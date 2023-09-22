@@ -1,0 +1,39 @@
+site_name: pyxecm
+
+site_url: https://example.com/
+
+theme:
+  name: "material"
+  icon:
+    repo: fontawesome/brands/gitlab
+
+plugins:
+  - search
+  - mkdocstrings
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+repo_url: https://gitlab.otxlab.net/ecm/pyxecm/
+repo_name: ecm/pyxecm
+edit_uri: edit/main/docs/
+
+markdown_extensions:
+  - pymdownx.snippets:
+      check_paths: true
+
+nav:
+  - Index: index.md
+  - xECM Classes:
+    - OTCS: pyxecm/otcs.md
+    - OTDS: pyxecm/otds.md  
+    - OTAC: pyxecm/otac.md  
+    - OTIV: pyxecm/otiv.md  
+    - OTPD: pyxecm/otpd.md  
+  - Customizer Classes:
+    - Customizer: pyxecm/customizer.md    
+    - Payload: pyxecm/payload.md  
+    - K8s: pyxecm/k8s.md
+    - M365: pyxecm/m365.md
+    - Translate: pyxecm/translate.md
+    - SAP: pyxecm/sap.md
+  - Changelog: changelog.md

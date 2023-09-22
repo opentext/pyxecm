@@ -1,0 +1,15 @@
+pdoc3
+
+mkdocs
+mkdocstrings[python]
+mkdocs-material
+mkdocs-git-revision-date-localized-plugin
+pymdown-extensions
+
+requests
+requests_toolbelt
+setuptools
+kubernetes
+zipfile36
+suds
+packaging

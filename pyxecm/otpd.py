@@ -57,7 +57,6 @@ class OTPD:
         port: int,
         username: str,
         password: str,
-        **kwargs
     ):
         """Initialize the OTPD object
 
@@ -67,7 +66,6 @@ class OTPD:
             port (int): The port number used to talk to the PowerDocs Server Manager.
             username (str): The admin user name of PowerDocs Server Manager.
             password (str): The admin password of PowerDocs Server Manager.
-            **kwargs
         """
 
         otpd_config = {}
@@ -213,8 +211,10 @@ class OTPD:
     # end method definition
 
     # This method is currently not used and not working...
+    # It cannot handle the Request - ServerManager returns an
+    # error stating that JavaScript is not enabled...
     def authenticate(self, revalidate: bool = False) -> dict:
-        """Authenticates at PowerDocs and retrieve OTCS Ticket.
+        """Authenticates at PowerDocs and retrieve session ID.
 
         Args:
             revalidate (bool): determinse if a re-athentication is enforced
@@ -246,8 +246,8 @@ class OTPD:
         # Step2: fetch session id from the response, and hit j_security_check with proper authentication
         # Step3: get session id from the response, add to self. It can be used for other transactions
         session = requests.Session()
-        response = session.put(request_url, json=payload)
         logger.info("Initiating dummy rest call to Tomcat to get initial session id")
+        response = session.put(request_url, json=payload)
         logger.info(response.text)
         if response.ok:
             logger.info("Url to authenticate Tomcat for Session id -> %s", auth_url)
@@ -258,23 +258,27 @@ class OTPD:
                 )
                 session_dict = session.cookies.get_dict()
                 logger.info(
-                    "Session id to perform Rest api calls to Tomcat -> %s",
+                    "Session id to perform Rest API calls to Tomcat -> %s",
                     session_dict["JSESSIONID"],
                 )
+                # store session ID an write it into the global requestHeaders variable:
                 self._jsessionid = session_dict["JSESSIONID"]
                 requestHeaders["Cookie"] = "JSESSIONID=" + self._jsessionid
+                return session_response
             else:
-                logger.info(
+                logger.error(
                     "Fetching session id from -> %s failed with j_security_check. Response -> %s",
                     auth_url,
                     session_response.text,
                 )
+                return None
         else:
-            logger.info(
+            logger.error(
                 "Fetching session id from -> %s failed. Response -> %s",
                 request_url,
                 response.text,
             )
+            return None
 
     # end method definition
 
@@ -344,13 +348,14 @@ class OTPD:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 json=settingsPutBody,
                 headers=requestHeaders,
                 auth=HTTPBasicAuth(
                     self.config()["username"], self.config()["password"]
                 ),
                 verify=False,  # for localhost deployments this will fail otherwise
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)

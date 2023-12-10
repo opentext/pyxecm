@@ -6,6 +6,12 @@ theme:
   name: "material"
   icon:
     repo: fontawesome/brands/gitlab
+  palette:
+    primary: black
+  features:
+    - content.action.edit
+    - content.code.copy
+    - content.tabs.link    
 
 plugins:
   - search
@@ -20,9 +26,25 @@ edit_uri: edit/main/docs/
 markdown_extensions:
   - pymdownx.snippets:
       check_paths: true
-
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+        
 nav:
   - Index: index.md
+  - Payload Syntax: payload-syntax.md
   - xECM Classes:
     - OTCS: pyxecm/otcs.md
     - OTDS: pyxecm/otds.md  
@@ -30,8 +52,9 @@ nav:
     - OTIV: pyxecm/otiv.md  
     - OTPD: pyxecm/otpd.md  
   - Customizer Classes:
-    - Customizer: pyxecm/customizer.md    
     - Payload: pyxecm/payload.md  
+    - Browser Automation: pyxecm/browser.md
+    - Customizer: pyxecm/customizer.md    
     - K8s: pyxecm/k8s.md
     - M365: pyxecm/m365.md
     - Translate: pyxecm/translate.md

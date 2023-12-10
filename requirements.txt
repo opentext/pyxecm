@@ -13,3 +13,6 @@ kubernetes
 zipfile36
 suds
 packaging
+
+selenium
+chromedriver_autoinstaller

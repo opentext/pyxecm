@@ -26,6 +26,7 @@ authenticate_user: Authenticate at M365 Graph API with username and password
 get_users: Get list all all users in M365 tenant 
 get_user: Get a M365 User based on its email
 add_user: Add a M365 User
+update_user: Update selected properties of an M365 user
 get_user_licenses: Get the assigned license SKUs of a user
 assign_license_to_user: Add an M365 license to a user (e.g. to use Office 365)
 get_user_photo: Get the photo of a M365 user
@@ -115,7 +116,6 @@ class M365(object):
         domain: str,
         sku_id: str,
         teams_app_name: str,
-        **kwargs,
     ):
         """Initialize the M365 object
 
@@ -126,7 +126,6 @@ class M365(object):
             domain (str): M365 domain
             sku_id (str): License SKU for M365 users
             teams_app_name (str): name of the Extended ECM app for MS Teams
-            kwargs
         """
 
         m365_config = {}
@@ -160,6 +159,7 @@ class M365(object):
         m365_config["teamsAppsUrl"] = m365_config["graphUrl"] + "appCatalogs/teamsApps"
         m365_config["directoryUrl"] = m365_config["graphUrl"] + "directory"
         m365_config["securityUrl"] = m365_config["betaUrl"] + "security"
+        m365_config["applicationsUrl"] = m365_config["graphUrl"] + "applications"
 
         self._config = m365_config
 
@@ -613,6 +613,7 @@ class M365(object):
         last_name: str,
         location: str = "US",
         department: str = "",
+        company_name: str = "Innovate",
     ) -> dict | None:
         """Add a M365 user.
 
@@ -623,6 +624,7 @@ class M365(object):
             last_name (str): last name of the user
             location (str, optional): country ISO 3166-1 alpha-2 format (e.g. US, CA, FR, DE, CN, ...)
             department (str, optional): department of the user
+            company_name (str): name of the company
         Returns:
             dict: User information or None if the user couldn't be created (e.g. because it exisits already
                   or if a permission problem occurs).
@@ -643,6 +645,8 @@ class M365(object):
         }
         if department:
             user_post_body["department"] = department
+        if company_name:
+            user_post_body["companyName"] = company_name
 
         request_url = self.config()["usersUrl"]
         request_header = self.request_header()
@@ -677,6 +681,60 @@ class M365(object):
                 logger.error(
                     "Failed to add M365 user -> %s; status -> %s; error -> %s",
                     email,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_user(self, user_id: str, updated_settings: dict) -> dict | None:
+        """Update selected properties of an M365 user. Documentation
+           on user properties is here: https://learn.microsoft.com/en-us/graph/api/user-update
+
+        Returns:
+            dict | None: Response of the M365 Graph API  or None if the call fails.
+        """
+
+        request_url = self.config()["usersUrl"] + "/" + user_id
+        request_header = self.request_header()
+
+        logger.info(
+            "Updating M365 user -> %s with -> %s; calling -> %s",
+            user_id,
+            str(updated_settings),
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.patch(
+                request_url,
+                json=updated_settings,
+                headers=request_header,
+                timeout=60,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to update M365 user -> %s with -> %s; status -> %s; error -> %s",
+                    user_id,
+                    str(updated_settings),
                     response.status_code,
                     response.text,
                 )
@@ -3347,6 +3405,264 @@ class M365(object):
                     "Failed to assign label -> %s to M365 user -> %s; status -> %s; error -> %s",
                     label_name,
                     user_email,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def upload_outlook_app(
+        self,
+        app_path: str,
+    ) -> dict | None:
+        """Upload the M365 Outlook Add-In as "Integrated" App to M365 Admin Center.
+           THIS IS CURRENTLY NOT IMPLEMENTED DUE TO MISSING MS GRAPH API SUPPORT!
+
+           https://admin.microsoft.com/#/Settings/IntegratedApps
+
+        Args:
+            app_path (str): path to manifest file in local file system. Needs to be
+                            downloaded before.
+
+        Returns:
+            dict | None: response of the MS Graph API or None if the request fails.
+        """
+
+        #        request_url = self.config()["teamsAppsUrl"]
+
+        #        request_header = self.request_header()
+
+        logger.info("Install Outlook Add-in from %s (NOT IMPLEMENTED)", app_path)
+
+        response = None
+
+        return response
+
+    # end method definition
+
+    def get_app_registration(
+        self,
+        app_registration_name: str,
+    ) -> dict:
+        """Find an Azure App Registration based on its name
+
+        Args:
+            app_registration_name (str): name of the App Registration
+
+        Returns:
+            dict: App Registration data or None of the request fails.
+        """
+
+        request_url = self.config()[
+            "applicationsUrl"
+        ] + "?$filter=displayName eq '{}'".format(app_registration_name)
+        request_header = self.request_header()
+
+        logger.info(
+            "Get Azure App Registration -> %s; calling -> %s",
+            app_registration_name,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(request_url, headers=request_header, timeout=60)
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Cannot find Azure App Registration -> %s; status -> %s; error -> %s",
+                    app_registration_name,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def add_app_registration(
+        self,
+        app_registration_name: str,
+        description: str = "",
+        api_permissions: list | None = None,
+        supported_account_type: str = "AzureADMyOrg",
+    ) -> dict:
+        """Add an Azure App Registration
+
+        Args:
+            app_registration_name (str): name of the App Registration
+            api_permissions (list): API permissions
+            supported_account_type (str): type of account that is supposed to use
+                                          the App Registration
+
+        Returns:
+            dict: App Registration data or None of the request fails.
+
+            Example data:
+            {
+                'id': 'd70bee91-3689-4239-a626-30756968e99c',
+                'deletedDateTime': None,
+                'appId': 'd288ba5f-9313-4b38-b4a4-d7edcce089b0',
+                'applicationTemplateId': None,
+                'disabledByMicrosoftStatus': None,
+                'createdDateTime': '2023-09-06T21:06:05Z',
+                'displayName': 'Test 1',
+                'description': None,
+                'groupMembershipClaims': None,
+                'identifierUris': [],
+                'isDeviceOnlyAuthSupported': None,
+                'isFallbackPublicClient': None,
+                'notes': None,
+                'publisherDomain': 'M365x41497014.onmicrosoft.com',
+                'signInAudience': 'AzureADMyOrg',
+                ...
+                'requiredResourceAccess': [
+                    {
+                        'resourceAppId': '00000003-0000-0ff1-ce00-000000000000',
+                        'resourceAccess': [
+                            {
+                                'id': '741f803b-c850-494e-b5df-cde7c675a1ca',
+                                'type': 'Role'
+                            },
+                            {
+                                'id': 'c8e3537c-ec53-43b9-bed3-b2bd3617ae97',
+                                'type': 'Role'
+                            },
+                        ]
+                    },
+                ]
+            }
+        """
+
+        # Define the request body to create the App Registration
+        app_registration_data = {
+            "displayName": app_registration_name,
+            "signInAudience": supported_account_type,
+        }
+        if api_permissions:
+            app_registration_data["requiredResourceAccess"] = api_permissions
+        if description:
+            app_registration_data["description"] = description
+
+        request_url = self.config()["applicationsUrl"]
+        request_header = self.request_header()
+
+        retries = 0
+        while True:
+            response = requests.post(
+                request_url,
+                headers=request_header,
+                json=app_registration_data,
+                timeout=60,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Cannot add App Registration -> %s; status -> %s; error -> %s",
+                    app_registration_name,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_app_registration(
+        self,
+        app_registration_id: str,
+        app_registration_name: str,
+        api_permissions: list,
+        supported_account_type: str = "AzureADMyOrg",
+    ) -> dict:
+        """Update an Azure App Registration
+
+        Args:
+            app_registration_id (str): ID of the existing App Registration
+            app_registration_name (str): name of the App Registration
+            api_permissions (list): API permissions
+            supported_account_type (str): type of account that is supposed to use
+                                          the App Registration
+
+        Returns:
+            dict: App Registration data or None of the request fails.
+        """
+
+        # Define the request body to create the App Registration
+        app_registration_data = {
+            "displayName": app_registration_name,
+            "requiredResourceAccess": api_permissions,
+            "signInAudience": supported_account_type,
+        }
+
+        request_url = self.config()["applicationsUrl"] + "/" + app_registration_id
+        request_header = self.request_header()
+
+        logger.info(
+            "Update App Registration -> %s (%s); calling -> %s",
+            app_registration_name,
+            app_registration_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.patch(
+                request_url,
+                headers=request_header,
+                json=app_registration_data,
+                timeout=60,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Cannot update App Registration -> %s (%s); status -> %s; error -> %s",
+                    app_registration_name,
+                    app_registration_id,
                     response.status_code,
                     response.text,
                 )

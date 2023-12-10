@@ -131,14 +131,25 @@ class XML:
         is_simple: bool = True,
         is_escaped: bool = False,
     ) -> str:
-        """_summary_
+        """Replace the value of a defined setting with a new value.
+
+        The simple case covers settings like this:
+        &quot;syncCandidates&quot;:true,
+        "syncCandidates":true,
+        In this case the setting value is a scalar like true, false, a number or none
+        the regular expression pattern searches for a setting name in "..." (quotes) followed
+        by a colon (:). The value is taken from what follows the colon until the next comma (,)
+
+        The more complex case is a string value that may itself have commas,
+        so we cannot look for comma as a delimiter like in the simple case
+        but we take the value for a string delimited by double quotes ("...")
 
         Args:
             element_text (str): original text of the XML element (that is to be updated)
             setting_key (str): name of the setting
             new_value (str): new value of the setting
-            is_simple (bool, optional): _description_. Defaults to True.
-            is_escaped (bool, optional): _description_. Defaults to False.
+            is_simple (bool, optional): True = value is a scalar like true, false, a number or none. Defaults to True.
+            is_escaped (bool, optional): True if the value is surrrounded with &quot;. Defaults to False.
 
         Returns:
             str: updated element text

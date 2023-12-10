@@ -32,7 +32,6 @@ class OTIV:
         product_description: str,
         license_file: str,
         default_license: str = "FULLTIME_USERS_REGULAR",
-        **kwargs,
     ):
         """Initialize the OTIV class for Intelligent Viewing
 
@@ -41,7 +40,6 @@ class OTIV:
             product_name (str): OTDS product name for licensing
             license_file (str): path to license file
             default_license (str, optional): Defaults to "FULLTIME_USERS_REGULAR".
-            **kwargs
         """
 
         # Initialize otiv_config as an empty dictionary

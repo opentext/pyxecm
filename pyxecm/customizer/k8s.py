@@ -67,15 +67,20 @@ class K8s:
     _networking_v1_api = None
     _namespace = None
 
-    def __init__(self, in_cluster: bool = True, **kwargs):
+    def __init__(
+        self,
+        in_cluster: bool,
+        kubeconfig_file: str = "~/.kube/config",
+        namespace: str = "default",
+    ):
         """Initialize the Kubernetes object."""
 
         # Configure Kubernetes API authentication to use pod serviceAccount
         if in_cluster:
             config.load_incluster_config()
         else:
-            if "kubeconfig_file" in kwargs:
-                config.load_kube_config(config_file=kwargs["kubeconfig_file"])
+            if kubeconfig_file:
+                config.load_kube_config(config_file=kubeconfig_file)
             else:
                 logger.warning(
                     "Not runnig in cluster but kubeconfig file not specified!"
@@ -84,8 +89,8 @@ class K8s:
         self._core_v1_api = client.CoreV1Api()
         self._apps_v1_api = client.AppsV1Api()
         self._networking_v1_api = client.NetworkingV1Api()
-        if "namespace" in kwargs and not in_cluster:
-            self._namespace = kwargs["namespace"]
+        if namespace and not in_cluster:
+            self._namespace = namespace
         else:
             # Read current namespace
             with open(
@@ -195,7 +200,9 @@ class K8s:
 
     # end method definition
 
-    def wait_pod_condition(self, pod_name: str, condition_name: str, sleep_time: int = 30):
+    def wait_pod_condition(
+        self, pod_name: str, condition_name: str, sleep_time: int = 30
+    ):
         """Wait for the pod to reach a defined condition (e.g. "Ready").
 
         Args:

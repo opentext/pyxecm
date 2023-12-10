@@ -1,21 +1,42 @@
 """[Automate OpenText Directory Services (OTDS) and Extended ECM (OTCS) configurations]
 
-Functions:
+Data classes to handle settings read from environment variables
+* CustomizerSettings: Class to manage settings
+* CustomizerSettingsOTDS: Class for OTDS related settings
+* CustomizerSettingsOTCS: Class for OTCS related settings
+* CustomizerSettingsOTAC: Class for OTAC related settings
+* CustomizerSettingsOTPD: Class for OTPD related settings
+* CustomizerSettingsOTIV: Class for OTIV related settings
+* CustomizerSettingsK8S: Class for K8s related settings
+* CustomizerSettingsOTAWP: Class for OTAWP related settings
+* CustomizerSettingsM365: Class for O365 related settings
+* CustomizerSettingsAviator: Class for Aviator related settings
 
+Methods of class Customizer:
+
+__init__: object initializer for class Customizer
+log_header: Helper method to output a section header in the log file
+init_browser_automation: initialize browser automation for Content Aviator
 init_m365: initialize the Microsoft 365 object
+init_k8s: initialize the Kubernetes object we use to talk to the Kubernetes API
 init_otds: initialize the OTDS object
-init_otds: initialize the OTAC object
+init_otac: initialize the OTAC object
 init_otcs: initialize the OTCS (Extended ECM) object
+init_otiv: initialize the OTIV (Intelligent Viewing) object and its OTDS settings
 init_otpd: initialize the PowerDocs object
 init_otawp: initialize OTDS settings for AppWorks Platform
 
 restart_otcs_service: restart the OTCS backend and frontend pods -
                       required to make certain configurations effective
 restart_otac_service: restart spawner process in Archive Center
-consolidate_otds: consolidate OTDS users / groups (to get to a fully synchronized state)
 restart_otawp_pod: restart the AppWorks Platform Pod to make settings effective
+consolidate_otds: consolidate OTDS users / groups (to get to a fully synchronized state)
 
 import_powerdocs_configuration: import PowerDocs database
+
+set_maintenance_mode: Enable or Disable Maintenance Mode
+
+customization_run: Central function to initiate the customization
 
 """
 
@@ -29,7 +50,7 @@ import logging
 import os
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 
 # from packaging.version import Version
@@ -43,6 +64,8 @@ from pyxecm.customizer.k8s import K8s
 from pyxecm.customizer.m365 import M365
 from pyxecm.customizer.payload import Payload
 
+from pyxecm.customizer.browser_automation import BrowserAutomation
+
 logger = logging.getLogger("pyxecm.customizer")
 
 
@@ -51,7 +74,7 @@ class CustomizerSettings:
     """Class to manage settings"""
 
     placeholder_values: dict = field(default_factory=dict)
-    stop_on_error: str = os.environ.get("LOGLEVEL", "INFO") == "DEBUG"
+    stop_on_error: bool = os.environ.get("LOGLEVEL", "INFO") == "DEBUG"
     cust_log_file: str = "/tmp/customizing.log"
     customizer_start_time = customizer_end_time = datetime.now()
 
@@ -59,6 +82,7 @@ class CustomizerSettings:
     cust_settings_dir: str = "/settings/"
     cust_payload_dir: str = "/payload/"
     cust_payload: str = cust_payload_dir + "payload.yaml"
+    cust_payload_gz: str = cust_payload_dir + "payload.yml.gz.b64"
     cust_payload_external: str = "/payload-external/"
 
     cust_target_folder_nickname: str = (
@@ -103,14 +127,14 @@ class CustomizerSettingsOTCS:
     k8s_statefulset_frontend: str = "otcs-frontend"
     k8s_statefulset_backend: str = "otcs-admin"
     k8s_ingress: str = "otxecm-ingress"
-    maintenance_mode: str = (
+    maintenance_mode: bool = (
         os.environ.get("OTCS_MAINTENANCE_MODE", "true").lower() == "true"
     )
     license_feature: str = "X3"
 
-    # K8s service name for maintenance pod
+    # K8s service name and port for maintenance pod
     maintenance_service_name: str = "otxecm-customizer"
-    mainteance_service_port: int = 5555  # K8s service name for maintenance pod
+    mainteance_service_port: int = 5555
 
     replicas_frontend = 0
     replicas_backend = 0
@@ -120,7 +144,7 @@ class CustomizerSettingsOTCS:
 class CustomizerSettingsOTAC:
     """Class for OTAC related settings"""
 
-    enabled: str = os.environ.get("OTAC_ENABLED", "true")
+    enabled: bool = os.environ.get("OTAC_ENABLED", "false").lower() == "true"
     hostname: str = os.environ.get("OTAC_SERVICE_HOST", "otac-0")
     port: int = os.environ.get("OTAC_SERVICE_PORT", 8080)
     protocol: str = os.environ.get("OTAC_PROTOCOL", "http")
@@ -135,7 +159,7 @@ class CustomizerSettingsOTAC:
 class CustomizerSettingsOTPD:
     """Class for OTPD related settings"""
 
-    enabled: str = os.environ.get("OTPD_ENABLED", "false")
+    enabled: bool = os.environ.get("OTPD_ENABLED", "false").lower() == "true"
     hostname: str = os.environ.get("OTPD_SERVICE_HOST", "otpd")
     port: int = os.environ.get("OTPD_SERVICE_PORT", 8080)
     protocol: str = os.environ.get("OTPD_PROTOCOL", "http")
@@ -154,7 +178,7 @@ class CustomizerSettingsOTPD:
 class CustomizerSettingsOTIV:
     """Class for OTIV related settings"""
 
-    enabled: str = os.environ.get("OTIV_ENABLED", "false")
+    enabled: bool = os.environ.get("OTIV_ENABLED", "false").lower() == "true"
     license_file: str = "/payload/otiv-license.lic"
     license_feature: str = "FULLTIME_USERS_REGULAR"
     product_name: str = "Viewing"
@@ -176,7 +200,7 @@ class CustomizerSettingsK8S:
 class CustomizerSettingsOTAWP:
     """Class for OTAWP related settings"""
 
-    enabled: str = os.environ.get("OTAWP_ENABLED", "false")
+    enabled: bool = os.environ.get("OTAWP_ENABLED", "false").lower() == "true"
     resource_name: str = "awp"
     access_role_name: str = "Access to " + resource_name
     admin: str = os.environ.get("OTAWP_ADMIN", "sysadmin")
@@ -191,8 +215,7 @@ class CustomizerSettingsOTAWP:
 class CustomizerSettingsM365:
     """Class for O365 related settings"""
 
-    enabled: str = os.environ.get("O365_ENABLED", "false")
-    """Enable/Disable the O365 Customization"""
+    enabled: bool = os.environ.get("O365_ENABLED", "false").lower() == "true"
     tenant_id: str = os.environ.get("O365_TENANT_ID", "")
     client_id: str = os.environ.get("O365_CLIENT_ID", "")
     client_secret: str = os.environ.get("O365_CLIENT_SECRET", "")
@@ -200,9 +223,21 @@ class CustomizerSettingsM365:
     password: str = os.environ.get("O365_PASSWORD", "")
     domain: str = os.environ.get("O365_DOMAIN", "")
     sku_id: str = os.environ.get("O365_SKU_ID", "c7df2760-2c81-4ef7-b578-5b5392b571df")
-    """Office 365 E5, used as default SKU for users (c7df2760-2c81-4ef7-b578-5b5392b571df)"""
     teams_app_name: str = "OpenText Extended ECM"
-    """Name of the Microsoft Teams App (OpenText Extended ECM)"""
+
+
+@dataclass
+class CustomizerSettingsAviator:
+    """Class for Aviator related settings"""
+
+    enabled: bool = os.environ.get("AVIATOR_ENABLED", "false").lower() == "true"
+    cs_url: str = (
+        os.environ.get("OTCS_PUBLIC_PROTOCOL", "https")
+        + "://"
+        + os.environ.get("OTCS_PUBLIC_URL", "").replace("otcs", "otcs-admin")
+    )
+    cs_user: str = "otadmin@otds.admin"  # needs to be hard-coded
+    cs_password: str = os.environ.get("OTCS_PASSWORD")
 
 
 class Customizer:
@@ -222,6 +257,7 @@ class Customizer:
         k8s: CustomizerSettingsK8S = CustomizerSettingsK8S(),
         otawp: CustomizerSettingsOTAWP = CustomizerSettingsOTAWP(),
         m365: CustomizerSettingsM365 = CustomizerSettingsM365(),
+        aviator: CustomizerSettingsAviator = CustomizerSettingsAviator(),
     ):
         self.settings = settings
 
@@ -249,16 +285,84 @@ class Customizer:
         # Microsoft 365 Environment variables:
         self.m365_settings = m365
 
+        # Aviator variables:
+        self.aviator_settings = aviator
+
         # Initialize Objects for later assignment
-        self.otds_object: OTDS
-        self.otcs_object: OTCS
-        self.otcs_backend_object: OTCS
-        self.otcs_frontend_object: OTCS
-        self.otpd_object: OTPD | None
-        self.otac_object: OTAC | None
-        self.otiv_object: OTIV | None
-        self.k8s_object: K8s
-        self.m365_object: M365 | None
+        self.otds_object: OTDS | None = None
+        self.otcs_object: OTCS | None = None
+        self.otcs_backend_object: OTCS | None = None
+        self.otcs_frontend_object: OTCS | None = None
+        self.otpd_object: OTPD | None = None
+        self.otac_object: OTAC | None = None
+        self.otiv_object: OTIV | None = None
+        self.k8s_object: K8s | None = None
+        self.m365_object: M365 | None = None
+        self.browser_automation_object: BrowserAutomation | None = None
+
+    def log_header(self, text: str, char: str = "=", length: int = 60):
+        """Helper method to output a section header in the log file
+
+        Args:
+            text (str): _description_
+            char (str, optional): header line character. Defaults to "=".
+            length (int, optional): maxium length. Defaults to 60.
+        Returns:
+            None
+        """
+
+        # Calculate the remaining space for the text after adding spaces
+        available_space = max(
+            0, length - len(text) - 2
+        )  # 2 accounts for the spaces each side of the text
+
+        # Calculate the number of characters needed on each side
+        char_count = available_space // 2
+        extra_char = available_space % 2  # do we have lost 1 char?
+
+        # Ensure there are at least 3 characters on each side
+        char_count = max(3, char_count)
+
+        # Build the header string, extra_char is either 0 or 1
+        logger.info(
+            "%s %s %s", char * char_count, text, char * (char_count + extra_char)
+        )
+
+        # end function definition
+
+    # def init_browser_automation(self) -> BrowserAutomation | None:
+    #     """Initializes the Browser automation that is needed
+    #        for settings that cannot be automated by REST API.
+
+    #     Returns:
+    #         BrowserAutomation: browser automation object or None
+    #     """
+
+    #     logger.info(
+    #         "Browser Automation - OTCS URL      = %s", self.aviator_settings.cs_url
+    #     )
+    #     logger.info(
+    #         "Browser Automation - OTCS user     = %s", self.aviator_settings.cs_user
+    #     )
+    #     logger.debug(
+    #         "Browser Automation - OTCS password = %s", self.aviator_settings.cs_password
+    #     )
+
+    #     # We shuld change this in future to make it not dependent on Aviator:
+    #     browser_automation_object = BrowserAutomation(
+    #         base_url=self.aviator_settings.cs_url,
+    #         user_name=self.aviator_settings.cs_user,
+    #         user_password=self.aviator_settings.cs_password,
+    #     )
+
+    #     if not browser_automation_object:
+    #         logger.error("Failed to initialize browser automation.")
+    #         return None
+
+    #     logger.info("Browser automation initialized.")
+    #     return browser_automation_object
+
+    # end function definition
 
     def init_m365(self) -> M365:
         """Initialize the M365 object we use to talk to the Microsoft Graph API.
@@ -306,7 +410,14 @@ class Customizer:
             self.m365_settings.teams_app_name,
         )
 
-        m365_object = M365(**asdict(self.m365_settings))
+        m365_object = M365(
+            tenant_id=self.m365_settings.tenant_id,
+            client_id=self.m365_settings.client_id,
+            client_secret=self.m365_settings.client_secret,
+            domain=self.m365_settings.domain,
+            sku_id=self.m365_settings.sku_id,
+            teams_app_name=self.m365_settings.teams_app_name,
+        )
 
         if m365_object and m365_object.authenticate():
             logger.info("Connected to Microsoft Graph API.")
@@ -317,21 +428,30 @@ class Customizer:
 
         # end function definition
 
-    def init_k8s(self, in_cluster: bool = True, **kwargs) -> K8s:
+    def init_k8s(self) -> K8s:
         """Initialize the Kubernetes object we use to talk to the Kubernetes API.
 
         Args:
-            in_cluster (bool): controls wether the code runs inside a pod (inCluster = True)
-                               or locally (access via .kube / kubectl, inCluster = False)
+            None
         Returns:
             K8s: K8s object
         Side effects:
             The global variables otcs_replicas_frontend and otcs_replicas_backend are initialized
         """
 
-        logger.info("Connect to Kubernetes, inCluster -> %s", in_cluster)
+        logger.info("Connection parameters Kubernetes (K8s):")
+        logger.info("K8s inCluster -> %s", self.k8s_settings.in_cluster)
+        logger.info("K8s namespace -> %s", self.k8s_settings.namespace)
+        logger.info(
+            "K8s kubeconfig file -> %s",
+            self.k8s_settings.kubeconfig_file,
+        )
 
-        k8s_object = K8s(in_cluster=in_cluster, **kwargs)
+        k8s_object = K8s(
+            in_cluster=self.k8s_settings.in_cluster,
+            kubeconfig_file=self.k8s_settings.kubeconfig_file,
+            namespace=self.k8s_settings.namespace,
+        )
         if k8s_object:
             logger.info("Kubernetes API is ready now.")
         else:
@@ -393,10 +513,16 @@ class Customizer:
         logger.info("OTDS Public URL        = %s", self.otds_settings.public_url)
         logger.info("OTDS Port              = %s", str(self.otds_settings.port))
         logger.info("OTDS Admin User        = %s", self.otds_settings.username)
-        logger.debug("OTDS Admin Password   = %s", self.otds_settings.password)
+        logger.debug("OTDS Admin Password    = %s", self.otds_settings.password)
         logger.info("OTDS Admin Partition   = %s", self.otds_settings.admin_partition)
 
-        otds_object = OTDS(**asdict(self.otds_settings))
+        otds_object = OTDS(
+            protocol=self.otds_settings.protocol,
+            hostname=self.otds_settings.hostname,
+            port=self.otds_settings.port,
+            username=self.otds_settings.username,
+            password=self.otds_settings.password,
+        )
 
         logger.info("Authenticating to OTDS...")
         otds_cookie = otds_object.authenticate()
@@ -408,6 +534,14 @@ class Customizer:
 
         logger.info("Enable OTDS audit...")
         otds_object.enable_audit()
+
+        logger.info("Disable OTDS password expiry...")
+        # Setting the value to 0 disables password expiry.
+        # The default is 90 days and we may have Terrarium
+        # instances that are running longer than that. This
+        # avoids problems with customerizer re-runs of
+        # instances that are > 90 days old.
+        otds_object.update_password_policy(update_values={"passwordMaximumDuration": 0})
 
         return otds_object
 
@@ -508,7 +642,7 @@ class Customizer:
         logger.info("OTCS Public URL            = %s", self.otcs_settings.public_url)
         logger.info("OTCS Port                  = %s", str(port))
         logger.info("OTCS Admin User            = %s", self.otcs_settings.admin)
-        logger.debug("OTCS Admin Password       = %s", self.otcs_settings.password)
+        logger.debug("OTCS Admin Password        = %s", self.otcs_settings.password)
         logger.info("OTCS User Partition        = %s", partition_name)
         logger.info("OTCS Resource Name         = %s", resource_name)
         logger.info(
@@ -567,7 +701,7 @@ class Customizer:
                 self.settings.placeholder_values,
             )
 
-        if self.otawp_settings.enabled == "true":
+        if self.otawp_settings.enabled:
             otcs_resource = self.otds_object.get_resource(
                 self.otcs_settings.resource_name
             )
@@ -602,11 +736,17 @@ class Customizer:
         )
         logger.info("OTIV License Feature     = %s", self.otiv_settings.license_feature)
 
-        otiv_object = OTIV(**asdict(self.otiv_settings))
+        otiv_object = OTIV(
+            resource_name=self.otiv_settings.resource_name,
+            product_name=self.otiv_settings.product_name,
+            product_description=self.otiv_settings.product_description,
+            license_file=self.otiv_settings.license_file,
+            default_license=self.otiv_settings.license_feature,
+        )
 
         otiv_resource = self.otds_object.get_resource(self.otiv_settings.resource_name)
         while otiv_resource is None:
-            logger.error(
+            logger.warning(
                 "OTDS Resource -> %s for Intelligent Viewing not found. OTIV may not be ready. Wait 30 sec...",
                 self.otiv_settings.resource_name,
             )
@@ -669,6 +809,15 @@ class Customizer:
         # wait until the OTPD pod is in ready state
         self.k8s_object.wait_pod_condition(self.otpd_settings.k8s_pod_name, "Ready")
 
+        # We have a race condition here. Even if the pod is ready
+        # it may not yet have fully initialized its database.
+        # Then the "apply_setting()" calls below may fail with
+        # an error. This should be improved in the future. For now
+        # we just wait a minute hoping that the DB is initialized then.
+        logger.info("Wait some time for PowerDocs database to be initialized...")
+        time.sleep(60)
+        logger.info("Configure some basic PowerDocs settings...")
+
         # Fix settings for local Kubernetes deployments.
         # Unclear why this is not the default.
         if otpd_object:
@@ -690,7 +839,7 @@ class Customizer:
         """
 
         logger.info("Connection parameters OTAWP:")
-        logger.info("OTAWP Enabled          = %s", self.otawp_settings.enabled)
+        logger.info("OTAWP Enabled          = %s", str(self.otawp_settings.enabled))
         logger.info("OTAWP Resource         = %s", self.otawp_settings.resource_name)
         logger.info("OTAWP Access Role      = %s", self.otawp_settings.access_role_name)
         logger.info("OTAWP Admin User       = %s", self.otawp_settings.admin)
@@ -1015,7 +1164,9 @@ class Customizer:
         )
 
         # Loop to wait for OTCS to create its OTDS user partition:
-        otcs_partition = self.otds_object.get_partition(self.otcs_settings.partition)
+        otcs_partition = self.otds_object.get_partition(
+            self.otcs_settings.partition, show_error=False
+        )
         while otcs_partition is None:
             logger.warning(
                 "OTDS user partition for Content Server with name -> %s does not exist yet. Waiting...",
@@ -1024,7 +1175,7 @@ class Customizer:
 
             time.sleep(30)
             otcs_partition = self.otds_object.get_partition(
-                self.otcs_settings.partition
+                self.otcs_settings.partition, show_error=False
             )
 
         # Add the OTDS user partition for OTCS to the AppWorks Platform Access Role in OTDS.
@@ -1054,7 +1205,7 @@ class Customizer:
 
         # end function definition
 
-    def restart_otcs_service(self, otcs_object: OTCS):
+    def restart_otcs_service(self, otcs_object: OTCS, extra_wait_time: int = 60):
         """Restart the Content Server service in all OTCS pods
 
         Args:
@@ -1124,6 +1275,15 @@ class Customizer:
 
         logger.info("Restart OTCS frontend and backend pods has been completed.")
 
+        # optional, give some additional time to make sure service is responsive
+        if extra_wait_time > 0:
+            logger.info(
+                "Wait %s seconds to make sure OTCS is responsive again...",
+                str(extra_wait_time),
+            )
+            time.sleep(extra_wait_time)
+        logger.info("Continue customizing...")
+
         # end function definition
 
     def restart_otac_service(self) -> bool:
@@ -1179,7 +1339,7 @@ class Customizer:
 
         self.otds_object.consolidate(self.otcs_settings.resource_name)
 
-        if self.otawp_settings.enabled == "true":  # is AppWorks Platform deployed?
+        if self.otawp_settings.enabled:  # is AppWorks Platform deployed?
             self.otds_object.consolidate(self.otawp_settings.resource_name)
 
         # end function definition
@@ -1233,7 +1393,7 @@ class Customizer:
             enable (bool, optional): _description_. Defaults to True.
         """
         if enable and self.k8s_settings.enabled:
-            logger.info("========== Enable Maintenance Mode ==========")
+            self.log_header("Enable Maintenance Mode")
             logger.info(
                 "Put OTCS frontends in Maitenance Mode by changing the Kubernetes Ingress backend service..."
             )
@@ -1272,7 +1432,7 @@ class Customizer:
         # Initialize the OTDS, OTCS and OTPD objects and wait for the
         # pods to be ready. If any of this fails we bail out:
 
-        logger.info("========== Initialize OTDS ==============")
+        self.log_header("Initialize OTDS")
 
         self.otds_object = self.init_otds()
         if not self.otds_object:
@@ -1280,9 +1440,9 @@ class Customizer:
             sys.exit()
 
         # Establish in-cluster Kubernetes connection
-        logger.info("========== Initialize Kubernetes ============")
+        self.log_header("Initialize Kubernetes")
         if self.k8s_settings.enabled:
-            self.k8s_object = self.init_k8s(**asdict(self.k8s_settings))
+            self.k8s_object = self.init_k8s()
 
             if not self.k8s_object:
                 logger.error("Failed to initialize Kubernetes - exiting...")
@@ -1293,15 +1453,15 @@ class Customizer:
         if self.otcs_settings.maintenance_mode:
             self.set_maintenance_mode(True)
 
-        if self.otawp_settings.enabled == "true":  # is AppWorks Platform deployed?
-            logger.info("========== Initialize OTAWP =============")
+        if self.otawp_settings.enabled:  # is AppWorks Platform deployed?
+            self.log_header("Initialize OTAWP")
 
             # Configure required OTDS resources as AppWorks doesn't do this on its own:
             self.init_otawp()
         else:
             self.settings.placeholder_values["OTAWP_RESOURCE_ID"] = ""
 
-        logger.info("========== Initialize OTCS backend ======")
+        self.log_header("Initialize OTCS backend")
         self.otcs_backend_object = self.init_otcs(
             self.otcs_settings.hostname_backend,
             int(self.otcs_settings.port_backend),
@@ -1312,7 +1472,7 @@ class Customizer:
             logger.error("Failed to initialize OTCS backend - exiting...")
             sys.exit()
 
-        logger.info("========== Initialize OTCS frontend =====")
+        self.log_header("Initialize OTCS frontend")
         self.otcs_frontend_object = self.init_otcs(
             self.otcs_settings.hostname_frontend,
             int(self.otcs_settings.port_frontend),
@@ -1323,8 +1483,8 @@ class Customizer:
             logger.error("Failed to initialize OTCS frontend - exiting...")
             sys.exit()
 
-        if self.otac_settings.enabled == "true":  # is Archive Center deployed?
-            logger.info("========== Initialize OTAC ==============")
+        if self.otac_settings.enabled:  # is Archive Center deployed?
+            self.log_header("Initialize OTAC")
 
             self.otac_object = self.init_otac()
             if not self.otac_object:
@@ -1333,15 +1493,15 @@ class Customizer:
         else:
             self.otac_object = None
 
-        if self.otiv_settings.enabled == "true":  # is PowerDocs deployed?
-            logger.info("========== Initialize OTIV ==============")
+        if self.otiv_settings.enabled:  # is Intelligent Viewing deployed?
+            self.log_header("Initialize OTIV")
 
             self.otiv_object = self.init_otiv()
         else:
             self.otiv_object = None
 
-        if self.otpd_settings.enabled == "true":  # is PowerDocs deployed?
-            logger.info("========== Initialize OTPD ==============")
+        if self.otpd_settings.enabled:  # is PowerDocs deployed?
+            self.log_header("Initialize OTPD")
 
             self.otpd_object = self.init_otpd()
             if not self.otpd_object:
@@ -1351,16 +1511,16 @@ class Customizer:
             self.otpd_object = None
 
         if (
-            self.m365_settings.enabled == "true"
+            self.m365_settings.enabled
             and self.m365_settings.user != ""
             and self.m365_settings.password != ""
         ):  # is M365 enabled?
-            logger.info("======== Initialize MS Graph API ========")
+            self.log_header("Initialize MS Graph API")
 
             # Initialize the M365 object and connection to M365 Graph API:
             self.m365_object = self.init_m365()
 
-            logger.info("======== Upload MS Teams App ============")
+            self.log_header("Upload MS Teams App")
 
             # Download MS Teams App from OTCS (this has with 23.2 a nasty side-effect
             # of unsetting 2 checkboxes on that config page - we reset these checkboxes
@@ -1398,7 +1558,6 @@ class Customizer:
                 app_upload_version = self.m365_object.extract_version_from_app_manifest(
                     app_path="/tmp/ot.xecm.teams.zip"
                 )
-                #                if Version(app_catalog_version) < Version(app_upload_version):
                 if app_catalog_version < app_upload_version:
                     logger.info(
                         "Upgrading Extended ECM Teams App in catalog from version -> %s to version -> %s...",
@@ -1423,12 +1582,49 @@ class Customizer:
                 response = self.m365_object.upload_teams_app(
                     app_path="/tmp/ot.xecm.teams.zip"
                 )
+
+            # logger.info("======== Upload Outlook Add-In ============")
+
+            # # Download MS Outlook Add-In from OTCS:
+            # MANIFEST_FILE = "/tmp/BusinessWorkspace.Manifest.xml"
+            # if not self.otcs_frontend_object.download_config_file(
+            #     "/cs/cs?func=outlookaddin.DownloadManifest",
+            #     MANIFEST_FILE,
+            #     "DeployedContentServer",
+            #     self.otcs_settings.public_url,
+            # ):
+            #     logger.error("Failed to download M365 Outlook Add-In from Extended ECM!")
+            # else:
+            #     # THIS IS NOT IMPLEMENTED DUE TO LACK OF M365 GRAPH API SUPPORT!
+            #     # Do it manually for now: https://admin.microsoft.com/#/Settings/IntegratedApps
+            #     logger.info("Successfully downloaded M365 Outlook Add-In from Extended ECM to %s", MANIFEST_FILE)
+            #     self.m365_object.upload_outlook_app(MANIFEST_FILE)
         else:
             self.m365_object = None
 
-        logger.info("========== Processing Payload ===========")
+        # self.log_header("Initialize Browser Automation...")
 
-        cust_payload_list = [self.settings.cust_payload]
+        # We initialize a Selenium based browser automation for
+        # those die-hard settings that cannot be automated via REST API
+        # nor LLConfig nor Transport:
+        # self.browser_automation_object = self.init_browser_automation()
+        # if not self.browser_automation_object:
+        #     logger.error("Failed to initialize Browser Automation - exiting...")
+        #     sys.exit()
+
+        self.log_header("Processing Payload")
+
+        cust_payload_list = []
+        # Is uncompressed payload provided?
+        if os.path.exists(self.settings.cust_payload):
+            logger.info("Found payload file -> %s", self.settings.cust_payload)
+            cust_payload_list.append(self.settings.cust_payload)
+        # Is compressed payload provided?
+        if os.path.exists(self.settings.cust_payload_gz):
+            logger.info(
+                "Found compressed payload file -> %s", self.settings.cust_payload_gz
+            )
+            cust_payload_list.append(self.settings.cust_payload_gz)
 
         # do we have additional payload as an external file?
         if os.path.exists(self.settings.cust_payload_external):
@@ -1459,7 +1655,9 @@ class Customizer:
                 otcs_restart_callback=self.restart_otcs_service,
                 otiv_object=self.otiv_object,
                 m365_object=self.m365_object,
+                browser_automation_object=self.browser_automation_object,
                 placeholder_values=self.settings.placeholder_values,  # this dict includes placeholder replacements for the Ressource IDs of OTAWP and OTCS
+                log_header_callback=self.log_header,
                 stop_on_error=self.settings.stop_on_error,
             )
             # Load the payload file and initialize the payload sections:
@@ -1472,11 +1670,11 @@ class Customizer:
             # Now process the payload in the defined ordering:
             payload_object.process_payload()
 
-            logger.info("========== Consolidate OTDS Resources ==================")
+            self.log_header("Consolidate OTDS Resources")
             self.consolidate_otds()
 
             # Upload payload file for later review to Enterprise Workspace
-            logger.info("========== Upload Payload file to Extended ECM =========")
+            self.log_header("Upload Payload file to Extended ECM")
             response = self.otcs_backend_object.get_node_from_nickname(
                 self.settings.cust_target_folder_nickname
             )
@@ -1485,7 +1683,14 @@ class Customizer:
                 target_folder_id = 2000  # use Enterprise Workspace as fallback
             # Write YAML file with upadated payload (including IDs, etc.).
             # We need to write to /tmp as initial location is read-only:
-            cust_payload = "/tmp/" + os.path.basename(cust_payload)
+            payload_file = os.path.basename(cust_payload)
+            payload_file = (
+                payload_file[: -len(".gz.b64")]
+                if payload_file.endswith(".gz.b64")
+                else payload_file
+            )
+            cust_payload = "/tmp/" + payload_file
+
             with open(cust_payload, "w", encoding="utf-8") as file:
                 yaml.dump(payload_object.get_payload(), file)
 
@@ -1515,17 +1720,18 @@ class Customizer:
                 )
 
             duration = datetime.now() - start_time
-            logger.info(
-                "========== Customizer completed processing of payload -> %s in %s ===",
-                cust_payload,
-                duration,
+            self.log_header(
+                "Customizer completed processing of payload -> {} in {}".format(
+                    cust_payload,
+                    duration,
+                )
             )
 
         if self.otcs_settings.maintenance_mode:
             self.set_maintenance_mode(False)
 
         # Restart AppWorksPlatform pod if it is deployed (to make settings effective):
-        if self.otawp_settings.enabled == "true":  # is AppWorks Platform deployed?
+        if self.otawp_settings.enabled:  # is AppWorks Platform deployed?
             otawp_resource = self.otds_object.get_resource(
                 self.otawp_settings.resource_name
             )
@@ -1560,7 +1766,8 @@ class Customizer:
 
         # Upload log file for later review to "Deployment" folder in "Administration" folder
         if os.path.exists(self.settings.cust_log_file):
-            logger.info("========== Upload log file to Extended ECM =============")
+            self.log_header("Upload log file to Extended ECM")
+            #            logger.info("========== Upload log file to Extended ECM =============")
             response = self.otcs_backend_object.get_node_from_nickname(
                 self.settings.cust_target_folder_nickname
             )
@@ -1593,9 +1800,10 @@ class Customizer:
                 )
 
         self.settings.customizer_end_time = datetime.now()
-        logger.info(
-            "======= Customizer completed in %s =========",
-            self.settings.customizer_end_time - self.settings.customizer_start_time,
+        self.log_header(
+            "Customizer completed in {}".format(
+                self.settings.customizer_end_time - self.settings.customizer_start_time
+            )
         )
 
 
@@ -1620,7 +1828,7 @@ if __name__ == "__main__":
         otds=CustomizerSettingsOTDS(hostname="otds.eng.terrarium.cloud"),
         otpd=CustomizerSettingsOTPD(enabled=False),
         k8s=CustomizerSettingsK8S(enabled=False),
-        otiv=CustomizerSettingsOTIV(enabled="true"),
+        otiv=CustomizerSettingsOTIV(enabled=True),
     )
 
     my_customizer.customization_run()

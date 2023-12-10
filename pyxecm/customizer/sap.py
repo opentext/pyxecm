@@ -74,7 +74,6 @@ class SAP(object):
         system_number: str = "00",
         lang: str = "EN",
         trace: str = "3",
-        **kwargs,
     ):
         """Initialize the SAP object."""
 

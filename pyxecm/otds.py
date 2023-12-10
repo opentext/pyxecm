@@ -47,6 +47,7 @@ add_partition : Add an OTDS partition
 get_partition : Get a partition with a specific name
 add_user : Add a user to a partion
 get_user : Get a user with a specific user ID (= login name @ partition)
+get_users: get all users (with option to filter)
 update_user : Update attributes of on OTDS user
 delete_user : Delete a user with a specific ID in a specific partition
 reset_user_password : Reset a password of a specific user ID
@@ -89,6 +90,9 @@ consolidate: Consolidate an OTDS resource
 impersonate_resource: Configure impersonation for an OTDS resource
 impersonate_oauth_client: Configure impersonation for an OTDS OAuth Client
 
+get_password_policy: get the global password policy
+update_password_policy: updates the global password policy
+
 """
 
 __author__ = "Dr. Marc Diefenbruch"
@@ -100,6 +104,7 @@ __email__ = "mdiefenb@opentext.com"
 import os
 import logging
 import json
+import urllib.parse
 import base64
 import requests
 
@@ -115,6 +120,8 @@ REQUEST_FORM_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 
+REQUEST_TIMEOUT = 60
+
 
 class OTDS:
     """Used to automate stettings in OpenText Directory Services (OTDS)."""
@@ -129,7 +136,6 @@ class OTDS:
         port: int,
         username: str,
         password: str,
-        **kwargs,
     ):
         """Initialize the OTDS object
 
@@ -139,7 +145,6 @@ class OTDS:
             port (int): port number - typically 80 or 443
             username (type): otds user name
             password (type): otds password
-            **kwargs
         """
 
         # Initialize otdsConfig as an empty dictionary
@@ -394,7 +399,10 @@ class OTDS:
         response = None
         try:
             response = requests.post(
-                self.credential_url(), json=self.credentials(), headers=REQUEST_HEADERS
+                url=self.credential_url(),
+                json=self.credentials(),
+                headers=REQUEST_HEADERS,
+                timeout=None,
             )
         except requests.exceptions.RequestException as exception:
             logger.warning(
@@ -490,18 +498,20 @@ class OTDS:
             if update:
                 # Do a REST PUT call for update an existing license:
                 response = requests.put(
-                    request_url,
+                    url=request_url,
                     json=licensePostBodyJson,
                     headers=REQUEST_HEADERS,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
             else:
                 # Do a REST POST call for creation of a new license:
                 response = requests.post(
-                    request_url,
+                    url=request_url,
                     json=licensePostBodyJson,
                     headers=REQUEST_HEADERS,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
             if response.ok:
                 return self.parse_request_response(response)
@@ -558,7 +568,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 response_dict = self.parse_request_response(response)
@@ -603,7 +616,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.delete(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -690,10 +706,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=licensePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 logger.info(
@@ -794,10 +811,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=licensePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 logger.info(
@@ -905,9 +923,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1080,10 +1099,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=partitionPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1111,7 +1131,7 @@ class OTDS:
             show_error (bool, optional): whether or not we want to log an error
                                          if partion is not found
         Returns:
-            dict: Request response or None if the creation fails.
+            dict: Request response or None if the REST call fails.
         """
 
         request_url = "{}/{}".format(self.config()["partitionUrl"], name)
@@ -1121,7 +1141,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1188,10 +1211,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=userPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1233,7 +1257,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1249,6 +1276,76 @@ class OTDS:
                     response.text,
                     response.status_code,
                 )
+                return None
+
+    # end method definition
+
+    def get_users(self, partition: str = "", limit: int | None = None) -> dict | None:
+        """Get all users in a partition partition
+
+        Args:
+            partition (str, optional): name of the partition
+            limit (int): maximum number of users to return
+        Returns:
+            dict: Request response or None if the user was not found.
+        """
+
+        # Add query parameters (these are NOT passed via JSon body!)
+        query = {}
+        if limit:
+            query["limit"] = limit
+        if partition:
+            query["where_partition_name"] = partition
+
+        encodedQuery = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.users_url()
+        if query:
+            request_url += "?{}".format(encodedQuery)
+
+        if partition:
+            logger.info(
+                "Get all users in partition -> %s (limit -> %s); calling -> %s",
+                partition,
+                limit,
+                request_url,
+            )
+        else:
+            logger.info(
+                "Get all users (limit -> %s); calling -> %s",
+                limit,
+                request_url,
+            )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                if partition:
+                    logger.error(
+                        "Failed to get users in partition -> %s; error -> %s (%s)",
+                        partition,
+                        response.text,
+                        response.status_code,
+                    )
+                else:
+                    logger.error(
+                        "Failed to get users; error -> %s (%s)",
+                        response.text,
+                        response.status_code,
+                    )
                 return None
 
     # end method definition
@@ -1285,10 +1382,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.patch(
-                request_url,
+                url=request_url,
                 json=userPatchBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1330,7 +1428,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.delete(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -1371,10 +1472,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 json=userPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -1424,10 +1526,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=groupPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1479,7 +1582,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1520,10 +1626,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=userToGroupPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -1568,10 +1675,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=groupToParentGroupPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
 
             if response.ok:
@@ -1598,7 +1706,7 @@ class OTDS:
         name: str,
         description: str,
         display_name: str,
-        additional_payload: dict = {},
+        additional_payload: dict | None = None,
     ) -> dict | None:
         """Add an OTDS resource
 
@@ -1631,10 +1739,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=resourcePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1671,7 +1780,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1715,10 +1827,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 json=resource,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1762,10 +1875,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=resourcePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1801,7 +1915,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1838,7 +1955,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1891,10 +2011,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=accessRolePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -1969,10 +2090,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=accessRolePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -2044,10 +2166,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=accessRolePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -2105,10 +2228,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 json=accessRolePutBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2168,10 +2292,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=systemAttributePostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2208,7 +2333,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2252,10 +2380,11 @@ class OTDS:
         logger.info("Add trusted site -> %s; calling -> %s", trusted_site, request_url)
 
         response = requests.put(
-            request_url,
+            url=request_url,
             json=trustedSitePostBodyJson,
             headers=REQUEST_HEADERS,
             cookies=self.cookie(),
+            timeout=None,
         )
         if not response.ok:
             logger.error(
@@ -2339,10 +2468,11 @@ class OTDS:
         logger.info("Enable audit; calling -> %s", request_url)
 
         response = requests.put(
-            request_url,
+            url=request_url,
             json=auditPutBodyJson,
             headers=REQUEST_HEADERS,
             cookies=self.cookie(),
+            timeout=None,
         )
         if not response.ok:
             logger.error(
@@ -2358,12 +2488,13 @@ class OTDS:
         self,
         client_id: str,
         description: str,
-        redirect_urls: list = [],
+        redirect_urls: list | None = None,
         allow_impersonation: bool = True,
         confidential: bool = True,
-        auth_scopes: list = [],  # empty list = "Global"
-        allowed_scopes: list = [],  # in OTDS UI: Permissible scopes
-        default_scopes: list = [],  # in OTDS UI: Default scopes
+        auth_scopes: list | None = None,  # None = "Global"
+        allowed_scopes: list | None = None,  # in OTDS UI: Permissible scopes
+        default_scopes: list | None = None,  # in OTDS UI: Default scopes
+        secret: str = "",
     ) -> dict | None:
         """Add a new OAuth client to OTDS
 
@@ -2376,6 +2507,7 @@ class OTDS:
             auth_scopes (list, optional): if empty then "Global"
             allowed_scopes (list, optional): in OTDS UI this is called Permissible scopes
             default_scopes (list, optional): in OTDS UI this is called Default scopes
+            secret (str, optional): predefined OAuth client secret. If empty a new secret is generated.
         Returns:
             dict: Request response or None if the creation fails.
             Example:
@@ -2422,6 +2554,16 @@ class OTDS:
             }
         """
 
+        # Avoid linter warning W0102:
+        if redirect_urls is None:
+            redirect_urls = []
+        if auth_scopes is None:
+            auth_scopes = []
+        if allowed_scopes is None:
+            allowed_scopes = []
+        if default_scopes is None:
+            default_scopes = []
+
         oauthClientPostBodyJson = {
             "id": client_id,
             "description": description,
@@ -2438,6 +2580,10 @@ class OTDS:
             "defaultScopes": default_scopes,
         }
 
+        # Do we have a predefined client secret?
+        if secret:
+            oauthClientPostBodyJson["secret"] = secret
+
         request_url = self.oauth_client_url()
 
         logger.info(
@@ -2450,10 +2596,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=oauthClientPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2490,7 +2637,10 @@ class OTDS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2537,10 +2687,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.patch(
-                request_url,
+                url=request_url,
                 json=oauthClientPatchBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2569,16 +2720,19 @@ class OTDS:
             response of REST call or None in case of an error
         """
 
-        accessRolesUrl = self.config()["accessRoleUrl"] + "/" + access_role_name
+        request_url = self.config()["accessRoleUrl"] + "/" + access_role_name
 
         logger.info(
-            "Get access role -> %s; calling -> %s", access_role_name, accessRolesUrl
+            "Get access role -> %s; calling -> %s", access_role_name, request_url
         )
 
         retries = 0
         while True:
             response = requests.get(
-                accessRolesUrl, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 accessRolesJson = self.parse_request_response(response)
@@ -2592,7 +2746,7 @@ class OTDS:
                 logger.error(
                     "Failed to retrieve role -> %s; url -> %s : error -> %s (%s)",
                     access_role_name,
-                    accessRolesUrl,
+                    request_url,
                     response.text,
                     response.status_code,
                 )
@@ -2610,9 +2764,12 @@ class OTDS:
 
         # Getting location info for the OAuthClients partition
         # so it can be added to access roles json
-        oauthPartitionsUrl = self.config()["partitionsUrl"] + "/OAuthClients"
+        request_url = self.config()["partitionsUrl"] + "/OAuthClients"
         partitionsResponse = requests.get(
-            oauthPartitionsUrl, headers=REQUEST_HEADERS, cookies=self.cookie()
+            url=request_url,
+            headers=REQUEST_HEADERS,
+            cookies=self.cookie(),
+            timeout=None,
         )
         if partitionsResponse.ok:
             response_dict = self.parse_request_response(partitionsResponse)
@@ -2622,7 +2779,7 @@ class OTDS:
         else:
             logger.error(
                 "Failed to get partition info for OAuthClients; url -> %s : error -> %s (%s)",
-                oauthPartitionsUrl,
+                request_url,
                 partitionsResponse.text,
                 response.status_code,
             )
@@ -2639,10 +2796,11 @@ class OTDS:
         )
 
         response = requests.put(
-            accessRolesUrl,
+            url=request_url,
             json=accessRolesJson,
             headers=REQUEST_HEADERS,
             cookies=self.cookie(),
+            timeout=None,
         )
 
         if response.ok:
@@ -2683,9 +2841,10 @@ class OTDS:
         request_url = self.token_url()
 
         response = requests.post(
-            request_url,
+            url=request_url,
             data={"grant_type": "client_credentials"},
             headers=accessTokenRequestHeaders,
+            timeout=None,
         )
 
         access_token = None
@@ -2741,18 +2900,23 @@ class OTDS:
                 'updatePermission': True,
                 'deletePermission': True,
                 'enablePermission': True,
-            }                    
-                            
+            }
+
         """
 
         request_url = "{}/{}".format(self.auth_handler_url(), name)
 
-        logger.info("Getting authentication handler -> %s; calling -> %s", name, request_url)
+        logger.info(
+            "Getting authentication handler -> %s; calling -> %s", name, request_url
+        )
 
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=REQUEST_HEADERS, cookies=self.cookie()
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2784,8 +2948,8 @@ class OTDS:
         enabled: bool = True,
         priority: int = 5,
         active_by_default: bool = False,
-        auth_principal_attributes: list = ["oTExternalID1", "oTUserID1"],
-        nameid_format: str = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+        auth_principal_attributes: list | None = None,
+        nameid_format: str = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
     ) -> dict | None:
         """Add a new SAML authentication handler
 
@@ -2808,6 +2972,9 @@ class OTDS:
         Returns:
             dict: Request response (dictionary) or None if the REST call fails.
         """
+
+        if auth_principal_attributes is None:
+            auth_principal_attributes = ["oTExternalID1", "oTUserID1"]
 
         authHandlerPostBodyJson = {
             "_name": name,
@@ -2899,10 +3066,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=authHandlerPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2931,7 +3099,7 @@ class OTDS:
         certificate_password: str,
         enabled: bool = True,
         priority: int = 10,
-        auth_principal_attributes: list = ["oTExternalID1"],
+        auth_principal_attributes: list | None = None,
     ):
         """Add a new SAP authentication handler
 
@@ -2947,6 +3115,10 @@ class OTDS:
         Returns:
             Request response (json) or None if the REST call fails.
         """
+
+        # Avoid linter warning W0102:
+        if auth_principal_attributes is None:
+            auth_principal_attributes = ["oTExternalID1"]
 
         # 1. Prepare the body for the AuthHandler REST call:
         authHandlerPostBodyJson = {
@@ -3013,10 +3185,11 @@ class OTDS:
         )
 
         response = requests.post(
-            request_url,
+            url=request_url,
             json=authHandlerPostBodyJson,
             headers=REQUEST_HEADERS,
             cookies=self.cookie(),
+            timeout=None,
         )
         if not response.ok:
             logger.error(
@@ -3109,10 +3282,11 @@ class OTDS:
         # Basically, if you specify a files parameter (a dictionary),
         # then requests will send a multipart/form-data POST automatically:
         response = requests.post(
-            request_url,
+            url=request_url,
             data=authHandlerPostData,
             files=authHandlerPostFiles,
             cookies=self.cookie(),
+            timeout=None,
         )
         if not response.ok:
             logger.error(
@@ -3142,7 +3316,7 @@ class OTDS:
         scope_string: str = "",
         enabled: bool = True,
         priority: int = 10,
-        auth_principal_attributes: list = ["oTExtraAttr0"],
+        auth_principal_attributes: list | None = None,
     ) -> dict | None:
         """Add a new OAuth authentication handler
 
@@ -3167,6 +3341,10 @@ class OTDS:
         Returns:
             dict: Request response (dictionary) or None if the REST call fails.
         """
+
+        # Avoid linter warning W0102:
+        if auth_principal_attributes is None:
+            auth_principal_attributes = ["oTExtraAttr0"]
 
         # 1. Prepare the body for the AuthHandler REST call:
         authHandlerPostBodyJson = {
@@ -3518,10 +3696,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=authHandlerPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3576,10 +3755,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 json=consolidationPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -3602,7 +3782,7 @@ class OTDS:
         self,
         resource_name: str,
         allow_impersonation: bool = True,
-        impersonation_list: list = [],
+        impersonation_list: list | None = None,
     ) -> bool:
         """Configure impersonation for an OTDS resource
 
@@ -3614,6 +3794,10 @@ class OTDS:
         Returns:
             bool: True if the impersonation setting succeeded or False if it failed.
         """
+
+        # Avoid linter warning W0102:
+        if impersonation_list is None:
+            impersonation_list = []
 
         impersonationPutBodyJson = {
             "allowImpersonation": allow_impersonation,
@@ -3631,10 +3815,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 json=impersonationPutBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -3657,7 +3842,7 @@ class OTDS:
         self,
         client_id: str,
         allow_impersonation: bool = True,
-        impersonation_list: list = [],
+        impersonation_list: list | None = None,
     ) -> bool:
         """Configure impersonation for an OTDS OAuth Client
 
@@ -3668,6 +3853,10 @@ class OTDS:
         Returns:
             bool: True if the impersonation setting succeeded or False if it failed.
         """
+
+        # Avoid linter warning W0102:
+        if impersonation_list is None:
+            impersonation_list = []
 
         impersonationPutBodyJson = {
             "allowImpersonation": allow_impersonation,
@@ -3685,10 +3874,11 @@ class OTDS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 json=impersonationPutBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -3701,6 +3891,131 @@ class OTDS:
                 logger.error(
                     "Failed to set impersonation for OAuth Client -> %s; error -> %s (%s)",
                     client_id,
+                    response.text,
+                    response.status_code,
+                )
+                return False
+
+    # end method definition
+
+    def get_password_policy(self):
+        """Get the global password policy
+
+        Args:
+            None
+        Returns:
+            dict: Request response or None if the REST call fails.
+
+            Example response:
+            {
+                'passwordHistoryMaximumCount': 3,
+                'daysBeforeNewPasswordMayBeChanged': 1,
+                'passwordMaximumDuration': 90,
+                'daysBeforeOldPasswordMayBeReused': 0,
+                'lockoutFailureCount': 0,
+                'lockoutDuration': 15,
+                'minimumNumberOfCharacters': 8,
+                'complexPasswordValidationEnabled': True,
+                'minimumNumberOfDigits': 1,
+                'minimumNumberOfSymbols': 1,
+                'minimumNumberOfUppercase': 1,
+                'minimumNumberOfLowercase': 1,
+                'minimumChangesToPreviousPassword': 0,
+                'maxNumberOfConsecutiveANCharsInPassword': 0,
+                'blockCommonPassword': False
+                ...
+            }
+        """
+
+        request_url = "{}/passwordpolicy".format(self.config()["systemConfigUrl"])
+
+        logger.info("Getting password policy; calling -> %s", request_url)
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get password policy; error -> %s (%s)",
+                    response.text,
+                    response.status_code,
+                )
+                return None
+
+    # end method definition
+
+    def update_password_policy(self, update_values: dict) -> bool:
+        """Update the global password policy
+
+        Args:
+            update_values (dict): new values for selected settings.
+                                  A value of 0 means the settings is deactivated.
+
+            Example values:
+            {
+                'passwordHistoryMaximumCount': 3,
+                'daysBeforeNewPasswordMayBeChanged': 1,
+                'passwordMaximumDuration': 90,
+                'daysBeforeOldPasswordMayBeReused': 0,
+                'lockoutFailureCount': 0,
+                'lockoutDuration': 15,
+                'minimumNumberOfCharacters': 8,
+                'complexPasswordValidationEnabled': True,
+                'minimumNumberOfDigits': 1,
+                'minimumNumberOfSymbols': 1,
+                'minimumNumberOfUppercase': 1,
+                'minimumNumberOfLowercase': 1,
+                'minimumChangesToPreviousPassword': 0,
+                'maxNumberOfConsecutiveANCharsInPassword': 0,
+                'blockCommonPassword': False
+                ...
+            }
+        Returns:
+            bool: True if the REST call succeeds, otherwise False. We use a boolean return
+                  value as the response of the REST call does not have meaningful content.
+
+        """
+
+        request_url = "{}/passwordpolicy".format(self.config()["systemConfigUrl"])
+
+        logger.info(
+            "Update password policy with these new values -> %s; calling -> %s",
+            update_values,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.put(
+                url=request_url,
+                json=update_values,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return True
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to update password policy with values -> %s; error -> %s (%s)",
+                    update_values,
                     response.text,
                     response.status_code,
                 )

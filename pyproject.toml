@@ -43,7 +43,7 @@ keywords = [
 packages = ['pyxecm', 'pyxecm.customizer', 'pyxecm.helper']
 
 [project.urls]
-"Homepage" = "https://ecm.glpages.otxlab.net/pyxecm/"
+"Homepage" = "https://github.com/opentext/pyxecm"
 
 [project.optional-dependencies]
 customizer = ['python-hcl2', 'lxml', 'pyrfc']

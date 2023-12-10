@@ -26,6 +26,7 @@ import base64
 import requests
 
 from suds.client import Client
+from suds import WebFault
 
 logger = logging.getLogger("pyxecm.otac")
 
@@ -47,7 +48,6 @@ class OTAC:
         ds_password: str,
         admin_username: str,
         admin_password: str,
-        **kwargs
     ):
         """Initialize the OTAC object
 
@@ -59,7 +59,6 @@ class OTAC:
             ds_password (str): The admin password of Archive Center (dsadmin).
             admin_username (str): The admin user name of Archive Center (otadmin@otds.admin).
             admin_password (str): The admin password of Archive Center (otadmin@otds.admin).
-            **kwargs
         """
 
         otac_config = {}
@@ -225,12 +224,14 @@ class OTAC:
             payload["user"],
             request_url,
         )
-        response = requests.post(request_url, data=payload, headers=requestHeaders)
+        response = requests.post(
+            url=request_url, data=payload, headers=requestHeaders, timeout=None
+        )
         if not response.ok:
             logger.error(
                 "Failed to execute command -> %s on Archive Center; error -> %s",
                 command,
-                response.text.replace("\n", " "),
+                response.text.replace("\n", " "),  # avoid multi-line log entries
             )
 
         return response
@@ -261,7 +262,7 @@ class OTAC:
             logger.error("Certificate file -> %s not found!", cert_path)
             return None
 
-        with open(cert_path, "r") as cert_file:
+        with open(file=cert_path, mode="r", encoding="utf-8") as cert_file:
             cert_content = cert_file.read().strip()
 
         # Check that we have the pem certificate file - this is what OTAC expects.
@@ -292,7 +293,9 @@ class OTAC:
             logical_archive,
             request_url,
         )
-        response = requests.put(request_url, data=cert_content, headers=requestHeaders)
+        response = requests.put(
+            url=request_url, data=cert_content, headers=requestHeaders, timeout=None
+        )
 
         if not response.ok:
             message = response.text.split(
@@ -346,7 +349,7 @@ class OTAC:
             )
             return response
 
-        except Exception as exception:
+        except WebFault as exception:
             logger.error(
                 "Failed to execute SetCertificateFlags for Client -> %s on Archive -> %s; error -> %s",
                 auth_id,
@@ -355,5 +358,4 @@ class OTAC:
             )
             return None
 
-
-# end method definition
+    # end method definition

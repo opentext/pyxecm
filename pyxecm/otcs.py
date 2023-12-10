@@ -32,6 +32,8 @@ get_result_value: Read an item value from the REST API response. This is conside
 is_configured: returns true if the OTCS pod is ready to serve requests
 authenticate : Authenticates at Content Server and retrieve OTCS Ticket.
 
+get_server_info: return OTCS server information
+
 apply_config: Apply Content Server administration settings from XML file
 
 get_user: Lookup Content Server user
@@ -44,7 +46,7 @@ update_user_profile: Update a defined field of the user profile (settings)
 update_user_photo: Update a user with a profile photo (which must be an existing node)
 is_proxy: Check if a user (login name) is a proxy of the current user
 get_user_proxies: Get the list of proxy users for the current user
-update_user_proxy: Add a proxy to the current (authenticated) user
+add_user_proxy: Add a proxy to the current (authenticated) user
 add_favorite: Add a favorite for the current (authenticated) user
 
 get_group: Lookup Content Server group
@@ -67,6 +69,7 @@ upload_file_to_volume: Fetch a file from a URL or local filesystem and upload
 upload_file_to_parent: Upload a document to a parent folder
 add_document_version: Add a version to an Extended ECM document
 get_latest_document_version: Get latest version of a document node based on the node ID.
+get_document_content: get content of a document version
 download_document: Download a document
 download_config_file: Download a config file from a given OTCS URL.
                       This is NOT for downloading documents from within the OTCS repository
@@ -88,7 +91,8 @@ get_business_object_type: Get information for a specific business object type
 get_workspace_create_form: Get the Workspace create form
 get_workspace: Get a workspace node
 get_workspace_instances: Get all instances of a given workspace type 
-get_workspace_by_type_and_name: Lookup workspace based on workspace type name and workspace name 
+get_workspace_by_type_and_name: Lookup workspace based on workspace type name and workspace name
+get_workspace_by_business_object: Lookup workspace based by an business object of an external system
 create_workspace: Create a new business workspace
 create_workspace_relationship: Create a relationship between two workspaces
 get_workspace_relationships: get a list of related workspaces
@@ -144,6 +148,8 @@ import_security_clearance_codes: Import Securioty Clearance codes from a config 
 assign_user_security_clearance: Assign a Security Clearance level to a user
 assign_user_supplemental_markings: Assign a list of Supplemental Markings to a user
 
+update_workspace_aviator: Enable or disable the Content Aviator for a workspace
+
 """
 
 __author__ = "Dr. Marc Diefenbruch"
@@ -155,6 +161,7 @@ __email__ = "mdiefenb@opentext.com"
 import os
 import logging
 import json
+import time
 import urllib.parse
 from datetime import datetime
 import zipfile
@@ -179,6 +186,8 @@ REQUEST_DOWNLOAD_HEADERS = {
 }
 
 REQUEST_TIMEOUT = 60
+REQUEST_RETRY_DELAY = 20
+REQUEST_MAX_RETRIES = 2
 
 
 class OTCS:
@@ -199,7 +208,6 @@ class OTCS:
         user_partition: str = "Content Server Members",
         resource_name: str = "cs",
         default_license: str = "X3",
-        **kwargs,
     ):
         """Initialize the OTCS object
 
@@ -213,7 +221,6 @@ class OTCS:
             user_partition (str): Name of the OTDS partition for OTCS users. Default is "Content Server Members".
             resource_name (str, optional): Name of the OTDS resource for OTCS. Dault is "cs".
             default_license (str, optional): name of the default user license. Default is "X3".
-            **kwargs
         """
 
         # Initialize otcs_config as an empty dictionary
@@ -281,6 +288,7 @@ class OTCS:
         otcs_config["restUrl"] = otcs_rest_url
 
         otcs_config["authenticationUrl"] = otcs_rest_url + "/v1/auth"
+        otcs_config["serverInfoUrl"] = otcs_rest_url + "/v1/serverinfo"
         otcs_config["membersUrl"] = otcs_rest_url + "/v1/members"
         otcs_config["membersUrlv2"] = otcs_rest_url + "/v2/members"
         otcs_config["nodesUrl"] = otcs_rest_url + "/v1/nodes"
@@ -314,6 +322,7 @@ class OTCS:
         otcs_config["holdsUrl"] = otcs_rest_url + "/v1/holds"
         otcs_config["holdsUrlv2"] = otcs_rest_url + "/v2/holds"
         otcs_config["validationUrl"] = otcs_rest_url + "/v1/validation/nodes/names"
+        otcs_config["aiUrl"] = otcs_rest_url + "/v2/ai/nodes"
 
         self._config = otcs_config
 
@@ -645,6 +654,11 @@ class OTCS:
             data = results["data"]
             if isinstance(data, dict):
                 # data is a dict - we don't need index value:
+                if property_name and not property_name in data:
+                    logger.error(
+                        "There's no -> %s dictionary in data -> %s", property_name, data
+                    )
+                    return False
                 properties = data[property_name]
                 if isinstance(properties, dict):
                     if key in properties:
@@ -663,9 +677,22 @@ class OTCS:
                     )
                     return False
             elif isinstance(data, list):
-                # data is a list - this has typically just one item, so we use 0 as index
+                # data is a list
                 for item in data:
-                    properties = item[property_name]
+                    if property_name and not property_name in item:
+                        logger.error(
+                            "There's no -> %s dictionary in the data list item -> %s",
+                            property_name,
+                            item,
+                        )
+                        continue
+                    # if properties if passed as empty string then we assume that
+                    # the key fields are directly in the item dictionary. This is
+                    # the case e.g. with the V2 Proxy APIs
+                    if not property_name:
+                        properties = item
+                    else:
+                        properties = item[property_name]
                     if key in properties and properties[key] == value:
                         return True
                 return False
@@ -838,7 +865,7 @@ class OTCS:
 
         try:
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=REQUEST_JSON_HEADERS,
                 timeout=REQUEST_TIMEOUT,
             )
@@ -888,7 +915,7 @@ class OTCS:
         response = None
         try:
             response = requests.post(
-                self.config()["authenticationUrl"],
+                url=self.config()["authenticationUrl"],
                 data=self.credentials(),
                 headers=REQUEST_FORM_HEADERS,
                 timeout=REQUEST_TIMEOUT,
@@ -923,6 +950,103 @@ class OTCS:
 
     # end method definition
 
+    def get_server_info(self) -> dict | None:
+        """Get Content Server information (server info)
+
+        Args:
+            None
+        Returns:
+            dict: server information or None if the call fails
+
+            Example value:
+            {
+                'mobile': {
+                    'cs_viewer_support': False,
+                    'offline_use': True
+                },
+                'server': {
+                    'advanced_versioning': True,
+                    'character_encoding': 1,
+                    'current_date': '2023-09-05T17:09:41',
+                    'current_locale_suffix': '_en_US',
+                    'domain_access_enabled': False,
+                    'enhanced_advanced_versioning': False,
+                    'force_download_for_mime_types': [...],
+                    'language_code': 'USA',
+                    'languages': [...],
+                    'metadata_languages: [...],
+                    'url': 'https://otcs.dev.idea-te.eimdemo.com/cs/cs'
+                    'version': '23.3'
+                    ...
+                },
+                'sessions': {
+                    'enabled': True,
+                    'expire_after_last_login': False,
+                    'expire_after_last_request': True,
+                    'logout_url': '?func=ll.DoLogout&secureRequestToken=LUAQSY%2BJs4KnlwoVgxLtxQFYrov2XefJQM9ShyhOK93Mzp3ymCxX6IGMTtUgNvTH7AYVt%2BbWLEw%3D',
+                    'session_inactivity': 7020000,
+                    'session_reaction_time': 180000,
+                    'session_timeout': 7200000
+                },
+                'viewer': {
+                    'content_suite': {...}
+                }
+            }
+        """
+
+        request_url = self.config()["serverInfoUrl"]
+        request_header = self._cookie
+
+        logger.info(
+            "Retrieve Extended ECM server information; calling -> %s", request_url
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to retrieve Extended ECM server information; status -> %s; error -> %s",
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def get_server_version(self) -> str | None:
+        """Get Content Server version
+
+        Args:
+            None
+        Returns:
+            str: server version number like 23.4
+        """
+
+        response = self.get_server_info()
+        if not response:
+            return None
+
+        server_info = response.get("server")
+        if not server_info:
+            return None
+
+        return server_info.get("version")
+
+    # end method definition
+
     def apply_config(self, xml_file_path: str) -> dict | None:
         """Apply Content Server administration settings from XML file
 
@@ -934,29 +1058,37 @@ class OTCS:
                         require a restart of the OTCS services.
         """
 
-        logger.info("Applying admin settings from file -> %s", xml_file_path)
         filename = os.path.basename(xml_file_path)
 
         if not os.path.exists(xml_file_path):
             logger.error(
-                "The file -> %s does not exist in path -> %s!",
+                "The admin settings file -> %s does not exist in path -> %s!",
                 filename,
                 os.path.dirname(xml_file_path),
             )
             return None
 
-        llconfig_file = {"file": (filename, open(xml_file_path), "text/xml")}
+        llconfig_file = {
+            "file": (filename, open(file=xml_file_path, encoding="utf-8"), "text/xml")
+        }
 
         request_url = self.config()["importSettingsUrl"]
         request_header = self._cookie
 
+        logger.info(
+            "Applying admin settings from file -> %s; calling -> %s",
+            xml_file_path,
+            request_url,
+        )
+
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 files=llconfig_file,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 logger.debug(
@@ -1051,7 +1183,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1082,7 +1217,7 @@ class OTCS:
         last_name: str,
         email: str,
         base_group: int,
-        privileges: list = ["Login", "Public Access"],
+        privileges: list | None = None,
     ) -> dict | None:
         """Add Content Server user.
 
@@ -1099,6 +1234,9 @@ class OTCS:
         Returns:
             dict: User information or None if the user couldn't be created (e.g. because it exisits already).
         """
+
+        if privileges is None:
+            privileges = ["Login", "Public Access"]
 
         userPostBody = {
             "type": 0,
@@ -1126,10 +1264,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=userPostBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1211,7 +1350,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1260,10 +1402,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 data=userPutBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1307,9 +1450,10 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1372,10 +1516,11 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.put(
-                request_url,
+                url=request_url,
                 data={"body": json.dumps(userProfilePutBody)},
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1419,10 +1564,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 data=updateUserPutBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1443,7 +1589,10 @@ class OTCS:
     # end method definition
 
     def is_proxy(self, user_name: str) -> bool:
-        """Check if a user is defined as proxy of the current user
+        """Check if a user is defined as proxy of the current user.
+           This method differentiates between the old (xGov) based
+           implementation and the new Extended ECM platform one
+           that was introduced with version 23.4.
 
         Args:
             user_name (str): user  to test (login name)
@@ -1451,19 +1600,35 @@ class OTCS:
             bool: True is user is proxy of current user. False if not.
         """
 
-        response = self.get_user_proxies()
-        if not response or not "proxies" in response:
-            return False
-        proxies = response["proxies"]
+        version_number = self.get_server_version()
+        # Split the version number by dot
+        parts = version_number.split(".")
+        # Take the first two parts and join them back with a dot
+        stripped_version = ".".join(parts[:2])
+        version_number = float(stripped_version)
 
-        for proxy in proxies:
-            if proxy["name"] == user_name:
+        if version_number >= 23.4:
+            response = self.get_user_proxies(use_v2=True)
+            if self.exist_result_item(
+                response=response, key="name", value=user_name, property_name=""
+            ):
                 return True
-        return False
+            else:
+                return False
+        else:
+            response = self.get_user_proxies(use_v2=False)
+            if not response or not "proxies" in response:
+                return False
+            proxies = response["proxies"]
+
+            for proxy in proxies:
+                if proxy["name"] == user_name:
+                    return True
+            return False
 
     # end method definition
 
-    def get_user_proxies(self) -> dict | None:
+    def get_user_proxies(self, use_v2: bool = False) -> dict | None:
         """Get list of user proxies.
            This method needs to be called as the user the proxy is acting for.
         Args:
@@ -1472,18 +1637,21 @@ class OTCS:
             dict: Node information or None if REST call fails.
         """
 
-        request_url = self.config()["membersUrl"] + "/proxies"
+        if use_v2:
+            request_url = self.config()["membersUrlv2"] + "/proxies"
+        else:
+            request_url = self.config()["membersUrl"] + "/proxies"
         request_header = self.request_form_header()
 
         logger.info("Get proxy users for current user; calling -> %s", request_url)
 
         retries = 0
         while True:
-            # This REST API needs a special treatment: we encapsulate the payload as JSON into a "add_assignment" tag.
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1502,18 +1670,24 @@ class OTCS:
 
     # end method definition
 
-    def update_user_proxy(
-        self, proxy_user_id: int, from_date: str = None, to_date: str = None
+    def add_user_proxy(
+        self,
+        proxy_user_id: int,
+        from_date: str = None,
+        to_date: str = None,
     ) -> dict | None:
-        """Update a user with a proxy user (which must be an existing user).
+        """Add a user as a proxy user to the current user.
            IMPORTANT: This method needs to be called as the user the proxy is acting for.
            Optional this method can be provided with a time span the proxy should be active.
+           This method differentiates between the old (xGov) based
+           implementation and the new Extended ECM platform one
+           that was introduced with version 23.4.
 
            Example payload for proxy user 19340 without time span:
-           add_proxy:  {"19340":{}}
+           {"id":2545, "from_date": None, "to_date": None}
 
            Example payload for proxy user 19340 with time span:
-           add_proxy: {"19340":{"from_date": "2022-10-01", "to_date": "2022-10-31"}}
+           {"id":2545, "from_date":"2023-03-15", "to_date":"2023-03-31"}
 
         Args:
             user_id (int): ID of the user
@@ -1523,30 +1697,53 @@ class OTCS:
             dict: Request response or None if call fails.
         """
 
-        post_dict = {}
-        if from_date and to_date:
+        version_number = self.get_server_version()
+        # Split the version number by dot
+        parts = version_number.split(".")
+        # Take the first two parts and join them back with a dot
+        stripped_version = ".".join(parts[:2])
+        version_number = float(stripped_version)
+
+        # for versions older than 23.4 we need to use
+        # the egacy Extended ECM for Government Proxy
+        # implementation:
+        if version_number >= 23.4:
+            post_dict = {}
+            post_dict["id"] = proxy_user_id
             post_dict["from_date"] = from_date
             post_dict["to_date"] = to_date
+            post_data = {"body": json.dumps(post_dict)}
+            request_url = self.config()["membersUrlv2"] + "/proxies"
+            logger.info(
+                "Assign proxy user with ID -> %s to current user; calling -> %s",
+                proxy_user_id,
+                request_url,
+            )
+        else:
+            post_dict = {}
+            if from_date and to_date:
+                post_dict["from_date"] = from_date
+                post_dict["to_date"] = to_date
+            post_dict = {str(proxy_user_id): post_dict}
+            post_data = {"add_proxy": json.dumps(post_dict)}
+            request_url = self.config()["membersUrl"] + "/proxies"
+            logger.info(
+                "Assign proxy user with ID -> %s to current user (legacy xGov); calling -> %s",
+                proxy_user_id,
+                request_url,
+            )
 
-        proxyPostBody = {str(proxy_user_id): post_dict}
-
-        request_url = self.config()["membersUrl"] + "/proxies"
         request_header = self.request_form_header()
-
-        logger.info(
-            "Assign proxy user with ID -> %s to current user; calling -> %s",
-            proxy_user_id,
-            request_url,
-        )
 
         retries = 0
         while True:
-            # This REST API needs a special treatment: we encapsulate the payload as JSON into a "add_assignment" tag.
+            # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.post(
-                request_url,
-                data={"add_proxy": json.dumps(proxyPostBody)},
+                url=request_url,
+                data=post_data,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1585,7 +1782,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1636,7 +1836,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1679,10 +1882,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=groupPostBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1737,7 +1941,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1782,10 +1989,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=groupMemberPostBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -1806,11 +2014,12 @@ class OTCS:
 
     # end method definition
 
-    def get_node(self, node_id: int) -> dict | None:
+    def get_node(self, node_id: int, timeout: int = REQUEST_TIMEOUT) -> dict | None:
         """Get a node based on the node ID.
 
         Args:
             node_id (int) is the node Id of the node
+            timeout (int, optional): timeout for the request in seconds
         Returns:
             dict: Node information or None if no node with this ID is found.
             "results": [
@@ -1883,24 +2092,43 @@ class OTCS:
 
         retries = 0
         while True:
-            response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get node with ID -> %s; status -> %s; error -> %s",
-                    str(node_id),
-                    response.status_code,
-                    response.text,
+            try:
+                response = requests.get(
+                    url=request_url,
+                    headers=request_header,
+                    cookies=self.cookie(),
+                    timeout=timeout,
                 )
-                return None
+                if response.ok:
+                    return self.parse_request_response(response)
+                # Check if Session has expired - then re-authenticate and try once more
+                elif response.status_code == 401 and retries == 0:
+                    logger.warning("Session has expired - try to re-authenticate...")
+                    self.authenticate(True)
+                    retries += 1
+                else:
+                    logger.error(
+                        "Failed to get node with ID -> %s; status -> %s; error -> %s",
+                        str(node_id),
+                        response.status_code,
+                        response.text,
+                    )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= REQUEST_MAX_RETRIES:
+                    logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "Failed to get node with ID -> %s; timeout error", str(node_id)
+                    )
+                    # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                    logger.warning("Turn timeouts off and wait forever...")
+                    timeout = None
 
     # end method definition
 
@@ -1948,7 +2176,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2014,7 +2245,7 @@ class OTCS:
     # end method definition
 
     def get_node_by_volume_and_path(
-        self, volume_type: int, path: list = []
+        self, volume_type: int, path: list | None = None
     ) -> dict | None:
         """Get a node based on the volume and path (list of container items).
 
@@ -2044,6 +2275,10 @@ class OTCS:
             dict: Node information or None if no node with this path is found.
         """
 
+        # If path is not given we use empty list to make the for loop below working in this case as well
+        if path is None:
+            path = []
+
         # Preparation: get volume IDs for Transport Warehouse (root volume and Transport Packages)
         response = self.get_volume(volume_type)
         if not response:
@@ -2063,14 +2298,15 @@ class OTCS:
 
         for path_element in path:
             node = self.get_node_by_parent_and_name(current_item_id, path_element)
-            current_item_id = self.get_result_value(node, "id")
-            if not current_item_id:
+            path_item_id = self.get_result_value(node, "id")
+            if not path_item_id:
                 logger.error(
                     "Cannot find path element -> %s in container with ID -> %s.",
                     path_element,
                     str(current_item_id),
                 )
                 return None
+            current_item_id = path_item_id
             logger.debug("Traversing path element with ID -> %s", str(current_item_id))
 
         return node
@@ -2099,7 +2335,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2183,7 +2422,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2208,8 +2450,8 @@ class OTCS:
         node_id: int,
         name: str,
         description: str,
-        name_multilingual: dict = {},
-        description_multilingual: dict = {},
+        name_multilingual: dict | None = None,
+        description_multilingual: dict | None = None,
     ) -> dict | None:
         """Change the name and description of a node.
 
@@ -2244,10 +2486,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 data={"body": json.dumps(renameNodePutBody)},
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2326,7 +2569,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2345,11 +2591,14 @@ class OTCS:
 
     # end method definition
 
-    def get_volume(self, volume_type: int) -> dict | None:
+    def get_volume(
+        self, volume_type: int, timeout: int = REQUEST_TIMEOUT
+    ) -> dict | None:
         """Get Volume information based on the volume type ID.
 
         Args:
             volume_type (int): ID of the volume type
+            timeout (int, optional): timeout for the request in seconds
         Returns:
             dict: Volume Details or None if volume is not found.
             ["results"]["data"]["properties"]["id"] is the node ID of the volume.
@@ -2364,24 +2613,44 @@ class OTCS:
 
         retries = 0
         while True:
-            response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get volume type -> %s; status -> %s; error -> %s",
-                    str(volume_type),
-                    response.status_code,
-                    response.text,
+            try:
+                response = requests.get(
+                    url=request_url,
+                    headers=request_header,
+                    cookies=self.cookie(),
+                    timeout=timeout,
                 )
-                return None
+                if response.ok:
+                    return self.parse_request_response(response)
+                # Check if Session has expired - then re-authenticate and try once more
+                elif response.status_code == 401 and retries == 0:
+                    logger.warning("Session has expired - try to re-authenticate...")
+                    self.authenticate(True)
+                    retries += 1
+                else:
+                    logger.error(
+                        "Failed to get volume type -> %s; status -> %s; error -> %s",
+                        str(volume_type),
+                        response.status_code,
+                        response.text,
+                    )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= REQUEST_MAX_RETRIES:
+                    logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "Failed to get volume type -> %s; timeout error",
+                        str(volume_type),
+                    )
+                    # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                    logger.warning("Turn timeouts off and wait forever...")
+                    timeout = None
 
     # end method definition
 
@@ -2409,10 +2678,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data={"body": json.dumps(checkNodeNamePostData)},
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2453,7 +2723,7 @@ class OTCS:
             logger.info("Download transport package from URL -> %s", package_url)
 
             try:
-                package = requests.get(package_url)
+                package = requests.get(url=package_url, timeout=1200)
                 package.raise_for_status()
             except requests.exceptions.HTTPError as errh:
                 logger.error("Http Error -> %s", errh.strerror)
@@ -2477,7 +2747,7 @@ class OTCS:
 
         elif os.path.exists(package_url):
             logger.info("Using local package -> %s", package_url)
-            file = open(package_url, "rb")
+            file = open(file=package_url, mode="rb")
 
         else:
             logger.warning("Cannot access -> %s", package_url)
@@ -2501,11 +2771,12 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=uploadPostData,
                 files=uploadPostFiles,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2546,7 +2817,7 @@ class OTCS:
             logger.info("Download file from URL -> %s", file_url)
 
             try:
-                response = requests.get(file_url)
+                response = requests.get(url=file_url, timeout=1200)
                 response.raise_for_status()
             except requests.exceptions.HTTPError as errh:
                 logger.error("Http Error -> %s", errh.strerror)
@@ -2570,7 +2841,7 @@ class OTCS:
 
         elif os.path.exists(file_url):
             logger.info("Uploading local file -> %s", file_url)
-            file_content = open(file_url, "rb")
+            file_content = open(file=file_url, mode="rb")
 
         else:
             logger.warning("Cannot access -> %s", file_url)
@@ -2599,11 +2870,12 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=uploadPostData,
                 files=uploadPostFiles,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2650,7 +2922,10 @@ class OTCS:
             logger.info("Download file from URL -> %s", file_url)
 
             try:
-                response = requests.get(file_url)
+                response = requests.get(
+                    url=file_url,
+                    timeout=None,
+                )
                 response.raise_for_status()
             except requests.exceptions.HTTPError as errh:
                 logger.error("Http Error -> %s", errh.strerror)
@@ -2674,7 +2949,7 @@ class OTCS:
 
         elif os.path.exists(file_url):
             logger.info("Uploading local file -> %s", file_url)
-            file_content = open(file_url, "rb")
+            file_content = open(file=file_url, mode="rb")
 
         else:
             logger.warning("Cannot access -> %s", file_url)
@@ -2699,11 +2974,12 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=uploadPostData,
                 files=uploadPostFiles,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2747,7 +3023,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -2766,6 +3045,72 @@ class OTCS:
                 return None
 
     # end method definition
+
+    def get_document_content(self, node_id: int, version_number: str = "") -> bytes:
+        """Get document content from Extended ECM.
+
+        Args:
+            node_id (int): node ID of the document to download
+            version_number (str): version of the document to download.
+                                     If version = "" then download the latest
+                                     version.
+        Returns:
+            bytes: content of the file or None in case of an error.
+        """
+
+        if not version_number:
+            response = self.get_latest_document_version(node_id)
+            if not response:
+                logger.error(
+                    "Cannot get latest version of document with ID -> %s", str(node_id)
+                )
+            version_number = response["data"]["version_number"]
+
+        request_url = (
+            self.config()["nodesUrlv2"]
+            + "/"
+            + str(node_id)
+            + "/versions/"
+            + str(version_number)
+            + "/content"
+        )
+        request_header = self.request_download_header()
+
+        logger.info(
+            "Retrieve document with node ID -> %s and version -> %s; calling -> %s",
+            str(node_id),
+            str(version_number),
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                content = response.content
+                break
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to download document with node ID -> %s; status -> %s; error -> %s",
+                    str(node_id),
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+        return content
+
+        # end method definition
 
     def download_document(
         self, node_id: int, file_path: str, version_number: str = ""
@@ -2815,7 +3160,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 content = response.content
@@ -2837,7 +3185,7 @@ class OTCS:
         logger.info("Writing document content to file -> %s", file_path)
 
         # Open file in write binary mode
-        with open(file_path, "wb") as file:
+        with open(file=file_path, mode="wb") as file:
             # Write the content to the file
             file.write(content)
 
@@ -2845,7 +3193,9 @@ class OTCS:
 
         # end method definition
 
-    def download_config_file(self, otcs_url_suffix: str, file_path: str) -> bool:
+    def download_config_file(
+        self, otcs_url_suffix: str, file_path: str, search: str = "", replace: str = ""
+    ) -> bool:
         """Download a config file from a given OTCS URL. This is NOT
             for downloading documents from within the OTCS repository
             but for configuration files such as app packages for MS Teams.
@@ -2855,6 +3205,8 @@ class OTCS:
                                       with /cs/cs?func=,
                                       e.g. /cs/cs?func=officegroups.DownloadTeamsPackage
             file_path (str): local path to save the file (direcotry + filename)
+            search (str, optional): optional string to search for a replacement
+            replace (str, optional): optional replacement
         Returns:
             bool: True if the download succeeds, False otherwise
         """
@@ -2867,7 +3219,10 @@ class OTCS:
 
         try:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=REQUEST_TIMEOUT,
             )
             response.raise_for_status()
         except requests.exceptions.HTTPError as errh:
@@ -2885,8 +3240,16 @@ class OTCS:
 
         content = response.content
 
+        if search:
+            logger.info(
+                "Search for all occurances of %s in the config file and replace them with %s",
+                search,
+                replace,
+            )
+            content = content.replace(search.encode("utf-8"), replace.encode("utf-8"))
+
         # Open file in write binary mode
-        with open(file_path, "wb") as file:
+        with open(file=file_path, mode="wb") as file:
             # Write the content to the file
             file.write(content)
 
@@ -2955,10 +3318,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=searchPostBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3004,7 +3368,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3083,10 +3450,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=externalSystemPostBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3128,10 +3496,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=createWorbenchPostData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3178,10 +3547,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=unpackPackagePostData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3225,7 +3595,10 @@ class OTCS:
             # As this is a potentially long-running request we put it in try / except:
             try:
                 response = requests.post(
-                    request_url, headers=request_header, cookies=self.cookie()
+                    url=request_url,
+                    headers=request_header,
+                    cookies=self.cookie(),
+                    timeout=None,
                 )
             except requests.exceptions.RequestException as exception:
                 logger.error(
@@ -3261,7 +3634,7 @@ class OTCS:
         package_url: str,
         package_name: str,
         package_description: str = "",
-        replacements: list = [],
+        replacements: list | None = None,
     ) -> dict | None:
         """Main method to deploy a transport. This uses subfunctions to upload,
            unpackage and deploy the transport, and creates the required workbench.
@@ -3278,6 +3651,9 @@ class OTCS:
         Returns:
             dict: Deploy response or None if the deployment fails.
         """
+
+        if replacements is None:
+            replacements = []
 
         # Preparation: get volume IDs for Transport Warehouse (root volume and Transport Packages)
         response = self.get_volume(525)
@@ -3535,7 +3911,9 @@ class OTCS:
             new_zip_file_path,
         )
         with zipfile.ZipFile(new_zip_file_path, "w", zipfile.ZIP_DEFLATED) as zip_ref:
-            for subdir, dirs, files in os.walk(zip_file_folder):
+            for subdir, _, files in os.walk(
+                zip_file_folder
+            ):  # 2nd parameter is not used, thus using _ instead of dirs
                 for file in files:
                     file_path = os.path.join(subdir, file)
                     rel_path = os.path.relpath(file_path, zip_file_folder)
@@ -3564,19 +3942,59 @@ class OTCS:
 
         # end method definition
 
-    def get_workspace_types(self) -> dict | None:
+    def get_workspace_types(
+        self, expand_workspace_info: bool = True, expand_templates: bool = True
+    ) -> dict | None:
         """Get all workspace types configured in Extended ECM.
 
         Args:
-            None
+            expand_workspace_info (bool, optional): controls if the workspace info
+                                                    is returned as well
+            expand_workspace_info (bool, optional): controls if the list of workspace templates
+                                                    per workspace typ is returned as well
         Returns:
             dict: Workspace Types or None if the request fails.
+
+            Example response:
+            {
+                'links': {
+                    'data': {...}
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'rm_enabled': False,
+                                'templates': [
+                                    {
+                                        'id': 14471,
+                                        'name': 'Campaign',
+                                        'subtype': 848
+                                    },
+                                    ...
+                                ],
+                                'wksp_type_id': 35,
+                                'wksp_type_name': 'Campaign'
+                            },
+                            'wksp_info': {
+                                'wksp_type_icon': '/appimg/ot_bws/icons/13147%2Esvg?v=161108_84584'
+                            }
+                        }
+                    }
+                ]
+            }
         """
 
-        request_url = (
-            self.config()["businessworkspacetypes"]
-            + "?expand_templates=true&expand_wksp_info=true"
-        )
+        request_url = self.config()["businessworkspacetypes"]
+        if expand_templates:
+            request_url += "?expand_templates=true"
+        else:
+            request_url += "?expand_templates=false"
+        if expand_workspace_info:
+            request_url += "&expand_wksp_info=true"
+        else:
+            request_url += "&expand_wksp_info=false"
+
         request_header = self.request_form_header()
 
         logger.info("Get workspace types; calling -> %s", request_url)
@@ -3584,7 +4002,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3634,7 +4055,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3705,7 +4129,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3732,6 +4159,65 @@ class OTCS:
             node_id (int) is the node Id of the workspace
         Returns:
             dict: Workspace node information or None if no node with this ID is found.
+
+            Example result:
+            {
+                'links': {
+                    'data': {...}
+                },
+                'meta_data': {
+                    'properties': {...}
+                },
+                'paging': {
+                    'limit': 500,
+                    'page': 1,
+                    'page_total': 1,
+                    'range_max': 1,
+                    'range_min': 1,
+                    'total_count': 1
+                },
+                'results': [
+                    {
+                        'actions': {...},
+                        'data': {
+                            'properties': {
+                                'volume_id': -2000,
+                                'id': 36780,
+                                'parent_id': 13567,
+                                'owner_user_id': 7240,
+                                'name': '4600000044 - C.E.B. New York Inc.',
+                                'type': 848,
+                                'description': '',
+                                'create_date': '2023-09-02T11:07:06',
+                                'create_user_id': 7240,
+                                'create_user_id': 7240,
+                                'modify_date': '2023-09-02T11:07:11',
+                                'modify_user_id': 7240,
+                                'reserved': False,
+                                'reserved_user_id': 0,
+                                'reserved_date': None,
+                                'order': None,
+                                'icon': '/cssupport/otsapxecm/wksp_contract_vendor.png',
+                                'hidden': False,
+                                'mime_type': None,
+                                'original_id': 0,
+                                'wnf_wksp_type_id': 16,
+                                'wnf_wksp_template_id': 15615,
+                                'size_formatted': '7 Items',
+                                'type_name': 'Business Workspace',
+                                'container': True,
+                                'size': 7,
+                                ...
+                            }
+                        },
+                        'metadata': {...},
+                        'metadata_order': {...}
+                    }
+                ],
+                'wksp_info': {
+                    'wksp_type_icon': None
+                }
+            }
         """
 
         request_url = self.config()["businessworkspaces"] + "/" + str(node_id)
@@ -3744,7 +4230,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3832,7 +4321,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -3861,17 +4353,156 @@ class OTCS:
 
     # end method definition
 
+    def get_workspace_by_business_object(
+        self,
+        external_system_name: str,
+        business_object_type: str,
+        business_object_id: str,
+        return_workspace_metadata: bool = False,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get a workspace based on the business object of an external system.
+
+        Args:
+            external_system_name (str): Name of the connection
+            business_object_type (str): type of the Business object, e.g. KNA1 for SAP customers
+            business_object_id (str): ID of the business object in the external system
+            return_workspace_metadata (bool): Whether or not workspace metadata (categories) should be returned
+            show_error (bool): treat as error if node is not found
+        Returns:
+            dict: Workspace node information or None if no node with this ID is found.
+
+            Example result:
+            {
+                'links': {
+                    'data': {...}
+                },
+                'meta_data': {
+                    'properties': {...}
+                },
+                'paging': {
+                    'limit': 500,
+                    'page': 1,
+                    'page_total': 1,
+                    'range_max': 1,
+                    'range_min': 1,
+                    'total_count': 1
+                },
+                'results': [
+                    {
+                        'actions': {...},
+                        'data': {
+                            'properties': {
+                                'volume_id': -2000,
+                                'id': 36780,
+                                'parent_id': 13567,
+                                'owner_user_id': 7240,
+                                'name': '4600000044 - C.E.B. New York Inc.',
+                                'type': 848,
+                                'description': '',
+                                'create_date': '2023-09-02T11:07:06',
+                                'create_user_id': 7240,
+                                'create_user_id': 7240,
+                                'modify_date': '2023-09-02T11:07:11',
+                                'modify_user_id': 7240,
+                                'reserved': False,
+                                'reserved_user_id': 0,
+                                'reserved_date': None,
+                                'order': None,
+                                'icon': '/cssupport/otsapxecm/wksp_contract_vendor.png',
+                                'hidden': False,
+                                'mime_type': None,
+                                'original_id': 0,
+                                'wnf_wksp_type_id': 16,
+                                'wnf_wksp_template_id': 15615,
+                                'size_formatted': '7 Items',
+                                'type_name': 'Business Workspace',
+                                'container': True,
+                                'size': 7,
+                                ...
+                            }
+                        },
+                        'metadata': {...},
+                        'metadata_order': {...}
+                    }
+                ],
+                'wksp_info': {
+                    'wksp_type_icon': None
+                }
+            }
+        """
+
+        request_url = (
+            self.config()["externalSystem"]
+            + "/"
+            + external_system_name
+            + "/botypes/"
+            + business_object_type
+            + "/boids/"
+            + business_object_id
+        )
+        if return_workspace_metadata:
+            request_url += "?metadata"
+
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Get workspace via external system -> %s (Business Object Type -> %s; Business Object ID -> %s); calling -> %s",
+            external_system_name,
+            business_object_type,
+            business_object_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                if show_error:
+                    logger.error(
+                        "Failed to get workspace via external system -> %s (Business Object Type -> %s; Business Object ID -> %s); status -> %s; error -> %s",
+                        external_system_name,
+                        business_object_type,
+                        business_object_id,
+                        response.status_code,
+                        response.text,
+                    )
+                else:
+                    logger.info(
+                        "Cannot fing workspace via external system -> %s (Business Object Type -> %s; Business Object ID -> %s); status -> %s; error -> %s",
+                        external_system_name,
+                        business_object_type,
+                        business_object_id,
+                        response.status_code,
+                        response.text,
+                    )
+                return None
+
+    # end method definition
+
     def create_workspace(
         self,
         workspace_template_id: int,
         workspace_name: str,
         workspace_description: str,
         workspace_type: int,
-        category_data: dict = {},
+        category_data: dict | None = None,
         external_system_id: int = None,
-        bo_type: int = None,
-        bo_id: int = None,
-        parent_id: int = None,
+        bo_type: int | None = None,
+        bo_id: int | None = None,
+        parent_id: int | None = None,
     ) -> dict | None:
         """Create a new business workspace.
 
@@ -3890,6 +4521,10 @@ class OTCS:
         Returns:
             dict: Workspace Create Form data or None if the request fails.
         """
+
+        # Avoid linter warning W0102
+        if category_data is None:
+            category_data = {}
 
         createWorkspacePostData = {
             "template_id": str(workspace_template_id),
@@ -3946,10 +4581,11 @@ class OTCS:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             # See https://developer.opentext.com/apis/14ba85a7-4693-48d3-8c93-9214c663edd2/4403207c-40f1-476a-b794-fdb563e37e1f/07229613-7ef4-4519-8b8a-47eaff639d42#operation/createBusinessWorkspace
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data={"body": json.dumps(createWorkspacePostData)},
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4006,10 +4642,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=createWorkspaceRelationshipPostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4056,7 +4693,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4099,7 +4739,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4149,7 +4792,10 @@ class OTCS:
         )
 
         response = requests.get(
-            request_url, headers=request_header, cookies=self.cookie()
+            url=request_url,
+            headers=request_header,
+            cookies=self.cookie(),
+            timeout=None,
         )
         if not response.ok:
             logger.error(
@@ -4180,10 +4826,11 @@ class OTCS:
         )
 
         response = requests.post(
-            request_url,
+            url=request_url,
             headers=request_header,
             data=addMemberToWorkspacePostData,
             cookies=self.cookie(),
+            timeout=None,
         )
 
         if response.ok:
@@ -4229,7 +4876,10 @@ class OTCS:
         )
 
         workspaceMembershipResponse = requests.get(
-            request_url, headers=request_header, cookies=self.cookie()
+            url=request_url,
+            headers=request_header,
+            cookies=self.cookie(),
+            timeout=None,
         )
         if not workspaceMembershipResponse.ok:
             logger.error(
@@ -4264,9 +4914,10 @@ class OTCS:
         )
 
         workspaceMembershipResponse = requests.delete(
-            request_url,
+            url=request_url,
             headers=request_header,
             cookies=self.cookie(),
+            timeout=None,
         )
 
         if workspaceMembershipResponse.ok:
@@ -4332,10 +4983,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data={"body": json.dumps(permissionPostData)},
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4372,8 +5024,6 @@ class OTCS:
             logger.error("Workspace icon file does not exist -> %s", file_path)
             return None
 
-        #        icon_file = open(file_path, "rb")
-
         updateWorkspaceIconPutBody = {
             "file_content_type": file_mimetype,
             "file_filename": os.path.basename(file_path),
@@ -4395,10 +5045,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=updateWorkspaceIconPutBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4469,10 +5120,11 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.post(
-                request_url,
+                url=request_url,
                 data={"body": json.dumps(createItemPostData)},
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4534,10 +5186,11 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.put(
-                request_url,
+                url=request_url,
                 data={"body": json.dumps(updateItemPutData)},
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4610,9 +5263,10 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4681,10 +5335,11 @@ class OTCS:
         request_header = self.request_form_header()
 
         logger.info(
-            "Create document -> %s from template with ID -> %s in target location -> %s (parent ID); calling -> %s",
+            "Create document -> %s from template with ID -> %s in target location -> %s (parent ID) with classification ID -> %s; calling -> %s",
             doc_name,
             str(template_id),
             str(parent_id),
+            str(classification_id),
             request_url,
         )
 
@@ -4692,12 +5347,13 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.post(
-                request_url,
+                url=request_url,
                 # this seems to only work with a "body" tag and is different form the documentation
                 # on developer.opentext.com
                 data={"body": json.dumps(createDocumentPostData)},
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4750,7 +5406,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 # Return the "data" element which is a list of dict items:
@@ -4776,7 +5435,7 @@ class OTCS:
     # end method definition
 
     def run_web_report(
-        self, nickname: str, web_report_parameters: dict = {}
+        self, nickname: str, web_report_parameters: dict | None = None
     ) -> dict | None:
         """Run a Web Report that is identified by its nick name.
 
@@ -4786,6 +5445,10 @@ class OTCS:
         Returns:
             dict: Response of the run Web Report request or None if the Web Report execution has failed.
         """
+
+        # Avoid linter warning W0102:
+        if web_report_parameters is None:
+            web_report_parameters = {}
 
         request_url = self.config()["webReportsUrl"] + "/" + nickname
         request_header = self.request_form_header()
@@ -4799,10 +5462,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=web_report_parameters,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4843,10 +5507,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=installCSApplicationPostData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -4905,10 +5570,11 @@ class OTCS:
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "add_assignment" tag.
             response = requests.post(
-                request_url,
+                url=request_url,
                 data={"add_assignment": json.dumps(assignmentPostData)},
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5084,18 +5750,20 @@ class OTCS:
                 # Custom also has a REST POST - we prefer this one as to
                 # also allows to add a new assigned permission (user or group):
                 response = requests.post(
-                    request_url,
+                    url=request_url,
                     data={"body": json.dumps(permissionPostData)},
                     headers=request_header,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
             else:
                 # Owner, Owner Group and Public require REST PUT:
                 response = requests.put(
-                    request_url,
+                    url=request_url,
                     data={"body": json.dumps(permissionPostData)},
                     headers=request_header,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5140,7 +5808,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5192,7 +5863,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5347,10 +6021,11 @@ class OTCS:
             retries = 0
             while True:
                 response = requests.post(
-                    request_url,
+                    url=request_url,
                     data=categoryPostData,
                     headers=request_header,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
                 if response.ok:
                     break
@@ -5380,16 +6055,18 @@ class OTCS:
             if inheritance:
                 # Enable inheritance
                 response = requests.post(
-                    request_url_inheritance,
+                    url=request_url_inheritance,
                     headers=request_header,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
             else:
                 # Disable inheritance
                 response = requests.delete(
-                    request_url_inheritance,
+                    url=request_url_inheritance,
                     headers=request_header,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
             if response.ok:
                 break
@@ -5426,10 +6103,11 @@ class OTCS:
                 # we need to wrap the body of this POST call into a "body"
                 # tag. This is documented worngly on developer.opentext.com
                 response = requests.post(
-                    request_url_apply_sub_items,
+                    url=request_url_apply_sub_items,
                     data={"body": json.dumps(categoryPostData)},
                     headers=request_header,
                     cookies=self.cookie(),
+                    timeout=None,
                 )
                 if response.ok:
                     break
@@ -5516,10 +6194,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.put(
-                request_url,
+                url=request_url,
                 data=categoryPutData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5583,10 +6262,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=classificationPostData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5643,10 +6323,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=rmClassificationPostData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5690,10 +6371,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=registrationPostData,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -5769,7 +6451,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 rsi_dict = self.parse_request_response(response)
@@ -5808,7 +6493,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url, headers=request_header, cookies=self.cookie()
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 rm_codes_dict = self.parse_request_response(response)
@@ -5846,15 +6534,20 @@ class OTCS:
         request_url = self.config()["recordsManagementUrl"] + "/rmcodes"
         request_header = self.request_form_header()
 
-        logger.info("Update Records Management codes; calling -> %s", request_url)
+        logger.info(
+            "Update Records Management codes -> %s; calling -> %s",
+            str(rm_codes),
+            request_url,
+        )
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=updateRMCodesPostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 rm_codes_dict = self.parse_request_response(response)
@@ -5923,10 +6616,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=createRSIPostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -6057,10 +6751,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=createRSISchedulePostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -6131,10 +6826,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=createHoldPostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -6198,9 +6894,10 @@ class OTCS:
         retries = 0
         while True:
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -6248,15 +6945,18 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6310,16 +7010,19 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=settingsPostData,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6379,16 +7082,19 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=settingsPostData,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6436,15 +7142,18 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6497,16 +7206,19 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=settingsPostData,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6554,15 +7266,18 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6615,16 +7330,19 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {"file": (filename, open(file_path), "text/xml")}
+        settingsPostFile = {
+            "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
+        }
 
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 data=settingsPostData,
                 files=settingsPostFile,
                 headers=request_header,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return True
@@ -6675,10 +7393,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=assignUserSecurityClearancePostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -6730,10 +7449,11 @@ class OTCS:
         retries = 0
         while True:
             response = requests.post(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 data=assignUserSupplementalMarkingsPostData,
                 cookies=self.cookie(),
+                timeout=None,
             )
             if response.ok:
                 return self.parse_request_response(response)
@@ -6747,6 +7467,67 @@ class OTCS:
                     "Failed to assign supplemental markings -> %s to user with ID -> %s; status -> %s; error -> %s",
                     str(supplemental_markings),
                     str(user_id),
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_workspace_aviator(
+        self,
+        workspace_id: int,
+        status: bool,
+    ) -> dict | None:
+        """Enable or disable the Content Aviator for a workspace
+
+        Args:
+            workspace_id (int): node ID of the workspace
+            status (bool): True = enable, False = disable Content Aviator for this workspace
+        Returns:
+            dict: REST response or None if the REST call fails.
+        """
+
+        aviatorStatusPutData = {
+            "enabled": status,
+        }
+
+        request_url = self.config()["aiUrl"] + "/{}".format(workspace_id)
+        request_header = self.request_form_header()
+
+        if status is True:
+            logger.info(
+                "Enable Content Aviator for workspace with ID -> %s; calling -> %s",
+                str(workspace_id),
+                request_url,
+            )
+        else:
+            logger.info(
+                "Disable Content Aviator for workspace with ID -> %s; calling -> %s",
+                str(workspace_id),
+                request_url,
+            )
+
+        retries = 0
+        while True:
+            response = requests.put(
+                url=request_url,
+                headers=request_header,
+                data=aviatorStatusPutData,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to change status for Content Aviator on workspace with ID -> %s; status -> %s; error -> %s",
+                    str(workspace_id),
                     response.status_code,
                     response.text,
                 )

@@ -37,6 +37,7 @@ get_all_group_names: construct a list of all group name
 check_status_file: check if the payload section has been processed before
 write_status_file: Write a status file into the Admin Personal Workspace in Extended ECM
                    to indicate that the payload section has been deployed successfully
+get_status_file: Retrieve the content of the status file
 
 determine_group_id: determine the id of a group - either from payload or from OTCS
 determine_user_id: determine the id of a user - either from payload or from OTCS
@@ -58,6 +59,7 @@ process_groups: process Extended ECM user groups
 process_groups_m365: process M365 user groups
 process_users: process Extended ECM users
 process_users_m365: process M365 users
+process_users_sap: process users that are SAP enabled (if SAP is enabled)
 process_teams_m365: process groups in payload and create matching M365 Teams
 cleanup_stale_teams_m365: Delete Microsoft Teams that are left-overs from former deployments.
                           This method is currently not used.
@@ -72,6 +74,9 @@ process_workspace_types: process Extended ECM workspace types
 process_workspaces: process Extended ECM workspace instances
 process_workspace_relationships: process Extended ECM workspace relationships
 process_workspace_members: process Extended ECM workspace members (users and groups)
+configure_vector_data_source: Configuration of the Aviator Vector Data Source
+process_workspace_aviators: Process workspaces Content Aviator settings in payload and
+                            enable Aviator for selected workspaces
 process_web_reports: process Extended ECM Web Reports (starts them with parameters)
 process_cs_applications: process Extended ECM CS Applications
 process_user_settings: Process user settings in payload and apply themin OTDS.
@@ -90,6 +95,7 @@ process_assignments: process assignments of workspaces / documents to users / gr
 process_user_licenses: process and apply licenses to all Extended ECM users (used for OTIV)
 process_exec_pod_commands: process Kubernetes pod commands
 process_document_generators: Generate documents for a defined workspace type based on template
+process_browser_automations: process Selenium-based browser automation payload
 init_sap: initalize SAP object for RFC communication
 process_sap_rfcs: process SAP Remote Function Calls (RFC) to trigger automation in SAP S/4HANA
 
@@ -114,10 +120,11 @@ import json
 import logging
 import os
 import re
-import time
 from typing import Callable
 from urllib.parse import urlparse
 
+import base64
+import gzip
 import yaml
 import hcl2.api
 
@@ -126,6 +133,7 @@ from pyxecm import OTAC, OTCS, OTDS, OTIV
 from pyxecm.customizer.k8s import K8s
 from pyxecm.customizer.m365 import M365
 from pyxecm.customizer.sap import SAP
+from pyxecm.customizer.browser_automation import BrowserAutomation
 from pyxecm.helper.web import HTTP
 
 logger = logging.getLogger("pyxecm.customizer.payload")
@@ -142,60 +150,158 @@ class Payload:
     _otcs_frontend: OTCS
     _otac: OTAC | None
     _otds: OTDS
-    _otiv = OTIV | None
-    _k8s = K8s | None
-    _web = HTTP
-    _m365 = M365 | None
+    _otiv: OTIV | None
+    _k8s: K8s | None
+    _web: HTTP | None
+    _m365: M365 | None
+    _browser_automation: BrowserAutomation | None
     _custom_settings_dir = ""
 
     # _payload_source (string): This is either path + filename of the yaml payload
     # or an path + filename of the Terraform HCL payload
     _payload_source = ""
+
     # _payload is a dict of the complete payload file.
     # It is initialized by the init_payload() method:
     _payload = {}
-    # _payload_sections is a list of dicts:
+
+    # _payload_sections is a list of dicts with these keys:
+    # - name (string)
+    # - enabled (bool)
+    # - restart (bool)
     _payload_sections = []
 
-    # Initialize payload section variables. They are all liust of dicts:
+    #
+    # Initialize payload section variables. They are all list of dicts:
+    #
+
+    # webhooks and webhooks_post: List of webHooks. List items are dicts with these key:
+    # - enabled (bool)
+    # - description (str)
+    # - url (str)
+    # - method (str) - either POST, PUT, GET
+    # - payload (dict)
+    # - headers (dict)
     _webhooks = []
     _webhooks_post = []
+
+    # partitions: list of dicts with these key / value pairs:
+    # - enabled (bool)
+    # - name (str)
+    # - description (str)
+    # - synced (bool)
+    # - access_role (str)
+    # - licenses (list)
     _partitions = []
+
+    # oauth_clients: list of dicts with these key / value pairs:
+    # - enabled (bool)
+    # - name (str)
+    # - description (str)
+    # - confidential (bool)
+    # - partition (str)
+    # - redirect_urls (list)
+    # - permission_scopes (list)
+    # - default_scopes (list)
+    # - allow_impersonation (bool)
     _oauth_clients = []
+
+    # oauth_handlers: list of dicts with these key / value pairs:
+    # - enabled (bool)
+    # - name (str)
+    # - description (str)
+    # - scope (str)
+    # - type (str) - like SAML, SAP, OAUTH
+    # - priority (int)
+    # - active_by_default (bool)
+    # - auth_principal_attributes (list)
+    # - saml_url (str)
+    # - otds_sp_endpoint (str)
+    # - nameid_format (str)
     _auth_handlers = []
+
+    # trusted_sites: list of dicts with these key / value pairs:
+    # - enabled (bool)
+    # - url (str)
     _trusted_sites = []
+
+    # system_attributes: list of dicts with these key / value pairs:
+    # - enabled (bool)
+    # - name (str)
+    # - value (str)
+    # - description (str)
     _system_attributes = []
+
+    # groups: List of groups. List items are dicts with these key / value pairs:
+    # - name (str),
+    # - parent_groups (list),
+    # - enable_o365 (bool)
     _groups = []
-    # users: List of users. List items are dicts with "id", "name" (= login),
-    # "password", "firstname", "lastname", and "email"
+
+    # users: List of users. List items are dicts with these key / value pairs:
+    # - enabled (bool)
+    # - name (str) (= login)
+    # - password (str)
+    # - firstname (str)
+    # - lastname (str)
+    # - email (str)
+    # - base_group (str)
+    # - groups (list)
+    # - favorites (list of str)
+    # - security_clearance (int)
+    # - supplemental_markings (list of str)
+    # - enable_sap (bool)
+    # - enable_o365 (bool)
+    # - m365_skus (list of str)
+    # - extra_attributes (list of dict)
     _users = []
+
     _admin_settings = []
+
     # exec_pod_commands: list of commands to be executed in the pods
     # list elements need to be dicts with pod name, command, etc.
     _exec_pod_commands = []
+
     # external_systems (list): List of external systems. Each list element is a dict with
-    # "description", "external_system_name", "connection_type",
-    # "as_url", "base_url", "username", and "password". Depending
-    # on the connection type there may be additional dict values.
+    # - enabled (bool)
+    # - external_system_type (str)
+    # - external_system_name (str)
+    # - external_system_number (str)
+    # - description (str)
+    # - as_url (str)
+    # - base_url (str)
+    # - client (str)
+    # - username (str)
+    # - password (str)
+    # - certificate_file (str)
+    # - certificate_password (str)
+    # - destination (str)
+    # - archive_logical_name (str)
+    # - archive_certificate_file (str)
     _external_systems = []
+
     # transport_packages (list): List of transport packages systems. Each list element is a
     # dict with "url", "name", and "description" keys.
     _transport_packages = []
     _content_transport_packages = []
     _transport_packages_post = []
+
     _workspace_types = []
+    _workspace_templates = []
     _workspaces = []
     _sap_rfcs = []
     _web_reports = []
     _web_reports_post = []
     _cs_applications = []
     _admin_settings_post = []
+
     # additional_group_members: List of memberships to establish. Each element
     # is a dict with these keys:
     # - parent_group (string)
     # - user_name (string)
     # - group_name (string)
     _additional_group_members = []
+
     # additional_access_role_members: List of memberships to establish. Each element
     # is a dict with these keys:
     # - access_role (string)
@@ -208,6 +314,7 @@ class Payload:
     _items_post = []
     _permissions = []
     _permissions_post = []
+
     # assignments: List of assignments. Each element is a dict with these keys:
     # - subject (string)
     # - instruction (string)
@@ -222,10 +329,12 @@ class Payload:
     _records_management_settings = []
     _holds = []
     _doc_generators = []
+    _browser_automations = []
 
     _placeholder_values = {}
 
     _otcs_restart_callback: Callable
+    _log_header_callback: Callable
 
     def __init__(
         self,
@@ -236,10 +345,12 @@ class Payload:
         otac_object: OTAC | None,
         otcs_backend_object: OTCS,
         otcs_frontend_object: OTCS,
-        otcs_restart_callback,
+        otcs_restart_callback: Callable,
         otiv_object: OTIV | None,
         m365_object: M365 | None,
+        browser_automation_object: BrowserAutomation | None,
         placeholder_values: dict,
+        log_header_callback: Callable,
         stop_on_error: bool = False,
     ):
         """Initialize the Payload object
@@ -251,11 +362,13 @@ class Payload:
             otac_object (OTAC): OTAC object
             otcs_backend_object (OTCS): OTCS backend object
             otcs_frontend_object (OTCS): OTCS frontend object
-            otcs_restart_callback (callable): function to call if OTCS service needs a restart
+            otcs_restart_callback (Callable): function to call if OTCS service needs a restart
             otiv_object (object): OTIV object
             m365_object (object): M365 object to talk to Microsoft Graph API
+            browser_automation_object (object): BrowserAutomation object to automate things which don't have a REST API
             placeholder_values (dict): dictionary of placeholder values
                                        to be replaced in admin settings
+            log_header_callback: prints a section break / header line into the log
             stop_on_error (bool): controls if transport deployment should stop
                                   if one transport fails
         """
@@ -270,10 +383,11 @@ class Payload:
         self._otcs_frontend = otcs_frontend_object
         self._otiv = otiv_object
         self._m365 = m365_object
+        self._browser_automation = browser_automation_object
         self._custom_settings_dir = custom_settings_dir
         self._placeholder_values = placeholder_values
         self._otcs_restart_callback = otcs_restart_callback
-
+        self._log_header_callback = log_header_callback
         self._http_object = HTTP()
 
     # end method definition
@@ -283,6 +397,8 @@ class Payload:
            The content of the file is provided via a parameter.
            The replacements are defined in a object variable
            _placeholder_values (type = dictionary)
+           The placeholder values are supposed to be surrounded by
+           double % signs like %%OTAWP_RESOURCE_ID%%
 
         Args:
             content (str): file content to replace placeholders in
@@ -290,11 +406,31 @@ class Payload:
             str: updated content with all defined replacements
         """
         # https://stackoverflow.com/questions/63502218/replacing-placeholders-in-a-text-file-with-python
-        return re.sub(
-            r"%%(\w+?)%%",
-            lambda match: self._placeholder_values[match.group(1)],
-            content,
-        )
+
+        # if no placeholders are defined we can return the
+        # initial value:
+        if not self._placeholder_values:
+            return content
+
+        try:
+            # We do a dynamic replacement here. The replacement is calculated
+            # by the lambda function that is basically a lookup of the replacement
+            # key found in the settings file with the value defined in the list
+            # of replacement values in self._placeholder_values
+            return re.sub(
+                r"%%(\w+?)%%",
+                lambda match: self._placeholder_values[match.group(1)],
+                content,
+            )
+        except KeyError as key_error:
+            logger.error(
+                "Found placeholder in settings file without a defined value; error -> %s",
+                str(key_error),
+            )
+            return content
+        except re.error as re_error:
+            logger.error("Regex substitution error -> %s", str(re_error))
+            return content
 
         # end method definition
 
@@ -345,6 +481,25 @@ class Payload:
                 )
                 self._payload = {}
 
+        elif self._payload_source.endswith(".yml.gz.b64"):
+            logger.info(
+                "Open payload from base64-gz-YAML file -> %s", self._payload_source
+            )
+            try:
+                with open(self._payload_source, "r", encoding="utf-8") as stream:
+                    content = base64.b64decode(stream.read())
+                    decoded_data = gzip.decompress(content)
+
+                    self._payload = yaml.safe_load(decoded_data)
+
+            except yaml.YAMLError as exception:
+                logger.error(
+                    "Error while reading YAML payload file -> %s; error -> %s",
+                    self._payload_source,
+                    exception,
+                )
+                self._payload = {}
+
         # If not, it is an unsupported type:
         else:
             logger.error(
@@ -383,6 +538,7 @@ class Payload:
         self._transport_packages_post = self.get_payload_section(
             "transportPackagesPost"
         )
+        self._workspace_templates = self.get_payload_section("workspaceTemplates")
         self._workspaces = self.get_payload_section("workspaces")
         self._sap_rfcs = self.get_payload_section("sapRFCs")
         self._web_reports = self.get_payload_section("webReports")
@@ -408,6 +564,7 @@ class Payload:
         )
         self._holds = self.get_payload_section("holds")
         self._doc_generators = self.get_payload_section("documentGenerators")
+        self._browser_automations = self.get_payload_section("browserAutomations")
 
         return self._payload
         # end method definition
@@ -516,6 +673,7 @@ class Payload:
 
     def write_status_file(
         self,
+        success: bool,
         payload_section_name: str,
         payload_section: list,
         payload_specific: bool = True,
@@ -526,6 +684,7 @@ class Payload:
            is restarted.
 
         Args:
+            success (bool): True if the section was processed successful, False otherwise.
             payload_section_name (str): name of the payload section
             payload_section (list): payload section content - this is written as JSon into the file
             payload_specific (bool): whether or not the success should be specific for
@@ -535,6 +694,19 @@ class Payload:
         Returns:
             bool: True if the status file as been upladed to Extended ECM successfully, False otherwise
         """
+
+        if success:
+            logger.info(
+                "Payload section -> %s has been completed successfully!",
+                payload_section_name,
+            )
+            prefix = "success_"
+        else:
+            logger.error(
+                "Payload section -> %s had failures!",
+                payload_section_name,
+            )
+            prefix = "failure_"
 
         response = self._otcs.get_node_by_volume_and_path(
             142
@@ -547,30 +719,113 @@ class Payload:
         # and we don't want external payload runs to re-process these:
         if payload_specific:
             file_name = os.path.basename(self._payload_source)  # remove directories
-            file_name = os.path.splitext(file_name)[0]  # remove file suffix
-            file_name = "success_" + file_name + "_" + payload_section_name + ".json"
+            # Split once at the first occurance of a dot
+            # as the _payload_source may have multiple suffixes
+            # such as .yml.gz.b64:
+            file_name = file_name.split(".", 1)[0]
+            file_name = prefix + file_name + "_" + payload_section_name + ".json"
         else:
-            file_name = "success_" + payload_section_name + ".json"
+            file_name = prefix + payload_section_name + ".json"
         full_path = "/tmp/" + file_name
 
         with open(full_path, mode="w", encoding="utf-8") as localfile:
             localfile.write(json.dumps(payload_section, indent=2))
 
-        response = self._otcs.upload_file_to_parent(
-            file_url=full_path,
-            file_name=file_name,
-            mime_type="text/plain",
-            parent_id=int(target_folder_id),
+        # Check if the status file has been uploaded before.
+        # This can happen if we re-run the python container.
+        # In this case we add a version to the existing document:
+        response = self._otcs.get_node_by_parent_and_name(
+            parent_id=int(target_folder_id), name=file_name, show_error=False
         )
+        target_document_id = self._otcs.get_result_value(response, "id")
+        if target_document_id:
+            response = self._otcs.add_document_version(
+                node_id=int(target_document_id),
+                file_url=full_path,
+                file_name=file_name,
+                mime_type="text/plain",
+                description="Updated status file after re-run of customization",
+            )
+        else:
+            response = self._otcs.upload_file_to_parent(
+                file_url=full_path,
+                file_name=file_name,
+                mime_type="text/plain",
+                parent_id=int(target_folder_id),
+            )
 
         if response:
             logger.info(
-                "Payload section -> %s has been completed successfully!",
-                payload_section_name,
+                "Status file -> %s has been written to Personal Workspace of admin user",
+                file_name,
             )
             return True
 
+        logger.error(
+            "Failed to write status file -> %s to Personal Workspace of admin user",
+            file_name,
+        )
+
         return False
+
+        # end method definition
+
+    def get_status_file(
+        self, payload_section_name: str, payload_specific: bool = True
+    ) -> list | None:
+        """Get the status file and read it into a dictionary.
+
+        Args:
+            payload_section_name (str): name of the payload section. This
+                                        is used to construct the file name
+            payload_specific (bool): whether or not the success should be specific for
+                                     each payload file or if success is "global" - like for the deletion
+                                     of the existing M365 teams (which we don't want to execute per
+                                     payload file)
+        Returns:
+            dict: content of the status file as a dictionary or None in case of an error
+        """
+
+        logger.info(
+            "Get the status file of the payload section -> %s...",
+            payload_section_name,
+        )
+
+        response = self._otcs.get_node_by_volume_and_path(
+            142
+        )  # read from Personal Workspace of Admin
+        source_folder_id = self._otcs.get_result_value(response, "id")
+        if not source_folder_id:
+            source_folder_id = 2004  # use Personal Workspace of Admin as fallback
+
+        # Some sections are actually not payload specific like teamsM365Cleanup
+        # we don't want external payload runs to re-apply this processing:
+        if payload_specific:
+            file_name = os.path.basename(self._payload_source)  # remove directories
+            file_name = os.path.splitext(file_name)[0]  # remove file suffix
+            file_name = "success_" + file_name + "_" + payload_section_name + ".json"
+        else:
+            file_name = "success_" + payload_section_name + ".json"
+
+        status_document = self._otcs.get_node_by_parent_and_name(
+            parent_id=int(source_folder_id), name=file_name, show_error=True
+        )
+        if not status_document:
+            logger.error("Cannot find status file -> %s", file_name)
+            return None
+        status_file_id = self._otcs.get_result_value(status_document, "id")
+        content = self._otcs.get_document_content(status_file_id)
+
+        try:
+            json_data = json.loads(content.decode("utf-8"))
+            if isinstance(json_data, list):
+                return json_data
+            else:
+                logger.error("File content is in JSON format but not a list.")
+                return None
+        except json.JSONDecodeError as e:
+            logger.error("File content is not in valid JSON format; error -> %s", e)
+            return None
 
         # end method definition
 
@@ -637,11 +892,11 @@ class Payload:
             return 0
         user_name = user["name"]
 
-        result = self._otcs.get_user(name=user_name)
+        response = self._otcs.get_user(name=user_name)
         # We use the lookup method here as get_user() could deliver more
         # then 1 result element (in edge cases):
         user_id = self._otcs.lookup_result_value(
-            response=result, key="name", value=user_name, return_key="id"
+            response=response, key="name", value=user_name, return_key="id"
         )
 
         # Have we found an exact match?
@@ -686,9 +941,8 @@ class Payload:
                 existing_user["userPrincipalName"],
                 existing_user["id"],
             )
-            user_m365_id = existing_user["id"]
             # write back the M365 user ID into the payload
-            user["m365_id"] = user_m365_id
+            user["m365_id"] = existing_user["id"]
             return user["m365_id"]
         else:
             logger.info("Did not find an existing M365 user with name -> %s", user_name)
@@ -745,48 +999,30 @@ class Payload:
         for payload_section in self._payload_sections:
             match payload_section["name"]:
                 case "webHooks":
-                    logger.info(
-                        "========== Process Web Hooks ==========================="
-                    )
+                    self._log_header_callback("Process Web Hooks")
                     self.process_web_hooks(self._webhooks)
                 case "webHooksPost":
-                    logger.info(
-                        "========== Process Web Hooks (post) ===================="
-                    )
+                    self._log_header_callback("Process Web Hooks (post)")
                     self.process_web_hooks(self._webhooks_post, "webHooksPost")
                 case "partitions":
-                    logger.info(
-                        "========== Process OTDS Partitions ====================="
-                    )
+                    self._log_header_callback("Process OTDS Partitions")
                     self.process_partitions()
-                    logger.info(
-                        "========== Assign OTCS Licenses to Partitions =========="
-                    )
+                    self._log_header_callback("Assign OTCS Licenses to Partitions")
                     self.process_partition_licenses()
                 case "oauthClients":
-                    logger.info(
-                        "========== Process OTDS OAuth Clients =================="
-                    )
+                    self._log_header_callback("Process OTDS OAuth Clients")
                     self.process_oauth_clients()
                 case "authHandlers":
-                    logger.info(
-                        "========== Process OTDS Auth Handlers =================="
-                    )
+                    self._log_header_callback("Process OTDS Auth Handlers")
                     self.process_auth_handlers()
                 case "trustedSites":
-                    logger.info(
-                        "========== Process OTDS Trusted Sites =================="
-                    )
+                    self._log_header_callback("Process OTDS Trusted Sites")
                     self.process_trusted_sites()
                 case "systemAttributes":
-                    logger.info(
-                        "========== Process OTDS System Attributes =============="
-                    )
+                    self._log_header_callback("Process OTDS System Attributes")
                     self.process_system_attributes()
                 case "groups":
-                    logger.info(
-                        "========== Process OTCS Groups ========================="
-                    )
+                    self._log_header_callback("Process OTCS Groups")
                     self.process_groups()
                     # Add all groups with ID the a lookup dict for placeholder replacements
                     # in adminSetting. This also updates the payload with group IDs from OTCS
@@ -794,152 +1030,126 @@ class Payload:
                     # if the customizer pod is restarted / run multiple times:
                     self.process_group_placeholders()
                     if self._m365 and isinstance(self._m365, M365):
-                        logger.info(
-                            "========== Cleanup existing MS Teams ==================="
-                        )
+                        self._log_header_callback("Cleanup existing MS Teams")
                         self.cleanup_all_teams_m365()
-                        logger.info(
-                            "========== Process M365 Groups ========================="
-                        )
+                        self._log_header_callback("Process M365 Groups")
                         self.process_groups_m365()
                 case "users":
-                    logger.info(
-                        "========== Process OTCS Users =========================="
-                    )
+                    self._log_header_callback("Process OTCS Users")
                     self.process_users()
                     # Add all users with ID the a lookup dict for placeholder replacements
                     # in adminSetting. This also updates the payload with user IDs from OTCS
                     # if the user already exists in Extended ECM. This is important especially
                     # if the cutomizer pod is restarted / run multiple times:
                     self.process_user_placeholders()
-                    logger.info(
-                        "========== Assign OTCS Licenses to Users ==============="
-                    )
+                    self._log_header_callback("Assign OTCS Licenses to Users")
                     self.process_user_licenses(
-                        self._otcs.config()["resource"],
-                        self._otcs.config()["license"],
-                        "EXTENDED_ECM",
+                        resource_name=self._otcs.config()["resource"],
+                        license_feature=self._otcs.config()["license"],
+                        license_name="EXTENDED_ECM",
                         user_specific_payload_field="licenses",
                     )
-                    logger.info(
-                        "========== Assign OTIV Licenses to Users ==============="
-                    )
+                    self._log_header_callback("Assign OTIV Licenses to Users")
 
                     if (
-                        isinstance(self._otiv, OTIV)
+                        isinstance(self._otiv, OTIV)  # can be None in 24.1 or newer
                         and self._otiv.config()
                         and self._otiv.config()["resource"]
                         and self._otiv.config()["license"]
                     ):
                         self.process_user_licenses(
-                            self._otiv.config()["resource"],
-                            self._otiv.config()["license"],
-                            "INTELLIGENT_VIEWING",
+                            resource_name=self._otiv.config()["resource"],
+                            license_feature=self._otiv.config()["license"],
+                            license_name="INTELLIGENT_VIEWING",
                             user_specific_payload_field="",
+                            section_name="userLicensesViewing",  # we need a specific name here for OTIV
                         )
                     else:
-                        logger.error(
-                            "Cannot assign OTIV licenses as OTIV seems to not be ready yet."
-                        )
-                    logger.info(
-                        "========== Process User Settings ======================="
-                    )
+                        logger.info("Processing of OTIV licenses is disabled.")
+                    self._log_header_callback("Process User Settings")
                     self.process_user_settings()
                     if self._m365 and isinstance(self._m365, M365):
-                        logger.info(
-                            "========== Process M365 Users =========================="
-                        )
+                        self._log_header_callback("Process M365 Users")
                         self.process_users_m365()
                         # We need to do the MS Teams creation after the creation of
                         # the M365 users as we require Group Owners to create teams
-                        logger.info(
-                            "========== Process M365 Teams =========================="
-                        )
+                        self._log_header_callback("Process M365 Teams")
                         self.process_teams_m365()
                 case "adminSettings":
-                    logger.info(
-                        "========== Process Administration Settings (1) ========="
-                    )
-                    self.process_admin_settings(self._admin_settings)
+                    self._log_header_callback("Process Administration Settings")
+                    restart_required = self.process_admin_settings(self._admin_settings)
+                    if restart_required:
+                        logger.info(
+                            "Admin Settings require a restart of OTCS services...",
+                        )
+                        # Restart OTCS frontend and backend pods:
+                        self._otcs_restart_callback(self._otcs_backend)
                 case "adminSettingsPost":
-                    logger.info(
-                        "========== Process Administration Settings (2) ========="
-                    )
-                    self.process_admin_settings(
+                    self._log_header_callback("Process Administration Settings (post)")
+                    restart_required = self.process_admin_settings(
                         self._admin_settings_post, "adminSettingsPost"
                     )
+                    if restart_required:
+                        logger.info(
+                            "Admin Settings (Post) require a restart of OTCS services...",
+                        )
+                        # Restart OTCS frontend and backend pods:
+                        self._otcs_restart_callback(self._otcs_backend)
                 case "execPodCommands":
-                    logger.info(
-                        "========== Process Pod Commands ========================"
-                    )
+                    self._log_header_callback("Process Pod Commands")
                     self.process_exec_pod_commands()
                 case "csApplications":
-                    logger.info(
-                        "========== Process CS Apps (backend) ==================="
-                    )
+                    self._log_header_callback("Process CS Apps (backend)")
                     self.process_cs_applications(
                         self._otcs_backend, section_name="csApplicationsBackend"
                     )
-                    logger.info(
-                        "========== Process CS Apps (frontend) =================="
-                    )
+                    self._log_header_callback("Process CS Apps (frontend)")
                     self.process_cs_applications(
                         self._otcs_frontend, section_name="csApplicationsFrontend"
                     )
                 case "externalSystems":
-                    logger.info(
-                        "========== Process External System Connections ========="
-                    )
+                    self._log_header_callback("Process External System Connections")
                     self.process_external_systems()
                 case "transportPackages":
-                    logger.info(
-                        "========== Process Transport Packages =================="
-                    )
+                    self._log_header_callback("Process Transport Packages")
                     self.process_transport_packages(self._transport_packages)
                     # Right after the transport that create the workspace types
                     # we extract them and put them in a generated payload list:
-                    logger.info(
-                        "========== Process Workspace Types ====================="
-                    )
+                    self._log_header_callback("Process Workspace Types")
                     self.process_workspace_types()
                     if self._m365 and isinstance(self._m365, M365):
                         # Right after the transport that creates the top level folders
                         # we can add the M365 Teams apps for Extended ECM as its own tab:
-                        logger.info(
-                            "========== Process M365 Teams apps ====================="
-                        )
+                        self._log_header_callback("Process M365 Teams apps")
                         self.process_teams_m365_apps()
                 case "contentTransportPackages":
-                    logger.info(
-                        "========== Process Content Transport Packages =========="
-                    )
+                    self._log_header_callback("Process Content Transport Packages")
                     self.process_transport_packages(
                         self._content_transport_packages, "contentTransportPackages"
                     )
                 case "transportPackagesPost":
-                    logger.info(
-                        "========== Process Transport Packages (post) ==========="
-                    )
+                    self._log_header_callback("Process Transport Packages (post)")
                     self.process_transport_packages(
                         self._transport_packages_post, "transportPackagesPost"
                     )
+                case "workspaceTemplates":
+                    self._log_header_callback(
+                        "Process Workspace Templates (Template Role Assignments)"
+                    )
+                    self.process_workspace_templates()
                 case "workspaces":
-                    logger.info(
-                        "========== Process Workspaces =========================="
-                    )
+                    self._log_header_callback("Process Workspaces")
                     self.process_workspaces()
-                    logger.info(
-                        "========== Process Workspace Relationships ============="
-                    )
+                    self._log_header_callback("Process Workspace Relationships")
                     self.process_workspace_relationships()
-                    logger.info(
-                        "========== Process Workspace Memberships ==============="
-                    )
+                    self._log_header_callback("Process Workspace Memberships")
                     self.process_workspace_members()
+                    
+                    # This can only run at the very as Web Reports are used to enable Aviator in KINI database table:
+                    self._log_header_callback("Process Workspace Aviators")
+                    self.process_workspace_aviators()
                 case "sapRFCs":
-                    logger.info(
-                        "========== Process SAP RFCs ============================"
-                    )
+                    self._log_header_callback("Process SAP RFCs")
 
                     sap_external_system = {}
                     if self._external_systems:
@@ -972,81 +1182,60 @@ class Payload:
                         sap = self.init_sap(sap_external_system)
                         if sap:
                             self.process_sap_rfcs(sap)
+                            self._log_header_callback("Process SAP Users")
+                            self.process_users_sap(sap)
                 case "webReports":
-                    logger.info(
-                        "========== Process Web Reports ========================="
-                    )
+                    self._log_header_callback("Process Web Reports")
                     self.process_web_reports(self._web_reports)
                 case "webReportsPost":
-                    logger.info(
-                        "========== Process Web Reports (post) =================="
-                    )
+                    self._log_header_callback("Process Web Reports (post)")
                     self.process_web_reports(self._web_reports_post, "webReportsPost")
                 case "additionalGroupMemberships":
-                    logger.info(
-                        "========== Process additional group members for OTDS ==="
+                    self._log_header_callback(
+                        "Process additional group members for OTDS"
                     )
                     self.process_additional_group_members()
                 case "additionalAccessRoleMemberships":
-                    logger.info(
-                        "==== Process additional access role members for OTDS ==="
+                    self._log_header_callback(
+                        "Process additional access role members for OTDS"
                     )
                     self.process_additional_access_role_members()
                 case "renamings":
-                    logger.info(
-                        "========== Process Custom Node Renamings ==============="
-                    )
+                    self._log_header_callback("Process Node Renamings")
                     self.process_renamings()
                 case "items":
-                    logger.info(
-                        "========== Process Items ==============================="
-                    )
+                    self._log_header_callback("Process Items")
                     self.process_items(self._items)
                 case "itemsPost":
-                    logger.info(
-                        "========== Process Items (post) ========================"
-                    )
+                    self._log_header_callback("Process Items (post)")
                     self.process_items(self._items_post, "itemsPost")
                 case "permissions":
-                    logger.info(
-                        "========== Process Permissions ========================="
-                    )
+                    self._log_header_callback("Process Permissions")
                     self.process_permissions(self._permissions)
                 case "permissionsPost":
-                    logger.info(
-                        "========== Process Permissions (post) =================="
-                    )
+                    self._log_header_callback("Process Permissions (post)")
                     self.process_permissions(self._permissions_post, "permissionsPost")
                 case "assignments":
-                    logger.info(
-                        "========== Process Assignments ========================="
-                    )
+                    self._log_header_callback("Process Assignments")
                     self.process_assignments()
                 case "securityClearances":
-                    logger.info(
-                        "========== Process Security Clearances ================="
-                    )
+                    self._log_header_callback("Process Security Clearances")
                     self.process_security_clearances()
                 case "supplementalMarkings":
-                    logger.info(
-                        "========== Process Supplemental Markings ==============="
-                    )
+                    self._log_header_callback("Process Supplemental Markings")
                     self.process_supplemental_markings()
                 case "recordsManagementSettings":
-                    logger.info(
-                        "========== Process Records Management Settings ========="
-                    )
+                    self._log_header_callback("Process Records Management Settings")
                     self.process_records_management_settings()
                 case "holds":
-                    logger.info(
-                        "========== Process Records Management Holds ============"
-                    )
+                    self._log_header_callback("Process Records Management Holds")
                     self.process_holds()
                 case "documentGenerators":
-                    logger.info(
-                        "========== Process Document Generators ================="
-                    )
+                    self._log_header_callback("Process Document Generators")
                     self.process_document_generators()
+                case "browserAutomations":
+                    self._log_header_callback("Process Browser Automations")
+                    self.process_browser_automations()
                 case _:
                     logger.error(
                         "Illegal payload section name -> %s in payloadSections!",
@@ -1060,8 +1249,6 @@ class Payload:
                 )
                 # Restart OTCS frontend and backend pods:
                 self._otcs_restart_callback(self._otcs_backend)
-                # give some additional time to make sure service is responsive
-                time.sleep(30)
             else:
                 logger.info(
                     "Payload section -> %s does not require a restart of OTCS services",
@@ -1069,14 +1256,14 @@ class Payload:
                 )
 
         if self._users:
-            logger.info("========== Process User Profile Photos =================")
+            self._log_header_callback("Process User Profile Photos")
             self.process_user_photos()
             if self._m365 and isinstance(self._m365, M365):
-                logger.info("========== Process M365 User Profile Photos ============")
+                self._log_header_callback("Process M365 User Profile Photos")
                 self.process_user_photos_m365()
-            logger.info("========== Process User Favorites and Profiles =========")
+            self._log_header_callback("Process User Favorites and Profiles")
             self.process_user_favorites_and_profiles()
-            logger.info("========== Process User Security =======================")
+            self._log_header_callback("Process User Security")
             self.process_user_security()
 
         # end method definition
@@ -1138,8 +1325,7 @@ class Payload:
             if not response or not response.ok:
                 success = False
 
-        if success:
-            self.write_status_file(section_name, webhooks)
+        self.write_status_file(success, section_name, webhooks)
 
         return success
 
@@ -1267,8 +1453,7 @@ class Payload:
                             license_name,
                         )
 
-        if success:
-            self.write_status_file(section_name, self._partitions)
+        self.write_status_file(success, section_name, self._partitions)
 
         return success
 
@@ -1375,8 +1560,7 @@ class Payload:
                             license_name,
                         )
 
-        if success:
-            self.write_status_file(section_name, self._partitions)
+        self.write_status_file(success, section_name, self._partitions)
 
         return success
 
@@ -1431,6 +1615,7 @@ class Payload:
             client_permission_scopes = oauth_client.get("permission_scopes")
             client_default_scopes = oauth_client.get("default_scopes")
             client_allow_impersonation = oauth_client.get("allow_impersonation")
+            client_secret = oauth_client.get("secret", "")
 
             # Check if OAuth client does already exist
             # (in an attempt to make the code idem-potent)
@@ -1457,6 +1642,7 @@ class Payload:
                 auth_scopes=client_partition,
                 allowed_scopes=client_permission_scopes,
                 default_scopes=client_default_scopes,
+                secret=client_secret,
             )
             if response:
                 logger.info("Added OTDS OAuth client -> %s", client_name)
@@ -1465,6 +1651,8 @@ class Payload:
                 success = False
                 continue
 
+            # in case the secret has not been provided in the payload we retrieve
+            # the automatically created secret:
             client_secret = response.get("secret")
             if not client_secret:
                 logger.error("OAuth client -> %s does not have a secret!", client_name)
@@ -1477,8 +1665,7 @@ class Payload:
             # Write the secret back into the payload
             oauth_client["secret"] = client_secret
 
-        if success:
-            self.write_status_file(section_name, self._oauth_clients)
+        self.write_status_file(success, section_name, self._oauth_clients)
 
         return success
 
@@ -1736,8 +1923,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._auth_handlers)
+        self.write_status_file(success, section_name, self._auth_handlers)
 
         return success
 
@@ -1768,7 +1954,13 @@ class Payload:
         success: bool = True
 
         for trusted_site in self._trusted_sites:
-            url = trusted_site.get("url")
+            # old payload may still have trusted sites as list of string
+            # we changed also the trusted sites to dict with 23.3
+            # We want to be backwards compatible so we handle both cases:
+            if isinstance(trusted_site, dict):
+                url = trusted_site.get("url")
+            elif isinstance(trusted_site, str):
+                url = trusted_site
             if not url:
                 logger.error("OTDS Trusted site does not have a URL. Skipping...")
                 success = False
@@ -1776,7 +1968,11 @@ class Payload:
 
             # Check if element has been disabled in payload (enabled = false).
             # In this case we skip the element:
-            if "enabled" in trusted_site and not trusted_site["enabled"]:
+            if (
+                isinstance(trusted_site, dict)
+                and "enabled" in trusted_site
+                and not trusted_site["enabled"]
+            ):
                 logger.info(
                     "Payload for OTDS Trusted Site -> %s is disabled. Skipping...",
                     url,
@@ -1790,8 +1986,7 @@ class Payload:
                 logger.error("Failed to add trusted site -> %s", trusted_site)
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._trusted_sites)
+        self.write_status_file(success, section_name, self._trusted_sites)
 
         return success
 
@@ -1859,8 +2054,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._system_attributes)
+        self.write_status_file(success, section_name, self._system_attributes)
 
         return success
 
@@ -2085,8 +2279,7 @@ class Payload:
                     )
                     self._otcs.add_group_member(group["id"], parent_group_id)
 
-        if success:
-            self.write_status_file(section_name, self._groups)
+        self.write_status_file(success, section_name, self._groups)
 
         return success
 
@@ -2172,6 +2365,7 @@ class Payload:
                         existing_group["displayName"],
                         existing_group["id"],
                     )
+                    # Write M365 group ID back into the payload (for the success file)
                     group["m365_id"] = existing_group["id"]
                     continue
                 logger.info(
@@ -2195,8 +2389,7 @@ class Payload:
             else:
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._groups)
+        self.write_status_file(success, section_name, self._groups)
 
         return success
 
@@ -2390,8 +2583,118 @@ class Payload:
                             attribute_value,
                         )
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        self.write_status_file(success, section_name, self._users)
+
+        return success
+
+        # end method definition
+
+    def process_users_sap(
+        self, sap_object: SAP, section_name: str = "usersSAP"
+    ) -> bool:
+        """Process users in payload and sync them with SAP (passwords for now).
+
+        Args:
+            sap_object (SAP): SAP object
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections like "webHooksPost")
+                                          This name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        Side Effects:
+            the user items are modified by adding an "id" dict element that
+            includes the technical ID of the user in Extended ECM
+        """
+
+        if not self._users:
+            logger.info("Payload section -> %s is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        rfc_name = "ZFM_TERRA_RFC_CHNG_USR_PW"
+        rfc_description = "RFC to update the SAP user password"
+        rfc_call_options = ()
+
+        # Add all users in payload and establish membership in
+        # specified groups:
+        for user in self._users:
+            # Sanity checks:
+            if not "name" in user:
+                logger.error("User is missing a login. Skipping to next user...")
+                success = False
+                continue
+            user_name = user["name"]
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in user and not user["enabled"]:
+                logger.info(
+                    "Payload for User -> %s is disabled. Skipping...", user_name
+                )
+                continue
+
+            # Check if the user is enabled for SAP:
+            if not "enable_sap" in user or not user["enable_sap"]:
+                logger.info("User -> %s is not enabled for SAP. Skipping...", user_name)
+                continue
+
+            # Sanity checks:
+            if not "password" in user:
+                logger.error(
+                    "User -> %s is missing a password. Cannot sync with SAP. Skipping to next user...",
+                    user_name,
+                )
+                success = False
+                continue
+            user_password = user["password"]
+
+            rfc_params = {
+                "USERNAME": user_name,
+                "PASSWORD": user_password,
+            }
+
+            logger.info(
+                "Updating password of user -> %s in SAP. Calling SAP RFC -> %s (%s) with parameters -> %s ...",
+                user_name,
+                rfc_name,
+                rfc_description,
+                rfc_params,
+            )
+
+            result = sap_object.call(rfc_name, rfc_call_options, rfc_params)
+            if result is None:
+                logger.error(
+                    "Failed to call SAP RFC -> %s to update password of user -> %s",
+                    rfc_name,
+                    user_name,
+                )
+                success = False
+            elif result.get("RESULT") != "OK":
+                logger.error(
+                    "Result of SAP RFC -> %s is not OK, it returned -> %s failed items in result -> %s",
+                    rfc_name,
+                    str(result.get("FAILED")),
+                    str(result),
+                )
+                success = False
+                # Save result for status file content
+                user["sap_sync_result"] = result
+            else:
+                logger.info(
+                    "Successfully called RFC -> %s. Result -> %s", rfc_name, str(result)
+                )
+                # Save result for status file content
+                user["sap_sync_result"] = result
+
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -2562,16 +2865,18 @@ class Payload:
                 )
             else:
                 logger.info(
-                    "Install M365 Teams app -> %s for user -> %s", app_name, user_name
+                    "Install M365 Teams app -> %s for M365 user -> %s",
+                    app_name,
+                    user_name,
                 )
                 response = self._m365.assign_teams_app_to_user(
                     user["m365_id"], app_name
                 )
                 if not response:
                     logger.error(
-                        "Failed to install the App -> %s for M365 Team -> %s",
+                        "Failed to install the App -> %s for M365 user -> %s",
                         app_name,
-                        group_name,
+                        user_name,
                     )
                     success = False
                     continue
@@ -2755,8 +3060,7 @@ class Payload:
                         )
                         self._m365.add_group_member(parent_group_id, user_id)
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -2844,8 +3148,7 @@ class Payload:
                 success = False
                 continue
 
-        if success:
-            self.write_status_file(section_name, self._groups)
+        self.write_status_file(success, section_name, self._groups)
 
         return success
 
@@ -3068,8 +3371,7 @@ class Payload:
                         app_catalog_id,
                     )
 
-        if success:
-            self.write_status_file(section_name, self._groups)
+        self.write_status_file(success, section_name, self._groups)
 
         return success
 
@@ -3159,7 +3461,7 @@ class Payload:
         # These are the patterns that each MS Teams needs to match at least one of to be deleted
         # Pattern 1: all MS teams with a name that has a number in brackets, line "(1234)"
         # Pattern 2: all MS Teams with a name that starts with a number followed by a space,
-        #            followed by a "- and followed by another space
+        #            followed by a "-" and followed by another space
         # Pattern 3: all MS Teams with a name that starts with "WS" and a 1-4 digit number
         #            (these are the workspaces for Purchase Contracts generated for Intelligent Filing)
         # Pattern 4: all MS Teams with a name that ends with a 1-2 character + a number in brackets, like (US-1000)
@@ -3179,6 +3481,7 @@ class Payload:
         # We want this cleanup to only run once even if we have
         # multiple payload files - so we pass payload_specific=False here:
         self.write_status_file(
+            success=True,
             payload_section_name=section_name,
             payload_section=exception_list + pattern_list,
             payload_specific=False,
@@ -3275,8 +3578,7 @@ class Payload:
                 logger.error("Admin settings file -> %s not found.", settings_file)
                 success = False
 
-        if success:
-            self.write_status_file(section_name, admin_settings)
+        self.write_status_file(success, section_name, admin_settings)
 
         return restart_required
 
@@ -3366,8 +3668,8 @@ class Payload:
 
         # If this payload section has been processed successfully before we
         # can return True and skip processing it once more:
-        if self.check_status_file(section_name):
-            return True
+        # if self.check_status_file(section_name):
+        #   return True
 
         success: bool = True
 
@@ -3432,6 +3734,11 @@ class Payload:
                     auth_method = "BASIC"
                     oauth_client_id = None
                     oauth_client_secret = None
+                case "Business Scenario Sample":
+                    connection_type = "Business Scenario Sample"
+                    auth_method = "BASIC"
+                    oauth_client_id = None
+                    oauth_client_secret = None
                 case _:
                     logger.error("Unsupported system_type defined -> %s", system_type)
                     return False
@@ -3453,28 +3760,6 @@ class Payload:
             # Check if external system is reachable and
             # update the payload dict with a "reachable" key/value pair:
             self.check_external_system(external_system)
-
-            # # Extract the hostname:
-            # external_system_hostname = urlparse(as_url).hostname
-            # # Write this information back into the data structure:
-            # external_system["external_system_hostname"] = external_system_hostname
-            # # Extract the port:
-            # external_system_port = (
-            #     urlparse(as_url).port if urlparse(as_url).port else 80
-            # )
-            # # Write this information back into the data structure:
-            # external_system["external_system_port"] = external_system_port
-
-            # if self._http_object.check_host_reachable(
-            #     external_system_hostname, external_system_port
-            # ):
-            #     logger.info(
-            #         "Mark external system -> %s as reachable for later workspace creation...",
-            #         system_name,
-            #     )
-            #     external_system["reachable"] = True
-            # else:
-            #     external_system["reachable"] = False
 
             # Read either username/password (BASIC) or client ID / secret (OAuth)
             match auth_method:
@@ -3601,8 +3886,7 @@ class Payload:
                         True,
                     )
 
-        if success:
-            self.write_status_file(section_name, self._external_systems)
+        self.write_status_file(success, section_name, self._external_systems)
 
         return success
 
@@ -3689,8 +3973,7 @@ class Payload:
             else:
                 logger.info("Successfully deployed transport -> %s", name)
 
-        if success:
-            self.write_status_file(section_name, transport_packages)
+        self.write_status_file(success, section_name, transport_packages)
 
         return success
 
@@ -3768,8 +4051,7 @@ class Payload:
             else:
                 logger.info("Successfully added photo for admin")
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -3872,6 +4154,7 @@ class Payload:
                     user_name,
                 )
                 success = False
+                continue
             else:
                 logger.info(
                     "Successfully downloaded photo for user -> %s from Extended ECM to file -> %s",
@@ -3892,8 +4175,34 @@ class Payload:
                     user_name,
                 )
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        # Check if Admin has a photo as well (nickname needs to be "admin")
+        # Then we want this to be applied in M365 as well:
+        response = self._otcs.get_node_from_nickname("admin")
+        if response is None:
+            logger.warning("Missing photo for admin - nickname not found. Skipping...")
+        else:
+            photo_id = self._otcs.get_result_value(response, "id")
+            photo_name = self._otcs.get_result_value(response, "name")
+            photo_path = "/tmp/" + str(photo_name)
+            response = self._otcs.download_document(photo_id, photo_path)
+            if response is None:
+                logger.warning(
+                    "Failed to download photo for admin user from Extended ECM",
+                )
+                success = False
+            else:
+                logger.info(
+                    "Successfully downloaded photo for admin from Extended ECM to file -> %s",
+                    photo_path,
+                )
+                m365_admin_email = "admin@" + self._m365.config()["domain"]
+                response = self._m365.update_user_photo(m365_admin_email, photo_path)
+                if response is None:
+                    logger.warning("Failed to add photo for %s", m365_admin_email)
+                else:
+                    logger.info("Successfully added photo for %s", m365_admin_email)
+
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -3916,9 +4225,15 @@ class Payload:
         """
 
         # If this payload section has been processed successfully before we
-        # can return True and skip processing it once more:
+        # still need to read the data structure from the status file and
+        # initialize self._workspace_types:
         if self.check_status_file(section_name):
-            return []
+            # read the list from the json file in admin Home
+            # this is important for restart of customizer pod
+            # as this data structure is used later on for workspace processing
+            logger.info("Re-Initialize workspace types list for later use...")
+            self._workspace_types = self.get_status_file(section_name)
+            return self._workspace_types
 
         # get all workspace types (these have been created by the transports and are not in the payload!):
         response = self._otcs.get_workspace_types()
@@ -3993,9 +4308,260 @@ class Payload:
                 )
                 continue
 
-        self.write_status_file(section_name, self._workspace_types)
+        self.write_status_file(True, section_name, self._workspace_types)
 
         return self._workspace_types
+
+        # end method definition
+
+    def process_workspace_templates(
+        self, section_name: str = "workspaceTemplates"
+    ) -> bool:
+        """Process Workspace Template playload. This allows to define role members on
+           template basis. This avoids having to "pollute" workspace template templates
+           with user or group information and instead controls this via payload.
+
+        Args:
+            section_name (str, optional): name of the section.
+                                          This name is used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        for workspace_template in self._workspace_templates:
+            # Read Workspace Type Name from payload:
+            if not "type_name" in workspace_template:
+                logger.error(
+                    "Workspace template needs a type name! Skipping to next workspace template...",
+                )
+                success = False
+                continue
+            type_name = workspace_template["type_name"]
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in workspace_template and not workspace_template["enabled"]:
+                logger.info(
+                    "Payload for Workspace Template -> %s is disabled. Skipping to next workspace template...",
+                    type_name,
+                )
+                continue
+
+            # Read Workspace Template Name from payload:
+            if not "template_name" in workspace_template:
+                logger.error(
+                    "Workspace Template for Workspace Type -> %s needs a template name! Skipping to next workspace template...",
+                    type_name,
+                )
+                success = False
+                continue
+            template_name = workspace_template["template_name"]
+
+            # Read members from payload:
+            if not "members" in workspace_template:
+                logger.info(
+                    "Workspace template with type -> %s and name -> %s has no members in payload. Skipping to next workspace...",
+                    type_name,
+                    template_name,
+                )
+                continue
+            members = workspace_template["members"]
+
+            # Find the workspace type with the name given in the _workspace_types
+            # datastructure that has been generated by process_workspace_type() method before:
+            workspace_type = next(
+                (item for item in self._workspace_types if item["name"] == type_name),
+                None,
+            )
+            if workspace_type is None:
+                logger.error(
+                    "Workspace Type -> %s not found. Skipping to next workspace template...",
+                    type_name,
+                )
+                success = False
+                continue
+            if workspace_type["templates"] == []:
+                logger.error(
+                    "Workspace Type -> %s does not have templates. Skipping to next workspace template...",
+                    type_name,
+                )
+                success = False
+                continue
+
+            workspace_template = next(
+                (
+                    item
+                    for item in workspace_type["templates"]
+                    if item["name"] == template_name
+                ),
+                None,
+            )
+            if workspace_template:  # does this template exist?
+                logger.info(
+                    "Workspace Template -> %s has been specified in payload and it does exist.",
+                    template_name,
+                )
+            else:
+                logger.error(
+                    "Workspace Template -> %s has been specified in payload but it doesn't exist!",
+                    template_name,
+                )
+                logger.error(
+                    "Workspace Type -> %s has only these templates -> %s",
+                    type_name,
+                    workspace_type["templates"],
+                )
+                success = False
+                continue
+
+            template_id = workspace_template["id"]
+
+            workspace_roles = self._otcs.get_workspace_roles(template_id)
+            if workspace_roles is None:
+                logger.info(
+                    "Workspace Template %s with node Id -> %s has no roles. Skipping to next workspace...",
+                    template_name,
+                    template_id,
+                )
+                continue
+
+            for member in members:
+                # read user list and role name from payload:
+                member_users = (
+                    member["users"] if member.get("users") else []
+                )  # be careful to avoid key errors as users are optional
+                member_groups = (
+                    member["groups"] if member.get("groups") else []
+                )  # be careful to avoid key errors as groups are optional
+                member_role_name = member["role"]
+
+                if member_role_name == "":  # role name is required
+                    logger.error(
+                        "Members of workspace template -> %s is missing the role name.",
+                        template_name,
+                    )
+                    success = False
+                    continue
+                if (
+                    member_users == [] and member_groups == []
+                ):  # we either need users or groups (or both)
+                    logger.warning(
+                        "Role -> %s of workspace template -> %s does not have any members (no users nor groups).",
+                        member_role_name,
+                        template_name,
+                    )
+                    continue
+
+                role_id = self._otcs.lookup_result_value(
+                    workspace_roles, "name", member_role_name, "id"
+                )
+                if role_id is None:
+                    #    if member_role is None:
+                    logger.error(
+                        "Workspace template -> %s does not have a role with name -> %s",
+                        template_name,
+                        member_role_name,
+                    )
+                    success = False
+                    continue
+                logger.info("Role -> %s has ID -> %s", member_role_name, role_id)
+
+                # Process users as workspace template members:
+                for member_user in member_users:
+                    # find member user in current payload:
+                    member_user_id = next(
+                        (item for item in self._users if item["name"] == member_user),
+                        {},
+                    )
+                    if member_user_id:
+                        user_id = member_user_id["id"]
+                    else:
+                        # If this didn't work, try to get the member user from OTCS. This covers
+                        # cases where the user is system generated or part
+                        # of a former payload processing (thus not in the current payload):
+                        logger.info(
+                            "Member -> %s not found in current payload - check if it exists in OTCS already...",
+                            member_user,
+                        )
+                        response = self._otcs.get_user(member_user)
+                        user_id = self._otcs.lookup_result_value(
+                            response, key="name", value=member_user, return_key="id"
+                        )
+                        if not user_id:
+                            logger.error(
+                                "Cannot find member user with login -> %s. Skipping...",
+                                member_user,
+                            )
+                            success = False
+                            continue
+
+                    # Add member if it does not yet exists - suppress warning
+                    # message if user is already in role:
+                    response = self._otcs.add_member_to_workspace(
+                        template_id, int(role_id), user_id, False
+                    )
+                    if response is None:
+                        logger.error(
+                            "Failed to add user -> %s (%s) to role -> %s of workspace template -> %s",
+                            member_user,
+                            user_id,
+                            member_role_name,
+                            template_name,
+                        )
+                        success = False
+                    else:
+                        logger.info(
+                            "Successfully added user -> %s (%s) to role -> %s of workspace template -> %s",
+                            member_user,
+                            user_id,
+                            member_role_name,
+                            template_name,
+                        )
+
+                # Process groups as workspace template members:
+                for member_group in member_groups:
+                    member_group_id = next(
+                        (item for item in self._groups if item["name"] == member_group),
+                        None,
+                    )
+                    if member_group_id is None:
+                        logger.error("Cannot find group with name -> %s", member_group)
+                        success = False
+                        continue
+                    group_id = member_group_id["id"]
+
+                    response = self._otcs.add_member_to_workspace(
+                        template_id, int(role_id), group_id
+                    )
+                    if response is None:
+                        logger.error(
+                            "Failed to add group -> %s (%s) to role -> %s of workspace template -> %s",
+                            member_group_id["name"],
+                            group_id,
+                            member_role_name,
+                            template_name,
+                        )
+                        success = False
+                    else:
+                        logger.info(
+                            "Successfully added group -> %s (%s) to role -> %s of workspace template -> %s",
+                            member_group_id["name"],
+                            group_id,
+                            member_role_name,
+                            template_name,
+                        )
+
+        self.write_status_file(success, section_name, self._workspace_types)
+
+        return success
 
         # end method definition
 
@@ -4030,6 +4596,7 @@ class Payload:
             # Read name from payload:
             if not "name" in workspace:
                 logger.error("Workspace needs a name! Skipping to next workspace...")
+                success = False
                 continue
             name = workspace["name"]
 
@@ -4047,6 +4614,7 @@ class Payload:
                     "Workspace -> %s needs a type name! Skipping to next workspace...",
                     name,
                 )
+                success = False
                 continue
             type_name = workspace["type_name"]
 
@@ -4056,10 +4624,11 @@ class Payload:
                 name,
                 type_name,
             )
-            workspace_id = int(self.determine_workspace_id(workspace))
+            # Check if workspace does already exist
+            # In case the workspace exists, determine_workspace_id()
+            # also stores the node ID into workspace["nodeId"]
+            workspace_id = self.determine_workspace_id(workspace)
             if workspace_id:
-                # we still want to set the nodeId as other parts of the payload depend on it:
-                # workspace["nodeId"] = workspace_id
                 logger.info(
                     "Workspace -> %s of type -> %s does already exist and has ID -> %s! Skipping to next workspace...",
                     name,
@@ -4091,6 +4660,7 @@ class Payload:
                     logger.error(
                         "Parent Workspace with logical ID -> %s not found.", parent_id
                     )
+                    success = False
                     continue
 
                 parent_workspace_node_id = self.determine_workspace_id(parent_workspace)
@@ -4098,6 +4668,7 @@ class Payload:
                     logger.warning(
                         "Parent Workspace without node ID (parent workspace creation may have failed). Skipping to next workspace..."
                     )
+                    success = False
                     continue
 
                 logger.info(
@@ -4120,12 +4691,14 @@ class Payload:
                     "Workspace Type -> %s not found. Skipping to next workspace...",
                     type_name,
                 )
+                success = False
                 continue
             if workspace_type["templates"] == []:
                 logger.error(
                     "Workspace Type -> %s does not have templates. Skipping to next workspace...",
                     type_name,
                 )
+                success = False
                 continue
 
             # check if the template to be used is specified in the payload:
@@ -4154,6 +4727,7 @@ class Payload:
                         type_name,
                         workspace_type["templates"],
                     )
+                    success = False
                     continue
             # template to be used is NOT specified in the payload - then we just take the first one:
             else:
@@ -4221,10 +4795,12 @@ class Payload:
                     bo_id = None
                 elif not external_system.get("reachable"):
                     logger.warning(
-                        "External System -> %s is not reachable. Cannot connect workspace -> %s to -> %s. Create workspace without connection.",
+                        "External System -> %s is not reachable. Cannot connect workspace -> %s to -> (%s, %s, %s). Create workspace without connection...",
                         ext_system_id,
                         name,
                         ext_system_id,
+                        bo_type,
+                        bo_id,
                     )
                     # we remove the Business Object information to avoid communication
                     # errors during workspace create form and workspace creation
@@ -4258,6 +4834,7 @@ class Payload:
                         "Failed to retrieve create information for template -> %s",
                         template_id,
                     )
+                    success = False
                     continue
 
                 logger.info(
@@ -4358,8 +4935,11 @@ class Payload:
                                         for item in categories
                                         if (
                                             item["name"] == cat_name
+                                            and "set"
+                                            in item  # not all items may have a "set" key
                                             and item["set"] == set_name
-                                            and "row" in item
+                                            and "row"
+                                            in item  # not all items may have a "row" key
                                             and item["row"] == row
                                         )
                                     ),
@@ -4431,9 +5011,12 @@ class Payload:
                                             for item in categories
                                             if (
                                                 item["name"] == cat_name
+                                                and "set"
+                                                in item  # not all items may have a "set" key
                                                 and item["set"] == set_name
                                                 and item["attribute"] == set_attr_name
-                                                and "row" in item
+                                                and "row"
+                                                in item  # not all items may have a "row" key
                                                 and item["row"] == row
                                             )
                                         ),
@@ -4507,6 +5090,8 @@ class Payload:
                                         for item in categories
                                         if (
                                             item["name"] == cat_name
+                                            and "set"
+                                            in item  # not all items may have a "set" key
                                             and item["set"] == set_name
                                             and item["attribute"] == set_attr_name
                                         )
@@ -4644,6 +5229,7 @@ class Payload:
             )
             if response is None:
                 logger.error("Failed to create workspace -> %s", name)
+                success = False
                 continue
 
             # Now we add the node ID of the new workspace to the payload data structure
@@ -4718,8 +5304,7 @@ class Payload:
                                 name,
                             )
 
-        if success:
-            self.write_status_file(section_name, self._workspaces)
+        self.write_status_file(success, section_name, self._workspaces)
 
         return success
 
@@ -4870,8 +5455,7 @@ class Payload:
                 else:
                     logger.info("Successfully created workspace relationship.")
 
-        if success:
-            self.write_status_file(section_name, self._workspaces)
+        self.write_status_file(success, section_name, self._workspaces)
 
         return success
 
@@ -5061,7 +5645,7 @@ class Payload:
                     if response is None:
                         logger.error(
                             "Failed to add user -> %s (%s) to role -> %s of workspace -> %s",
-                            member_user_id["name"],
+                            member_user,
                             user_id,
                             member_role_name,
                             workspace_name,
@@ -5070,7 +5654,7 @@ class Payload:
                     else:
                         logger.info(
                             "Successfully added user -> %s (%s) to role -> %s of workspace -> %s",
-                            member_user_id["name"],
+                            member_user,  # member_user_id["name"],
                             user_id,
                             member_role_name,
                             workspace_name,
@@ -5109,8 +5693,185 @@ class Payload:
                             workspace_name,
                         )
 
-        if success:
-            self.write_status_file(section_name, self._workspaces)
+                # Optionally the payload may have a permission list for the role
+                # to change the default permission from the workspace template
+                # to something more specific:
+                member_permissions = member.get("permissions", [])
+                if member_permissions == []:
+                    logger.info(
+                        "No permission change for workspace -> %s and role -> %s.",
+                        workspace_name,
+                        member_role_name,
+                    )
+                    continue
+
+                logger.info(
+                    "Update permissions of workspace -> %s (%s) and role -> %s to -> %s",
+                    workspace_name,
+                    str(workspace_node_id),
+                    member_role_name,
+                    str(member_permissions),
+                )
+                response = self._otcs.assign_permission(
+                    node_id=workspace_node_id,
+                    assignee_type="custom",
+                    assignee=role_id,
+                    permissions=member_permissions,
+                    apply_to=2,
+                )
+                if not response:
+                    logger.error(
+                        "Failed to update permissions of workspace -> %s (%s) and role -> %s to -> %s.",
+                        workspace_name,
+                        str(workspace_node_id),
+                        member_role_name,
+                        str(member_permissions),
+                    )
+                    success = False
+
+        self.write_status_file(success, section_name, self._workspaces)
+
+        return success
+
+        # end method definition
+
+    def configure_vector_data_source(self) -> bool:
+        """Run the configuration of the Aviator Vector Data Source"""
+
+        response = self._otcs.get_node_by_parent_and_name(
+            2001, "Vector Data Source Folder"
+        )
+        vector_source_node_id = self._otcs.get_result_value(response, "id")
+        if vector_source_node_id:
+            logger.warning("Vector Data Source does already exist.")
+            return True
+
+        # 1. Log into Extended ECM:
+        logger.info("Log in to Extended ECM (OTCS) in the browser...")
+        if not self._browser_automation.run_login():
+            return False
+
+        # 2. Load the data sources page:
+        logger.info("Load page for data sources...")
+        if not self._browser_automation.get_page(
+            "/cs/cs?func=ll&objtype=148&objaction=browse"
+        ):
+            return False
+
+        # 3. Identify the Add item Menu:
+        logger.info("Find Add Item menu for data flows and open it...")
+        if not self._browser_automation.find_elem_and_click(
+            find_elem="addItemMenuSystemSelect"
+        ):
+            return False
+
+        # 4. Click the menu item for Vector data source:
+        logger.info("Add Aviator Vector data source...")
+        if not self._browser_automation.find_elem_and_click(
+            find_elem="addItemMenuSystemVector Data Source"
+        ):
+            return False
+
+        # 5. Fill the required parameters:
+        logger.info("Fill Aviator Vector Data Source parameters...")
+        if (
+            not self._browser_automation.find_elem_and_set(
+                find_elem="ProducerWriteBaseDir_ID",
+                elem_value="/opt/opentext/cs_index/vector/",
+            )
+            or not self._browser_automation.find_elem_and_set(
+                find_elem="ReadBaseDir_ID", elem_value="/opt/opentext/cs_index/vector/"
+            )
+            or not self._browser_automation.find_elem_and_set(
+                find_elem="WriteBaseDir_ID", elem_value="/opt/opentext/cs_index/vector/"
+            )
+        ):
+            return False
+
+        # 5. Save and Continue:
+        if not self._browser_automation.find_elem_and_click(
+            find_elem="applyButton"
+        ) or not self._browser_automation.find_elem_and_click(
+            find_elem="continueButton", find_method="name"
+        ):
+            return False
+
+        return True
+
+    # end method definition
+
+    def process_workspace_aviators(
+        self, section_name: str = "workspaceAviators"
+    ) -> bool:
+        """Process workspaces Content Aviator settings in payload and enable Aviator for selected workspaces.
+
+        Args:
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections)
+                                          This name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        if not self._workspaces:
+            logger.info("Payload section -> %s is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        for workspace in self._workspaces:
+            # Read name from payload (just for logging):
+            if not "name" in workspace:
+                continue
+            workspace_name = workspace["name"]
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in workspace and not workspace["enabled"]:
+                logger.info(
+                    "Payload for Workspace -> %s is disabled. Skipping...",
+                    workspace_name,
+                )
+                continue
+
+            # Read Aviator setting from payload:
+            if not "enable_aviator" in workspace or not workspace["enable_aviator"]:
+                logger.info(
+                    "Aviator is not enabled for Workspace -> %s. Skipping to next workspace...",
+                    workspace_name,
+                )
+                continue
+
+            # We cannot just lookup with workspace.get("nodeId") as the customizer
+            # may have been restarted inbetween - so we use our proper determine_workspace_id
+            # here...
+            workspace_id = self.determine_workspace_id(workspace)
+            if not workspace_id:
+                logger.error(
+                    "Cannot find node ID for workspace -> %s. Workspace creation may have failed. Skipping to next workspace...",
+                    workspace_name,
+                )
+                success = False
+                continue
+
+            response = self._otcs.update_workspace_aviator(workspace_id, True)
+            if not response:
+                logger.error(
+                    "Failed to enable Content Aviator for workspace -> %s (%s)",
+                    workspace_name,
+                    workspace_id,
+                )
+                success = False
+                continue
+
+        self.write_status_file(success, section_name, self._workspaces)
 
         return success
 
@@ -5261,8 +6022,7 @@ class Payload:
                 logger.error("Failed to run web report -> %s", nick_name)
                 success = False
 
-        if success:
-            self.write_status_file(section_name, web_reports)
+        self.write_status_file(success, section_name, web_reports)
 
         return success
 
@@ -5327,8 +6087,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._cs_applications)
+        self.write_status_file(success, section_name, self._cs_applications)
 
         return success
 
@@ -5406,8 +6165,14 @@ class Payload:
             if not response:
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._users)
+            # Set user password to never expire
+            response = self._otds.update_user(
+                user_partition, user_name, "PasswordNeverExpires", "True"
+            )
+            if not response:
+                success = False
+
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -5596,7 +6361,7 @@ class Payload:
                     )
                     # set the user proxy - currently we don't support time based proxies in payload.
                     # The called method is ready to support this.
-                    response = self._otcs.update_user_proxy(proxy_user_id)
+                    response = self._otcs.add_user_proxy(proxy_user_id)
                 else:
                     logger.info(
                         "User -> %s (%s) is already proxy for user -> %s. Skipping...",
@@ -5645,8 +6410,7 @@ class Payload:
                 "Profile for admin user has been updated to enable messages for responsive container mode.",
             )
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -5707,8 +6471,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._security_clearances)
+        self.write_status_file(success, section_name, self._security_clearances)
 
         return success
 
@@ -5769,8 +6532,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._supplemental_markings)
+        self.write_status_file(success, section_name, self._supplemental_markings)
 
         return success
 
@@ -5826,8 +6588,7 @@ class Payload:
                     user_id, user_supplemental_markings
                 )
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -5949,8 +6710,7 @@ class Payload:
             if not response:
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._records_management_settings)
+        self.write_status_file(success, section_name, self._records_management_settings)
 
         return success
 
@@ -6008,18 +6768,34 @@ class Payload:
             hold_date_applied = hold.get("date_applied")
             hold_date_suspend = hold.get("date_to_remove")
 
+            # 550 is the RM Volume
+            response = self._otcs.get_node_by_volume_and_path(550, ["Hold Maintenance"])
+            if not response:
+                logger.error("Cannot find Records Management Volume!")
+                continue
+            holds_maintenance_id = self._otcs.get_result_value(response, "id")
+            if not holds_maintenance_id:
+                logger.error(
+                    "Cannot find Holds Maintenance folder in Records Management Volume!"
+                )
+                continue
+
             if hold_group:
                 # Check if the Hold Group (folder) does already exist.
-                # 2122 is the ID of the "Hold Maintenance" top level
-                # folder in Records Management area that (we hope) will remain
-                # stable:
-                response = self._otcs.get_node_by_parent_and_name(2122, hold_group)
+                response = self._otcs.get_node_by_parent_and_name(
+                    holds_maintenance_id, hold_group
+                )
                 parent_id = self._otcs.get_result_value(response, "id")
                 if not parent_id:
-                    response = self._otcs.create_item(2122, "833", hold_group)
+                    response = self._otcs.create_item(
+                        holds_maintenance_id, "833", hold_group
+                    )
                     parent_id = self._otcs.get_result_value(response, "id")
+                    if not parent_id:
+                        logger.error("Failed to create hold group -> %s", hold_group)
+                        continue
             else:
-                parent_id = 2122
+                parent_id = holds_maintenance_id
 
             # Holds are special - they ahve folders that cannot be traversed
             # in the normal way - we need to get the whole list of holds and use
@@ -6051,8 +6827,7 @@ class Payload:
             else:
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._holds)
+        self.write_status_file(success, section_name, self._holds)
 
         return success
 
@@ -6139,8 +6914,7 @@ class Payload:
                     )
                     success = False
 
-        if success:
-            self.write_status_file(section_name, self._additional_group_members)
+        self.write_status_file(success, section_name, self._additional_group_members)
 
         return success
 
@@ -6246,8 +7020,9 @@ class Payload:
                     )
                     success = False
 
-        if success:
-            self.write_status_file(section_name, self._additional_access_role_members)
+        self.write_status_file(
+            success, section_name, self._additional_access_role_members
+        )
 
         return success
 
@@ -6307,8 +7082,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._renamings)
+        self.write_status_file(success, section_name, self._renamings)
 
         return success
 
@@ -6471,8 +7245,7 @@ class Payload:
                 logger.error("Failed to create item -> %s.", item_name)
                 success = False
 
-        if success:
-            self.write_status_file(section_name, items)
+        self.write_status_file(success, section_name, items)
 
         return success
 
@@ -6695,8 +7468,8 @@ class Payload:
                         continue
                     user_name = user["name"]
                     user_permissions = user["permissions"]
-                    result = self._otcs.get_user(user_name, True)
-                    user_id = self._otcs.get_result_value(response=result, key="id")
+                    response = self._otcs.get_user(user_name, True)
+                    user_id = self._otcs.get_result_value(response=response, key="id")
                     if not user_id:
                         logger.error(
                             "Cannot find user with name -> %s; cannot set user permissions. Skipping user...",
@@ -6704,7 +7477,7 @@ class Payload:
                         )
                         success = False
                         continue
-                    user["id"] = user_id # write ID back into payload
+                    user["id"] = user_id  # write ID back into payload
 
                     logger.info(
                         "Update permission of user -> %s for item -> %s (%s) to -> %s",
@@ -6750,7 +7523,7 @@ class Payload:
                         )
                         success = False
                         continue
-                    group["id"] = group_id # write ID back into payload
+                    group["id"] = group_id  # write ID back into payload
                     response = self._otcs.assign_permission(
                         int(node_id), "custom", group_id, group_permissions, apply_to
                     )
@@ -6762,8 +7535,7 @@ class Payload:
                         )
                         success = False
 
-        if success:
-            self.write_status_file(section_name, permissions)
+        self.write_status_file(success, section_name, permissions)
 
         return success
 
@@ -6950,8 +7722,7 @@ class Payload:
                 )
                 success = False
 
-        if success:
-            self.write_status_file(section_name, self._assignments)
+        self.write_status_file(success, section_name, self._assignments)
 
         return success
 
@@ -7058,8 +7829,7 @@ class Payload:
                     )
                     success = False
 
-        if success:
-            self.write_status_file(section_name, self._users)
+        self.write_status_file(success, section_name, self._users)
 
         return success
 
@@ -7173,8 +7943,7 @@ class Payload:
                     pod_name,
                 )
 
-        if success:
-            self.write_status_file(section_name, self._exec_pod_commands)
+        self.write_status_file(success, section_name, self._exec_pod_commands)
 
         return success
 
@@ -7236,6 +8005,8 @@ class Payload:
                 success = False
                 continue
             template_path = doc_generator["template_path"]
+            # 20541 is the ID of the Document Template Volume which
+            # (we hope) is stable:
             template = self._otcs.get_node_by_volume_and_path(20541, template_path)
             if not template:
                 logger.error(
@@ -7422,7 +8193,7 @@ class Payload:
                         # If the workspace template is not matching
                         # the path we may have an error here. Then
                         # we fall back to workspace root level.
-                        logger.info(
+                        logger.warning(
                             "Folder path does not exist in workspace -> %s. Using workspace root level instead...",
                             workspace_name,
                         )
@@ -7478,8 +8249,206 @@ class Payload:
             # True = force new login with new user
             cookie = self._otcs.authenticate(True)
 
-        if success:
-            self.write_status_file(section_name, self._doc_generators)
+        self.write_status_file(success, section_name, self._doc_generators)
+
+        return success
+
+        # end method definition
+
+    def process_browser_automations(
+        self, section_name: str = "browserAutomations", check_status: bool = True
+    ) -> bool:
+        """Process Selenium-based browser automations.
+
+        Args:
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections)
+                                          This name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        if not self._browser_automations:
+            logger.info("Payload section -> %s is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if check_status and self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        for browser_automation in self._browser_automations:
+            description = browser_automation.get("description", "")
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in browser_automation and not browser_automation["enabled"]:
+                logger.info(
+                    "Payload for Browser Automation -> %s is disabled. Skipping...",
+                    description,
+                )
+                continue
+
+            if not "base_url" in browser_automation:
+                logger.error("Browser automation is missing base_url. Skipping...")
+                success = False
+                continue
+            base_url = browser_automation.get("base_url")
+
+            if not "user_name" in browser_automation:
+                logger.info("Browser automation is not having user name.")
+            user_name = browser_automation.get("user_name", "")
+
+            if not "password" in browser_automation:
+                logger.info("Browser automation is not having password.")
+            password = browser_automation.get("password", "")
+
+            if not "automations" in browser_automation:
+                logger.error(
+                    "Browser automation is missing list of automations. Skipping..."
+                )
+                success = False
+                continue
+            automations = browser_automation.get("automations", [])
+
+            # Create Selenium Browser Automation:
+            logger.info("Browser Automation URL -> %s", base_url)
+            logger.info("Browser Automation User -> %s", user_name)
+            logger.debug("Browser Automation Password -> %s", password)
+            browser_automation_object = BrowserAutomation(
+                base_url=base_url,
+                user_name=user_name,
+                user_password=password,
+            )
+
+            for automation in automations:
+                if not "type" in automation:
+                    logger.error("Browser automation step is missing type. Skipping...")
+                    success = False
+                    break
+                automation_type = automation.get("type", "")
+
+                match automation_type:
+                    case "login":
+                        page = automation.get("page", "")
+                        logger.info(
+                            "Login to -> %s as user -> %s", base_url + page, user_name
+                        )
+                        user_field = automation.get("user_field", "otds_username")
+                        password_field = automation.get(
+                            "password_field", "otds_password"
+                        )
+                        login_button = automation.get("login_button", "loginbutton")
+                        if not browser_automation_object.run_login(
+                            user_field=user_field,
+                            password_field=password_field,
+                            login_button=login_button,
+                        ):
+                            logger.error(
+                                "Cannot log into -> %s. Stopping automation.",
+                                base_url + page,
+                            )
+                            success = False
+                            break
+                        else:
+                            logger.info(
+                                "Successfuly logged into page -> %s.", base_url + page
+                            )
+                    case "get_page":
+                        page = automation.get("page", "")
+                        if not page:
+                            logger.error(
+                                "Automation type -> %s requires page parameter",
+                                automation_type,
+                            )
+                            success = False
+                            break
+                        logger.info("Get page -> %s", base_url + page)
+                        if not browser_automation_object.get_page(url=page):
+                            logger.error(
+                                "Cannot get page -> %s. Stopping automation.",
+                                page,
+                            )
+                            success = False
+                            break
+                        else:
+                            browser_automation_object.implict_wait(10.0)
+                            logger.info(
+                                "Successfuly loaded page -> %s.", base_url + page
+                            )
+                    case "click_elem":
+                        elem = automation.get("elem", "")
+                        if not elem:
+                            logger.error(
+                                "Automation type -> %s requires elem parameter",
+                                automation_type,
+                            )
+                            success = False
+                            break
+                        find = automation.get("find", "id")
+                        if not browser_automation_object.find_elem_and_click(
+                            find_elem=elem, find_method=find
+                        ):
+                            logger.error(
+                                "Cannot find clickable element -> %s on current page. Stopping automation.",
+                                elem,
+                            )
+                            success = False
+                            break
+                        else:
+                            browser_automation_object.implict_wait(10.0)
+                            logger.info("Successfuly clicked element -> %s.", elem)
+                    case "set_elem":
+                        elem = automation.get("elem", "")
+                        if not elem:
+                            logger.error(
+                                "Automation type -> %s requires elem parameter",
+                                automation_type,
+                            )
+                            success = False
+                            break
+                        find = automation.get("find", "id")
+                        value = automation.get("value", "")
+                        if not value:
+                            logger.error(
+                                "Automation type -> %s requires value parameter",
+                                automation_type,
+                            )
+                            success = False
+                            break
+                        # we also support replacing placeholders that are
+                        # enclosed in double % characters like %%OTCS_RESOURCE_ID%%:
+                        value = self.replace_placeholders(value)
+                        if not browser_automation_object.find_elem_and_set(
+                            find_elem=elem, elem_value=value, find_method=find
+                        ):
+                            logger.error(
+                                "Cannot find element -> %s on current page to set value -> %s. Stopping automation.",
+                                elem,
+                                value,
+                            )
+                            success = False
+                            break
+                        else:
+                            logger.info(
+                                "Successfuly set element -> %s to set value -> %s.",
+                                elem,
+                                value,
+                            )
+                    case _:
+                        logger.error(
+                            "Illegal automation step type -> %s in browser automation!",
+                            automation_type,
+                        )
+                        success = False
+                        break
+
+        if check_status:
+            self.write_status_file(success, section_name, self._browser_automations)
 
         return success
 
@@ -7632,8 +8601,7 @@ class Payload:
                 # Save result for status file content
                 sap_rfc["result"] = result
 
-        if success:
-            self.write_status_file(section_name, self._sap_rfcs)
+        self.write_status_file(success, section_name, self._sap_rfcs)
 
         return success
 

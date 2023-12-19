@@ -915,7 +915,7 @@ class OTCS:
             response = requests.get(
                 url=request_url,
                 headers=REQUEST_JSON_HEADERS,
-                timeout=REQUEST_TIMEOUT,
+                timeout=2,
             )
         except requests.exceptions.RequestException as exception:
             logger.warning(
@@ -926,7 +926,7 @@ class OTCS:
             logger.warning("OTCS service may not be ready yet.")
             return False
 
-        if not response.ok:
+        if not response.status_code == 200:
             logger.warning(
                 "Unable to connect to -> %s; status -> %s; warning -> %s",
                 request_url,
@@ -939,12 +939,16 @@ class OTCS:
 
     # end method definition
 
-    def authenticate(self, revalidate: bool = False) -> dict | None:
+    def authenticate(
+        self, revalidate: bool = False, force_user_password_login: bool = False
+    ) -> dict | None:
         """Authenticates at Content Server and retrieve OTCS Ticket.
 
         Args:
             revalidate (bool): determinse if a re-athentication is enforced
                                (e.g. if session has timed out with 401 error)
+            force_user_password_login (bool): By default we use the OTDS ticket (if exists) for the authentication with OTCS.
+                                              This switch allows the forced usage of username / password for the authentication.
         Returns:
             dict: Cookie information of None in case of an error.
                         Also stores cookie information in self._cookie
@@ -961,51 +965,54 @@ class OTCS:
             logger.warning(
                 "OTCS is not ready to receive requests yet. Waiting 30 seconds..."
             )
-            time.sleep(15)
+            time.sleep(30)
 
-        if self._otds_ticket:
+        request_url = self.config()["authenticationUrl"]
+
+        if self._otds_ticket and not force_user_password_login:
             logger.info(
-                "Requesting OTCS ticket with OTDS ticket from -> %s",
-                self.config()["authenticationUrl"],
+                "Requesting OTCS ticket with OTDS ticket; calling -> %s",
+                request_url,
             )
-            url = self.config()["authenticationUrl"]
-            headers = {
+            request_header = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
                 "OTDSTicket": self._otds_ticket,
             }
 
             try:
-                response = requests.request("GET", url, headers=headers, timeout=10)
+                response = requests.get(
+                    url=request_url, headers=request_header, timeout=10
+                )
                 if response.ok:
                     otcs_ticket = response.headers.get("OTCSTicket")
 
             except requests.exceptions.RequestException as exception:
                 logger.warning(
                     "Unable to connect to -> %s; error -> %s",
-                    self.config()["authenticationUrl"],
+                    request_url,
                     exception.strerror,
                 )
 
         # Check if previous authentication was successful
         if not otcs_ticket:
             logger.info(
-                "Requesting OTCS ticket with User/Password from -> %s",
-                self.config()["authenticationUrl"],
+                "Requesting OTCS ticket with User/Password; calling -> %s",
+                request_url,
             )
 
             response = None
             try:
                 response = requests.post(
-                    url=self.config()["authenticationUrl"],
-                    data=self.credentials(),
+                    url=request_url,
+                    data=self.credentials(),  # this includes username + password
                     headers=REQUEST_FORM_HEADERS,
                     timeout=REQUEST_TIMEOUT,
                 )
             except requests.exceptions.RequestException as exception:
                 logger.warning(
                     "Unable to connect to -> %s; error -> %s",
-                    self.config()["authenticationUrl"],
+                    request_url,
                     exception.strerror,
                 )
                 logger.warning("OTCS service may not be ready yet.")
@@ -4389,13 +4396,13 @@ class OTCS:
     # end method definition
 
     def get_workspace_instances(
-        self, type_name: str, type_id: int = None, expanded_view: bool = True
+        self, type_name: str = "", type_id: int = None, expanded_view: bool = True
     ):
         """Get all workspace instances of a given type. This is a convenience
            wrapper method for get_workspace_by_type_and_name()
 
         Args:
-            type_name (str): name of the workspace type
+            type_name (str, optional): name of the workspace type
             type_id (int, optional): ID of the workspace_type
             expanded_view (bool, optional): if 'False' then just search in recently
                                                accessed business workspace for this name and type

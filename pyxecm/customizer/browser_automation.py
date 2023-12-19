@@ -119,7 +119,7 @@ class BrowserAutomation:
             logger.error("Cannot load page -> %s; error -> %s", page_url, exception)
             return False
 
-        logger.info("Page title get page -> %s", self.browser.title)
+        logger.info("Page title after get page -> %s", self.browser.title)
 
         return True
 

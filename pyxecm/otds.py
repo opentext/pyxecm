@@ -1369,10 +1369,16 @@ class OTDS:
             dict: Request response or None if the update fails.
         """
 
-        userPatchBodyJson = {
-            "userPartitionID": partition,
-            "values": [{"name": attribute_name, "values": [attribute_value]}],
-        }
+        if attribute_name in ["description"]:
+            userPatchBodyJson = {
+                "userPartitionID": partition,
+                attribute_name: attribute_value,
+            }
+        else:
+            userPatchBodyJson = {
+                "userPartitionID": partition,
+                "values": [{"name": attribute_name, "values": [attribute_value]}],
+            }
 
         request_url = self.users_url() + "/" + user_id
 

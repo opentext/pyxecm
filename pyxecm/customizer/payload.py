@@ -118,7 +118,9 @@ __email__ = "mdiefenb@opentext.com"
 import json
 import logging
 import os
+import random
 import re
+import string
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -2095,7 +2097,7 @@ class Payload:
 
             # Now we determine the ID. Either it is in the payload section from
             # the current customizer run or we try to look it up in the system.
-            # The latter case may happen if the custiomuer pod got restarted.
+            # The latter case may happen if the customizer pod got restarted.
             group_id = self.determine_group_id(group)
             if not group_id:
                 logger.warning(
@@ -2129,7 +2131,7 @@ class Payload:
                 )
                 continue
             user_name = user["name"]
-            # Check if group has been disabled in payload (enabled = false).
+            # Check if user has been disabled in payload (enabled = false).
             # In this case we skip the element:
             if "enabled" in user and not user["enabled"]:
                 logger.info(
@@ -2139,7 +2141,7 @@ class Payload:
 
             # Now we determine the ID. Either it is in the payload section from
             # the current customizer run or we try to look it up in the system.
-            # The latter case may happen if the custiomuer pod got restarted.
+            # The latter case may happen if the customizer pod got restarted.
             user_id = self.determine_user_id(user)
             if not user_id:
                 logger.warning(
@@ -2147,7 +2149,7 @@ class Payload:
                 )
                 continue
 
-            # Add Group with its ID to the dict self._placeholder_values:
+            # Add user with its ID to the dict self._placeholder_values:
             self._placeholder_values["OTCS_USER_ID_%s", user_name.upper()] = str(
                 user_id
             )
@@ -2428,8 +2430,8 @@ class Payload:
 
         # If this payload section has been processed successfully before we
         # can return True and skip processing it once more:
-        if self.check_status_file(section_name):
-            return True
+        #        if self.check_status_file(section_name):
+        #            return True
 
         success: bool = True
 
@@ -2452,13 +2454,28 @@ class Payload:
                 continue
 
             # Sanity checks:
-            if not "password" in user:
-                logger.error(
-                    "User -> %s is missing a password. Skipping to next user...",
+            if (
+                not "password" in user
+                or user["password"] is None
+                or user["password"] == ""
+            ):
+                logger.info(
+                    "User -> %s no password defined in payload, generating random password...",
                     user_name,
                 )
-                success = False
-                continue
+                user["password"] = self.generate_password(
+                    length=10, use_special_chars=True
+                )
+
+                description_attribue = {
+                    "name": "description",
+                    "value": "initial password: " + user["password"],
+                }
+
+                try:
+                    user["extra_attributes"].append(description_attribue)
+                except KeyError:
+                    user["extra_attributes"] = [description_attribue]
 
             # Sanity checks:
             if not "base_group" in user:
@@ -3533,12 +3550,12 @@ class Payload:
 
         if not admin_settings:
             logger.info("Payload section -> %s is empty. Skipping...", section_name)
-            return True
+            return False  # important to return False here as otherwise we are triggering a restart of services!!
 
         # If this payload section has been processed successfully before we
         # can return True and skip processing it once more:
         if self.check_status_file(section_name):
-            return True
+            return False  # important to return False here as otherwise we are triggering a restart of services!!
 
         restart_required: bool = False
         success: bool = True
@@ -5587,12 +5604,12 @@ class Payload:
             # of automatically created workspaces - this can happen because the
             # creator gets added to the leader role automatically:
             leader_role_id = self._otcs.lookup_result_value(
-                workspace_roles, "leader", "True", "id"
+                workspace_roles, "leader", True, "id"
             )
 
             if leader_role_id:
                 leader_role_name = self._otcs.lookup_result_value(
-                    workspace_roles, "leader", str(True), "name"
+                    workspace_roles, "leader", True, "name"
                 )
                 response = self._otcs.remove_member_from_workspace(
                     workspace_node_id, leader_role_id, workspace_owner_id, False
@@ -8391,7 +8408,7 @@ class Payload:
                             success = False
                             break
                         else:
-                            browser_automation_object.implict_wait(10.0)
+                            browser_automation_object.implict_wait(15.0)
                             logger.info(
                                 "Successfuly loaded page -> %s.", base_url + page
                             )
@@ -8415,7 +8432,7 @@ class Payload:
                             success = False
                             break
                         else:
-                            browser_automation_object.implict_wait(10.0)
+                            browser_automation_object.implict_wait(15.0)
                             logger.info("Successfuly clicked element -> %s.", elem)
                     case "set_elem":
                         elem = automation.get("elem", "")
@@ -8657,3 +8674,71 @@ class Payload:
     def getM365(self) -> object:
         """Get M365 object"""
         return self._m365
+
+    def generate_password(
+        self,
+        length: int,
+        use_special_chars: bool = False,
+        min_special: int = 1,
+        min_numerical: int = 1,
+        min_upper: int = 1,
+        min_lower: int = 1,
+        override_special: str = None,
+    ):
+        """Function to generate random passwords with a given specification
+
+        Args:
+            length (int): Define password length
+            use_special_chars (bool, optional): Define if special characters should be used. Defaults to False.
+            min_special (int, optional): Define min amount of special characters. Defaults to 1.
+            min_numerical (int, optional): Define if numbers should be used. Defaults to 1.
+            min_upper (int, optional): Define mininum number of upper case letters. Defaults to 1.
+            min_lower (int, optional): Define minimum number of lower case letters. Defaults to 1.
+            override_special (string | None, optional): Define special characters to be used, if not set: !@#$%^&*()_-+=<>?/{}[]. Defaults to None.
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            _type_: _description_
+        """
+        # Define character sets
+        lowercase_letters = string.ascii_lowercase
+        uppercase_letters = string.ascii_uppercase
+        numerical_digits = string.digits
+        special_characters = "!@#$%^&*()_-+=<>?/{}[]"
+
+        if override_special:
+            special_characters = override_special
+        # Ensure minimum requirements are met
+
+        if min_special + min_numerical + min_upper + min_lower > length:
+            raise ValueError("Minimum requirements exceed password length")
+
+        # Initialize the password
+        password = []
+
+        # Add required characters
+        password.extend(random.sample(lowercase_letters, min_lower))
+        password.extend(random.sample(uppercase_letters, min_upper))
+        password.extend(random.sample(numerical_digits, min_numerical))
+
+        if use_special_chars:
+            password.extend(random.sample(special_characters, min_special))
+
+        # Fill the rest of the password with random characters
+        remaining_length = length - len(password)
+        all_chars = lowercase_letters + uppercase_letters + numerical_digits
+
+        if use_special_chars:
+            all_chars += special_characters
+
+        password.extend(random.choices(all_chars, k=remaining_length))
+
+        # Shuffle the password to ensure randomness
+        random.shuffle(password)
+
+        # Convert the password list to a string
+        final_password = "".join(password)
+
+        return final_password

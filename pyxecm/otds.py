@@ -134,8 +134,9 @@ class OTDS:
         protocol: str,
         hostname: str,
         port: int,
-        username: str,
-        password: str,
+        username: str | None = None,
+        password: str | None = None,
+        otds_ticket: str | None = None,
     ):
         """Initialize the OTDS object
 
@@ -143,8 +144,9 @@ class OTDS:
             protocol (str): either http or https
             hostname (str): hostname of otds
             port (int): port number - typically 80 or 443
-            username (type): otds user name
-            password (type): otds password
+            username (str, optional): otds user name. Optional if otds_ticket is provided.
+            password (str, optional): otds password. Optional if otds_ticket is provided.
+            otds_ticket (str, optional): Authentication ticket of OTDS
         """
 
         # Initialize otdsConfig as an empty dictionary
@@ -174,6 +176,9 @@ class OTDS:
             otds_config["password"] = password
         else:
             otds_config["password"] = ""
+
+        if otds_ticket:
+            self._cookie = {"OTDSTicket": otds_ticket}
 
         otdsBaseUrl = protocol + "://" + otds_config["hostname"]
         if str(port) not in ["80", "443"]:

@@ -101,9 +101,12 @@ class CustomizerSettingsOTDS:
     hostname: str = os.environ.get("OTDS_HOSTNAME", "otds")
     port: int = os.environ.get("OTDS_SERVICE_PORT_OTDS", 80)
     username: str = os.environ.get("OTDS_ADMIN", "admin")
+    otds_ticket: str | None = None
     admin_partition: str = "otds.admin"
     public_url: str = os.environ.get("OTDS_PUBLIC_URL")
     password: str = os.environ.get("OTDS_PASSWORD")
+    disable_password_policy: bool = True
+    enable_audit: bool = True
 
 
 @dataclass
@@ -116,7 +119,7 @@ class CustomizerSettingsOTCS:
     hostname: str = os.environ.get("OTCS_HOSTNAME", "otcs-admin-0")
     hostname_backend: str = os.environ.get("OTCS_HOSTNAME", "otcs-admin-0")
     hostname_frontend: str = os.environ.get("OTCS_HOSTNAME_FRONTEND", "otcs-frontend")
-    public_url: str = os.environ.get("OTCS_PUBLIC_URL")
+    public_url: str = os.environ.get("OTCS_PUBLIC_URL", "otcs.public-url.undefined")
     port: int = os.environ.get("OTCS_SERVICE_PORT_OTCS", 8080)
     port_backend: int = os.environ.get("OTCS_SERVICE_PORT_OTCS", 8080)
     port_frontend: int = 80
@@ -138,6 +141,8 @@ class CustomizerSettingsOTCS:
 
     replicas_frontend = 0
     replicas_backend = 0
+
+    update_admin_user: bool = True
 
 
 @dataclass
@@ -201,6 +206,9 @@ class CustomizerSettingsOTAWP:
     """Class for OTAWP related settings"""
 
     enabled: bool = os.environ.get("OTAWP_ENABLED", "false").lower() == "true"
+    license_file: str = "/payload/otawp-license.lic"
+    product_name: str = "APPWORKS_PLATFORM"
+    product_description: str = "OpenText Appworks Platform"
     resource_name: str = "awp"
     access_role_name: str = "Access to " + resource_name
     admin: str = os.environ.get("OTAWP_ADMIN", "sysadmin")
@@ -231,13 +239,6 @@ class CustomizerSettingsAviator:
     """Class for Aviator related settings"""
 
     enabled: bool = os.environ.get("AVIATOR_ENABLED", "false").lower() == "true"
-    cs_url: str = (
-        os.environ.get("OTCS_PUBLIC_PROTOCOL", "https")
-        + "://"
-        + os.environ.get("OTCS_PUBLIC_URL", "").replace("otcs", "otcs-admin")
-    )
-    cs_user: str = "otadmin@otds.admin"  # needs to be hard-coded
-    cs_password: str = os.environ.get("OTCS_PASSWORD")
 
 
 class Customizer:
@@ -329,40 +330,6 @@ class Customizer:
         )
 
         # end function definition
-
-    # def init_browser_automation(self) -> BrowserAutomation | None:
-    #     """Initializes the Browser automation that is needed
-    #        for settings that cannot be automated by REST API.
-
-    #     Returns:
-    #         BrowserAutomation: browser automation object or None
-    #     """
-
-    #     logger.info(
-    #         "Browser Automation - OTCS URL      = %s", self.aviator_settings.cs_url
-    #     )
-    #     logger.info(
-    #         "Browser Automation - OTCS user     = %s", self.aviator_settings.cs_user
-    #     )
-    #     logger.debug(
-    #         "Browser Automation - OTCS password = %s", self.aviator_settings.cs_password
-    #     )
-
-    #     # We shuld change this in future to make it not dependent on Aviator:
-    #     browser_automation_object = BrowserAutomation(
-    #         base_url=self.aviator_settings.cs_url,
-    #         user_name=self.aviator_settings.cs_user,
-    #         user_password=self.aviator_settings.cs_password,
-    #     )
-
-    #     if not browser_automation_object:
-    #         logger.error("Failed to initialize browser automation.")
-    #         return None
-
-    #     logger.info("Browser automation initialized.")
-    #     return browser_automation_object
-
-    # end function definition
 
     def init_m365(self) -> M365:
         """Initialize the M365 object we use to talk to the Microsoft Graph API.
@@ -514,6 +481,7 @@ class Customizer:
         logger.info("OTDS Port              = %s", str(self.otds_settings.port))
         logger.info("OTDS Admin User        = %s", self.otds_settings.username)
         logger.debug("OTDS Admin Password    = %s", self.otds_settings.password)
+        logger.debug("OTDS Ticket            = %s", self.otds_settings.otds_ticket)
         logger.info("OTDS Admin Partition   = %s", self.otds_settings.admin_partition)
 
         otds_object = OTDS(
@@ -522,6 +490,7 @@ class Customizer:
             port=self.otds_settings.port,
             username=self.otds_settings.username,
             password=self.otds_settings.password,
+            otds_ticket=self.otds_settings.otds_ticket,
         )
 
         logger.info("Authenticating to OTDS...")
@@ -533,15 +502,20 @@ class Customizer:
         logger.info("OTDS is ready now.")
 
         logger.info("Enable OTDS audit...")
-        otds_object.enable_audit()
 
-        logger.info("Disable OTDS password expiry...")
-        # Setting the value to 0 disables password expiry.
-        # The default is 90 days and we may have Terrarium
-        # instances that are running longer than that. This
-        # avoids problems with customerizer re-runs of
-        # instances that are > 90 days old.
-        otds_object.update_password_policy(update_values={"passwordMaximumDuration": 0})
+        if self.otds_settings.enable_audit:
+            otds_object.enable_audit()
+
+        if self.otds_settings.disable_password_policy:
+            logger.info("Disable OTDS password expiry...")
+            # Setting the value to 0 disables password expiry.
+            # The default is 90 days and we may have Terrarium
+            # instances that are running longer than that. This
+            # avoids problems with customerizer re-runs of
+            # instances that are > 90 days old.
+            otds_object.update_password_policy(
+                update_values={"passwordMaximumDuration": 0}
+            )
 
         return otds_object
 
@@ -657,6 +631,11 @@ class Customizer:
             self.otcs_settings.k8s_statefulset_backend,
         )
 
+        logger.debug("Checking if OTCS object has already been initialized")
+
+        otds_ticket = (
+            self.otds_object.cookie()["OTDSTicket"] if self.otds_object else None
+        )
         otcs_object = OTCS(
             self.otcs_settings.protocol,
             hostname,
@@ -666,6 +645,7 @@ class Customizer:
             self.otcs_settings.password,
             partition_name,
             resource_name,
+            otds_ticket=otds_ticket,
         )
 
         # It is important to wait for OTCS to be configured - otherwise we
@@ -686,9 +666,10 @@ class Customizer:
             otcs_cookie = otcs_object.authenticate()
         logger.info("OTCS is ready now.")
 
-        # Set first name and last name of Admin user (ID = 1000):
-        otcs_object.update_user(1000, field="first_name", value="Terrarium")
-        otcs_object.update_user(1000, field="last_name", value="Admin")
+        if self.otcs_settings.update_admin_user:
+            # Set first name and last name of Admin user (ID = 1000):
+            otcs_object.update_user(1000, field="first_name", value="Terrarium")
+            otcs_object.update_user(1000, field="last_name", value="Admin")
 
         if "OTCS_RESSOURCE_ID" not in self.settings.placeholder_values:
             self.settings.placeholder_values[
@@ -1203,6 +1184,57 @@ class Customizer:
         # Allow impersonation for all users:
         self.otds_object.impersonate_resource(self.otawp_settings.resource_name)
 
+        # Add SPS license for OTAWP
+        # check if the license file exists, otherwise skip for versions pre 24.1
+        if os.path.isfile(self.otawp_settings.license_file):
+            logger.info(
+                "OTAWP license file (%s) found, assiging to ressource %s",
+                self.otawp_settings.license_file,
+                self.otawp_settings.resource_name,
+            )
+
+            otawp_license = self.otds_object.add_license_to_resource(
+                self.otawp_settings.license_file,
+                self.otawp_settings.product_name,
+                self.otawp_settings.product_description,
+                awp_resource["resourceID"],
+            )
+            if not otawp_license:
+                logger.error(
+                    "Couldn't apply license -> %s for product -> %s.",
+                    self.otawp_settings.license_file,
+                    self.otawp_settings.product_name,
+                )
+
+            # Assign license to Content Server Members Partiton and otds.admin
+            for partition_name in ["otds.admin", self.otcs_settings.partition]:
+                if self.otds_object.is_partition_licensed(
+                    partition_name=partition_name,
+                    resource_id=awp_resource["resourceID"],
+                    license_feature="USERS",
+                    license_name=self.otawp_settings.product_name,
+                ):
+                    logger.info(
+                        "Partition -> %s is already licensed for -> %s (%s)",
+                        partition_name,
+                        self.otawp_settings.product_name,
+                        "USERS",
+                    )
+                else:
+                    assigned_license = self.otds_object.assign_partition_to_license(
+                        partition_name,
+                        awp_resource["resourceID"],
+                        "USERS",
+                        self.otawp_settings.product_name,
+                    )
+                    if not assigned_license:
+                        logger.error(
+                            "Partition -> %s could not be assigned to license -> %s (%s)",
+                            partition_name,
+                            self.otawp_settings.product_name,
+                            "USERS",
+                        )
+
         # end function definition
 
     def restart_otcs_service(self, otcs_object: OTCS, extra_wait_time: int = 60):
@@ -1213,6 +1245,12 @@ class Customizer:
         Returns:
             None
         """
+
+        if not self.k8s_object:
+            logger.warning(
+                "Kubernetes integration not available, skipping restart of services"
+            )
+            return
 
         logger.info("Restart OTCS frontend and backend pods...")
 
@@ -1659,6 +1697,7 @@ class Customizer:
                 placeholder_values=self.settings.placeholder_values,  # this dict includes placeholder replacements for the Ressource IDs of OTAWP and OTCS
                 log_header_callback=self.log_header,
                 stop_on_error=self.settings.stop_on_error,
+                aviator_enabled=self.aviator_settings.enabled,
             )
             # Load the payload file and initialize the payload sections:
             if not payload_object.init_payload():

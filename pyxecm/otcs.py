@@ -60,6 +60,7 @@ get_node_by_workspace_and_path: Get a node based on the workspace ID and path (l
 get_node_by_volume_and_path: Get a node based on the volume ID and path
 get_node_from_nickname: Get a node based on the nickname
 get_subnodes: get children nodes of a parent node
+get_node_actions: get possible actions for a node
 rename_node: Change the name and description of a node
 get_volumes: Get all Volumes
 get_volume: Get Volume information based on the volume type ID
@@ -148,6 +149,7 @@ import_security_clearance_codes: Import Securioty Clearance codes from a config 
 assign_user_security_clearance: Assign a Security Clearance level to a user
 assign_user_supplemental_markings: Assign a list of Supplemental Markings to a user
 
+check_workspace_aviator: Check if Content Aviator is enabled for a workspace
 update_workspace_aviator: Enable or disable the Content Aviator for a workspace
 
 """
@@ -196,6 +198,7 @@ class OTCS:
     _config: dict
     _cookie = None
     _otcs_ticket = None
+    _otds_ticket = None
 
     def __init__(
         self,
@@ -203,11 +206,12 @@ class OTCS:
         hostname: str,
         port: int,
         public_url: str,
-        username: str,
-        password: str,
+        username: str | None = None,
+        password: str | None = None,
         user_partition: str = "Content Server Members",
         resource_name: str = "cs",
         default_license: str = "X3",
+        otds_ticket: str | None = None,
     ):
         """Initialize the OTCS object
 
@@ -216,11 +220,12 @@ class OTCS:
             hostname (str): The hostname of Extended ECM server to communicate with.
             port (int): The port number used to talk to the Extended ECM server.
             public_url (str): public (external) URL
-            username (str): The admin user name of Extended ECM.
-            password (str): The admin password of Extended ECM.
+            username (str, optional): The admin user name of Extended ECM. Optional if otds_ticket is provided.
+            password (str, optional): The admin password of Extended ECM. Optional if otds_ticket is provided.
             user_partition (str): Name of the OTDS partition for OTCS users. Default is "Content Server Members".
             resource_name (str, optional): Name of the OTDS resource for OTCS. Dault is "cs".
             default_license (str, optional): name of the default user license. Default is "X3".
+            otds_ticket (str, optional): Authentication ticket of OTDS
         """
 
         # Initialize otcs_config as an empty dictionary
@@ -287,6 +292,7 @@ class OTCS:
         otcs_rest_url = otcs_url + "/api"
         otcs_config["restUrl"] = otcs_rest_url
 
+        otcs_config["isReady"] = otcs_rest_url + "/v1/ping"
         otcs_config["authenticationUrl"] = otcs_rest_url + "/v1/auth"
         otcs_config["serverInfoUrl"] = otcs_rest_url + "/v1/serverinfo"
         otcs_config["membersUrl"] = otcs_rest_url + "/v1/members"
@@ -325,6 +331,7 @@ class OTCS:
         otcs_config["aiUrl"] = otcs_rest_url + "/v2/ai/nodes"
 
         self._config = otcs_config
+        self._otds_ticket = otds_ticket
 
     def config(self) -> dict:
         """Returns the configuration dictionary
@@ -851,7 +858,7 @@ class OTCS:
     # end method definition
 
     def is_configured(self) -> bool:
-        """Checks if the Content Server pod is ready to receive requests.
+        """Checks if the Content Server pod is configured to receive requests.
 
         Args:
             None.
@@ -860,6 +867,47 @@ class OTCS:
         """
 
         request_url = self.config()["configuredUrl"]
+
+        logger.info("Trying to retrieve OTCS URL -> %s", request_url)
+
+        try:
+            response = requests.get(
+                url=request_url,
+                headers=REQUEST_JSON_HEADERS,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.RequestException as exception:
+            logger.warning(
+                "Unable to connect to -> %s; warning -> %s",
+                request_url,
+                exception.strerror,
+            )
+            logger.warning("OTCS service may not be ready yet.")
+            return False
+
+        if not response.ok:
+            logger.warning(
+                "Unable to connect to -> %s; status -> %s; warning -> %s",
+                request_url,
+                response.status_code,
+                response.text,
+            )
+            return False
+
+        return True
+
+    # end method definition
+
+    def is_ready(self) -> bool:
+        """Checks if the Content Server pod is ready to receive requests.
+
+        Args:
+            None.
+        Returns:
+            bool: True if pod is ready. False if pod is not yet ready.
+        """
+
+        request_url = self.config()["isReady"]
 
         logger.info("Trying to retrieve OTCS URL -> %s", request_url)
 
@@ -906,41 +954,77 @@ class OTCS:
         if self._cookie and not revalidate:
             return self._cookie
 
-        otcs_ticket = "NotSet"
+        otcs_ticket = None
 
-        logger.info(
-            "Requesting OTCS ticket from -> %s", self.config()["authenticationUrl"]
-        )
-
-        response = None
-        try:
-            response = requests.post(
-                url=self.config()["authenticationUrl"],
-                data=self.credentials(),
-                headers=REQUEST_FORM_HEADERS,
-                timeout=REQUEST_TIMEOUT,
-            )
-        except requests.exceptions.RequestException as exception:
+        logger.info("Wait for OTCS to be ready...")
+        while not self.is_ready():
             logger.warning(
-                "Unable to connect to -> %s; error -> %s",
-                self.config()["authenticationUrl"],
-                exception.strerror,
+                "OTCS is not ready to receive requests yet. Waiting 30 seconds..."
             )
-            logger.warning("OTCS service may not be ready yet.")
-            return None
+            time.sleep(15)
 
-        if response.ok:
-            authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+        if self._otds_ticket:
+            logger.info(
+                "Requesting OTCS ticket with OTDS ticket from -> %s",
+                self.config()["authenticationUrl"],
             )
-            if not authenticate_dict:
+            url = self.config()["authenticationUrl"]
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "OTDSTicket": self._otds_ticket,
+            }
+
+            try:
+                response = requests.request("GET", url, headers=headers, timeout=10)
+                if response.ok:
+                    otcs_ticket = response.headers.get("OTCSTicket")
+
+            except requests.exceptions.RequestException as exception:
+                logger.warning(
+                    "Unable to connect to -> %s; error -> %s",
+                    self.config()["authenticationUrl"],
+                    exception.strerror,
+                )
+
+        # Check if previous authentication was successful
+        if not otcs_ticket:
+            logger.info(
+                "Requesting OTCS ticket with User/Password from -> %s",
+                self.config()["authenticationUrl"],
+            )
+
+            response = None
+            try:
+                response = requests.post(
+                    url=self.config()["authenticationUrl"],
+                    data=self.credentials(),
+                    headers=REQUEST_FORM_HEADERS,
+                    timeout=REQUEST_TIMEOUT,
+                )
+            except requests.exceptions.RequestException as exception:
+                logger.warning(
+                    "Unable to connect to -> %s; error -> %s",
+                    self.config()["authenticationUrl"],
+                    exception.strerror,
+                )
+                logger.warning("OTCS service may not be ready yet.")
                 return None
+
+            if response.ok:
+                authenticate_dict = self.parse_request_response(
+                    response, "This can be normal during restart", False
+                )
+                if not authenticate_dict:
+                    return None
+                else:
+                    otcs_ticket = authenticate_dict["ticket"]
+                    logger.info("Ticket -> %s", otcs_ticket)
             else:
-                otcs_ticket = authenticate_dict["ticket"]
-                logger.info("Ticket -> %s", otcs_ticket)
-        else:
-            logger.error("Failed to request an OTCS ticket; error -> %s", response.text)
-            return None
+                logger.error(
+                    "Failed to request an OTCS ticket; error -> %s", response.text
+                )
+                return None
 
         # Store authentication ticket:
         self._cookie = {"otcsticket": otcs_ticket, "LLCookie": otcs_ticket}
@@ -2438,6 +2522,57 @@ class OTCS:
                 logger.error(
                     "Failed to get subnodes for parent node with ID -> %s; status -> %s; error -> %s",
                     parent_node_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def get_node_actions(self, node_id: int, filter_actions: list = None) -> dict:
+        """Get allowed actions for a node.
+
+        Args:
+            node_id (int): _description_
+            filter_actions (list, optional): _description_
+
+        Returns:
+            dict: _description_
+        """
+
+        actions_post_body = {"ids": [node_id], "actions": filter_actions}
+
+        request_url = self.config()["nodesUrlv2"] + "/actions"
+
+        #        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/actions"
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Get actions for node with ID -> %s; calling -> %s",
+            str(node_id),
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.post(
+                url=request_url,
+                headers=request_header,
+                data=actions_post_body,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get actions for node with ID -> %s; status -> %s; error -> %s",
+                    node_id,
                     response.status_code,
                     response.text,
                 )
@@ -4253,12 +4388,15 @@ class OTCS:
 
     # end method definition
 
-    def get_workspace_instances(self, type_name: str, expanded_view: bool = True):
+    def get_workspace_instances(
+        self, type_name: str, type_id: int = None, expanded_view: bool = True
+    ):
         """Get all workspace instances of a given type. This is a convenience
            wrapper method for get_workspace_by_type_and_name()
 
         Args:
             type_name (str): name of the workspace type
+            type_id (int, optional): ID of the workspace_type
             expanded_view (bool, optional): if 'False' then just search in recently
                                                accessed business workspace for this name and type
                                                if 'True' (this is the default) then search in all
@@ -4267,19 +4405,25 @@ class OTCS:
             dict: Workspace information or None if the workspace is not found.
         """
 
+        # Omitting the name lets it return all instances of the type:
         return self.get_workspace_by_type_and_name(
-            type_name, name="", expanded_view=expanded_view
+            type_name=type_name, type_id=type_id, name="", expanded_view=expanded_view
         )
 
     # end method definition
 
     def get_workspace_by_type_and_name(
-        self, type_name: str, name: str = "", expanded_view: bool = True
+        self,
+        type_name: str = "",
+        type_id: int = None,
+        name: str = "",
+        expanded_view: bool = True,
     ) -> dict | None:
         """Lookup workspace based on workspace type and workspace name.
 
         Args:
             type_name (str): name of the workspace type
+            type_id (int, optional): ID of the workspace_type
             name (str, optional): name of the workspace, if "" then deliver all instances
                                   of the given workspace type
             expanded_view (bool, optional): if 'False' then just search in recently
@@ -4292,10 +4436,12 @@ class OTCS:
 
         # Add query parameters (these are NOT passed via JSon body!)
         query = {
-            #            "where_name": name,
-            "where_workspace_type_name": type_name,
             "expanded_view": expanded_view,
         }
+        if type_name:
+            query["where_workspace_type_name"] = type_name
+        if type_id:
+            query["where_workspace_type_id"] = type_id
         if name:
             query["where_name"] = name
 
@@ -5016,6 +5162,7 @@ class OTCS:
         Args:
             workspace_id (int): ID of the workspace
             file_path (str): path + filename of icon file
+            file_mimetype (str, optional): mimetype of the image
         Returns:
             dict: Node information or None if REST call fails.
         """
@@ -5024,16 +5171,27 @@ class OTCS:
             logger.error("Workspace icon file does not exist -> %s", file_path)
             return None
 
-        updateWorkspaceIconPutBody = {
+        updateWorkspaceIconPostBody = {
             "file_content_type": file_mimetype,
             "file_filename": os.path.basename(file_path),
-            "file": file_path,  # icon_file
         }
+
+        uploadPostFiles = [
+            (
+                "file",
+                (
+                    f"{os.path.basename(file_path)}",
+                    open(file_path, "rb"),
+                    file_mimetype,
+                ),
+            )
+        ]
 
         request_url = (
             self.config()["businessworkspaces"] + "/" + str(workspace_id) + "/icons"
         )
-        request_header = self.request_form_header()
+
+        request_header = self.cookie()
 
         logger.info(
             "Update icon for workspace ID -> %s with icon file -> %s; calling -> %s",
@@ -5046,9 +5204,10 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=updateWorkspaceIconPutBody,
+                data=updateWorkspaceIconPostBody,
                 headers=request_header,
                 cookies=self.cookie(),
+                files=uploadPostFiles,
                 timeout=None,
             )
             if response.ok:
@@ -7471,6 +7630,41 @@ class OTCS:
                     response.text,
                 )
                 return None
+
+    # end method definition
+
+    def check_workspace_aviator(
+        self,
+        workspace_id: int,
+    ) -> bool:
+        """Check if Content Aviator is enabled for a workspace
+
+        Args:
+            workspace_id (int): node ID of the workspace
+        Returns:
+            bool: True if aviator is enabled, False otherwise
+        """
+
+        response = self.get_node_actions(
+            node_id=workspace_id, filter_actions=["disableai", "enableai"]
+        )
+        result_data = self.get_result_value(
+            response=response,
+            key=str(workspace_id),
+        )
+        if result_data and "data" in result_data:
+            data = result_data["data"]
+            if "disableai" in data:
+                logger.info(
+                    "Aviator is enabled for workspace with ID -> %s", str(workspace_id)
+                )
+                return True
+            elif "enableai" in data:
+                logger.info(
+                    "Aviator is disabled for workspace with ID -> %s", str(workspace_id)
+                )
+
+        return False
 
     # end method definition
 

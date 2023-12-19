@@ -74,7 +74,6 @@ process_workspace_types: process Extended ECM workspace types
 process_workspaces: process Extended ECM workspace instances
 process_workspace_relationships: process Extended ECM workspace relationships
 process_workspace_members: process Extended ECM workspace members (users and groups)
-configure_vector_data_source: Configuration of the Aviator Vector Data Source
 process_workspace_aviators: Process workspaces Content Aviator settings in payload and
                             enable Aviator for selected workspaces
 process_web_reports: process Extended ECM Web Reports (starts them with parameters)
@@ -335,6 +334,7 @@ class Payload:
 
     _otcs_restart_callback: Callable
     _log_header_callback: Callable
+    _aviator_enabled = False
 
     def __init__(
         self,
@@ -352,6 +352,7 @@ class Payload:
         placeholder_values: dict,
         log_header_callback: Callable,
         stop_on_error: bool = False,
+        aviator_enabled: bool = False,
     ):
         """Initialize the Payload object
 
@@ -371,6 +372,7 @@ class Payload:
             log_header_callback: prints a section break / header line into the log
             stop_on_error (bool): controls if transport deployment should stop
                                   if one transport fails
+            aviator_enabled (bool): whether or not the Content Aviator is enabled
         """
 
         self._stop_on_error = stop_on_error
@@ -388,6 +390,7 @@ class Payload:
         self._placeholder_values = placeholder_values
         self._otcs_restart_callback = otcs_restart_callback
         self._log_header_callback = log_header_callback
+        self._aviator_enabled = aviator_enabled
         self._http_object = HTTP()
 
     # end method definition
@@ -647,7 +650,10 @@ class Payload:
         # we don't want external payload runs to re-apply this processing:
         if payload_specific:
             file_name = os.path.basename(self._payload_source)  # remove directories
-            file_name = os.path.splitext(file_name)[0]  # remove file suffix
+            # Split once at the first occurance of a dot
+            # as the _payload_source may have multiple suffixes
+            # such as .yml.gz.b64:
+            file_name = file_name.split(".", 1)[0]
             file_name = "success_" + file_name + "_" + payload_section_name + ".json"
         else:
             file_name = "success_" + payload_section_name + ".json"
@@ -802,7 +808,10 @@ class Payload:
         # we don't want external payload runs to re-apply this processing:
         if payload_specific:
             file_name = os.path.basename(self._payload_source)  # remove directories
-            file_name = os.path.splitext(file_name)[0]  # remove file suffix
+            # Split once at the first occurance of a dot
+            # as the _payload_source may have multiple suffixes
+            # such as .yml.gz.b64:
+            file_name = file_name.split(".", 1)[0]
             file_name = "success_" + file_name + "_" + payload_section_name + ".json"
         else:
             file_name = "success_" + payload_section_name + ".json"
@@ -810,10 +819,10 @@ class Payload:
         status_document = self._otcs.get_node_by_parent_and_name(
             parent_id=int(source_folder_id), name=file_name, show_error=True
         )
-        if not status_document:
+        status_file_id = self._otcs.get_result_value(status_document, "id")
+        if not status_file_id:
             logger.error("Cannot find status file -> %s", file_name)
             return None
-        status_file_id = self._otcs.get_result_value(status_document, "id")
         content = self._otcs.get_document_content(status_file_id)
 
         try:
@@ -967,7 +976,7 @@ class Payload:
             return workspace["nodeId"]
 
         response = self._otcs.get_workspace_by_type_and_name(
-            workspace["type_name"], workspace["name"]
+            type_name=workspace["type_name"], name=workspace["name"]
         )
         workspace_id = self._otcs.get_result_value(response, "id")
         if workspace_id:
@@ -1144,10 +1153,12 @@ class Payload:
                     self.process_workspace_relationships()
                     self._log_header_callback("Process Workspace Memberships")
                     self.process_workspace_members()
-                    
-                    # This can only run at the very as Web Reports are used to enable Aviator in KINI database table:
-                    self._log_header_callback("Process Workspace Aviators")
-                    self.process_workspace_aviators()
+
+                    # This has to run after the processing of webReports that are
+                    # used to enable Content Aviator in KINI database table:
+                    if self._aviator_enabled:
+                        self._log_header_callback("Process Workspace Aviators")
+                        self.process_workspace_aviators()
                 case "sapRFCs":
                     self._log_header_callback("Process SAP RFCs")
 
@@ -5249,6 +5260,40 @@ class Payload:
                 workspace["nodeId"],
             )
 
+            # Check if there's an workspace icon/image configured:
+            if "image_nickname" in workspace:
+                image_nickname = workspace["image_nickname"]
+
+                response = self._otcs.get_node_from_nickname(image_nickname)
+                node_id = self._otcs.get_result_value(response, "id")
+                if node_id:
+                    mime_type = self._otcs.get_result_value(response, "mime_type")
+                    if not mime_type:
+                        logger.warning(
+                            "Missing mime type information - assuming image/png"
+                        )
+                        mime_type = "image/png"
+                    file_path = "/tmp/" + image_nickname
+                    self._otcs.download_document(node_id=node_id, file_path=file_path)
+                    response = self._otcs.update_workspace_icon(
+                        workspace_id=workspace["nodeId"],
+                        file_path=file_path,
+                        file_mimetype=mime_type,
+                    )
+                    if not response:
+                        logger.error(
+                            "Failed to assign icon -> %s to workspace -> %s from file -> %s ",
+                            image_nickname,
+                            name,
+                            file_path,
+                        )
+                else:
+                    logger.error(
+                        "Cannot find workspace image with nickname -> %s for workspace -> %s",
+                        image_nickname,
+                        name,
+                    )
+
             # Check if an RM classification is specified for the workspace:
             # RM Classification is specified as list of path elements (top-down)
             if (
@@ -5735,71 +5780,6 @@ class Payload:
 
         # end method definition
 
-    def configure_vector_data_source(self) -> bool:
-        """Run the configuration of the Aviator Vector Data Source"""
-
-        response = self._otcs.get_node_by_parent_and_name(
-            2001, "Vector Data Source Folder"
-        )
-        vector_source_node_id = self._otcs.get_result_value(response, "id")
-        if vector_source_node_id:
-            logger.warning("Vector Data Source does already exist.")
-            return True
-
-        # 1. Log into Extended ECM:
-        logger.info("Log in to Extended ECM (OTCS) in the browser...")
-        if not self._browser_automation.run_login():
-            return False
-
-        # 2. Load the data sources page:
-        logger.info("Load page for data sources...")
-        if not self._browser_automation.get_page(
-            "/cs/cs?func=ll&objtype=148&objaction=browse"
-        ):
-            return False
-
-        # 3. Identify the Add item Menu:
-        logger.info("Find Add Item menu for data flows and open it...")
-        if not self._browser_automation.find_elem_and_click(
-            find_elem="addItemMenuSystemSelect"
-        ):
-            return False
-
-        # 4. Click the menu item for Vector data source:
-        logger.info("Add Aviator Vector data source...")
-        if not self._browser_automation.find_elem_and_click(
-            find_elem="addItemMenuSystemVector Data Source"
-        ):
-            return False
-
-        # 5. Fill the required parameters:
-        logger.info("Fill Aviator Vector Data Source parameters...")
-        if (
-            not self._browser_automation.find_elem_and_set(
-                find_elem="ProducerWriteBaseDir_ID",
-                elem_value="/opt/opentext/cs_index/vector/",
-            )
-            or not self._browser_automation.find_elem_and_set(
-                find_elem="ReadBaseDir_ID", elem_value="/opt/opentext/cs_index/vector/"
-            )
-            or not self._browser_automation.find_elem_and_set(
-                find_elem="WriteBaseDir_ID", elem_value="/opt/opentext/cs_index/vector/"
-            )
-        ):
-            return False
-
-        # 5. Save and Continue:
-        if not self._browser_automation.find_elem_and_click(
-            find_elem="applyButton"
-        ) or not self._browser_automation.find_elem_and_click(
-            find_elem="continueButton", find_method="name"
-        ):
-            return False
-
-        return True
-
-    # end method definition
-
     def process_workspace_aviators(
         self, section_name: str = "workspaceAviators"
     ) -> bool:
@@ -5861,6 +5841,17 @@ class Payload:
                 success = False
                 continue
 
+            # Make code idem-potent and check if Aviator is already enabled
+            # for this workspace:
+            if self._otcs.check_workspace_aviator(workspace_id=workspace_id):
+                logger.info(
+                    "Skip workspace -> %s (%s) as Aviator is already enabled...",
+                    workspace_name,
+                    workspace_id,
+                )
+                continue
+
+            # Now enable the Content Aviator for the workspace:
             response = self._otcs.update_workspace_aviator(workspace_id, True)
             if not response:
                 logger.error(
@@ -6161,6 +6152,12 @@ class Payload:
             logger.info("Don't enforce password change for user -> %s...", user_name)
             response = self._otds.update_user(
                 user_partition, user_name, "UserMustChangePasswordAtNextSignIn", "False"
+            )
+            if not response:
+                success = False
+
+            response = self._otds.update_user(
+                user_partition, user_name, "UserCannotChangePassword", "True"
             )
             if not response:
                 success = False
@@ -8143,6 +8140,7 @@ class Payload:
                     success = False
             else:
                 admin_context = True
+                exec_as_user = "admin"
 
             if admin_context and authenticated_user != "admin":
                 # Set back admin credentials:
@@ -8172,11 +8170,20 @@ class Payload:
                     template_name,
                 )
 
-            workspace_instances = self._otcs.get_workspace_instances(workspace_type)
+            # Find the workspace type with the name given in the _workspace_types
+            # datastructure that has been generated by process_workspace_type() method before:
+            workspace_type_id = next(
+                (item for item in self._workspace_types if item["name"] == workspace_type),
+                None,
+            )
+            workspace_instances = self._otcs.get_workspace_instances(
+                type_name=workspace_type, type_id=workspace_type_id
+            )
             if not workspace_instances["results"]:
                 logger.warning(
-                    "No workspace instances found for workspace type -> %s",
+                    "No workspace instances found for workspace type -> %s (%s)",
                     workspace_type,
+                    workspace_type_id,
                 )
             for workspace_instance in workspace_instances["results"]:
                 workspace_id = workspace_instance["data"]["properties"]["id"]
@@ -8224,9 +8231,11 @@ class Payload:
                 )
                 if not response:
                     logger.error(
-                        "Failed to generate document -> %s in workspace -> %s",
+                        "Failed to generate document -> %s in workspace -> %s (%s) as user -> %s",
                         document_name,
                         workspace_name,
+                        workspace_id,
+                        exec_as_user,
                     )
                     success = False
                 else:

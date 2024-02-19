@@ -42,7 +42,7 @@ update_ingress_backend_services: Replace the backend service and port for an ing
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -245,13 +245,16 @@ class K8s:
 
     # end method definition
 
-    def exec_pod_command(self, pod_name: str, command: list):
+    def exec_pod_command(
+        self, pod_name: str, command: list, max_retry: int = 3, time_retry: int = 10
+    ):
         """Execute a command inside a Kubernetes Pod (similar to kubectl exec on command line).
             See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#connect_get_namespaced_pod_exec
         Args:
             pod_name (str): name of the Kubernetes pod in the current namespace
             command (list): list of command and its parameters, e.g. ["/bin/bash", "-c", "pwd"]
                             The "-c" is required to make the shell executing the command.
+            max_retry (int): Max amount of attempts to execute the command
         Returns:
             Response of the command or None if the call fails
         """
@@ -262,27 +265,46 @@ class K8s:
 
         logger.info("Execute command -> %s in pod -> %s", command, pod_name)
 
-        try:
-            response = stream(
-                self.get_core_v1_api().connect_get_namespaced_pod_exec,
-                pod_name,
-                self.get_namespace(),
-                command=command,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-            )
-        except ApiException as exception:
-            logger.error(
-                "Failed to execute command -> %s in pod -> %s; error -> %s",
-                command,
-                pod_name,
-                str(exception),
-            )
-            return None
+        retry_counter = 1
 
-        return response
+        while retry_counter <= max_retry:
+            try:
+                response = stream(
+                    self.get_core_v1_api().connect_get_namespaced_pod_exec,
+                    pod_name,
+                    self.get_namespace(),
+                    command=command,
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                )
+                logger.debug(response)
+                return response
+            except ApiException as exc:
+                logger.warning(
+                    "Failed to execute command, retry (%s/%s) -> %s in pod -> %s; error -> %s",
+                    retry_counter,
+                    max_retry,
+                    command,
+                    pod_name,
+                    str(exc),
+                )
+                retry_counter = retry_counter + 1
+                exception = exc
+                logger.info("Wait %s seconds before next retry...", str(time_retry))
+                time.sleep(time_retry)
+                continue
+
+        logger.error(
+            "Failed to execute command with %s retries -> %s in pod -> %s; error -> %s",
+            max_retry,
+            command,
+            pod_name,
+            str(exception),
+        )
+
+        return None
 
     # end method definition
 

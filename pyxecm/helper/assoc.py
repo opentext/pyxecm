@@ -12,7 +12,7 @@ dictToString: converting an Assoc dict to an Assoc string
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -22,8 +22,7 @@ import html
 
 
 class Assoc:
-    """Class to handle Extended ECM Assoc data structures.
-    """
+    """Class to handle Extended ECM Assoc data structures."""
 
     @classmethod
     def is_unicode_escaped(cls, assoc_string: str) -> bool:
@@ -41,7 +40,6 @@ class Assoc:
 
         return len(matches) > 0
 
-
     @classmethod
     def escape_unicode(cls, assoc_string: str) -> str:
         """Escape / Encode a given string in Unicode
@@ -53,10 +51,9 @@ class Assoc:
             str: Escaped string
         """
 
-        encoded_string = assoc_string.encode('unicode_escape') # .decode()
+        encoded_string = assoc_string.encode("unicode_escape")  # .decode()
 
         return encoded_string
-
 
     @classmethod
     def unescape_unicode(cls, assoc_string: str) -> str:

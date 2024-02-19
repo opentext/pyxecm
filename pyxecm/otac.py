@@ -15,7 +15,7 @@ enable_cert: enables Certitificate on Archive Center
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -175,7 +175,7 @@ class OTAC:
         return self.config()["baseUrl"]
 
     def exec_url(self) -> str:
-        """Returns the Archive Center URL to execute commandss
+        """Returns the Archive Center URL to execute commands
 
         Returns:
             str: Archive Center exec URL

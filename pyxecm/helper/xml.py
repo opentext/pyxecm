@@ -13,7 +13,7 @@ replace_in_xml_files: Replace all occurrences of the search pattern with the rep
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -24,6 +24,7 @@ import re
 
 # we need lxml instead of stadard xml.etree to have xpath capabilities!
 from lxml import etree
+import xmltodict
 
 # import xml.etree.ElementTree as etree
 from pyxecm.helper.assoc import Assoc
@@ -32,8 +33,7 @@ logger = logging.getLogger("pyxecm.xml")
 
 
 class XML:
-    """XML Class to parse and update Extended ECM transport packages
-    """
+    """XML Class to parse and update Extended ECM transport packages"""
 
     @classmethod
     def get_xml_element(cls, xml_content: str, xpath: str):
@@ -206,12 +206,12 @@ class XML:
         found = False
 
         # Traverse the directory and its subdirectories
-        for subdir, dirs, files in os.walk(directory):
-            for file in files:
+        for subdir, _, files in os.walk(directory):
+            for filename in files:
                 # Check if the file is an XML file
-                if file.endswith(".xml"):
+                if filename.endswith(".xml"):
                     # Read the contents of the file
-                    file_path = os.path.join(subdir, file)
+                    file_path = os.path.join(subdir, filename)
 
                     # if xpath is given we do an intelligent replacement
                     if xpath:
@@ -232,7 +232,7 @@ class XML:
                             )
                             continue
                         root = tree.getroot()
-                        # find the matching XML element using the given XPath:
+                        # find the matching XML elements using the given XPath:
                         elements = root.xpath(xpath)
                         if not elements:
                             logger.info(
@@ -243,9 +243,11 @@ class XML:
                             continue
                         for element in elements:
                             # as XPath returns a list
-                            #                            element = elements[0]
                             logger.info(
-                                "Found XML element -> %s in -> %s", element.tag, xpath
+                                "Found XML element -> %s in file -> %s using xpath -> %s",
+                                element.tag,
+                                filename,
+                                xpath,
                             )
                             # the simple case: replace the complete text of the XML element
                             if not setting and not assoc_elem:
@@ -464,7 +466,7 @@ class XML:
                     # this is not using xpath - do a simple search and replace
                     else:
                         logger.info("Replacement without xpath...")
-                        with open(file_path, "r") as f:
+                        with open(file_path, "r", encoding="UTF-8") as f:
                             contents = f.read()
                         # Replace all occurrences of the search pattern with the replace string
                         new_contents = pattern.sub(replace_string, contents)
@@ -477,10 +479,76 @@ class XML:
                                 file_path,
                             )
                             # Write the updated contents to the file
-                            with open(file_path, "w") as f:
+                            with open(file_path, "w", encoding="UTF-8") as f:
                                 f.write(new_contents)
                             found = True
 
         return found
+
+    @classmethod
+    def extract_from_xml_files(
+        cls,
+        directory: str,
+        xpath: str,
+    ) -> list | None:
+        """Extracts the XML subtrees using an XPath in all XML files
+            in the directory and its subdirectories.
+
+        Args:
+            directory (str): directory to traverse for XML files
+            xpath (str): used to determine XML elements to extract
+        Returns:
+            list | None: Extracted data if it is found by the XPath, None otherwise
+        """
+
+        extracted_data_list = []
+
+        # Traverse the directory and its subdirectories
+        for subdir, _, files in os.walk(directory):
+            for filename in files:
+                # Check if the file is an XML file
+                if filename.endswith(".xml"):
+                    # Read the contents of the file
+                    file_path = os.path.join(subdir, filename)
+
+                    logger.info("Extraction with xpath -> %s...", xpath)
+                    tree = etree.parse(file_path)
+                    if not tree:
+                        logger.erro(
+                            "Cannot parse XML tree -> {}. Skipping...".format(file_path)
+                        )
+                        continue
+                    root = tree.getroot()
+                    # find the matching XML elements using the given XPath:
+                    elements = root.xpath(xpath)
+                    if not elements:
+                        logger.info(
+                            "The XML file -> %s does not have any element with the given XML path -> %s. Skipping...",
+                            file_path,
+                            xpath,
+                        )
+                        continue
+                    for element in elements:
+                        # as XPath returns a list
+                        logger.info(
+                            "Found XML element -> %s in file -> %s using xpath -> %s. Add it to result list.",
+                            element.tag,
+                            filename,
+                            xpath,
+                        )
+                        extracted_content = etree.tostring(element)
+
+                        try:
+                            dict_content = xmltodict.parse(extracted_content)
+                        except xmltodict.expat.ExpatError:
+                            logger.error(
+                                "Invalid XML syntax in file -> %s. Please check the XML file for errors.",
+                                filename,
+                            )
+                            continue
+
+                        extracted_data_list.append(dict_content)
+
+        return extracted_data_list
 
         # end method definition

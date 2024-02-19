@@ -41,7 +41,7 @@ customization_run: Central function to initiate the customization
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -1201,12 +1201,20 @@ class Customizer:
             )
             if not otawp_license:
                 logger.error(
-                    "Couldn't apply license -> %s for product -> %s.",
+                    "Couldn't apply license -> %s for product -> %s to OTDS resource -> %s",
                     self.otawp_settings.license_file,
                     self.otawp_settings.product_name,
+                    awp_resource["resourceID"],
+                )
+            else:
+                logger.info(
+                    "Successfully applied license -> %s for product -> %s to OTDS resource -> %s",
+                    self.otawp_settings.license_file,
+                    self.otawp_settings.product_name,
+                    awp_resource["resourceID"],
                 )
 
-            # Assign license to Content Server Members Partiton and otds.admin
+            # Assign AppWorks license to Content Server Members Partiton and otds.admin:
             for partition_name in ["otds.admin", self.otcs_settings.partition]:
                 if self.otds_object.is_partition_licensed(
                     partition_name=partition_name,
@@ -1230,6 +1238,13 @@ class Customizer:
                     if not assigned_license:
                         logger.error(
                             "Partition -> %s could not be assigned to license -> %s (%s)",
+                            partition_name,
+                            self.otawp_settings.product_name,
+                            "USERS",
+                        )
+                    else:
+                        logger.info(
+                            "Partition -> %s successfully assigned to license -> %s (%s)",
                             partition_name,
                             self.otawp_settings.product_name,
                             "USERS",

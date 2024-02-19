@@ -34,6 +34,7 @@ init_payload: load and initialize the YAML payload
 get_payload_section: delivers a section of the payload as a list of settings
 get_all_group_names: construct a list of all group name
 
+get_status_file_name: construct the name of the status file.
 check_status_file: check if the payload section has been processed before
 write_status_file: Write a status file into the Admin Personal Workspace in Extended ECM
                    to indicate that the payload section has been deployed successfully
@@ -69,11 +70,14 @@ process_external_systems: process Extended ECM external systems
 process_transport_packages: process Extended ECM transport packages
 process_user_photos: process Extended ECM user photos (user profile)
 process_user_photos_m365: process user photos in payload and assign them to Microsoft 365 users.
+process_business_object_types: process Extended ECM business object types
+                               (needs to run after process_transport_packages)
 process_workspace_types: process Extended ECM workspace types
                          (needs to run after process_transport_packages)
 process_workspaces: process Extended ECM workspace instances
 process_workspace_relationships: process Extended ECM workspace relationships
 process_workspace_members: process Extended ECM workspace members (users and groups)
+process_workspace_member_permissions: Process workspaces members in payload and set their permissions.
 process_workspace_aviators: Process workspaces Content Aviator settings in payload and
                             enable Aviator for selected workspaces
 process_web_reports: process Extended ECM Web Reports (starts them with parameters)
@@ -97,6 +101,7 @@ process_document_generators: Generate documents for a defined workspace type bas
 process_browser_automations: process Selenium-based browser automation payload
 init_sap: initalize SAP object for RFC communication
 process_sap_rfcs: process SAP Remote Function Calls (RFC) to trigger automation in SAP S/4HANA
+init_salesforce: initialize Salesforce object for Salesforce API communication
 
 get_payload: return the payload data structure
 get_users: return list of users
@@ -110,7 +115,7 @@ get_k8s: return the Kubernetes object
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -134,6 +139,7 @@ from pyxecm import OTAC, OTCS, OTDS, OTIV
 from pyxecm.customizer.k8s import K8s
 from pyxecm.customizer.m365 import M365
 from pyxecm.customizer.sap import SAP
+from pyxecm.customizer.salesforce import Salesforce
 from pyxecm.customizer.browser_automation import BrowserAutomation
 from pyxecm.helper.web import HTTP
 
@@ -155,6 +161,8 @@ class Payload:
     _k8s: K8s | None
     _web: HTTP | None
     _m365: M365 | None
+    _sap: SAP | None
+    _salesforce: Salesforce | None
     _browser_automation: BrowserAutomation | None
     _custom_settings_dir = ""
 
@@ -257,7 +265,12 @@ class Payload:
     # - extra_attributes (list of dict)
     _users = []
 
+    # admin_settings: list of admin settings (XML file to import)
+    # - enabled (bool)
+    # - description (str)
+    # - filename (str) - without path
     _admin_settings = []
+    _admin_settings_post = []
 
     # exec_pod_commands: list of commands to be executed in the pods
     # list elements need to be dicts with pod name, command, etc.
@@ -287,14 +300,19 @@ class Payload:
     _content_transport_packages = []
     _transport_packages_post = []
 
+    _business_object_types = []
     _workspace_types = []
     _workspace_templates = []
     _workspaces = []
     _sap_rfcs = []
     _web_reports = []
     _web_reports_post = []
+
+    # cs_applications (list): List of Content Server Applications to deploy.
+    # - enabled (bool)
+    # - name (str)
+    # - descriptions (str)
     _cs_applications = []
-    _admin_settings_post = []
 
     # additional_group_members: List of memberships to establish. Each element
     # is a dict with these keys:
@@ -311,8 +329,31 @@ class Payload:
     # - partition_name (string)
     _additional_access_role_members = []
     _renamings = []
+
+    # items: List of items to create in Extended ECM
+    # - enabled (bool)
+    # - parent_nickname (str)
+    # - parent_path (list)
+    # - name (str)
+    # - description (str)
+    # - type (str)
+    # - url (str) - "" means not set
+    # - original_nickname
+    # - original_path (list)
     _items = []
     _items_post = []
+
+    # permissions: List of permissions changes to apply
+    # - path (list)
+    # - volume (int)
+    # - public_permissions (list)
+    # - groups (list)
+    #   + name (str)
+    #   + permissions (list)
+    # - users (list)
+    #   + name (str)
+    #   + permissions (list)
+    # - apply_to (int)
     _permissions = []
     _permissions_post = []
 
@@ -331,12 +372,16 @@ class Payload:
     _holds = []
     _doc_generators = []
     _browser_automations = []
+    _browser_automations_post = []
 
     _placeholder_values = {}
 
     _otcs_restart_callback: Callable
     _log_header_callback: Callable
     _aviator_enabled = False
+
+    _transport_extractions: list = []
+    _transport_replacements: list = []
 
     def __init__(
         self,
@@ -387,6 +432,10 @@ class Payload:
         self._otcs_frontend = otcs_frontend_object
         self._otiv = otiv_object
         self._m365 = m365_object
+        self._sap = (
+            None  # this object only exists after external systems have been processed
+        )
+        self._salesforce = None
         self._browser_automation = browser_automation_object
         self._custom_settings_dir = custom_settings_dir
         self._placeholder_values = placeholder_values
@@ -570,6 +619,9 @@ class Payload:
         self._holds = self.get_payload_section("holds")
         self._doc_generators = self.get_payload_section("documentGenerators")
         self._browser_automations = self.get_payload_section("browserAutomations")
+        self._browser_automations_post = self.get_payload_section(
+            "browserAutomationsPost"
+        )
 
         return self._payload
         # end method definition
@@ -618,6 +670,42 @@ class Payload:
 
         # end method definition
 
+    def get_status_file_name(
+        self,
+        payload_section_name: str,
+        payload_specific: bool = True,
+        prefix: str = "success_",
+    ) -> str:
+        """Construct the name of the status file.
+
+        Args:
+            payload_section_name (str): name of the payload section. This
+                                        is used to construct the file name
+            payload_specific (bool, optional): whether or not the success should be specific for
+                                               each payload file or if success is "global" - like for the deletion
+                                               of the existing M365 teams (which we don't want to execute per
+                                               payload file)
+
+        Returns:
+            str: name of the payload section file
+        """
+
+        # Some sections are actually not payload specific like teamsM365Cleanup
+        # we don't want external payload runs to re-apply this processing:
+        if payload_specific:
+            file_name = os.path.basename(self._payload_source)  # remove directories
+            # Split once at the first occurance of a dot
+            # as the _payload_source may have multiple suffixes
+            # such as .yml.gz.b64:
+            file_name = file_name.split(".", 1)[0]
+            file_name = prefix + file_name + "_" + payload_section_name + ".json"
+        else:
+            file_name = prefix + payload_section_name + ".json"
+
+        return file_name
+
+        # end method definition
+
     def check_status_file(
         self, payload_section_name: str, payload_specific: bool = True
     ) -> bool:
@@ -628,10 +716,10 @@ class Payload:
         Args:
             payload_section_name (str): name of the payload section. This
                                         is used to construct the file name
-            payload_specific (bool): whether or not the success should be specific for
-                                     each payload file or if success is "global" - like for the deletion
-                                     of the existing M365 teams (which we don't want to execute per
-                                     payload file)
+            payload_specific (bool, optional): whether or not the success should be specific for
+                                               each payload file or if success is "global" - like for the deletion
+                                               of the existing M365 teams (which we don't want to execute per
+                                               payload file)
         Returns:
             bool: True if the payload has been processed successfully before, False otherwise
         """
@@ -648,17 +736,9 @@ class Payload:
         if not target_folder_id:
             target_folder_id = 2004  # use Personal Workspace of Admin as fallback
 
-        # Some sections are actually not payload specific like teamsM365Cleanup
-        # we don't want external payload runs to re-apply this processing:
-        if payload_specific:
-            file_name = os.path.basename(self._payload_source)  # remove directories
-            # Split once at the first occurance of a dot
-            # as the _payload_source may have multiple suffixes
-            # such as .yml.gz.b64:
-            file_name = file_name.split(".", 1)[0]
-            file_name = "success_" + file_name + "_" + payload_section_name + ".json"
-        else:
-            file_name = "success_" + payload_section_name + ".json"
+        file_name = self.get_status_file_name(
+            payload_section_name=payload_section_name, payload_specific=payload_specific
+        )
 
         status_document = self._otcs.get_node_by_parent_and_name(
             parent_id=int(target_folder_id), name=file_name, show_error=False
@@ -723,17 +803,12 @@ class Payload:
         if not target_folder_id:
             target_folder_id = 2004  # use Personal Workspace of Admin as fallback
 
-        # Some sections are actually not payload specific like teamsM365Cleanup
-        # and we don't want external payload runs to re-process these:
-        if payload_specific:
-            file_name = os.path.basename(self._payload_source)  # remove directories
-            # Split once at the first occurance of a dot
-            # as the _payload_source may have multiple suffixes
-            # such as .yml.gz.b64:
-            file_name = file_name.split(".", 1)[0]
-            file_name = prefix + file_name + "_" + payload_section_name + ".json"
-        else:
-            file_name = prefix + payload_section_name + ".json"
+        file_name = self.get_status_file_name(
+            payload_section_name=payload_section_name,
+            payload_specific=payload_specific,
+            prefix=prefix,
+        )
+
         full_path = "/tmp/" + file_name
 
         with open(full_path, mode="w", encoding="utf-8") as localfile:
@@ -806,17 +881,9 @@ class Payload:
         if not source_folder_id:
             source_folder_id = 2004  # use Personal Workspace of Admin as fallback
 
-        # Some sections are actually not payload specific like teamsM365Cleanup
-        # we don't want external payload runs to re-apply this processing:
-        if payload_specific:
-            file_name = os.path.basename(self._payload_source)  # remove directories
-            # Split once at the first occurance of a dot
-            # as the _payload_source may have multiple suffixes
-            # such as .yml.gz.b64:
-            file_name = file_name.split(".", 1)[0]
-            file_name = "success_" + file_name + "_" + payload_section_name + ".json"
-        else:
-            file_name = "success_" + payload_section_name + ".json"
+        file_name = self.get_status_file_name(
+            payload_section_name=payload_section_name, payload_specific=payload_specific
+        )
 
         status_document = self._otcs.get_node_by_parent_and_name(
             parent_id=int(source_folder_id), name=file_name, show_error=True
@@ -995,6 +1062,27 @@ class Payload:
 
         # end method definition
 
+    def add_transport_extractions(self, extractions: list) -> int:
+        """_summary_
+
+        Args:
+            extractions (list): list of extractions from a single transport package
+
+        Returns:
+            int: number of extractions that have actually extracted data
+        """
+
+        counter = 0
+        for extraction in extractions:
+            if extraction.get("enabled", True) and "data" in extraction:
+                self._transport_extractions.append(extraction)
+                counter += 1
+        logger.info("Added -> %s transport extractions", str(counter))
+
+        return counter
+
+        # end method definition
+
     def process_payload(self):
         """Main method to process a payload file.
 
@@ -1011,10 +1099,12 @@ class Payload:
             match payload_section["name"]:
                 case "webHooks":
                     self._log_header_callback("Process Web Hooks")
-                    self.process_web_hooks(self._webhooks)
+                    self.process_web_hooks(webhooks=self._webhooks)
                 case "webHooksPost":
                     self._log_header_callback("Process Web Hooks (post)")
-                    self.process_web_hooks(self._webhooks_post, "webHooksPost")
+                    self.process_web_hooks(
+                        webhooks=self._webhooks_post, section_name="webHooksPost"
+                    )
                 case "partitions":
                     self._log_header_callback("Process OTDS Partitions")
                     self.process_partitions()
@@ -1088,7 +1178,9 @@ class Payload:
                         self.process_teams_m365()
                 case "adminSettings":
                     self._log_header_callback("Process Administration Settings")
-                    restart_required = self.process_admin_settings(self._admin_settings)
+                    restart_required = self.process_admin_settings(
+                        admin_settings=self._admin_settings
+                    )
                     if restart_required:
                         logger.info(
                             "Admin Settings require a restart of OTCS services...",
@@ -1124,8 +1216,11 @@ class Payload:
                 case "transportPackages":
                     self._log_header_callback("Process Transport Packages")
                     self.process_transport_packages(self._transport_packages)
-                    # Right after the transport that create the workspace types
-                    # we extract them and put them in a generated payload list:
+                    # Right after the transport that create the business object types
+                    # and the workspace types we extract them and put them into
+                    # generated payload lists:
+                    self._log_header_callback("Process Business Object Types")
+                    self.process_business_object_types()
                     self._log_header_callback("Process Workspace Types")
                     self.process_workspace_types()
                     if self._m365 and isinstance(self._m365, M365):
@@ -1136,19 +1231,46 @@ class Payload:
                 case "contentTransportPackages":
                     self._log_header_callback("Process Content Transport Packages")
                     self.process_transport_packages(
-                        self._content_transport_packages, "contentTransportPackages"
+                        transport_packages=self._content_transport_packages,
+                        section_name="contentTransportPackages",
                     )
+                    # Process workspace permissions after content may have been added:
+                    self._log_header_callback("Process Workspace Permissions")
+                    self.process_workspace_member_permissions()
                 case "transportPackagesPost":
                     self._log_header_callback("Process Transport Packages (post)")
                     self.process_transport_packages(
-                        self._transport_packages_post, "transportPackagesPost"
+                        transport_packages=self._transport_packages_post,
+                        section_name="transportPackagesPost",
                     )
                 case "workspaceTemplates":
+                    # If a payload file (e.g. additional ones) does not have
+                    # transportPackages then it can happen that the
+                    # self._workspace_types is not yet initialized. As we need
+                    # this structure for workspaceTemnplates we initialize it here:
+                    if not self._business_object_types:
+                        self._log_header_callback("Process Business Object Types")
+                        self.process_business_object_types()
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
+
                     self._log_header_callback(
                         "Process Workspace Templates (Template Role Assignments)"
                     )
                     self.process_workspace_templates()
                 case "workspaces":
+                    # If a payload file (e.g. additional ones) does not have
+                    # transportPackages then it can happen that the self._business_object_types and
+                    # self._workspace_types are not yet initialized. As we need
+                    # these structures for workspaces we initialize it here:
+                    if not self._business_object_types:
+                        self._log_header_callback("Process Business Object Types")
+                        self.process_business_object_types()
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
+
                     self._log_header_callback("Process Workspaces")
                     self.process_workspaces()
                     self._log_header_callback("Process Workspace Relationships")
@@ -1192,17 +1314,37 @@ class Payload:
                             "SAP RFC in payload but SAP external system is not reachable. RFCs will not be processed."
                         )
                     else:
-                        sap = self.init_sap(sap_external_system)
-                        if sap:
-                            self.process_sap_rfcs(sap)
+                        if self._sap:
+                            self.process_sap_rfcs(self._sap)
                             self._log_header_callback("Process SAP Users")
-                            self.process_users_sap(sap)
+                            self.process_users_sap(self._sap)
+                        else:
+                            logger.error(
+                                "SAP object is not yet initialized. Something is wrong with payload section ordering."
+                            )
                 case "webReports":
                     self._log_header_callback("Process Web Reports")
-                    self.process_web_reports(self._web_reports)
+                    restart_required = self.process_web_reports(
+                        web_reports=self._web_reports
+                    )
+                    if restart_required:
+                        logger.info(
+                            "Web Reports require a restart of OTCS services...",
+                        )
+                        # Restart OTCS frontend and backend pods:
+                        self._otcs_restart_callback(self._otcs_backend)
                 case "webReportsPost":
                     self._log_header_callback("Process Web Reports (post)")
-                    self.process_web_reports(self._web_reports_post, "webReportsPost")
+                    restart_required = self.process_web_reports(
+                        web_reports=self._web_reports_post,
+                        section_name="webReportsPost",
+                    )
+                    if restart_required:
+                        logger.info(
+                            "WebReports (Post) require a restart of OTCS services...",
+                        )
+                        # Restart OTCS frontend and backend pods:
+                        self._otcs_restart_callback(self._otcs_backend)
                 case "additionalGroupMemberships":
                     self._log_header_callback(
                         "Process additional group members for OTDS"
@@ -1218,16 +1360,19 @@ class Payload:
                     self.process_renamings()
                 case "items":
                     self._log_header_callback("Process Items")
-                    self.process_items(self._items)
+                    self.process_items(items=self._items)
                 case "itemsPost":
                     self._log_header_callback("Process Items (post)")
-                    self.process_items(self._items_post, "itemsPost")
+                    self.process_items(items=self._items_post, section_name="itemsPost")
                 case "permissions":
                     self._log_header_callback("Process Permissions")
-                    self.process_permissions(self._permissions)
+                    self.process_permissions(permissions=self._permissions)
                 case "permissionsPost":
                     self._log_header_callback("Process Permissions (post)")
-                    self.process_permissions(self._permissions_post, "permissionsPost")
+                    self.process_permissions(
+                        permissions=self._permissions_post,
+                        section_name="permissionsPost",
+                    )
                 case "assignments":
                     self._log_header_callback("Process Assignments")
                     self.process_assignments()
@@ -1244,11 +1389,27 @@ class Payload:
                     self._log_header_callback("Process Records Management Holds")
                     self.process_holds()
                 case "documentGenerators":
+                    # If a payload file (e.g. additional ones) does not have
+                    # transportPackages then it can happen that the
+                    # self._workspace_types is not yet initialized. As we need
+                    # this structure for documentGenerators we initialize it here:
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
+
                     self._log_header_callback("Process Document Generators")
                     self.process_document_generators()
                 case "browserAutomations":
                     self._log_header_callback("Process Browser Automations")
-                    self.process_browser_automations()
+                    self.process_browser_automations(
+                        browser_automations=self._browser_automations
+                    )
+                case "browserAutomationsPost":
+                    self._log_header_callback("Process Browser Automations (post)")
+                    self.process_browser_automations(
+                        browser_automations=self._browser_automations_post,
+                        section_name="browserAutomationsPost",
+                    )
                 case _:
                     logger.error(
                         "Illegal payload section name -> %s in payloadSections!",
@@ -1310,14 +1471,19 @@ class Payload:
 
         for webhook in webhooks:
             url = webhook.get("url")
-            if not url:
-                logger.info("Web Hook does not have a url. Skipping...")
-                success = False
-                continue
 
             # Check if element has been disabled in payload (enabled = false).
             # In this case we skip the element:
-            if "enabled" in webhook and not webhook["enabled"]:
+            enabled = webhook.get("enabled", True)
+
+            if not enabled and not url:
+                logger.info("Payload for Web Hook is disabled. Skipping...")
+                continue
+            elif not url:
+                logger.info("Web Hook does not have a url. Skipping...")
+                success = False
+                continue
+            elif not enabled:
                 logger.info("Payload for Web Hook -> %s is disabled. Skipping...", url)
                 continue
 
@@ -1334,7 +1500,14 @@ class Payload:
             else:
                 logger.info("Calling Web Hook -> %s: %s", method, url)
 
-            response = self._http_object.http_request(url, method, payload, headers)
+            response = self._http_object.http_request(
+                url=url,
+                method=method,
+                payload=payload,
+                headers=headers,
+                retries=webhook.get("retries", 0),
+                wait_time=webhook.get("wait_time", 0),
+            )
             if not response or not response.ok:
                 success = False
 
@@ -2515,6 +2688,7 @@ class Payload:
                 first_name=user.get("firstname", ""),  # be careful - can be empty
                 last_name=user.get("lastname", ""),  # be careful - can be empty
                 email=user.get("email", ""),  # be careful - can be empty
+                title=user.get("title", ""),  # be careful - can be empty
                 base_group=base_group,
                 privileges=user.get("privileges", ["Login", "Public Access"]),
             )
@@ -3553,7 +3727,7 @@ class Payload:
             return False  # important to return False here as otherwise we are triggering a restart of services!!
 
         # If this payload section has been processed successfully before we
-        # can return True and skip processing it once more:
+        # can return False and skip processing it once more:
         if self.check_status_file(section_name):
             return False  # important to return False here as otherwise we are triggering a restart of services!!
 
@@ -3694,6 +3868,8 @@ class Payload:
             logger.info("Payload section -> %s is empty. Skipping...", section_name)
             return True
 
+        # WE DON'T WANT TO DO THIS AS WE NEED TO INITIALIZE
+        # DATASTRUCTURES LIKE self._sap and self._salesforce!!
         # If this payload section has been processed successfully before we
         # can return True and skip processing it once more:
         # if self.check_status_file(section_name):
@@ -3852,9 +4028,26 @@ class Payload:
             )
             if self._otcs.get_external_system_connection(system_name):
                 logger.info(
-                    "External System connection -> %s already exists! Skipping to next external system...",
+                    "External System connection -> %s already exists!",
                     system_name,
                 )
+                # This is for handling re-runs of customizer pod where the transports
+                # are skipped and thus self._sap or self._salesforce may not be initialized:
+                if system_type == "SAP" and not self._sap:
+                    logger.info(
+                        "Re-Initialize SAP connection for external system -> %s.",
+                        system_name,
+                    )
+                    # Initialize SAP object responsible for communication to SAP:
+                    self._sap = self.init_sap(external_system)
+                if system_type == "Salesforce" and not self._salesforce:
+                    logger.info(
+                        "Re-Initialize Salesforce connection for external system -> %s.",
+                        system_name,
+                    )
+                    # Initialize Salesforce object responsible for communication to Salesforce:
+                    self._salesforce = self.init_salesforce(external_system)
+                logger.info("Skip to next external system...")
                 continue
 
             #
@@ -3885,9 +4078,12 @@ class Payload:
                 logger.info("Successfully created external system -> %s", system_name)
 
             #
-            # In case of an SAP external system we also do some Archiving config:
+            # In case of an SAP external system we also initialize the SAP object
+            # and do some SAP-specific Archiving config:
             #
             if system_type == "SAP":
+                # Initialize SAP object responsible for communication to SAP:
+                self._sap = self.init_sap(external_system)
                 if (
                     "archive_logical_name" in external_system
                     and "archive_certificate_file" in external_system
@@ -3913,6 +4109,13 @@ class Payload:
                         external_system["archive_logical_name"],
                         True,
                     )
+
+            #
+            # In case of an Salesforce external system we also initialize the Salesforce object
+            #
+            if system_type == "Salesforce":
+                # Initialize Salesforce object responsible for communication to Salesforce:
+                self._salesforce = self.init_salesforce(external_system)
 
         self.write_status_file(success, section_name, self._external_systems)
 
@@ -3981,18 +4184,25 @@ class Payload:
             # configured:
             if "replacements" in transport_package:
                 replacements = transport_package["replacements"]
-                logger.info(
-                    "Deploy transport -> %s with replacements -> %s; URL -> %s",
-                    description,
-                    url,
-                    replacements,
-                )
-                response = self._otcs.deploy_transport(
-                    url, name, description, replacements
-                )
             else:
-                logger.info("Deploy transport -> %s; URL -> %s", description, url)
-                response = self._otcs.deploy_transport(url, name, description)
+                replacements = None
+
+            # For some transports there can be data extractions
+            # configured:
+            if "extractions" in transport_package:
+                extractions = transport_package["extractions"]
+            else:
+                extractions = None
+
+            logger.info("Deploy transport -> %s; URL -> %s", description, url)
+            if replacements:
+                logger.info("Use replacements -> %s", str(replacements))
+            if extractions:
+                logger.info("Use extractions -> %s", str(extractions))
+
+            response = self._otcs.deploy_transport(
+                url, name, description, replacements, extractions
+            )
             if response is None:
                 logger.error("Failed to deploy transport -> %s; URL -> %s", name, url)
                 success = False
@@ -4000,8 +4210,14 @@ class Payload:
                     break
             else:
                 logger.info("Successfully deployed transport -> %s", name)
+                # Save the extractions for later processing, e.g. in process_business_object_types()
+                if extractions:
+                    self.add_transport_extractions(extractions)
 
         self.write_status_file(success, section_name, transport_packages)
+        self.write_status_file(
+            success, section_name + "Extractions", self._transport_extractions
+        )
 
         return success
 
@@ -4118,13 +4334,6 @@ class Payload:
         # we also assume that the photos have been uploaded / transported into the target system
         for user in self._users:
             user_name = user["name"]
-            if not "id" in user:
-                logger.error(
-                    "User -> %s does not have an ID. The user creation may have failed before. Skipping...",
-                    user_name,
-                )
-                success = False
-                continue
 
             # Check if element has been disabled in payload (enabled = false).
             # In this case we skip the element:
@@ -4133,6 +4342,15 @@ class Payload:
                     "Payload for User -> %s is disabled. Skipping...", user_name
                 )
                 continue
+
+            if not "id" in user:
+                logger.error(
+                    "User -> %s does not have an ID. The user creation may have failed before. Skipping...",
+                    user_name,
+                )
+                success = False
+                continue
+
             if not "enable_o365" in user or not user["enable_o365"]:
                 logger.info(
                     "Microsoft 365 is not enabled in payload for User -> %s. Skipping...",
@@ -4236,6 +4454,419 @@ class Payload:
 
         # end method definition
 
+    def process_business_object_types(
+        self, section_name: str = "businessObjectTypes"
+    ) -> list:
+        """Create a data structure for all business object types in the Extended ECM system.
+
+        Args:
+            section_name (str, optional): name of the section.
+                                          This name is used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            list: list of business object types. Each list element is a dict with these values:
+                - id (str)
+                - name (str)
+                - type (str)
+                - ext_system_id (str)
+                - business_properties (list)
+                - business_property_groups (list)
+        """
+
+        # If this payload section has been processed successfully before we
+        # still need to read the data structure from the status file and
+        # initialize self._workspace_types:
+        if self.check_status_file(section_name):
+            # read the list from the json file in admin Home
+            # this is important for restart of customizer pod
+            # as this data structure is used later on for workspace processing
+            logger.info(
+                "Re-Initialize business object types list from status file -> %s for later use...",
+                self.get_status_file_name(payload_section_name=section_name),
+            )
+            self._business_object_types = self.get_status_file(section_name)
+            logger.info(
+                "Found -> %s business object types.",
+                str(len(self._business_object_types)),
+            )
+            logger.debug(
+                "Business object types -> %s", str(self._business_object_types)
+            )
+            return self._business_object_types
+
+        success: bool = True
+
+        # get all workspace types (these have been created by the transports and are not in the payload!)
+        # we need to do this each time as it needs to work across potential multiple payload files...
+        response = self._otcs.get_business_object_types()
+        if response is None:
+            logger.info("No business object types found!")
+            self._business_object_types = []
+        else:
+            self._business_object_types = response["results"]
+            logger.info(
+                "Found -> %s business object types.",
+                str(len(self._business_object_types)),
+            )
+            logger.debug(
+                "Business object types -> %s", str(self._business_object_types)
+            )
+
+        # now we enrich the workspace_type list elments (which are dicts)
+        # with additional dict elements for further processing:
+        for business_object_type in self._business_object_types:
+            # Get BO Type (e.g. KNA1):
+            bo_type = business_object_type["data"]["properties"]["bo_type"]
+            logger.info("Business Object Type -> %s", bo_type)
+            business_object_type["type"] = bo_type
+            # Get BO Type ID:
+            bo_type_id = business_object_type["data"]["properties"]["bo_type_id"]
+            logger.info("Business Object Type ID -> %s", bo_type_id)
+            business_object_type["id"] = bo_type_id
+            # Get BO Type Name:
+            bo_type_name = business_object_type["data"]["properties"]["bo_type_name"]
+            logger.info("Business Object Type Name -> %s", bo_type_name)
+            business_object_type["name"] = bo_type_name
+            # Get External System ID:
+            ext_system_id = business_object_type["data"]["properties"]["ext_system_id"]
+            logger.info("External System ID -> %s", ext_system_id)
+            business_object_type["ext_system_id"] = ext_system_id
+
+            # Get additional information per BO Type (this REST API is severly
+            # limited) - it does not return Property names from External System
+            # and is also missing Business Property Groups:
+            # if not "/" in bo_type:
+            #     response = self._otcs.get_business_object_type(
+            #         external_system_id=ext_system_id, type_name=bo_type
+            #     )
+            #     if response is None or not response["results"]:
+            #         logger.warning(
+            #             "Cannot retrieve additional information for business object type -> %s. Skipping...",
+            #             bo_type,
+            #         )
+            #         continue
+            #     business_properties = response["results"]["data"][
+            #         "business_object_type"
+            #     ]["data"]["businessProperties"]
+            #     business_object_type["business_properties"] = business_properties
+            # else:
+            #     logger.warning(
+            #         "Business Object Type -> %s does not have a proper name to call REST API.",
+            #         bo_type,
+            #     )
+            #     business_object_type["business_properties"] = []
+
+            business_object_type["business_properties"] = []
+            business_object_type["business_property_groups"] = []
+
+            # Now we complete the data with what we have extracted from the transport packages
+            # for Business Object Types. This is a workaround for the insufficient REST API
+            # implementation (see otcs.get_business_object_type)
+            if self._transport_extractions:
+                logger.info(
+                    "Enrich Business Object Types with data extractions from transport packages (found %s extractions)...",
+                    str(len(self._transport_extractions)),
+                )
+            else:
+                logger.info(
+                    "No transport extractions are recorded. This may be because of customizer restart."
+                )
+                extraction_status_file = "transportPackagesExtractions"
+                if self.check_status_file(extraction_status_file):
+                    logger.info(
+                        "Try to load extractions from success file -> %s...",
+                        extraction_status_file,
+                    )
+                    self._transport_extractions = self.get_status_file(
+                        extraction_status_file
+                    )
+
+            for extraction in self._transport_extractions:
+                xpath = extraction.get("data")
+                data_list = extraction.get("data")
+                if not data_list:
+                    logger.error(
+                        "Extraction -> %s is missing the data element. Skipping...",
+                        xpath,
+                    )
+                    success = False
+                    continue
+                if not isinstance(data_list, list):
+                    logger.warning(
+                        "Extracted data for -> %s is not a list. Cannot process it. Skipping...",
+                        xpath,
+                    )
+                    continue
+
+                # The following loop processes a dictionasry of this structure:
+
+                # llnode: {
+                #     '@created': '2017-11-23T16:43:35',
+                #     '@createdby': '1000',
+                #     '@createdbyname': 'Terrarium Admin',
+                #     '@description': '',
+                #     '@id': '16013',
+                #     '@modified': '2023-12-09T12:08:21',
+                #     '@name': 'SFDC Order',
+                #     '@objname': 'Business Object Type',
+                #     '@objtype': '889',
+                #     '@ownedby': '1000',
+                #     '@ownedbyname': 'Terrarium Admin',
+                #     '@parentguid': '95F96645-057D-4EAF-9083-BE9F24C0CB6C',
+                #     '@parentid': '2898',
+                #     '@parentname': 'Business Object Types',
+                #     ...
+                #     'Nickname': {'@domain': ''},
+                #     'name': {'@xml:lang': 'en', '#text': 'SFDC Order'},
+                #     'description': {'@xml:lang': 'en'},
+                #     'businessObjectTypeInfo': {
+                #         'basicInfo': {
+                #             '@businessObjectId': '9',
+                #             '@businessobjectType': 'Order',
+                #             '@deleted': 'false',
+                #             '@name': 'SFDC Order',
+                #             '@subtype': '889',
+                #             '@useBusWorkspace': 'true',
+                #             'displayUrl': {...}
+                #         },
+                #         'businessApplication': {
+                #             'businessObjectTypeReference': {...}},
+                #             'businessAttachmentInfo': {
+                #                 '@automaticAddingOfBusinessObject': 'false',
+                #                 '@canbeAddedAsBusinessObject': 'false',
+                #                 '@enableBADIBeforeAddingBO': 'false',
+                #                 '@enableBADIBeforeRemovingBO': 'false',
+                #                 '@enableMetadataMapping': 'false'
+                #             },
+                #             'managedObjectTypes': {
+                #                 'managedObjectType': [...]
+                #             },
+                #             'multilingualNames': {'language': [...]},
+                #             'callbacks': {'callback': [...]},
+                #             'workspaceTypeReference': {'@isDefaultDisplay': 'false', '@isDefaultSearch': 'false', 'businessObjectTypeReference': {...}},
+                #             'businessPropertyMappings': {
+                #                 'propertyMapping': [...]
+                #             },
+                #             'businessPropertyGroupMappings': {
+                #                 'propertyGroupMapping': [...]
+                #             },
+                #             'documentTypes': {
+                #                 'documentType': [...]
+                #             },
+                #             'CustomBOTypeInfo': None
+                #         }
+                # }
+
+                for data in data_list:
+                    #
+                    # Level 1: llnode
+                    #
+                    llnode = data.get("llnode")
+                    if not llnode:
+                        logger.error("Missing llnode structure in data. Skipping...")
+                        success = False
+                        continue
+
+                    #
+                    # Level 2: businessobjectTypeInfo
+                    #
+                    business_object_type_info = llnode.get(
+                        "businessobjectTypeInfo", None
+                    )
+                    if not business_object_type_info:
+                        logger.error(
+                            "Information is missing for Business Object Type -> %s. Skipping...",
+                            bo_type_name,
+                        )
+                        success = False
+                        continue
+
+                    # Check if this extraction is for the current business object type:
+                    basic_info = business_object_type_info.get("basicInfo", None)
+                    if not basic_info:
+                        logger.error(
+                            "Cannot find Basic Info of Business Object Type -> %s. Skipping...",
+                            bo_type_name,
+                        )
+                        success = False
+                        continue
+                    name = basic_info.get("@businessobjectType", "")
+                    if not name:
+                        logger.error(
+                            "Cannot find name of Business Object Type -> %s. Skipping...",
+                            bo_type_name,
+                        )
+                        success = False
+                        continue
+                    obj_type = llnode.get("@objtype", None)
+                    # we need to compare bo_type and NOT bo_type_name here!
+                    # Otherwise we don't find the SAP and SuccessFactors data:
+                    if name != bo_type or obj_type != "889":
+                        continue
+
+                    #
+                    # Level 3: businessPropertyMappings - plain, non-grouped properties
+                    #
+                    business_property_mappings = business_object_type_info.get(
+                        "businessPropertyMappings", None
+                    )
+                    if not business_property_mappings:
+                        logger.info(
+                            "No Property Mapping for Business Object Type -> %s. Skipping...",
+                            bo_type_name,
+                        )
+                    else:
+                        property_mappings = business_property_mappings.get(
+                            "propertyMapping", []
+                        )
+                        # This can happen if there's only 1 propertyMapping;
+                        if not isinstance(property_mappings, list):
+                            logger.info(
+                                "Found a single property mapping in a dictionary (not in a list). Package it into a list...",
+                            )
+                            property_mappings = [property_mappings]
+
+                        for property_mapping in property_mappings:
+                            property_name = property_mapping.get("@propertyName")
+                            attribute_name = property_mapping.get("@attributeName")
+                            category_id = property_mapping.get("@categoryId")
+                            mapping_type = property_mapping.get("@type")
+                            logger.info(
+                                "%s Property Mapping for Business Object -> %s: property -> %s is mapped to attribute -> %s (category -> %s)",
+                                mapping_type,
+                                bo_type_name,
+                                property_name,
+                                attribute_name,
+                                category_id,
+                            )
+                            business_object_type["business_properties"].append(
+                                property_mapping
+                            )
+
+                    #
+                    # Level 3: businessPropertyGroupMappings - grouped properties
+                    #
+                    business_property_group_mappings = business_object_type_info.get(
+                        "businessPropertyGroupMappings", None
+                    )
+                    if not business_property_group_mappings:
+                        logger.info(
+                            "No Property Group Mapping for Business Object Type -> %s. Skipping...",
+                            bo_type_name,
+                        )
+                        continue
+
+                    property_group_mappings = business_property_group_mappings.get(
+                        "propertyGroupMapping", []
+                    )
+                    # This can happen if there's only 1 propertyMapping;
+                    if isinstance(property_group_mappings, dict):
+                        logger.info(
+                            "Found a single property group mapping in a dictionary (not in a list). Pack it into a list...",
+                        )
+                        property_group_mappings = [property_group_mappings]
+
+                    for property_group_mapping in property_group_mappings:
+                        group_name = property_group_mapping.get("@groupName")
+                        set_name = property_group_mapping.get("@setName")
+                        category_id = property_group_mapping.get("@categoryId")
+                        mapping_type = property_group_mapping.get("@type")
+                        logger.info(
+                            "%s Property Group Mapping for Business Object -> %s: group -> %s is mapped to set -> %s (category -> %s)",
+                            mapping_type,
+                            bo_type_name,
+                            group_name,
+                            set_name,
+                            category_id,
+                        )
+
+                        property_mappings = property_group_mapping.get(
+                            "propertyMapping", []
+                        )
+                        # This can happen if there's only 1 propertyMapping;
+                        if not isinstance(property_mappings, list):
+                            logger.info(
+                                "Found a single property mapping in a dictionary (not in a list). Package it into a list...",
+                            )
+                            property_mappings = [property_mappings]
+
+                        for property_mapping in property_mappings:
+                            # for nested mappings we only have 2 fields - the rest is on the group level - see above
+                            property_name = property_mapping.get("@propertyName")
+                            attribute_name = property_mapping.get("@attributeName")
+                            logger.info(
+                                "%s Property Mapping inside group for Business Object -> %s: group -> %s, property -> %s is mapped to set -> %s, attribute -> %s (category -> %s)",
+                                mapping_type,
+                                bo_type_name,
+                                group_name,
+                                property_name,
+                                set_name,
+                                attribute_name,
+                                category_id,
+                            )
+                            # we write the group / set information also in the property mapping
+                            # tp have a plain list with all information:
+                            property_mapping["@groupName"] = group_name
+                            property_mapping["@setName"] = set_name
+                            property_mapping["@type"] = mapping_type
+                            business_object_type["business_property_groups"].append(
+                                property_mapping
+                            )
+
+        self.write_status_file(success, section_name, self._business_object_types)
+
+        return self._business_object_types
+
+        # end method definition
+
+    def get_business_object_properties(self, bo_type_name: str) -> dict:
+        """Get a dictionary with all property mapping of a business object type.
+           We contruct this dictionary from the two lists for the given
+           business object types (property mapping and property group mappings)
+           These two lists have been created before by process_business_object_types()
+
+           This method is used for creation of business objects in Salesforce.
+
+        Args:
+            bo_type_name (str): Name of the business object type
+
+        Returns:
+            dict: dictionary with keys that are either the attribute name or
+                  a key that is contructed like this: st name + "-" + attribute name.
+                  This allows for an easy lookup in mthods that have access to
+                  the category data of business workspaces.
+        """
+
+        # Find the matching business object type:
+        business_object_type = next(
+            (
+                item
+                for item in self._business_object_types
+                if item["name"] == bo_type_name
+            ),
+            None,
+        )
+        if not business_object_type:
+            return None
+
+        business_properties = business_object_type.get("business_properties")
+        business_property_groups = business_object_type.get("business_property_groups")
+
+        lookup_dict = {}
+
+        for mapping in business_properties:
+            attribute_name = mapping.get("@attributeName")
+            lookup_dict[attribute_name] = mapping
+
+        for mapping in business_property_groups:
+            set_name = mapping.get("@setName")
+            attribute_name = mapping.get("@attributeName")
+            lookup_dict[set_name + "-" + attribute_name] = mapping
+
+        return lookup_dict
+
+        # end method definition
+
     def process_workspace_types(self, section_name: str = "workspaceTypes") -> list:
         """Create a data structure for all workspace types in the Extended ECM system.
 
@@ -4259,26 +4890,34 @@ class Payload:
             # read the list from the json file in admin Home
             # this is important for restart of customizer pod
             # as this data structure is used later on for workspace processing
-            logger.info("Re-Initialize workspace types list for later use...")
+            logger.info(
+                "Re-Initialize workspace types list from status file -> %s for later use...",
+                self.get_status_file_name(payload_section_name=section_name),
+            )
             self._workspace_types = self.get_status_file(section_name)
+            logger.info("Found -> %s workspace types.", str(len(self._workspace_types)))
+            logger.debug("Workspace types -> %s", str(self._workspace_types))
             return self._workspace_types
 
-        # get all workspace types (these have been created by the transports and are not in the payload!):
+        # get all workspace types (these have been created by the transports and are not in the payload!)
+        # we need to do this each time as it needs to work across potential multiple payload files...
         response = self._otcs.get_workspace_types()
         if response is None:
             logger.error("No workspace types found!")
             self._workspace_types = []
         else:
             self._workspace_types = response["results"]
+            logger.info("Found -> %s workspace types.", str(len(self._workspace_types)))
+            logger.debug("Workspace types -> %s", str(self._workspace_types))
 
         # now we enrich the workspace_type list elments (which are dicts)
         # with additional dict elements for further processing:
         for workspace_type in self._workspace_types:
             workspace_type_id = workspace_type["data"]["properties"]["wksp_type_id"]
-            logger.info("Workspace Types ID -> %s", workspace_type_id)
+            logger.info("Workspace Type ID -> %s", workspace_type_id)
             workspace_type["id"] = workspace_type_id
             workspace_type_name = workspace_type["data"]["properties"]["wksp_type_name"]
-            logger.info("Workspace Types Name -> %s", workspace_type_name)
+            logger.info("Workspace Type Name -> %s", workspace_type_name)
             workspace_type["name"] = workspace_type_name
             workspace_templates = workspace_type["data"]["properties"]["templates"]
             # Create empty lists of dicts with template names and node IDs:
@@ -4289,7 +4928,7 @@ class Payload:
                     workspace_template_id = workspace_template["id"]
                     workspace_template_name = workspace_template["name"]
                     logger.info(
-                        "Found template with name -> %s and ID -> %s",
+                        "Found workspace template with name -> %s and ID -> %s",
                         workspace_template_name,
                         workspace_template_id,
                     )
@@ -4404,7 +5043,7 @@ class Payload:
             members = workspace_template["members"]
 
             # Find the workspace type with the name given in the _workspace_types
-            # datastructure that has been generated by process_workspace_type() method before:
+            # datastructure that has been generated by process_workspace_types() method before:
             workspace_type = next(
                 (item for item in self._workspace_types if item["name"] == type_name),
                 None,
@@ -4593,6 +5232,648 @@ class Payload:
 
         # end method definition
 
+    def prepare_workspace_create_form(
+        self,
+        categories: list,
+        template_id: int,
+        ext_system_id: int,
+        bo_type: int,
+        bo_id: int,
+        parent_workspace_node_id: int,
+    ) -> dict | None:
+        """Prepare the category structure for the workspace creation.
+
+        Args:
+            categories (list): categories list from workspace payload
+            template_id (int): workspace template ID
+            ext_system_id (int): External system ID
+            bo_type (int): Business Object Type ID
+            bo_id (int): Business Object ID
+            parent_workspace_node_id (int): Parent Workspace ID
+
+        Returns:
+            dict | None: category structure for workspace creation or None
+                         in case of an error.
+        """
+
+        category_create_data = {"categories": {}}
+
+        response = self._otcs.get_workspace_create_form(
+            template_id=template_id,
+            external_system_id=ext_system_id,
+            bo_type=bo_type,
+            bo_id=bo_id,
+            parent_id=parent_workspace_node_id,
+        )
+        if response is None:
+            logger.error(
+                "Failed to retrieve create information for template -> %s",
+                template_id,
+            )
+            return None
+
+        logger.info(
+            "Successfully retrieved create information for template -> %s",
+            template_id,
+        )
+
+        # Process category information
+        forms = response["forms"]
+
+        categories_form = {}
+
+        # Typically the the create workspace form delivers 3 forms:
+        # 1. Form for System Attributes (has no role name)
+        # 2. Form for Category Data (role name = "categories")
+        # 3. Form for Classifications (role name = "classifications")
+        # First we extract these 3 forms:
+        for form in forms:
+            if "role_name" in form and form["role_name"] == "categories":
+                categories_form = form
+                logger.debug("Found Categories form -> %s", form)
+                continue
+            if "role_name" in form and form["role_name"] == "classifications":
+                logger.debug("Found Classification form -> %s", form)
+                continue
+            # the remaining option is that this form is the system attributes form:
+            logger.debug("Found System Attributes form -> %s", form)
+
+        # We are just interested in the single category data set (role_name = "categories"):
+        data = categories_form["data"]
+        logger.debug("Categories data found -> %s", data)
+        schema = categories_form["schema"]["properties"]
+        logger.debug("Categories schema found -> %s", schema)
+        # parallel loop over category data and schema
+        for cat_data, cat_schema in zip(data, schema):
+            logger.info("Category ID -> %s", cat_data)
+            data_attributes = data[cat_data]
+            logger.debug("Data Attributes -> %s", data_attributes)
+            schema_attributes = schema[cat_schema]["properties"]
+            logger.debug("Schema Attributes -> %s", schema_attributes)
+            cat_name = schema[cat_schema]["title"]
+            logger.info("Category name -> %s", cat_name)
+            # parallel loop over attribute data and schema
+            # Sets with one (fixed) row have type = object
+            # Multi-value Sets with (multiple) rows have type = array and "properties" in "items" schema
+            # Multi-value attributes have also type = array but NO "properties" in "items" schema
+            for attr_data, attr_schema in zip(data_attributes, schema_attributes):
+                logger.debug("Attribute ID -> %s", attr_data)
+                logger.debug("Attribute Data -> %s", data_attributes[attr_data])
+                logger.debug("Attribute Schema -> %s", schema_attributes[attr_schema])
+                attr_type = schema_attributes[attr_schema]["type"]
+                logger.debug("Attribute Type -> %s", attr_type)
+                if not "title" in schema_attributes[attr_schema]:
+                    logger.debug("Attribute has no title. Skipping...")
+                    continue
+                # Check if it is an multi-line set:
+                if attr_type == "array" and (
+                    "properties" in schema_attributes[attr_schema]["items"]
+                ):
+                    set_name = schema_attributes[attr_schema]["title"]
+                    logger.info("Multi-line Set -> %s", set_name)
+                    set_data_attributes = data_attributes[
+                        attr_data
+                    ]  # this is a list []
+                    logger.debug("Set Data Attributes -> %s", set_data_attributes)
+                    set_schema_attributes = schema_attributes[attr_schema]["items"][
+                        "properties"
+                    ]
+                    logger.debug("Set Schema Attributes -> %s", set_schema_attributes)
+                    set_schema_max_rows = schema_attributes[attr_schema]["items"][
+                        "maxItems"
+                    ]
+                    logger.debug("Set Schema Max Rows -> %s", set_schema_max_rows)
+                    set_data_max_rows = len(set_data_attributes)
+                    logger.debug("Set Data Max Rows -> %s", set_data_max_rows)
+                    row = 1
+                    # it can happen that the payload contains more rows than the
+                    # initial rows in the set data structure. In this case we use
+                    # a copy of the data structure from row 0 as template...
+                    first_row = dict(set_data_attributes[0])
+                    # We don't know upfront how many rows of data we will find in payload
+                    # but we at max process the maxItems specified in the schema:
+                    while row <= set_schema_max_rows:
+                        # Test if we have any payload for this row:
+                        attribute = next(
+                            (
+                                item
+                                for item in categories
+                                if (
+                                    item["name"] == cat_name
+                                    and "set"
+                                    in item  # not all items may have a "set" key
+                                    and item["set"] == set_name
+                                    and "row"
+                                    in item  # not all items may have a "row" key
+                                    and item["row"] == row
+                                )
+                            ),
+                            None,
+                        )
+                        # stop if there's no payload for the row:
+                        if attribute is None:
+                            logger.info(
+                                "No payload found for set -> %s, row -> %s",
+                                set_name,
+                                row,
+                            )
+                            # we assume that if there's no payload for row n there will be no payload for rows > n
+                            # and break the while loop:
+                            break
+                        # do we need to create a new row in the data set?
+                        elif row > set_data_max_rows:
+                            # use the row we stored above to create a new empty row:
+                            logger.info(
+                                "Found payload for row -> %s, we need a new data row for it",
+                                row,
+                            )
+                            logger.info(
+                                "Adding an additional row -> %s to set data -> %s",
+                                row,
+                                set_name,
+                            )
+                            # add the empty dict to the list:
+                            set_data_attributes.append(dict(first_row))
+                            set_data_max_rows += 1
+                        else:
+                            logger.info(
+                                "Found payload for row -> %s %s we can store in existing data row",
+                                row,
+                                set_name,
+                            )
+                        # traverse all attributes in a single row:
+                        for set_attr_schema in set_schema_attributes:
+                            logger.debug(
+                                "Set Attribute ID -> %s (row -> %s)",
+                                set_attr_schema,
+                                row,
+                            )
+                            logger.debug(
+                                "Set Attribute Schema -> %s (row -> %s)",
+                                set_schema_attributes[set_attr_schema],
+                                row,
+                            )
+                            set_attr_type = set_schema_attributes[set_attr_schema][
+                                "type"
+                            ]
+                            logger.debug(
+                                "Set Attribute Type -> %s (row -> %s)",
+                                set_attr_type,
+                                row,
+                            )
+                            set_attr_name = set_schema_attributes[set_attr_schema][
+                                "title"
+                            ]
+                            logger.debug(
+                                "Set Attribute Name -> %s (row -> %s)",
+                                set_attr_name,
+                                row,
+                            )
+                            # Lookup the attribute with the right category, set, attribute name, and row number in payload:
+                            attribute = next(
+                                (
+                                    item
+                                    for item in categories
+                                    if (
+                                        item["name"] == cat_name
+                                        and "set"
+                                        in item  # not all items may have a "set" key
+                                        and item["set"] == set_name
+                                        and item["attribute"] == set_attr_name
+                                        and "row"
+                                        in item  # not all items may have a "row" key
+                                        and item["row"] == row
+                                    )
+                                ),
+                                None,
+                            )
+                            if attribute is None:
+                                logger.warning(
+                                    "Set -> %s, Attribute -> %s, Row -> %s not found in payload.",
+                                    set_name,
+                                    set_attr_name,
+                                    row,
+                                )
+
+                                # need to use row - 1 as index starts with 0 but payload rows start with 1
+                                set_data_attributes[row - 1][set_attr_schema] = ""
+                            else:
+                                logger.info(
+                                    "Set -> %s, Attribute -> %s, Row -> %s found in payload, value -> %s",
+                                    set_name,
+                                    set_attr_name,
+                                    row,
+                                    attribute["value"],
+                                )
+                                # Put the value from the payload into data structure
+                                # need to use row - 1 as index starts with 0 but payload rows start with 1
+                                set_data_attributes[row - 1][set_attr_schema] = (
+                                    attribute["value"]
+                                )
+                        row += 1  # continue the while loop with the next row
+                # Check if it is single-line set:
+                elif attr_type == "object":
+                    set_name = schema_attributes[attr_schema]["title"]
+                    logger.info("Single-line Set -> %s", set_name)
+                    set_data_attributes = data_attributes[attr_data]
+                    logger.debug("Set Data Attributes -> %s", set_data_attributes)
+
+                    set_schema_attributes = schema_attributes[attr_schema]["properties"]
+                    logger.debug("Set Schema Attributes -> %s", set_schema_attributes)
+                    for set_attr_data, set_attr_schema in zip(
+                        set_data_attributes, set_schema_attributes
+                    ):
+                        logger.debug("Set Attribute ID -> %s", set_attr_data)
+                        logger.debug(
+                            "Set Attribute Data -> %s",
+                            set_data_attributes[set_attr_data],
+                        )
+                        logger.debug(
+                            "Set Attribute Schema -> %s",
+                            set_schema_attributes[set_attr_schema],
+                        )
+                        set_attr_type = set_schema_attributes[set_attr_schema]["type"]
+                        logger.debug("Set Attribute Type -> %s", set_attr_type)
+                        set_attr_name = set_schema_attributes[set_attr_schema]["title"]
+                        logger.debug("Set Attribute Name -> %s", set_attr_name)
+                        # Lookup the attribute with the right category, set and attribute name in payload:
+                        attribute = next(
+                            (
+                                item
+                                for item in categories
+                                if (
+                                    item["name"] == cat_name
+                                    and "set"
+                                    in item  # not all items may have a "set" key
+                                    and item["set"] == set_name
+                                    and item["attribute"] == set_attr_name
+                                )
+                            ),
+                            None,
+                        )
+                        if attribute is None:
+                            logger.warning(
+                                "Set -> %s, Attribute -> %s not found in payload.",
+                                set_name,
+                                set_attr_name,
+                            )
+                            set_data_attributes[set_attr_data] = ""
+                        else:
+                            logger.info(
+                                "Set -> %s, Attribute -> %s found in payload, value -> %s",
+                                set_name,
+                                set_attr_name,
+                                attribute["value"],
+                            )
+                            # Put the value from the payload into data structure
+                            set_data_attributes[set_attr_data] = attribute["value"]
+                # It is a plain attribute (not inside a set) or it is a multi-value attribute (not inside a set):
+                else:
+                    attr_name = schema_attributes[attr_schema]["title"]
+                    logger.debug("Attribute Name -> %s", attr_name)
+                    # Lookup the attribute with the right category and attribute name in payload:
+                    attribute = next(
+                        (
+                            item
+                            for item in categories
+                            if (
+                                item["name"] == cat_name
+                                and item["attribute"] == attr_name
+                            )
+                        ),
+                        None,
+                    )
+                    if attribute is None:
+                        logger.warning(
+                            "Attribute -> %s not found in payload.", attr_name
+                        )
+                        data_attributes[attr_data] = ""
+                    else:
+                        logger.info(
+                            "Attribute -> %s found in payload, value -> %s",
+                            attr_name,
+                            attribute["value"],
+                        )
+                        # We need to handle a very special case here for Extended ECM for Government
+                        # which has an attribute type "Organizational Unit" (OU). This is referring to a group ID
+                        # which is not stable across deployments. So we need to lookup the Group ID and add it
+                        # to the data structure. This expects that the payload has the Group Name and not the Group ID
+                        if attr_type == str(11480):
+                            logger.info(
+                                "Attribute -> %s is is of type -> Organizational Unit (%s). Looking up group ID for group name -> %s",
+                                attr_name,
+                                attr_type,
+                                attribute["value"],
+                            )
+                            group = self._otcs.get_group(attribute["value"])
+                            group_id = self._otcs.lookup_result_value(
+                                group, "name", attribute["value"], "id"
+                            )
+
+                            if group_id:
+                                logger.info(
+                                    "Group for Organizational Unit -> %s has ID -> %s",
+                                    attribute["value"],
+                                    group_id,
+                                )
+                                # Put the group ID into data structure
+                                data_attributes[attr_data] = str(group_id)
+                            else:
+                                logger.error(
+                                    "Group for Organizational Unit -> %s does not exist!",
+                                    attribute["value"],
+                                )
+                                # Clear the value to avoid workspace create failure
+                                data_attributes[attr_data] = ""
+                        # handle special case where attribute type is a user picker.
+                        # we expect that the payload includes the login name for this
+                        # (as user IDs are not stable across systems) but then we need
+                        # to lookup the real user ID here:
+                        elif attr_type == "otcs_user_picker":
+                            logger.info(
+                                "Attribute -> %s is is of type -> User Picker (%s). Looking up user ID for user login name -> %s",
+                                attr_name,
+                                attr_type,
+                                attribute["value"],
+                            )
+                            user = self._otcs.get_user(attribute["value"])
+                            user_id = self._otcs.lookup_result_value(
+                                response=user,
+                                key="name",
+                                value=attribute["value"],
+                                return_key="id",
+                            )
+                            if user_id:
+                                # User has been found - determine ID:
+                                logger.info(
+                                    "User -> %s has ID -> %s",
+                                    attribute["value"],
+                                    user_id,
+                                )
+                                # Put the user ID into data structure
+                                data_attributes[attr_data] = str(user_id)
+                            else:
+                                logger.error(
+                                    "User with login name -> %s does not exist!",
+                                    attribute["value"],
+                                )
+                                # Clear the value to avoid workspace create failure
+                                data_attributes[attr_data] = ""
+                        else:
+                            # Put the value from the payload into data structure
+                            data_attributes[attr_data] = attribute["value"]
+            category_create_data["categories"][cat_data] = data_attributes
+
+        logger.debug("Category Create Data -> %s", category_create_data)
+
+        return category_create_data
+
+        # end method definition
+
+    def get_salesforce_business_object(
+        self, workspace: dict, object_type: str, search_field: str, search_value: str
+    ) -> str | None:
+        """_summary_
+
+        Args:
+            workspace (dict): Workspace payload
+            object_type (str): Business Object Type
+            search_field (str): Search field to find business object in external system.
+            search_value (str): Search value to find business object in external system.
+
+        Returns:
+            str | None: technical ID of the business object
+        """
+
+        if not self._salesforce:
+            logger.error(
+                "Salesforce connection not initialized! Cannot connect to Salesforce API!"
+            )
+            return None
+
+        logger.info(
+            "Workspaces is connected to Salesforce and we need to lookup the BO ID..."
+        )
+        salesforce_token = self._salesforce.authenticate()
+        if not salesforce_token:
+            logger.error("Failed to authenticate with Salesforce!")
+            return None
+
+        response = self._salesforce.get_object(
+            object_type=object_type,
+            search_field=search_field,
+            search_value=search_value,
+            result_fields=["Id"],
+        )
+        bo_id = self._salesforce.get_result_value(response, "Id")
+        if not bo_id:
+            logger.warning(
+                "Business object of type -> %s and %s = %s does not exist in Salesforce!",
+                object_type,
+                search_field,
+                search_value,
+            )
+            logger.info("We try to create the Salesforce object...")
+
+            # Geta helper dict to quickly lookup Salesforce properties
+            # for given set + attribute name:
+            property_lookup = self.get_business_object_properties(
+                bo_type_name=object_type
+            )
+            categories = workspace.get("categories", [])
+            parameter_dict = {}
+            # We process all category entries in workspace payload
+            # and see if we have a matching mapping to a business property
+            # in the BO Type definition:
+            for category in categories:
+                # generate the lookup key:
+                key = ""
+                if "set" in category:
+                    key += category["set"] + "-"
+                key += category.get("attribute")
+                # get the attribute value:
+                value = category.get("value")
+                # lookup the mapping
+                mapping = property_lookup.get(key, None)
+                # Check if we have a mapping:
+                if mapping:
+                    property_name = mapping.get("@propertyName", None)
+                    logger.info(
+                        "Found business property -> %s for attribute -> %s",
+                        property_name,
+                        category.get("attribute"),
+                    )
+                    parameter_dict[property_name] = value
+                else:
+                    logger.info(
+                        "Attribute -> %s (key -> %s) does not have a mapped business property.",
+                        category.get("attribute"),
+                        key,
+                    )
+
+            if not parameter_dict:
+                logger.warning("Cannot create Salesforce object - no parameters found")
+                return None
+
+            logger.info(
+                "Create Salesforce object of type -> %s with parameters -> %s",
+                object_type,
+                str(parameter_dict),
+            )
+            #
+            # Now we try to create the Salesforce object
+            #
+            response = self._salesforce.add_object(
+                object_type=object_type, **parameter_dict
+            )
+            bo_id = self._salesforce.get_result_value(response, "id")
+            if bo_id:
+                logger.info(
+                    "Created Salesforce business object with ID -> %s of type -> %s ",
+                    bo_id,
+                    object_type,
+                )
+            else:
+                logger.error(
+                    "Failed to create Salesforce business object of type -> %s",
+                    object_type,
+                )
+        else:
+            logger.info(
+                "Retrieved ID -> %s for Salesforce object type -> %s (looking up -> %s in field -> %s)",
+                bo_id,
+                object_type,
+                search_field,
+                search_value,
+            )
+
+        return bo_id
+
+        # end method definition
+
+    def prepare_workspace_business_objects(
+        self, workspace: dict, business_objects: list
+    ) -> list | None:
+        """Prepare the business object data for the workspace creation.
+           This supports multiple external system connections. This methods
+           also checks if the external system is reachable and tries to create
+           missing business objects in the leading system if they are missing.
+
+        Args:
+            workspace (dict): Payload data for the Workspace
+            business_objects (list): Payload data for the business object connections.
+
+        Returns:
+            list | None: list of business object data connections (dicts)
+        """
+
+        business_object_list = []
+
+        for business_object_data in business_objects:
+            business_object = {}
+
+            name = workspace.get("name")
+
+            # Read business object data from workspace payload.
+            # business_object_data is a dict with 3-5 elements:
+            if "external_system" in business_object_data:
+                ext_system_id = business_object_data["external_system"]
+            else:
+                logger.error(
+                    "Missing External System in Business Object payload for workspace -> %s.",
+                    name,
+                )
+                continue
+            if "bo_type" in business_object_data:
+                bo_type = business_object_data["bo_type"]
+            else:
+                logger.error(
+                    "Missing Type in Business Object payload for workspace -> %s.",
+                    name,
+                )
+                continue
+
+            if "bo_id" in business_object_data:
+                bo_id = business_object_data["bo_id"]
+                bo_search_field = None
+                bo_search_value = None
+            elif (
+                not "bo_search_field" in business_object_data
+                or not "bo_search_value" in business_object_data
+            ):
+                logger.error(
+                    "Missing BO search fields (bo_search_field, bo_search_value) in Business Object payload for workspace -> %s.",
+                    name,
+                )
+                continue
+            else:
+                bo_search_field = business_object_data["bo_search_field"]
+                bo_search_value = business_object_data["bo_search_value"]
+                bo_id = None
+
+            # Check if external system has been declared in payload:
+            external_system = next(
+                (
+                    item
+                    for item in self._external_systems
+                    if (item["external_system_name"] == ext_system_id)
+                ),
+                None,
+            )
+
+            if not external_system:
+                logger.warning(
+                    "External System -> %s does not exist. Cannot connect workspace -> %s to -> %s. Create workspace without connection.",
+                    ext_system_id,
+                    name,
+                    ext_system_id,
+                )
+                continue
+            elif not external_system.get("reachable"):
+                logger.warning(
+                    "External System -> %s is not reachable. Cannot connect workspace -> %s to -> (%s, %s, %s, %s, %s). Create workspace without connection...",
+                    ext_system_id,
+                    name,
+                    ext_system_id,
+                    bo_type,
+                    bo_id,
+                    bo_search_field,
+                    bo_search_value,
+                )
+                continue
+            external_system_type = external_system.get("external_system_type", "")
+
+            logger.info(
+                "Workspace -> %s will be connected with external system -> %s (%s) with (type -> %s, id -> %s, search_field -> %s, search_value -> %s)",
+                name,
+                external_system_type,
+                ext_system_id,
+                bo_type,
+                bo_id,
+                bo_search_field,
+                bo_search_value,
+            )
+
+            # For Salesforce we need to determine the actual business object ID (technical ID):
+            if external_system_type == "Salesforce" and not bo_id:
+                bo_id = self.get_salesforce_business_object(
+                    workspace,
+                    object_type=bo_type,
+                    search_field=bo_search_field,
+                    search_value=bo_search_value,
+                )
+                if not bo_id:
+                    continue
+
+            business_object["ext_system_id"] = ext_system_id
+            business_object["bo_type"] = bo_type
+            business_object["bo_id"] = bo_id
+
+            logger.info("Add external system -> %s to list.", bo_type)
+            business_object_list.append(business_object)
+
+        return business_object_list
+
     def process_workspaces(self, section_name: str = "workspaces") -> bool:
         """Process workspaces in payload and create them in Extended ECM.
 
@@ -4646,6 +5927,30 @@ class Payload:
                 continue
             type_name = workspace["type_name"]
 
+            # We need to do this early to find out if we have a cross-application workspace
+            # and need to continue even if the workspace does exist...
+            if "business_objects" in workspace and workspace["business_objects"]:
+                business_objects = workspace["business_objects"]
+
+                business_object_list = self.prepare_workspace_business_objects(
+                    workspace=workspace, business_objects=business_objects
+                )
+                # Check if any of the external systems are avaiable:
+                if business_object_list:
+                    logger.info(
+                        "Workspace -> %s will be connected to -> %s business object(s).",
+                        name,
+                        str(len(business_object_list)),
+                    )
+            else:
+                logger.info(
+                    "Workspace -> %s is not connected to any business object.", name
+                )
+                business_object_list = []
+
+            # Intialize cross-application workspace to "off":
+            ibo_workspace_id = None
+
             # check if the workspace has been created before (effort to make the customizing code idem-potent)
             logger.info(
                 "Check if workspace -> %s of type -> %s does already exist...",
@@ -4658,12 +5963,26 @@ class Payload:
             workspace_id = self.determine_workspace_id(workspace)
             if workspace_id:
                 logger.info(
-                    "Workspace -> %s of type -> %s does already exist and has ID -> %s! Skipping to next workspace...",
+                    "Workspace -> %s of type -> %s does already exist and has ID -> %s!",
                     name,
                     type_name,
                     workspace_id,
                 )
-                continue
+                # Check if we have an existing workspace that is cross-application.
+                # In this case we cannot just continue.
+                if len(business_object_list) > 1:
+                    ibo_workspace_id = workspace_id
+                    logger.info(
+                        "This is a cross-application workspace so we cannot skip the creation..."
+                    )
+                    # We assume the workspace is already conntected to the first BO in the list
+                    # This is a simplifiying assumption and should be enahcned in the future.
+                    business_object_list.pop(0)
+                else:
+                    logger.info(
+                        "This workspace is NOT a cross-application workspace so we can skip the creation..."
+                    )
+                    continue
 
             logger.info(
                 "Creating new Workspace -> %s; Workspace Type -> %s...", name, type_name
@@ -4777,505 +6096,117 @@ class Payload:
                 template_id,
             )
 
-            # Read business object data from workspace payload:
-            ext_system_id = None
-            bo_type = None
-            bo_id = None
-            # Check if business objects are in workspace payload and list is not empty:
-            if "business_objects" in workspace and workspace["business_objects"]:
-                # Currently we can only process one business object (workspaces connected to multiple leading systems are not support yet)
-                business_object_data = workspace["business_objects"][0]
-                # business_object_data is a dict with 3 elements:
-                if "external_system" in business_object_data:
-                    ext_system_id = business_object_data["external_system"]
-                if "bo_type" in business_object_data:
-                    bo_type = business_object_data["bo_type"]
-                if "bo_id" in business_object_data:
-                    bo_id = business_object_data["bo_id"]
-                logger.info(
-                    "Workspace -> %s has business object information -> (%s, %s, %s)",
-                    name,
-                    ext_system_id,
-                    bo_type,
-                    bo_id,
+            # Handle the case where the workspace is not connected
+            # to any external system / business object:
+            if not business_object_list:
+                business_object_list.append(
+                    {
+                        "ext_system_id": None,
+                        "bo_type": None,
+                        "bo_id": None,
+                    }
                 )
 
-                # Check if external system has been declared in payload:
-                external_system = next(
-                    (
-                        item
-                        for item in self._external_systems
-                        if (item["external_system_name"] == ext_system_id)
-                    ),
-                    None,
-                )
-                if not external_system:
-                    logger.warning(
-                        "External System -> %s does not exist. Cannot connect workspace -> %s to -> %s. Create workspace without connection.",
-                        ext_system_id,
-                        name,
-                        ext_system_id,
-                    )
-                    # we remove the Business Object information to avoid communication
-                    # errors during workspace create form and workspace creation
-                    ext_system_id = None
-                    bo_type = None
-                    bo_id = None
-                elif not external_system.get("reachable"):
-                    logger.warning(
-                        "External System -> %s is not reachable. Cannot connect workspace -> %s to -> (%s, %s, %s). Create workspace without connection...",
-                        ext_system_id,
-                        name,
-                        ext_system_id,
-                        bo_type,
-                        bo_id,
-                    )
-                    # we remove the Business Object information to avoid communication
-                    # errors during workspace create form and workspace creation
-                    ext_system_id = None
-                    bo_type = None
-                    bo_id = None
-                else:
+            for business_object in business_object_list:
+                # Read categories from payload:
+                if not "categories" in workspace:
                     logger.info(
-                        "Workspace -> %s will be connected with external system -> %s (%s, %s)",
-                        name,
-                        ext_system_id,
-                        bo_type,
-                        bo_id,
+                        "Workspace payload has no category data! Will leave category attributes empty..."
+                    )
+                    category_create_data = {}
+                else:
+                    categories = workspace["categories"]
+                    category_create_data = self.prepare_workspace_create_form(
+                        categories=categories,
+                        template_id=template_id,
+                        ext_system_id=business_object["ext_system_id"],
+                        bo_type=business_object["bo_type"],
+                        bo_id=business_object["bo_id"],
+                        parent_workspace_node_id=parent_workspace_node_id,
                     )
 
-            # Read categories from payload:
-            if not "categories" in workspace:
-                logger.info(
-                    "Workspace payload has no category data! Will leave category attributes empty..."
-                )
-                category_create_data = {}
-            else:
-                categories = workspace["categories"]
-                category_create_data = {"categories": {}}
-
-                response = self._otcs.get_workspace_create_form(
-                    template_id, ext_system_id, bo_type, bo_id, parent_workspace_node_id
+                if ibo_workspace_id:
+                    logger.info(
+                        "Connect existing workspace to an additional business object (IBO)"
+                    )
+                # Create the workspace with all provided information:
+                response = self._otcs.create_workspace(
+                    workspace_template_id=template_id,
+                    workspace_name=name,
+                    workspace_description=description,
+                    workspace_type=workspace_type_id,
+                    category_data=category_create_data,
+                    external_system_id=business_object["ext_system_id"],
+                    bo_type=business_object["bo_type"],
+                    bo_id=business_object["bo_id"],
+                    parent_id=parent_workspace_node_id,
+                    ibo_workspace_id=ibo_workspace_id,
+                    show_error=(
+                        not self._sap
+                    ),  # if SAP is active it may produce workspaces concurrently (race condition). Then we don't want to issue errors.
                 )
                 if response is None:
-                    logger.error(
-                        "Failed to retrieve create information for template -> %s",
-                        template_id,
-                    )
-                    success = False
-                    continue
-
-                logger.info(
-                    "Successfully retrieved create information for template -> %s",
-                    template_id,
-                )
-
-                # Process category information
-                forms = response["forms"]
-
-                categories_form = {}
-
-                # Typically the the create workspace form delivers 3 forms:
-                # 1. Form for System Attributes (has no role name)
-                # 2. Form for Category Data (role name = "categories")
-                # 3. Form for Classifications (role name = "classifications")
-                # First we extract these 3 forms:
-                for form in forms:
-                    if "role_name" in form and form["role_name"] == "categories":
-                        categories_form = form
-                        logger.debug("Found Categories form -> %s", form)
-                        continue
-                    if "role_name" in form and form["role_name"] == "classifications":
-                        logger.debug("Found Classification form -> %s", form)
-                        continue
-                    # the remaining option is that this form is the system attributes form:
-                    logger.debug("Found System Attributes form -> %s", form)
-
-                # We are just interested in the single category data set (role_name = "categories"):
-                data = categories_form["data"]
-                logger.debug("Categories data found -> %s", data)
-                schema = categories_form["schema"]["properties"]
-                logger.debug("Categories schema found -> %s", schema)
-                # parallel loop over category data and schema
-                for cat_data, cat_schema in zip(data, schema):
-                    logger.info("Category ID -> %s", cat_data)
-                    data_attributes = data[cat_data]
-                    logger.debug("Data Attributes -> %s", data_attributes)
-                    schema_attributes = schema[cat_schema]["properties"]
-                    logger.debug("Schema Attributes -> %s", schema_attributes)
-                    cat_name = schema[cat_schema]["title"]
-                    logger.info("Category name -> %s", cat_name)
-                    # parallel loop over attribute data and schema
-                    # Sets with one (fixed) row have type = object
-                    # Multi-value Sets with (multiple) rows have type = array and "properties" in "items" schema
-                    # Multi-value attributes have also type = array but NO "properties" in "items" schema
-                    for attr_data, attr_schema in zip(
-                        data_attributes, schema_attributes
-                    ):
-                        logger.debug("Attribute ID -> %s", attr_data)
-                        logger.debug("Attribute Data -> %s", data_attributes[attr_data])
-                        logger.debug(
-                            "Attribute Schema -> %s", schema_attributes[attr_schema]
+                    # Check if workspace has been concurrently created by some other
+                    # process (e.g. via SAP or Salesforce). This would be a race condition
+                    # that seems to really occur.
+                    workspace_id = self.determine_workspace_id(workspace)
+                    if workspace_id:
+                        logger.info(
+                            "Workspace -> %s of type -> %s has been created by an external process and has ID -> %s!",
+                            name,
+                            type_name,
+                            workspace_id,
                         )
-                        attr_type = schema_attributes[attr_schema]["type"]
-                        logger.debug("Attribute Type -> %s", attr_type)
-                        if not "title" in schema_attributes[attr_schema]:
-                            logger.debug("Attribute has no title. Skipping...")
-                            continue
-                        # Check if it is an multi-line set:
-                        if attr_type == "array" and (
-                            "properties" in schema_attributes[attr_schema]["items"]
-                        ):
-                            set_name = schema_attributes[attr_schema]["title"]
-                            logger.info("Multi-line Set -> %s", set_name)
-                            set_data_attributes = data_attributes[
-                                attr_data
-                            ]  # this is a list []
-                            logger.debug(
-                                "Set Data Attributes -> %s", set_data_attributes
-                            )
-                            set_schema_attributes = schema_attributes[attr_schema][
-                                "items"
-                            ]["properties"]
-                            logger.debug(
-                                "Set Schema Attributes -> %s", set_schema_attributes
-                            )
-                            set_schema_max_rows = schema_attributes[attr_schema][
-                                "items"
-                            ]["maxItems"]
-                            logger.debug(
-                                "Set Schema Max Rows -> %s", set_schema_max_rows
-                            )
-                            set_data_max_rows = len(set_data_attributes)
-                            logger.debug("Set Data Max Rows -> %s", set_data_max_rows)
-                            row = 1
-                            # it can happen that the payload contains more rows than the
-                            # initial rows in the set data structure. In this case we use
-                            # a copy of the data structure from row 0 as template...
-                            first_row = dict(set_data_attributes[0])
-                            # We don't know upfront how many rows of data we will find in payload
-                            # but we at max process the maxItems specified in the schema:
-                            while row <= set_schema_max_rows:
-                                # Test if we have any payload for this row:
-                                attribute = next(
-                                    (
-                                        item
-                                        for item in categories
-                                        if (
-                                            item["name"] == cat_name
-                                            and "set"
-                                            in item  # not all items may have a "set" key
-                                            and item["set"] == set_name
-                                            and "row"
-                                            in item  # not all items may have a "row" key
-                                            and item["row"] == row
-                                        )
-                                    ),
-                                    None,
-                                )
-                                # stop if there's no payload for the row:
-                                if attribute is None:
-                                    logger.info(
-                                        "No payload found for set -> %s, row -> %s",
-                                        set_name,
-                                        row,
-                                    )
-                                    # we assume that if there's no payload for row n there will be no payload for rows > n
-                                    # and break the while loop:
-                                    break
-                                # do we need to create a new row in the data set?
-                                elif row > set_data_max_rows:
-                                    # use the row we stored above to create a new empty row:
-                                    logger.info(
-                                        "Found payload for row -> %s, we need a new data row for it",
-                                        row,
-                                    )
-                                    logger.info(
-                                        "Adding an additional row -> %s to set data -> %s",
-                                        row,
-                                        set_name,
-                                    )
-                                    # add the empty dict to the list:
-                                    set_data_attributes.append(dict(first_row))
-                                    set_data_max_rows += 1
-                                else:
-                                    logger.info(
-                                        "Found payload for row -> %s %s we can store in existing data row",
-                                        row,
-                                        set_name,
-                                    )
-                                # traverse all attributes in a single row:
-                                for set_attr_schema in set_schema_attributes:
-                                    logger.debug(
-                                        "Set Attribute ID -> %s (row -> %s)",
-                                        set_attr_schema,
-                                        row,
-                                    )
-                                    logger.debug(
-                                        "Set Attribute Schema -> %s (row -> %s)",
-                                        set_schema_attributes[set_attr_schema],
-                                        row,
-                                    )
-                                    set_attr_type = set_schema_attributes[
-                                        set_attr_schema
-                                    ]["type"]
-                                    logger.debug(
-                                        "Set Attribute Type -> %s (row -> %s)",
-                                        set_attr_type,
-                                        row,
-                                    )
-                                    set_attr_name = set_schema_attributes[
-                                        set_attr_schema
-                                    ]["title"]
-                                    logger.debug(
-                                        "Set Attribute Name -> %s (row -> %s)",
-                                        set_attr_name,
-                                        row,
-                                    )
-                                    # Lookup the attribute with the right category, set, attribute name, and row number in payload:
-                                    attribute = next(
-                                        (
-                                            item
-                                            for item in categories
-                                            if (
-                                                item["name"] == cat_name
-                                                and "set"
-                                                in item  # not all items may have a "set" key
-                                                and item["set"] == set_name
-                                                and item["attribute"] == set_attr_name
-                                                and "row"
-                                                in item  # not all items may have a "row" key
-                                                and item["row"] == row
-                                            )
-                                        ),
-                                        None,
-                                    )
-                                    if attribute is None:
-                                        logger.warning(
-                                            "Set -> %s, Attribute -> %s, Row -> %s not found in payload.",
-                                            set_name,
-                                            set_attr_name,
-                                            row,
-                                        )
+                    else:
+                        logger.error(
+                            "Failed to create workspace -> %s of type -> %s!",
+                            name,
+                            type_name,
+                        )
+                        success = False
+                        continue
+                else:
+                    # Now we add the node ID of the new workspace to the payload data structure
+                    # This will be reused when creating the workspace relationships!
+                    if not ibo_workspace_id:
+                        workspace["nodeId"] = self._otcs.get_result_value(
+                            response, "id"
+                        )
+                        ibo_workspace_id = workspace["nodeId"]
 
-                                        # need to use row - 1 as index starts with 0 but payload rows start with 1
-                                        set_data_attributes[row - 1][
-                                            set_attr_schema
-                                        ] = ""
-                                    else:
-                                        logger.info(
-                                            "Set -> %s, Attribute -> %s, Row -> %s found in payload, value -> %s",
-                                            set_name,
-                                            set_attr_name,
-                                            row,
-                                            attribute["value"],
-                                        )
-                                        # Put the value from the payload into data structure
-                                        # need to use row - 1 as index starts with 0 but payload rows start with 1
-                                        set_data_attributes[row - 1][
-                                            set_attr_schema
-                                        ] = attribute["value"]
-                                row += 1  # continue the while loop with the next row
-                        # Check if it is single-line set:
-                        elif attr_type == "object":
-                            set_name = schema_attributes[attr_schema]["title"]
-                            logger.info("Single-line Set -> %s", set_name)
-                            set_data_attributes = data_attributes[attr_data]
-                            logger.debug(
-                                "Set Data Attributes -> %s", set_data_attributes
-                            )
+                        # We also get the name the workspace was finally created with.
+                        # This can be different form the name in the payload as additional
+                        # naming conventions from the Workspace Type definitions may apply.
+                        # This is important to make the python container idem-potent.
+                        response = self._otcs.get_workspace(workspace["nodeId"])
+                        workspace["name"] = self._otcs.get_result_value(
+                            response, "name"
+                        )
 
-                            set_schema_attributes = schema_attributes[attr_schema][
-                                "properties"
-                            ]
-                            logger.debug(
-                                "Set Schema Attributes -> %s", set_schema_attributes
-                            )
-                            for set_attr_data, set_attr_schema in zip(
-                                set_data_attributes, set_schema_attributes
-                            ):
-                                logger.debug("Set Attribute ID -> %s", set_attr_data)
-                                logger.debug(
-                                    "Set Attribute Data -> %s",
-                                    set_data_attributes[set_attr_data],
-                                )
-                                logger.debug(
-                                    "Set Attribute Schema -> %s",
-                                    set_schema_attributes[set_attr_schema],
-                                )
-                                set_attr_type = set_schema_attributes[set_attr_schema][
-                                    "type"
-                                ]
-                                logger.debug("Set Attribute Type -> %s", set_attr_type)
-                                set_attr_name = set_schema_attributes[set_attr_schema][
-                                    "title"
-                                ]
-                                logger.debug("Set Attribute Name -> %s", set_attr_name)
-                                # Lookup the attribute with the right category, set and attribute name in payload:
-                                attribute = next(
-                                    (
-                                        item
-                                        for item in categories
-                                        if (
-                                            item["name"] == cat_name
-                                            and "set"
-                                            in item  # not all items may have a "set" key
-                                            and item["set"] == set_name
-                                            and item["attribute"] == set_attr_name
-                                        )
-                                    ),
-                                    None,
-                                )
-                                if attribute is None:
-                                    logger.warning(
-                                        "Set -> %s, Attribute -> %s not found in payload.",
-                                        set_name,
-                                        set_attr_name,
-                                    )
-                                    set_data_attributes[set_attr_data] = ""
-                                else:
-                                    logger.info(
-                                        "Set -> %s, Attribute -> %s found in payload, value -> %s",
-                                        set_name,
-                                        set_attr_name,
-                                        attribute["value"],
-                                    )
-                                    # Put the value from the payload into data structure
-                                    set_data_attributes[set_attr_data] = attribute[
-                                        "value"
-                                    ]
-                        # It is a plain attribute (not inside a set) or it is a multi-value attribute (not inside a set):
-                        else:
-                            attr_name = schema_attributes[attr_schema]["title"]
-                            logger.debug("Attribute Name -> %s", attr_name)
-                            # Lookup the attribute with the right category and attribute name in payload:
-                            attribute = next(
-                                (
-                                    item
-                                    for item in categories
-                                    if (
-                                        item["name"] == cat_name
-                                        and item["attribute"] == attr_name
-                                    )
-                                ),
-                                None,
-                            )
-                            if attribute is None:
-                                logger.warning(
-                                    "Attribute -> %s not found in payload.", attr_name
-                                )
-                                data_attributes[attr_data] = ""
-                            else:
-                                logger.info(
-                                    "Attribute -> %s found in payload, value -> %s",
-                                    attr_name,
-                                    attribute["value"],
-                                )
-                                # We need to handle a very special case here for Extended ECM for Government
-                                # which has an attribute type "Organizational Unit" (OU). This is referring to a group ID
-                                # which is not stable across deployments. So we need to lookup the Group ID and add it
-                                # to the data structure. This expects that the payload has the Group Name and not the Group ID
-                                if attr_type == str(11480):
-                                    logger.info(
-                                        "Attribute -> %s is is of type -> Organizational Unit (%s). Looking up group ID for group name -> %s",
-                                        attr_name,
-                                        attr_type,
-                                        attribute["value"],
-                                    )
-                                    group = self._otcs.get_group(attribute["value"])
-                                    group_id = self._otcs.lookup_result_value(
-                                        group, "name", attribute["value"], "id"
-                                    )
+                        logger.info(
+                            "Successfully created workspace with final name -> %s and node ID -> %s",
+                            workspace["name"],
+                            workspace["nodeId"],
+                        )
 
-                                    if group_id:
-                                        logger.info(
-                                            "Group for Organizational Unit -> %s has ID -> %s",
-                                            attribute["value"],
-                                            group_id,
-                                        )
-                                        # Put the group ID into data structure
-                                        data_attributes[attr_data] = str(group_id)
-                                    else:
-                                        logger.error(
-                                            "Group for Organizational Unit -> %s does not exist!",
-                                            attribute["value"],
-                                        )
-                                        # Clear the value to avoid workspace create failure
-                                        data_attributes[attr_data] = ""
-                                # handle special case where attribute type is a user picker.
-                                # we expect that the payload includes the login name for this
-                                # (as user IDs are not stable across systems) but then we need
-                                # to lookup the real user ID here:
-                                elif attr_type == "otcs_user_picker":
-                                    logger.info(
-                                        "Attribute -> %s is is of type -> User Picker (%s). Looking up user ID for user login name -> %s",
-                                        attr_name,
-                                        attr_type,
-                                        attribute["value"],
-                                    )
-                                    user = self._otcs.get_user(attribute["value"])
-                                    user_id = self._otcs.lookup_result_value(
-                                        response=user,
-                                        key="name",
-                                        value=attribute["value"],
-                                        return_key="id",
-                                    )
-                                    if user_id:
-                                        # User has been found - determine ID:
-                                        logger.info(
-                                            "User -> %s has ID -> %s",
-                                            attribute["value"],
-                                            user_id,
-                                        )
-                                        # Put the user ID into data structure
-                                        data_attributes[attr_data] = str(user_id)
-                                    else:
-                                        logger.error(
-                                            "User with login name -> %s does not exist!",
-                                            attribute["value"],
-                                        )
-                                        # Clear the value to avoid workspace create failure
-                                        data_attributes[attr_data] = ""
-                                else:
-                                    # Put the value from the payload into data structure
-                                    data_attributes[attr_data] = attribute["value"]
-                    category_create_data["categories"][cat_data] = data_attributes
-
-            logger.debug("Category Create Data -> %s", category_create_data)
-
-            # Create the workspace with all provided information:
-            response = self._otcs.create_workspace(
-                template_id,
-                name,
-                description,
-                workspace_type_id,
-                category_create_data,
-                ext_system_id,
-                bo_type,
-                bo_id,
-                parent_workspace_node_id,
-            )
-            if response is None:
-                logger.error("Failed to create workspace -> %s", name)
-                success = False
-                continue
-
-            # Now we add the node ID of the new workspace to the payload data structure
-            # This will be reused when creating the workspace relationships!
-            workspace["nodeId"] = self._otcs.get_result_value(response, "id")
-
-            # We also get the name the workspace was finally created with.
-            # This can be different form the name in the payload as additional
-            # naming conventions from the Workspace Type definitions may apply.
-            # This is important to make the python container idem-potent.
-            response = self._otcs.get_workspace(workspace["nodeId"])
-            workspace["name"] = self._otcs.get_result_value(response, "name")
-
-            logger.info(
-                "Successfully created workspace with final name -> %s and node ID -> %s",
-                workspace["name"],
-                workspace["nodeId"],
-            )
+            # Check if there's an workspace nickname configured:
+            if "nickname" in workspace:
+                nickname = workspace["nickname"]
+                logger.info(
+                    "Assign nickname %s to workspace -> %s (%s)...",
+                    nickname,
+                    name,
+                    workspace["nodeId"],
+                )
+                response = self._otcs.set_node_nickname(
+                    node_id=workspace["nodeId"], nickname=nickname, show_error=True
+                )
+                if not response:
+                    logger.error(
+                        "Failed to assign nickname -> %s to workspace -> %s",
+                        nickname,
+                        name,
+                    )
 
             # Check if there's an workspace icon/image configured:
             if "image_nickname" in workspace:
@@ -5797,6 +6728,156 @@ class Payload:
 
         # end method definition
 
+    def process_workspace_member_permissions(
+        self, section_name: str = "workspaceMemberPermissions"
+    ) -> bool:
+        """Process workspaces members in payload and set their permissions.
+           We need this separate from process_workspace_members() with also
+           sets permissions (if in payload) as we add documents to workspaces with
+           content transports and these documents don't inherit role permissions
+           (this is a transport limitation)
+
+        Args:
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections)
+                                          This name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        if not self._workspaces:
+            logger.info("Payload section -> %s is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        for workspace in self._workspaces:
+            # Read name from payload (just for logging):
+            if not "name" in workspace:
+                continue
+            workspace_name = workspace["name"]
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in workspace and not workspace["enabled"]:
+                logger.info(
+                    "Payload for Workspace -> %s is disabled. Skipping...",
+                    workspace_name,
+                )
+                continue
+
+            # Read members from payload:
+            if not "members" in workspace:
+                logger.info(
+                    "Workspace -> %s has no members in payload. No need to update permissions. Skipping to next workspace...",
+                    workspace_name,
+                )
+                continue
+            members = workspace["members"]
+
+            workspace_id = workspace["id"]
+            workspace_node_id = int(self.determine_workspace_id(workspace))
+            if not workspace_node_id:
+                logger.warning(
+                    "Workspace without node ID cannot cannot get permission changes (workspaces creation may have failed). Skipping to next workspace..."
+                )
+                continue
+
+            workspace_roles = self._otcs.get_workspace_roles(workspace_node_id)
+            if workspace_roles is None:
+                logger.info(
+                    "Workspace with ID -> %s and node Id -> %s has no roles to update permissions. Skipping to next workspace...",
+                    workspace_id,
+                    workspace_node_id,
+                )
+                continue
+
+            for member in members:
+                # read user list and role name from payload:
+                member_users = (
+                    member["users"] if member.get("users") else []
+                )  # be careful to avoid key errors as users are optional
+                member_groups = (
+                    member["groups"] if member.get("groups") else []
+                )  # be careful to avoid key errors as groups are optional
+                member_role_name = member["role"]
+
+                if member_role_name == "":  # role name is required
+                    logger.error(
+                        "Members of workspace -> %s is missing the role name.",
+                        workspace_name,
+                    )
+                    success = False
+                    continue
+                if (
+                    member_users == [] and member_groups == []
+                ):  # we either need users or groups (or both)
+                    logger.warning(
+                        "Role -> %s of workspace -> %s does not have any members (no users nor groups).",
+                        member_role_name,
+                        workspace_name,
+                    )
+                    continue
+
+                role_id = self._otcs.lookup_result_value(
+                    workspace_roles, "name", member_role_name, "id"
+                )
+                if role_id is None:
+                    logger.error(
+                        "Workspace -> %s does not have a role with name -> %s",
+                        workspace_name,
+                        member_role_name,
+                    )
+                    success = False
+                    continue
+                logger.info("Role -> %s has ID -> %s", member_role_name, role_id)
+
+                member_permissions = member.get("permissions", [])
+                if member_permissions == []:
+                    logger.info(
+                        "No permission change for workspace -> %s and role -> %s.",
+                        workspace_name,
+                        member_role_name,
+                    )
+                    continue
+
+                logger.info(
+                    "Update permissions of workspace -> %s (%s) and role -> %s to -> %s",
+                    workspace_name,
+                    str(workspace_node_id),
+                    member_role_name,
+                    str(member_permissions),
+                )
+                response = self._otcs.assign_permission(
+                    node_id=workspace_node_id,
+                    assignee_type="custom",
+                    assignee=role_id,
+                    permissions=member_permissions,
+                    apply_to=2,
+                )
+                if not response:
+                    logger.error(
+                        "Failed to update permissions of workspace -> %s (%s) and role -> %s to -> %s.",
+                        workspace_name,
+                        str(workspace_node_id),
+                        member_role_name,
+                        str(member_permissions),
+                    )
+                    success = False
+
+        self.write_status_file(success, section_name, self._workspaces)
+
+        return success
+
+        # end method definition
+
     def process_workspace_aviators(
         self, section_name: str = "workspaceAviators"
     ) -> bool:
@@ -5899,18 +6980,19 @@ class Payload:
                                           This name is also used for the "success" status
                                           files written to the Admin Personal Workspace
         Returns:
-            bool: True if payload has been processed without errors, False otherwise
+            bool: True if a restart of the OTCS pods is required. False otherwise.
         """
 
         if not web_reports:
             logger.info("Payload section -> %s is empty. Skipping...", section_name)
-            return True
+            return False  # important to return False here as otherwise we are triggering a restart of services!!
 
         # If this payload section has been processed successfully before we
-        # can return True and skip processing it once more:
+        # can return False and skip processing it once more:
         if self.check_status_file(section_name):
-            return True
+            return False  # important to return False here as otherwise we are triggering a restart of services!!
 
+        restart_required: bool = False
         success: bool = True
 
         for web_report in web_reports:
@@ -5925,6 +7007,7 @@ class Payload:
                 continue
 
             description = web_report["description"]
+            restart = web_report.get("restart", False)
 
             if not self._otcs.get_node_from_nickname(nick_name):
                 logger.error(
@@ -6030,9 +7113,12 @@ class Payload:
                 logger.error("Failed to run web report -> %s", nick_name)
                 success = False
 
+            if restart:
+                restart_required = True
+
         self.write_status_file(success, section_name, web_reports)
 
-        return success
+        return restart_required
 
         # end method definition
 
@@ -6249,9 +7335,7 @@ class Payload:
             # we re-authenticate as the user:
             logger.info("Authenticate user -> %s...", user_name)
             # True = force new login with new user
-            cookie = self._otcs.authenticate(
-                revalidate=True, force_user_password_login=True
-            )
+            cookie = self._otcs.authenticate(revalidate=True)
             if not cookie:
                 logger.error("Couldn't authenticate user -> %s", user_name)
                 success = False
@@ -6396,7 +7480,7 @@ class Payload:
                 "Authenticate as admin user -> %s...", admin_credentials["username"]
             )
             # True = force new login with new user
-            cookie = self._otcs.authenticate(True)
+            cookie = self._otcs.authenticate(revalidate=True)
 
         # Also for the admin user we want to update the user profile to activate responsive (dynamic) containers:
         response = self._otcs.update_user_profile(
@@ -7559,7 +8643,7 @@ class Payload:
 
     def process_assignments(self, section_name: str = "assignments") -> bool:
         """Process assignments specified in payload and assign items (such as workspaces and
-        items withnicknames) to users or groups.
+        items with nicknames) to users or groups.
 
         Args:
             section_name (str, optional): name of the section. It can be overridden
@@ -8144,7 +9228,7 @@ class Payload:
                     # we re-authenticate as the user:
                     logger.info("Authenticate user -> %s...", exec_as_user)
                     # True = force new login with new user
-                    cookie = self._otcs.authenticate(True)
+                    cookie = self._otcs.authenticate(revalidate=True)
                     if not cookie:
                         logger.error("Couldn't authenticate user -> %s", exec_as_user)
                         continue
@@ -8172,7 +9256,7 @@ class Payload:
                     "Authenticate as admin user -> %s...", admin_credentials["username"]
                 )
                 # True = force new login with new user
-                cookie = self._otcs.authenticate(True)
+                cookie = self._otcs.authenticate(revalidate=True)
                 authenticated_user = "admin"
 
             if category_data:
@@ -8190,7 +9274,7 @@ class Payload:
                 )
 
             # Find the workspace type with the name given in the _workspace_types
-            # datastructure that has been generated by process_workspace_type() method before:
+            # datastructure that has been generated by process_workspace_types() method before:
             workspace_type_id = next(
                 (
                     item["id"]
@@ -8279,7 +9363,7 @@ class Payload:
                 "Authenticate as admin user -> %s...", admin_credentials["username"]
             )
             # True = force new login with new user
-            cookie = self._otcs.authenticate(True)
+            cookie = self._otcs.authenticate(revalidate=True)
 
         self.write_status_file(success, section_name, self._doc_generators)
 
@@ -8288,21 +9372,30 @@ class Payload:
         # end method definition
 
     def process_browser_automations(
-        self, section_name: str = "browserAutomations", check_status: bool = True
+        self,
+        browser_automations: list,
+        section_name: str = "browserAutomations",
+        check_status: bool = True,
     ) -> bool:
         """Process Selenium-based browser automations.
 
         Args:
+            browser_automations (list): list of browser_automations (need this as parameter as we
+                                        have multiple lists)
             section_name (str, optional): name of the section. It can be overridden
                                           for cases where multiple sections of same type
                                           are used (e.g. the "Post" sections)
                                           This name is also used for the "success" status
                                           files written to the Admin Personal Workspace
+            check_status (bool, optional): defines whether or not this needs to re-run
+                                           for each customizer run (even if it has been successful before).
+                                           If check_status is True (default) then it is only re-run
+                                           if it has NOT been successfully before.
         Returns:
             bool: True if payload has been processed without errors, False otherwise
         """
 
-        if not self._browser_automations:
+        if not browser_automations:
             logger.info("Payload section -> %s is empty. Skipping...", section_name)
             return True
 
@@ -8313,7 +9406,7 @@ class Payload:
 
         success: bool = True
 
-        for browser_automation in self._browser_automations:
+        for browser_automation in browser_automations:
             description = browser_automation.get("description", "")
 
             # Check if element has been disabled in payload (enabled = false).
@@ -8324,6 +9417,21 @@ class Payload:
                     description,
                 )
                 continue
+
+            if not "name" in browser_automation:
+                logger.error("Browser automation is missing a unique name. Skipping...")
+                success = False
+                continue
+            name = browser_automation.get("name")
+
+            if description:
+                logger.info(
+                    "Processing Browser Automation -> %s (%s)...",
+                    name,
+                    description,
+                )
+            else:
+                logger.info("Processing Browser Automation -> %s...", name)
 
             if not "base_url" in browser_automation:
                 logger.error("Browser automation is missing base_url. Skipping...")
@@ -8347,15 +9455,30 @@ class Payload:
                 continue
             automations = browser_automation.get("automations", [])
 
+            debug_automation: bool = browser_automation.get("debug", False)
+
             # Create Selenium Browser Automation:
-            logger.info("Browser Automation URL -> %s", base_url)
+            logger.info("Browser Automation base URL -> %s", base_url)
             logger.info("Browser Automation User -> %s", user_name)
             logger.debug("Browser Automation Password -> %s", password)
             browser_automation_object = BrowserAutomation(
                 base_url=base_url,
                 user_name=user_name,
                 user_password=password,
+                automation_name=name,
+                take_screenshots=debug_automation,
             )
+            # Implicit Wait is a global setting (for whole brwoser session)
+            # This makes sure a page is fully loaded and elements are present
+            # before accessing them. We set 15.0 seconds as default if not
+            # otherwise specified by "wait_time" in the payload.
+            # See https://www.selenium.dev/documentation/webdriver/waits/
+            wait_time = browser_automation.get("wait_time", 15.0)
+            browser_automation_object.implicit_wait(wait_time)
+            if "wait_time" in browser_automation:
+                logger.info(
+                    "Browser Automation Implicit Wait time -> %s configured", wait_time
+                )
 
             for automation in automations:
                 if not "type" in automation:
@@ -8408,7 +9531,7 @@ class Payload:
                             success = False
                             break
                         else:
-                            browser_automation_object.implict_wait(15.0)
+                            # browser_automation_object.implicit_wait(15.0) # this is global but not command-specific! Don't need it here!
                             logger.info(
                                 "Successfuly loaded page -> %s.", base_url + page
                             )
@@ -8432,7 +9555,7 @@ class Payload:
                             success = False
                             break
                         else:
-                            browser_automation_object.implict_wait(15.0)
+                            # browser_automation_object.implicit_wait(15.0) # this is global but not command-specific! Don't need it here!
                             logger.info("Successfuly clicked element -> %s.", elem)
                     case "set_elem":
                         elem = automation.get("elem", "")
@@ -8480,7 +9603,7 @@ class Payload:
                         break
 
         if check_status:
-            self.write_status_file(success, section_name, self._browser_automations)
+            self.write_status_file(success, section_name, browser_automations)
 
         return success
 
@@ -8546,6 +9669,8 @@ class Payload:
                 system_id=system_id,
                 destination=destination,
             )
+
+        self._sap = sap_object
 
         return sap_object
 
@@ -8636,6 +9761,48 @@ class Payload:
         self.write_status_file(success, section_name, self._sap_rfcs)
 
         return success
+
+        # end method definition
+
+    def init_salesforce(self, salesforce_external_system: dict) -> Salesforce | None:
+        """Initialize Salesforce object for workspace creation. This is needed to query Salesforce API
+           to lookup IDs of Salesforce objects.
+
+        Args:
+            salesfoce_external_system (dict): Salesforce external system created before
+        Returns:
+            Salesforce: Salesforce object
+        """
+
+        if not salesforce_external_system:
+            return None
+
+        username = salesforce_external_system["username"]
+        password = salesforce_external_system["password"]
+        base_url = salesforce_external_system["base_url"]
+        authorization_url = salesforce_external_system.get("token_endpoint", "")
+        client_id = salesforce_external_system["oauth_client_id"]
+        client_secret = salesforce_external_system["oauth_client_secret"]
+
+        logger.info("Connection parameters Salesforce:")
+        logger.info("Salesforce base URL          = %s", base_url)
+        logger.info("Salesforce authorization URL = %s", base_url)
+        logger.info("Salesforce username          = %s", username)
+        logger.debug("Salesforce password          = %s", password)
+        logger.info("Salesforce client ID         = %s", client_id)
+        logger.debug("Salesforce client secret     = %s", client_secret)
+        salesforce_object = Salesforce(
+            base_url=base_url,
+            client_id=client_id,
+            client_secret=client_secret,
+            username=username,
+            password=password,
+            authorization_url=authorization_url,
+        )
+
+        self._salesforce = salesforce_object
+
+        return salesforce_object
 
         # end method definition
 

@@ -24,7 +24,7 @@ apply_setting: apply a setting to a PowerDocs tenant
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -199,7 +199,9 @@ class OTPD:
                     additional_error_message, exception
                 )
             else:
-                message = "Cannot decode response as JSon; error -> {}".format(exception)
+                message = "Cannot decode response as JSon; error -> {}".format(
+                    exception
+                )
             if show_error:
                 logger.error(message)
             else:

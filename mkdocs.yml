@@ -4,14 +4,16 @@ site_url: https://example.com/
 
 theme:
   name: "material"
+  logo: https://avatars.githubusercontent.com/u/6463527?s=200&v=4
+  favicon: https://avatars.githubusercontent.com/u/6463527?s=200&v=4
   icon:
-    repo: fontawesome/brands/gitlab
+    repo: fontawesome/brands/github
   palette:
     primary: black
   features:
     - content.action.edit
     - content.code.copy
-    - content.tabs.link    
+    - content.tabs.link
 
 plugins:
   - search
@@ -19,8 +21,8 @@ plugins:
   - git-revision-date-localized:
       enable_creation_date: true
 
-repo_url: https://gitlab.otxlab.net/ecm/pyxecm/
-repo_name: ecm/pyxecm
+repo_url: https://github.com/opentext/pyxecm
+repo_name: opentext/pyxecm
 edit_uri: edit/main/docs/
 
 markdown_extensions:
@@ -41,22 +43,25 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
-        
+
 nav:
   - Index: index.md
   - Payload Syntax: payload-syntax.md
-  - xECM Classes:
-    - OTCS: pyxecm/otcs.md
-    - OTDS: pyxecm/otds.md  
-    - OTAC: pyxecm/otac.md  
-    - OTIV: pyxecm/otiv.md  
-    - OTPD: pyxecm/otpd.md  
-  - Customizer Classes:
-    - Payload: pyxecm/payload.md  
-    - Browser Automation: pyxecm/browser.md
-    - Customizer: pyxecm/customizer.md    
-    - K8s: pyxecm/k8s.md
-    - M365: pyxecm/m365.md
-    - Translate: pyxecm/translate.md
-    - SAP: pyxecm/sap.md
-  - Changelog: changelog.md
+  - Extended ECM Python Classes:
+      - Content Server (OTCS): pyxecm/otcs.md
+      - Directory Services (OTDS): pyxecm/otds.md
+      - Archive Center (OTAC): pyxecm/otac.md
+      - Intelligent Viewing (OTIV): pyxecm/otiv.md
+      - PowerDocs (OTPD): pyxecm/otpd.md
+  - Customizer Python Classes:
+      - Payload: pyxecm/payload.md
+      - Customizer: pyxecm/customizer.md
+      - Browser Automation: pyxecm/browser.md
+      - K8s: pyxecm/k8s.md
+      - Microsoft 365: pyxecm/m365.md
+      - SAP: pyxecm/sap.md
+      - Translate: pyxecm/translate.md
+  - Helper Python Classes:
+      - Assoc: pyxecm/assoc.md
+      - Web: pyxecm/web.md
+      - XML: pyxecm/xml.md

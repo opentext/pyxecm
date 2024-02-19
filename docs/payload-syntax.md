@@ -61,6 +61,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
     ```terraform
     partitions = [
       {
+          enabled     = true
           name        = "Salesforce"
           description = "Salesforce user partition"
           synced      = false
@@ -73,7 +74,8 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
     ```yaml
     partitions:
-      - name: "Salesforce"
+      - enabled: True
+        name: "Salesforce"
         description: "Salesforce user partition"
         synced: False
         access_role: "Access to cs"
@@ -81,7 +83,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
 #### oauthClients
 
-`oauthClients` allows to create new OAuth client in OTDS. Each list element includes a switch `enabled` to turn them on or off. This switch can be controlled by a Terraform variable. `name` defines the name of the OTDS OAuth client and `description` should describe what the OAuth client is used for. Each OAuth client has the typical elements such as `confidential`, OTDS `partition`, a `redirect_url`, `permission_scope`, `default_scope`, and `allow_impersonation`.
+`oauthClients` allows to create new OAuth client in OTDS. Each list element includes a switch `enabled` to turn them on or off. This switch can be controlled by a Terraform variable. `name` defines the name of the OTDS OAuth client and `description` should describe what the OAuth client is used for. Each OAuth client has the typical elements such as `confidential`, OTDS `partition`, a `redirect_url`, `permission_scope`, `default_scope`, and `allow_impersonation`. If there's a predefined secret it can be provided by `secret`.
 
 === "Terraform / HCL"
 
@@ -97,6 +99,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
         permission_scopes   = ["full"]
         default_scopes      = ["full"]
         allow_impersonation = true
+        secret              = var.salesforce_oauth_secret
       }
     ]
     ```
@@ -117,6 +120,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
         - full
         redirect_urls:
         - https://salesforce.com/services/authcallback/OTDS
+        secret: ${var.salesforce_oauth_secret}
     ```
 
 #### authHandlers
@@ -142,6 +146,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
         active_by_default      = false # replace standard OTDS login page
         authorization_endpoint = "..." # required only for OAUTH
         token_endpoint         = "..." # required only for OAUTH
+        scope_string           = "id"
       },
     ]
     ```
@@ -162,6 +167,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
         otds_url: https://${local.otds_dns_name}/otdsws/login
         provider_name: '...'
         saml_url: '...'
+        scope_string: '...'
         token_endpoint: '...'
         type: '...'
     ```
@@ -361,6 +367,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
         firstname             = "Adam"
         lastname              = "Minton"
         email                 = "adminton@innovate.com"
+        title                 = "Administrator"
         base_group            = "Administration"
         groups                = ["IT"]
         favorites             = ["workspace-a", "nickname-a"]
@@ -382,6 +389,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
         firstname             = "Nick"
         lastname              = "Wheeler"
         email                 = "nwheeler@innovate.com"
+        title                 = "Sales Director"
         base_group            = "Sales"
         groups                = ["Manager", "Office365"]
         favorites             = ["workspace-b", "nickname-b"]
@@ -424,6 +432,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
       security_clearance: 50
       supplemental_markings:
       - EUZONE
+      title: Administrator
     - base_group: Sales
       email: nwheeler@innovate.com
       favorites:
@@ -440,6 +449,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
       supplemental_markings:
       - EU-GDPR-PD
       - EUZONE
+      title: Sales Director
     ```
 
 #### items
@@ -649,16 +659,21 @@ Each external system has a field called `enabled` that allows to dyanmically tur
     ```terraform
     externalSystems = [
       {
-        enabled              = var.enable_sap
-        external_system_type = "SAP"
-        external_system_name = "TM6"
-        description          = "SAP S/4HANA on-premise"
-        as_url               = "https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding"
-        base_url             = "https://tmcerp1.eimdemo.biz:8443"
-        username             = "demo"
-        password             = local.password
-        certificate_file     = "/certificates/TM6.pse"
-        certificate_password = "topsecret"
+        enabled                  = var.enable_sap
+        external_system_type     = "SAP"
+        external_system_name     = "TM6"
+        external_system_number   = var.sap_external_system_number
+        description              = "SAP S/4HANA on-premise"
+        as_url                   = "https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding"
+        base_url                 = "https://tmcerp1.eimdemo.biz:8443"
+        client                   = var.sap_external_system_client
+        username                 = "demo"
+        password                 = local.password
+        certificate_file         = "/certificates/TM6.pse"
+        certificate_password     = "topsecret"
+        destination              = var.sap_external_system_destination
+        archive_logical_name     = var.sap_archive_logical_name
+        archive_certificate_file = "/certificates/${var.sap_archive_certificate_file}"
       },
       {
         enabled                = var.enable_salesforce
@@ -695,11 +710,15 @@ Each external system has a field called `enabled` that allows to dyanmically tur
 
     ```yaml
     externalSystems:
-    - as_url: https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding
+    - archive_logical_name: ${var.sap_archive_logical_name}
+      archive_certificate_file: "/certificates/${var.sap_archive_certificate_file}"
+      as_url: https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding
       base_url: https://tmcerp1.eimdemo.biz:8443
       certificate_file: /certificates/TM6.pse
       certificate_password: topsecret
+      client: ${var.sap_external_system_client}
       description: SAP S/4HANA on-premise
+      destination: ${var.sap_external_system_destination}
       enabled: ${var.enable_sap}
       external_system_name: TM6
       external_system_type: SAP
@@ -740,6 +759,7 @@ Each external system has a field called `enabled` that allows to dyanmically tur
     ```terraform
     transportPackages = [
         {
+          enabled     = true
           url         = "https://terrarium.blob.core.windows.net/transports/Terrarium-010-Categories.zip"
           name        = "Terrarium 010 Categories.zip"
           description = "Terrarium Category definitions"
@@ -748,6 +768,34 @@ Each external system has a field called `enabled` that allows to dyanmically tur
           url         = "https://terrarium.blob.core.windows.net/transports/Terrarium-020-Classifications.zip"
           name        = "Terrarium 20 Classifications.zip"
           description = "Terrarium Classification definitions"
+        },
+        {
+          enabled     = var.enable_sap
+          url         = "${var.transporturl}/Terrarium-110-Business-Object-Types-SAP.zip"
+          name        = "Terrarium 110 Business Object Types (SAP).zip"
+          description = "Terrarium Business Object types for SAP"
+          extractions = [
+            {
+              enabled = true
+              xpath   = "/livelink/llnode[@objtype='889']"
+            }
+          ]
+        },
+        {
+          enabled     = var.enable_o365
+          url         = "${var.transporturl}/Terrarium-115-Scheduled-Processing-Microsoft.zip"
+          name        = "Terrarium 115 Scheduled Processing (Microsoft).zip"
+          description = "Terrarium Scheduled Processing Jobs for Microsoft Office 365"
+          replacements = [
+            {
+              placeholder = "M365x62444544.onmicrosoft.com"
+              value       = var.o365_domain
+            },
+            {
+              placeholder = "M365x61936377.onmicrosoft.com"
+              value       = var.o365_domain
+            }
+          ]
         }
     ]
     ```
@@ -799,7 +847,7 @@ Each external system has a field called `enabled` that allows to dyanmically tur
 
 #### workspaces
 
-`workspaces` is a list of business workspaces instances that should be automatically created. Category, Roles, and Business Relationships can be provided. The `id` needs to be a unique value in the payload. It does not need to be something related to any of the actual Extended ECM workspace data. It is only used to establish relationship between different workspaces in the payload (using the list of IDs in `relationships`). **_Important_**: If the workspace type definition uses a pattern to generate the workspace name then the `name` in the payload should match the pattern in the workspace definition. Otherwise incremental deployments of the payload may not find the existing workspaces and may try to recreate them resulting in an error.
+`workspaces` is a list of business workspaces instances that should be automatically created. Category, Roles, and Business Relationships can be provided. The `id` needs to be a unique value in the payload. It does not need to be something related to any of the actual Extended ECM workspace data. It is only used to establish relationship between different workspaces in the payload (using the list of IDs in `relationships`). **_Important_**: If the workspace type definition uses a pattern to generate the workspace name then the `name` in the payload should match the pattern in the workspace definition. Otherwise incremental deployments of the payload may not find the existing workspaces and may try to recreate them resulting in an error. The `nickname` is the Extended ECM nickname that allows to refer to this itemwithout knowing its technical ID.
 
 Business Object information can be provided with a `business_objects` list. Each list item defines the external system (see above), the business object type, and business object ID. This list is optional.
 
@@ -818,6 +866,7 @@ A thrid workspace in the example below is for `Material` - it has an additional 
       {
         id          = "50031"
         name        = "Global Trade AG (50031)"
+        nickname    = "ws_customer_global_trade"
         description = "Strategic customer in Germany"
         type_name   = "Customer"
         template_name = "Customer"

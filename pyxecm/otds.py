@@ -96,7 +96,7 @@ update_password_policy: updates the global password policy
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler", "Jim Bennett"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -128,6 +128,7 @@ class OTDS:
 
     _config = None
     _cookie = None
+    _otds_ticket = None
 
     def __init__(
         self,
@@ -395,6 +396,10 @@ class OTDS:
 
         # Already authenticated and session still valid?
         if self._cookie and not revalidate:
+            logger.info(
+                "Session still valid - return existing cookie -> %s",
+                str(self._cookie),
+            )
             return self._cookie
 
         otds_ticket = "NotSet"
@@ -429,7 +434,10 @@ class OTDS:
             logger.error("Failed to request an OTDS ticket; error -> %s", response.text)
             return None
 
+        # Store authentication ticket:
         self._cookie = {"OTDSTicket": otds_ticket}
+        self._otds_ticket = otds_ticket
+
         return self._cookie
 
     # end method definition
@@ -523,7 +531,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -586,7 +594,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -631,7 +639,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -727,7 +735,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -832,7 +840,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -938,7 +946,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1115,7 +1123,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1156,7 +1164,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -1227,7 +1235,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1272,7 +1280,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1335,7 +1343,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if partition:
@@ -1404,7 +1412,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1449,7 +1457,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1494,7 +1502,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1548,7 +1556,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1603,7 +1611,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1648,7 +1656,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1698,7 +1706,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1761,7 +1769,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1801,7 +1809,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 # We don't necessarily want to log an error as this function
@@ -1849,7 +1857,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 # We don't necessarily want to log an error as this function
@@ -1897,7 +1905,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1936,7 +1944,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1976,7 +1984,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2032,7 +2040,7 @@ class OTDS:
                 return True
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2111,7 +2119,7 @@ class OTDS:
                 return True
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2187,7 +2195,7 @@ class OTDS:
                 return True
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2250,7 +2258,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2314,7 +2322,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2354,7 +2362,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2618,7 +2626,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2658,7 +2666,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -2709,7 +2717,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2751,7 +2759,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2934,7 +2942,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -3088,7 +3096,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3718,7 +3726,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3777,7 +3785,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3837,7 +3845,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3896,7 +3904,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3955,7 +3963,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -4021,7 +4029,7 @@ class OTDS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(

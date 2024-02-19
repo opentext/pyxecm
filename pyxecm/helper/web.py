@@ -11,13 +11,14 @@ http_request: make a HTTP request to a defined URL / endpoint (e.g. a Web Hook)
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
 import logging
 import socket
+import time
 import requests
 
 logger = logging.getLogger("pyxecm.web")
@@ -75,20 +76,23 @@ class HTTP(object):
         self,
         url: str,
         method: str = "POST",
-        payload: dict = {},
-        headers: dict = {},
+        payload: dict | None = None,
+        headers: dict | None = None,
         timeout: int = 60,
+        retries: int = 0,
+        wait_time: int = 0,
     ):
-        """Issues an http request
+        """Issues an http request to a given URL.
 
         Args:
             url (str): URL of the request
             method (str, optional): Method of the request (POST, PUT, GET, ...). Defaults to "POST".
-            payload (dict, optional): Request payload. Defaults to {}.
-            headers (dict, optional): Request header. Defaults to {}. If {} then a default
+            payload (dict, optional): Request payload. Defaults to None.
+            headers (dict, optional): Request header. Defaults to None. If None then a default
                                       value defined in "requestHeaders" is used.
-            timeout (int): timeout in seconds
-
+            timeout (int, optional): timeout in seconds
+            retries (int, optional): number of retries. If -1 then unlimited retries.
+            wait_time (int, optional): number of seconds to wait after each try
         Returns:
             Response of call
         """
@@ -97,24 +101,60 @@ class HTTP(object):
             headers = requestHeaders
 
         logger.info(
-            "Make HTTP Request to URL -> %s using -> %s method with payload -> %s",
+            "Make HTTP Request to URL -> %s using -> %s method with payload -> %s (max number of retries = %s)",
             url,
             method,
             str(payload),
+            str(retries),
         )
 
-        response = requests.request(
-            method=method, url=url, data=payload, headers=headers, timeout=timeout
-        )
+        try_counter = 1
 
-        if not response.ok:
-            logger.error(
-                "HTTP request -> %s to url -> %s failed; error -> %s",
-                method,
-                url,
-                response.text,
+        while True:
+            response = requests.request(
+                method=method, url=url, data=payload, headers=headers, timeout=timeout
             )
 
-        return response
+            if not response.ok and retries == 0:
+                logger.error(
+                    "HTTP request -> %s to url -> %s failed; status -> %s; error -> %s",
+                    method,
+                    url,
+                    response.status_code,
+                    response.text,
+                )
+                return response
+
+            elif response.ok:
+                logger.info(
+                    "HTTP request -> %s to url -> %s succeeded with status -> %s!",
+                    method,
+                    url,
+                    response.status_code,
+                )
+                if wait_time > 0:
+                    logger.info("Sleeping %s seconds...", wait_time)
+                    time.sleep(wait_time)
+                return response
+
+            else:
+                logger.warning(
+                    "HTTP request -> %s to url -> %s failed (try %s); status -> %s; error -> %s",
+                    method,
+                    url,
+                    try_counter,
+                    response.status_code,
+                    response.text,
+                )
+                if wait_time > 0:
+                    logger.warning(
+                        "Sleeping %s seconds and then trying once more...",
+                        str(wait_time),
+                    )
+                    time.sleep(wait_time)
+                else:
+                    logger.warning("Trying once more...")
+                retries -= 1
+                try_counter += 1
 
     # end method definition

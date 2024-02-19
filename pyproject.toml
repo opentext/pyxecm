@@ -28,6 +28,7 @@ dependencies = [
   'zipfile36',
   'suds',
   'python-hcl2',
+  'xmltodict',
   'lxml',
 ]
 keywords = [

@@ -48,6 +48,7 @@ is_proxy: Check if a user (login name) is a proxy of the current user
 get_user_proxies: Get the list of proxy users for the current user
 add_user_proxy: Add a proxy to the current (authenticated) user
 add_favorite: Add a favorite for the current (authenticated) user
+add_favorite_tab: Add a favorite tab for the current (authenticated) user
 
 get_group: Lookup Content Server group
 add_group: Add Content Server group
@@ -59,6 +60,7 @@ get_node_by_parent_and_name: Get a node based on the parent ID and name
 get_node_by_workspace_and_path: Get a node based on the workspace ID and path (list of folder names)
 get_node_by_volume_and_path: Get a node based on the volume ID and path
 get_node_from_nickname: Get a node based on the nickname
+set_node_nickname: Assign a nickname to an Extended ECM node (e.g. workspace)
 get_subnodes: get children nodes of a parent node
 get_node_actions: get possible actions for a node
 rename_node: Change the name and description of a node
@@ -87,8 +89,11 @@ deploy_transport: Main method to deploy a transport. This uses subfunctions to u
                  unpackage and deploy the transport, and creates the required workbench
 replace_transport_placeholders: Search and replace strings in the XML files of the transport packlage
 
-get_workspace_types: Get all workspace types configured in Extended ECM
+get_business_object_types: Get information for all configured business object types
 get_business_object_type: Get information for a specific business object type
+get_business_objects: Get all business objects for an external system and a given business object type.
+
+get_workspace_types: Get all workspace types configured in Extended ECM
 get_workspace_create_form: Get the Workspace create form
 get_workspace: Get a workspace node
 get_workspace_instances: Get all instances of a given workspace type 
@@ -102,6 +107,8 @@ add_member_to_workspace: Add member to workspace role. Check that the user is no
 remove_member_from_workspace: Remove member from workspace role
 assign_workspace_permissions: Update workspace permissions for a given role
 update_workspace_icon: Update a workspace with a with a new icon (which is uploaded)
+
+get_unique_names: Get information on definition of Unique Names.
 
 create_item: Create an item in Extended ECM (e.g. folder or URL item)
 update_item: Update an item in Extended ECM (e.g. folder or URL item)
@@ -155,7 +162,7 @@ update_workspace_aviator: Enable or disable the Content Aviator for a workspace
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -212,6 +219,7 @@ class OTCS:
         resource_name: str = "cs",
         default_license: str = "X3",
         otds_ticket: str | None = None,
+        base_path: str = "/cs/cs",
     ):
         """Initialize the OTCS object
 
@@ -284,9 +292,9 @@ class OTCS:
 
         otcs_config["configuredUrl"] = otcs_support_url + "/csconfigured"
 
-        otcs_url = otcs_base_url + "/cs/cs"
+        otcs_url = otcs_base_url + base_path
         otcs_config["csUrl"] = otcs_url
-        otcs_public_url = public_url + "/cs/cs"
+        otcs_public_url = public_url + base_path
         otcs_config["csPublicUrl"] = otcs_public_url
 
         otcs_rest_url = otcs_url + "/api"
@@ -304,14 +312,22 @@ class OTCS:
         otcs_config["importSettingsUrl"] = otcs_rest_url + "/v2/import/settings/admin"
         otcs_config["searchUrl"] = otcs_rest_url + "/v2/search"
         otcs_config["volumeUrl"] = otcs_rest_url + "/v2/volumes"
-        otcs_config["externalSystem"] = otcs_rest_url + "/v2/externalsystems"
-        otcs_config["businessworkspacetypes"] = (
+        otcs_config["externalSystemUrl"] = otcs_rest_url + "/v2/externalsystems"
+        otcs_config["businessObjectsUrl"] = otcs_rest_url + "/v2/businessobjects"
+        otcs_config["businessObjectTypesUrl"] = (
+            otcs_rest_url + "/v2/businessobjecttypes"
+        )
+        otcs_config["businessObjectsSearchUrl"] = (
+            otcs_rest_url + "/v2/forms/businessobjects/search"
+        )
+        otcs_config["businessWorkspaceTypesUrl"] = (
             otcs_rest_url + "/v2/businessworkspacetypes"
         )
         otcs_config["businessworkspacecreateform"] = (
             otcs_rest_url + "/v2/forms/businessworkspaces/create"
         )
-        otcs_config["businessworkspaces"] = otcs_rest_url + "/v2/businessworkspaces"
+        otcs_config["businessWorkspacesUrl"] = otcs_rest_url + "/v2/businessworkspaces"
+        otcs_config["uniqueNamesUrl"] = otcs_rest_url + "/v2/uniquenames"
         otcs_config["favoritesUrl"] = otcs_rest_url + "/v2/members/favorites"
         otcs_config["webReportsUrl"] = otcs_rest_url + "/v1/webreports"
         otcs_config["csApplicationsUrl"] = otcs_rest_url + "/v2/csapplications"
@@ -404,7 +420,7 @@ class OTCS:
         return self.config()["csUrl"]
 
     def cs_public_url(self) -> str:
-        """Returns the public (external) Extended ECM URL (incl. /cs/cs)
+        """Returns the public (external) Extended ECM URL (incl. base_path /cs/cs )
 
         Returns:
             str: Extended ECM Public URL
@@ -939,23 +955,25 @@ class OTCS:
 
     # end method definition
 
-    def authenticate(
-        self, revalidate: bool = False, force_user_password_login: bool = False
-    ) -> dict | None:
+    def authenticate(self, revalidate: bool = False) -> dict | None:
         """Authenticates at Content Server and retrieve OTCS Ticket.
 
         Args:
-            revalidate (bool): determinse if a re-athentication is enforced
-                               (e.g. if session has timed out with 401 error)
-            force_user_password_login (bool): By default we use the OTDS ticket (if exists) for the authentication with OTCS.
-                                              This switch allows the forced usage of username / password for the authentication.
+            revalidate (bool, optional): determinse if a re-athentication is enforced
+                                         (e.g. if session has timed out with 401 error)
+                                         By default we use the OTDS ticket (if exists) for the authentication with OTCS.
+                                         This switch allows the forced usage of username / password for the authentication.
         Returns:
             dict: Cookie information of None in case of an error.
-                        Also stores cookie information in self._cookie
+                  Also stores cookie information in self._cookie
         """
 
         # Already authenticated and session still valid?
         if self._cookie and not revalidate:
+            logger.info(
+                "Session still valid - return existing cookie -> %s",
+                str(self._cookie),
+            )
             return self._cookie
 
         otcs_ticket = None
@@ -969,7 +987,7 @@ class OTCS:
 
         request_url = self.config()["authenticationUrl"]
 
-        if self._otds_ticket and not force_user_password_login:
+        if self._otds_ticket and not revalidate:
             logger.info(
                 "Requesting OTCS ticket with OTDS ticket; calling -> %s",
                 request_url,
@@ -994,7 +1012,8 @@ class OTCS:
                     exception.strerror,
                 )
 
-        # Check if previous authentication was successful
+        # Check if previous authentication was not successful.
+        # Then we do the normal username + password authentication:
         if not otcs_ticket:
             logger.info(
                 "Requesting OTCS ticket with User/Password; calling -> %s",
@@ -1049,7 +1068,7 @@ class OTCS:
         Returns:
             dict: server information or None if the call fails
 
-            Example value:
+            Example response:
             {
                 'mobile': {
                     'cs_viewer_support': False,
@@ -1105,7 +1124,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1145,8 +1164,8 @@ class OTCS:
             xml_file_path (str): name + path of the XML settings file
         Returns:
             dict: Import response or None if the import fails.
-                        response["results"]["data"]["restart"] indicates if the settings
-                        require a restart of the OTCS services.
+                  The field response["results"]["data"]["restart"] indicates if the settings
+                  require a restart of the OTCS services.
         """
 
         filename = os.path.basename(xml_file_path)
@@ -1189,7 +1208,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1284,7 +1303,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -1307,6 +1326,7 @@ class OTCS:
         first_name: str,
         last_name: str,
         email: str,
+        title: str,
         base_group: int,
         privileges: list | None = None,
     ) -> dict | None:
@@ -1318,6 +1338,7 @@ class OTCS:
             first_name (str): first name of the user
             last_name (str): last name of the user
             email (str): email address of the user
+            title (str): title of the user
             base_group (int): base group id of the user (e.g. department)
             privileges (list, optional): values are Login, Public Access, Content Manager,
                                          Modify Users, Modify Groups, User Admin Rights,
@@ -1329,13 +1350,14 @@ class OTCS:
         if privileges is None:
             privileges = ["Login", "Public Access"]
 
-        userPostBody = {
+        user_post_body = {
             "type": 0,
             "name": name,
             "password": password,
             "first_name": first_name,
             "last_name": last_name,
             "business_email": email,
+            "title": title,
             "group_id": base_group,
             "privilege_login": ("Login" in privileges),
             "privilege_public_access": ("Public Access" in privileges),
@@ -1356,7 +1378,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=userPostBody,
+                data=user_post_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -1366,7 +1388,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1387,7 +1409,8 @@ class OTCS:
             field (str): user field to search with (where_name, where_first_name, where_last_name)
         Returns:
             dict: User information or None if the user couldn't be found (e.g. because it doesn't exist).
-            Example:
+
+            Example response:
             {
                 'collection': {
                     'paging': {...},
@@ -1451,7 +1474,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1476,7 +1499,7 @@ class OTCS:
             dict: User information or None if the user couldn't be updated (e.g. because it doesn't exist).
         """
 
-        userPutBody = {field: value}
+        user_put_body = {field: value}
 
         request_url = self.config()["membersUrlv2"] + "/" + str(user_id)
         request_header = self.request_form_header()
@@ -1488,13 +1511,13 @@ class OTCS:
             value,
             request_url,
         )
-        logger.debug("User Attributes -> %s", str(userPutBody))
+        logger.debug("User Attributes -> %s", str(user_put_body))
 
         retries = 0
         while True:
             response = requests.put(
                 url=request_url,
-                data=userPutBody,
+                data=user_put_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -1504,7 +1527,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1551,7 +1574,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1590,7 +1613,7 @@ class OTCS:
                   (e.g. because it doesn't exist).
         """
 
-        userProfilePutBody = {config_section: {field: value}}
+        user_profile_put_body = {config_section: {field: value}}
 
         request_url = self.config()["membersUrlv2"] + "/preferences"
         request_header = self.request_form_header()
@@ -1601,14 +1624,14 @@ class OTCS:
             value,
             request_url,
         )
-        logger.debug("User Attributes -> %s", str(userProfilePutBody))
+        logger.debug("User Attributes -> %s", str(user_profile_put_body))
 
         retries = 0
         while True:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.put(
                 url=request_url,
-                data={"body": json.dumps(userProfilePutBody)},
+                data={"body": json.dumps(user_profile_put_body)},
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -1618,7 +1641,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1640,7 +1663,7 @@ class OTCS:
             dict: Node information or None if photo node is not found.
         """
 
-        updateUserPutBody = {"photo_id": photo_id}
+        update_user_put_body = {"photo_id": photo_id}
 
         request_url = self.config()["membersUrl"] + "/" + str(user_id)
         request_header = self.request_form_header()
@@ -1656,7 +1679,7 @@ class OTCS:
         while True:
             response = requests.put(
                 url=request_url,
-                data=updateUserPutBody,
+                data=update_user_put_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -1666,7 +1689,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1696,7 +1719,11 @@ class OTCS:
         parts = version_number.split(".")
         # Take the first two parts and join them back with a dot
         stripped_version = ".".join(parts[:2])
-        version_number = float(stripped_version)
+
+        try:
+            version_number = float(stripped_version)
+        except ValueError:
+            version_number = 99.99  # Set to version 99.99 for "main"
 
         if version_number >= 23.4:
             response = self.get_user_proxies(use_v2=True)
@@ -1749,7 +1776,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1841,7 +1868,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -1883,12 +1910,56 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
                     "Failed to add favorite for node ID -> %s; status -> %s; error -> %s",
                     str(node_id),
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def add_favorite_tab(self, tab_name: str, order: int) -> dict | None:
+        """Add a favorite tab for the current (authenticated) user.
+
+        Args:
+            tab_name (str): Name of the new tab.
+            order (int): The order of the tab.
+        Returns:
+            dict: Request response or None if the favorite tab creation has failed.
+        """
+
+        favorite_tab_post_body = {"name": tab_name, "order": str(order)}
+
+        request_url = self.config()["favoritesUrl"] + "/tabs"
+        request_header = self.request_form_header()
+
+        logger.info("Adding favorite tab -> %s; calling -> %s", tab_name, request_url)
+
+        retries = 0
+        while True:
+            response = requests.post(
+                url=request_url,
+                data=favorite_tab_post_body,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to add favorite tab -> %s; status -> %s; error -> %s",
+                    tab_name,
                     response.status_code,
                     response.text,
                 )
@@ -1937,7 +2008,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -1962,19 +2033,19 @@ class OTCS:
             dict: Group information or None if the group couldn't be created (e.g. because it exisits already).
         """
 
-        groupPostBody = {"type": 1, "name": name}
+        group_post_body = {"type": 1, "name": name}
 
         request_url = self.config()["membersUrlv2"]
         request_header = self.request_form_header()
 
         logger.info("Adding group -> %s; calling -> %s", name, request_url)
-        logger.debug("Group Attributes -> %s", str(groupPostBody))
+        logger.debug("Group Attributes -> %s", str(group_post_body))
 
         retries = 0
         while True:
             response = requests.post(
                 url=request_url,
-                data=groupPostBody,
+                data=group_post_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -1984,7 +2055,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2042,7 +2113,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2065,7 +2136,7 @@ class OTCS:
             dict: Response or None if adding a the member fails.
         """
 
-        groupMemberPostBody = {"member_id": member_id}
+        group_member_post_body = {"member_id": member_id}
 
         request_url = self.config()["membersUrlv2"] + "/" + str(group_id) + "/members"
         request_header = self.request_form_header()
@@ -2081,7 +2152,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=groupMemberPostBody,
+                data=group_member_post_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -2091,7 +2162,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2195,7 +2266,7 @@ class OTCS:
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     logger.warning("Session has expired - try to re-authenticate...")
-                    self.authenticate(True)
+                    self.authenticate(revalidate=True)
                     retries += 1
                 else:
                     logger.error(
@@ -2236,7 +2307,7 @@ class OTCS:
         Args:
             parent_id (int) is the node Id of the parent node
             name (str) is the name of the node to get
-            fields (str): which fields to retrieve. This can have a big impact on performance!
+            fields (str, optional): which fields to retrieve. This can have a big impact on performance!
             show_error (bool, optional): treat as error if node is not found
         Returns:
             dict: Node information or None if no node with this name is found in parent.
@@ -2277,7 +2348,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -2436,7 +2507,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -2448,6 +2519,63 @@ class OTCS:
                     )
                 else:
                     logger.info("Node with nickname -> %s not found.", nickname)
+                return None
+
+    def set_node_nickname(
+        self, node_id: int, nickname: str, show_error: bool = False
+    ) -> dict | None:
+        """Assign a nickname to an Extended ECM node (e.g. workspace)
+
+        Args:
+            nickname (str): Nickname of the node.
+            show_error (bool): treat as error if node is not found
+        Returns:
+            dict: Node information or None if no node with this nickname is found.
+        """
+
+        nickname_put_body = {"nickname": nickname}
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/nicknames"
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Assign nickname -> %s to node with ID -> %s; calling -> %s",
+            nickname,
+            node_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.put(
+                url=request_url,
+                data=nickname_put_body,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                if show_error:
+                    logger.error(
+                        "Failed to assign nickname -> %s to node ID -> %s; status -> %s; error -> %s",
+                        nickname,
+                        node_id,
+                        response.status_code,
+                        response.text,
+                    )
+                else:
+                    logger.info(
+                        "Cannot assign nickname -> %s to node ID -> %s. Maybe the nickname is already in use or the node does not exist.",
+                        nickname,
+                        node_id,
+                    )
                 return None
 
     # end method definition
@@ -2493,14 +2621,14 @@ class OTCS:
         if fields:
             query["fields"] = fields
 
-        encodedQuery = urllib.parse.urlencode(query, doseq=True)
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
 
         request_url = (
             self.config()["nodesUrlv2"]
             + "/"
             + str(parent_node_id)
             + "/nodes"
-            + "?{}".format(encodedQuery)
+            + "?{}".format(encoded_query)
         )
         request_header = self.request_form_header()
 
@@ -2523,7 +2651,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2551,7 +2679,6 @@ class OTCS:
 
         request_url = self.config()["nodesUrlv2"] + "/actions"
 
-        #        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/actions"
         request_header = self.request_form_header()
 
         logger.info(
@@ -2574,7 +2701,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2608,12 +2735,12 @@ class OTCS:
             dict: Request response or None if the renaming fails.
         """
 
-        renameNodePutBody = {"name": name, "description": description}
+        rename_node_put_body = {"name": name, "description": description}
 
         if name_multilingual:
-            renameNodePutBody["name_multilingual"] = name_multilingual
+            rename_node_put_body["name_multilingual"] = name_multilingual
         if description_multilingual:
-            renameNodePutBody["description_multilingual"] = description_multilingual
+            rename_node_put_body["description_multilingual"] = description_multilingual
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id)
         request_header = self.request_form_header()
@@ -2629,7 +2756,7 @@ class OTCS:
         while True:
             response = requests.put(
                 url=request_url,
-                data={"body": json.dumps(renameNodePutBody)},
+                data={"body": json.dumps(rename_node_put_body)},
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -2639,7 +2766,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2721,7 +2848,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2767,7 +2894,7 @@ class OTCS:
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     logger.warning("Session has expired - try to re-authenticate...")
-                    self.authenticate(True)
+                    self.authenticate(revalidate=True)
                     retries += 1
                 else:
                     logger.error(
@@ -2797,12 +2924,15 @@ class OTCS:
     # end method definition
 
     def check_node_name(self, parent_id: int, node_name: str) -> dict | None:
-        """Get Volume information based on the volume type ID.
+        """Check if a node with a given name does already exist under a given parent node.
 
         Args:
             parent_id (int): ID of the parent location
             node_name (str): name of the new node
         Returns:
+            dict | None: if response["results"] contains an element then the node with the name does exist.
+                         if not response["results"] then the node with the given name does not exist
+                         None in case an error occured
         """
 
         request_url = self.config()["validationUrl"]
@@ -2815,14 +2945,14 @@ class OTCS:
             request_url,
         )
 
-        checkNodeNamePostData = {"parent_id": parent_id, "names": [node_name]}
+        check_node_name_post_data = {"parent_id": parent_id, "names": [node_name]}
 
         retries = 0
         while True:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data={"body": json.dumps(checkNodeNamePostData)},
+                data={"body": json.dumps(check_node_name_post_data)},
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -2831,7 +2961,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2895,8 +3025,8 @@ class OTCS:
             logger.warning("Cannot access -> %s", package_url)
             return None
 
-        uploadPostData = {"type": str(volume_type), "name": file_name}
-        uploadPostFiles = [("file", (f"{file_name}", file, mime_type))]
+        upload_post_data = {"type": str(volume_type), "name": file_name}
+        upload_post_files = [("file", (f"{file_name}", file, mime_type))]
 
         request_url = self.config()["nodesUrlv2"]
         request_header = (
@@ -2914,8 +3044,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=uploadPostData,
-                files=uploadPostFiles,
+                data=upload_post_data,
+                files=upload_post_files,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -2925,7 +3055,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -2954,7 +3084,7 @@ class OTCS:
         """
 
         if file_url.startswith("http"):
-            # Download file from remote location specified by the fileUrl
+            # Download file from remote location specified by the file_url parameter
             # this must be a public place without authentication:
             logger.info("Download file from URL -> %s", file_url)
 
@@ -2989,12 +3119,12 @@ class OTCS:
             logger.warning("Cannot access -> %s", file_url)
             return None
 
-        uploadPostData = {
+        upload_post_data = {
             "type": str(144),
             "name": file_name,
             "parent_id": str(parent_id),
         }
-        uploadPostFiles = [("file", (f"{file_name}", file_content, mime_type))]
+        upload_post_files = [("file", (f"{file_name}", file_content, mime_type))]
 
         request_url = self.config()["nodesUrlv2"]
         request_header = (
@@ -3013,8 +3143,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=uploadPostData,
-                files=uploadPostFiles,
+                data=upload_post_data,
+                files=upload_post_files,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -3024,7 +3154,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3059,7 +3189,7 @@ class OTCS:
         """
 
         if file_url.startswith("http"):
-            # Download file from remote location specified by the fileUrl
+            # Download file from remote location specified by the file_url parameter
             # this must be a public place without authentication:
             logger.info("Download file from URL -> %s", file_url)
 
@@ -3097,8 +3227,8 @@ class OTCS:
             logger.warning("Cannot access -> %s", file_url)
             return None
 
-        uploadPostData = {"description": description}
-        uploadPostFiles = [("file", (f"{file_name}", file_content, mime_type))]
+        upload_post_data = {"description": description}
+        upload_post_files = [("file", (f"{file_name}", file_content, mime_type))]
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/versions"
         request_header = (
@@ -3117,8 +3247,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=uploadPostData,
-                files=uploadPostFiles,
+                data=upload_post_data,
+                files=upload_post_files,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -3128,7 +3258,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3175,7 +3305,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3193,9 +3323,9 @@ class OTCS:
 
         Args:
             node_id (int): node ID of the document to download
-            version_number (str): version of the document to download.
-                                     If version = "" then download the latest
-                                     version.
+            version_number (str, optional): version of the document to download.
+                                            If version = "" then download the latest
+                                            version.
         Returns:
             bytes: content of the file or None in case of an error.
         """
@@ -3239,7 +3369,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3313,7 +3443,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3436,7 +3566,7 @@ class OTCS:
             dict: search response or None if the search fails.
         """
 
-        searchPostBody = {
+        search_post_body = {
             "where": search_term,
             "lookfor": look_for,
             "page": page,
@@ -3444,13 +3574,13 @@ class OTCS:
         }
 
         if modifier:
-            searchPostBody["modifier"] = modifier
+            search_post_body["modifier"] = modifier
         if slice_id > 0:
-            searchPostBody["slice_id"] = slice_id
+            search_post_body["slice_id"] = slice_id
         if query_id > 0:
-            searchPostBody["query_id"] = query_id
+            search_post_body["query_id"] = query_id
         if template_id > 0:
-            searchPostBody["template_id"] = template_id
+            search_post_body["template_id"] = template_id
 
         request_url = self.config()["searchUrl"]
         request_header = self.request_form_header()
@@ -3461,7 +3591,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=searchPostBody,
+                data=search_post_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -3471,7 +3601,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3491,13 +3621,13 @@ class OTCS:
 
         Args:
             connection_name (str): Name of the connection
-            show_error (bool): treat as error if node is not found
+            show_error (bool, optional): If True, treat as error if connection is not found.
         Returns:
             dict: External system Details or None if the REST call fails.
         """
 
         request_url = (
-            self.config()["externalSystem"] + "/" + connection_name + "/config"
+            self.config()["externalSystemUrl"] + "/" + connection_name + "/config"
         )
         request_header = self.cookie()
 
@@ -3520,7 +3650,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -3553,18 +3683,18 @@ class OTCS:
         Args:
             connection_name (str): Name of the connection
             connection_type (str): Type of the connection (HTTP, SF, SFInstance)
-            as_url (str): Application URL
-            base_url (str): Base URL
+            as_url (str): Application URL of the external system
+            base_url (str): Base URL of the external system
             username (str): username (used for BASIC authentication)
             password (str): password (used for BASIC authentication)
-            authentication_method: either BASIC (using username and password) or OAUTH
-            client_id: OAUTH Client ID (only required if authenticationMethod = OAUTH)
-            client_secret: OAUTH Client Secret (only required if authenticationMethod = OAUTH)
+            authentication_method (str, optional): either BASIC (using username and password) or OAUTH
+            client_id (str, optional): OAUTH Client ID (only required if authenticationMethod = OAUTH)
+            client_secret (str, optional): OAUTH Client Secret (only required if authenticationMethod = OAUTH)
         Returns:
             dict: External system Details or None if the REST call fails.
         """
 
-        externalSystemPostBody = {
+        external_system_post_body = {
             "external_system_name": connection_name,
             "conn_type": connection_type,
             "asurl": as_url,
@@ -3574,11 +3704,13 @@ class OTCS:
         }
 
         if authentication_method == "OAUTH" and client_id and client_secret:
-            externalSystemPostBody["authentication_method"] = str(authentication_method)
-            externalSystemPostBody["client_id"] = str(client_id)
-            externalSystemPostBody["client_secret"] = str(client_secret)
+            external_system_post_body["authentication_method"] = str(
+                authentication_method
+            )
+            external_system_post_body["client_id"] = str(client_id)
+            external_system_post_body["client_secret"] = str(client_secret)
 
-        request_url = self.config()["externalSystem"]
+        request_url = self.config()["externalSystemUrl"]
         request_header = self.cookie()
 
         logger.info(
@@ -3593,7 +3725,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=externalSystemPostBody,
+                data=external_system_post_body,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -3603,7 +3735,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3620,12 +3752,12 @@ class OTCS:
         """Create a Workbench in the Transport Volume.
 
         Args:
-            workbench_name (str): name of the workbench to be created
+            workbench_name (str): Name of the workbench to be created
         Returns:
             dict: Create response or None if the creation fails.
         """
 
-        createWorbenchPostData = {"type": "528", "name": workbench_name}
+        create_worbench_post_data = {"type": "528", "name": workbench_name}
 
         request_url = self.config()["nodesUrlv2"]
         request_header = self.request_form_header()
@@ -3639,7 +3771,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=createWorbenchPostData,
+                data=create_worbench_post_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -3649,7 +3781,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3674,7 +3806,7 @@ class OTCS:
             dict: Unpack response or None if the unpacking fails.
         """
 
-        unpackPackagePostData = {"workbench_id": workbench_id}
+        unpack_package_post_data = {"workbench_id": workbench_id}
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(package_id) + "/unpack"
         request_header = self.request_form_header()
@@ -3690,7 +3822,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=unpackPackagePostData,
+                data=unpack_package_post_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -3700,7 +3832,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -3758,7 +3890,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.warning(
@@ -3777,25 +3909,33 @@ class OTCS:
         package_name: str,
         package_description: str = "",
         replacements: list | None = None,
+        extractions: list | None = None,
     ) -> dict | None:
         """Main method to deploy a transport. This uses subfunctions to upload,
            unpackage and deploy the transport, and creates the required workbench.
 
         Args:
             package_url (str): URL to download the transport package.
-            package_name (str): name of the transport package ZIP file
-            package_description (str): description of the transport package
-            replacements (list of dicts): list of replacement values to be applied
+            package_name (str): Name of the transport package ZIP file
+            package_description (str): Description of the transport package
+            replacements (list of dicts): List of replacement values to be applied
                                           to all XML files in transport;
                                           each dict needs to have two values:
                                           - placeholder: text to replace
                                           - value: text to replace with
+            extractions (list of dicts): List of XML Subtrees to extract
+                                         each XML file in transport;
+                                         each dict needs to have two values:
+                                          - xpath: defining the subtree to extract
+                                          - enabled: True if the extraction is active
         Returns:
             dict: Deploy response or None if the deployment fails.
         """
 
         if replacements is None:
             replacements = []
+        if extractions is None:
+            extractions = []
 
         # Preparation: get volume IDs for Transport Warehouse (root volume and Transport Packages)
         response = self.get_volume(525)
@@ -3844,6 +3984,16 @@ class OTCS:
                 self.replace_transport_placeholders(package_url, replacements)
             else:
                 logger.info("Transport -> %s has no replacements!", package_name)
+            # If we have data extractions configured execute them now:
+            if extractions:
+                logger.info(
+                    "Transport -> %s has extractions -> %s",
+                    package_name,
+                    str(extractions),
+                )
+                self.extract_transport_data(package_url, extractions)
+            else:
+                logger.info("Transport -> %s has no extractions!", package_name)
             # Upload package to Extended ECM:
             response = self.upload_file_to_volume(
                 package_url, package_name, "application/zip", 531
@@ -3942,11 +4092,11 @@ class OTCS:
     def replace_transport_placeholders(
         self, zip_file_path: str, replacements: list
     ) -> bool:
-        """Search and replace strings in the XML files of the transport packlage
+        """Search and replace strings in the XML files of the transport package
 
         Args:
-            zip_file_path (str): path to transport zip file
-            replacements (list of dicts): list of replacement values; dict needs to have two values:
+            zip_file_path (str): Path to transport zip file
+            replacements (list of dicts): List of replacement values; dict needs to have two values:
                                          * placeholder: text to replace
                                          * value: text to replace with
         Returns:
@@ -4084,15 +4234,424 @@ class OTCS:
 
         # end method definition
 
+    def extract_transport_data(self, zip_file_path: str, extractions: list) -> bool:
+        """Search and extract XML data from the transport package
+
+        Args:
+            zip_file_path (str): Path to transport zip file
+            extractions (list of dicts): List of extraction values; dict needs to have two values:
+                                         * xpath: structure to find
+                                         * enabed (optional): if the extraction is active
+        Returns:
+            True if successful, False otherwise. THIS METHOD MODIFIES EXTRACTIONS
+            BY ADDING A NEW KEY "data" TO EACH EXTRACTION ELEMENT!!
+        """
+
+        if not os.path.isfile(zip_file_path):
+            logger.error("Zip file -> %s not found.", zip_file_path)
+            return False
+
+        # Extract the zip file to a temporary directory
+        zip_file_folder = os.path.splitext(zip_file_path)[0]
+        with zipfile.ZipFile(zip_file_path, "r") as zfile:
+            zfile.extractall(zip_file_folder)
+
+        # Extract data from all XML files in the directory and its subdirectories
+        for extraction in extractions:
+            if not "xpath" in extraction:
+                logger.error(
+                    "Extraction needs an XPath but it is not specified. Skipping..."
+                )
+                continue
+            if "enabled" in extraction and not extraction["enabled"]:
+                logger.info(
+                    "Extraction for transport -> %s is disabled. Skipping...",
+                    zip_file_path,
+                )
+                continue
+
+            xpath = extraction["xpath"]
+            logger.info(
+                "Using xpath -> %s to extract the data",
+                xpath,
+            )
+
+            # This delivers a list of strings containing the extracted data:
+            extracted_data = XML.extract_from_xml_files(
+                zip_file_folder,
+                xpath,
+            )
+            if extracted_data:
+                logger.info(
+                    "Extraction with XPath -> %s has been successfully completed for Transport package -> %s",
+                    xpath,
+                    zip_file_folder,
+                )
+                # Add the extracted elements to the extraction data structure (dict).
+                extraction["data"] = extracted_data
+            else:
+                logger.warning(
+                    "Extraction with XPath -> %s has not delivered any data for Transport package -> %s",
+                    xpath,
+                    zip_file_folder,
+                )
+                extraction["data"] = []
+
+        # Return the path to the new zip file
+        return True
+
+        # end method definition
+
+    def get_business_object_types(self) -> dict | None:
+        """Get information for all configured business object types.
+
+        Args:
+            None
+        Returns:
+            dict: Workspace Types information (for all external systems)
+                  or None if the request fails.
+        """
+
+        request_url = self.config()["businessObjectTypesUrl"]
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Get all business object types; calling -> %s",
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get business object types; status -> %s; error -> %s",
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def get_business_object_type(
+        self,
+        external_system_id: str,
+        type_name: str,
+        expand_workspace_type: bool = True,
+        expand_external_system: bool = True,
+    ) -> dict | None:
+        """Get business object type information. Unfortunately this REST API is
+           pretty much limited. It does not return Field names of external system properties
+           and also does not return property groups defined.
+
+        Args:
+            external_system_id (str): External system Id (such as "TM6")
+            type_name (str): Type name of the business object (such as "SAP Customer")
+        Returns:
+            dict: Business Object Type information or None if the request fails.
+
+            Example response:
+            {
+                'businessProperties': [
+                    {
+                        'attributeID': '14012_29',
+                        'categoryID': '14012',
+                        'name': 'Name',
+                        'type': 'String'
+                    },
+                    {
+                        'attributeID': '14012_28',
+                        'categoryID': '14012',
+                        'name': 'Customer Number',
+                        'type': 'String'
+                    }
+                ]
+                'bwsinfo': {'id': None},
+                'cadxref_doc_info': {'has_relation': False},
+                'categories': [],
+                'claimed_doc_info': {'is_claimed': False},
+                'columns': [{...}, {...}, {...}, {...}],
+                'doctemplates_info': {'isInDocTemplateVolTree': False},
+                'followups': [],
+                'nicknames': {'nickname': '16568'},
+                'properties': {
+                    'advanced_versioning': None,
+                    'container': False,
+                    'container_size': 0,
+                    'create_date': '2017-11-23T16:43:34Z',
+                    'create_user_id': 1000,
+                    'description': '',
+                    'description_multilingual': {...},
+                    'external_create_date': None,
+                    'external_identity': '',
+                    ...
+                },
+                'rmiconsdata': {'class_id': 0, 'official': 0, 'show_classify': False, 'show_hold': False, 'show_hold_tab': False, 'show_label_tab': True, 'show_official': False, 'show_xref': False, 'show_xref_tab': False},
+                'sestatus_doc_info': {'is_se_document': False, 'sync_tooltip': ''},
+                'sharing_info': {'is_shared': False, 'sync_state': -1},
+                'showmainruleicon': False,
+                ...
+            }
+        """
+
+        query = {
+            "expand_ext_system": expand_external_system,
+            "expand_wksp_type": expand_workspace_type,
+        }
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        encoded_type_name = type_name.replace("/", "%2F")
+
+        request_url = (
+            self.config()["externalSystemUrl"]
+            + "/"
+            + external_system_id
+            + "/botypes/"
+            + encoded_type_name
+            + "?{}".format(encoded_query)
+        )
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Get business object type -> %s for external system -> %s; calling -> %s",
+            type_name,
+            external_system_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get business object type -> %s; status -> %s; error -> %s",
+                    type_name,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def get_business_objects(
+        self,
+        external_system_id: str,
+        type_name: str,
+        where_clauses: dict | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+    ) -> dict | None:
+        """Get all business objects for an external system and a given business object type.
+
+        Args:
+            external_system_id (str): External system Id (such as "TM6")
+            type_name (str): Type name of the business object (such as "SAP Customer")
+            where_clause (dict, optional): filter the results based on 1 or kultiple
+                                           where clauses (THE  NAME CONVENTION FOR THE
+                                           FIELDS IS UNCLEAR)
+            limit (int, optional): maximum result items
+            page (int, optional): page for chunked result lists
+        Returns:
+            dict: Business Object information (for all results)
+                  or None if the request fails.
+
+            Example response (for a Salesforce Account):
+            {
+                'links': {'data': {...}},
+                'paging': {'limit': 500, 'page': 1, 'page_total': 1, 'range_max': 15, 'range_min': 1, 'total_count': 15},
+                'results': {
+                    'column_descriptions': [
+                        {
+                            'fieldLabel': 'AccountDetail.AccountID',
+                            'fieldName': 'Account.ID',
+                            'keyField': 'X',
+                            'length': 18,
+                            'position': 4
+                        },
+                        {
+                            'fieldLabel': 'AccountName',
+                            'fieldName': 'Account.Name',
+                            'keyField': ' ',
+                            'length': 255,
+                            'position': 2
+                        },
+                        {
+                            'fieldLabel': 'AccountNumber',
+                            'fieldName': 'Account.AccountNumber',
+                            'keyField': ' ',
+                            'length': 40,
+                            'position': 3
+                        },
+                        ...
+                    ]
+                    'max_rows_exceeded': False,
+                    'result_rows': [
+                        {
+                            'AccountDetail.AccountID': '001Dn00000w0bCQIAY',
+                            'AccountDetail.AccountName': 'Jet Stream Inc.',
+                            'AccountDetail.AccountNumber': '1234567',
+                            'AccountDetail.AccountOwner': 'Nick Wheeler',
+                            'AccountDetail.AnnualRevenue': '$900001',
+                            'AccountDetail.Description': '',
+                            'AccountDetail.Employees': '',
+                            'AccountDetail.Industry': 'Biotechnology',
+                            'AccountDetail.ParentAccount': '',
+                            ...
+                        },
+                        ...
+                    ]
+                }
+            }
+        """
+
+        query = {
+            "ext_system_id": external_system_id,
+            "bo_type": type_name,
+        }
+        if limit:
+            query["limit"] = limit
+        if page:
+            query["page"] = page
+        if where_clauses:
+            query.update(
+                {("where_" + key): value for key, value in where_clauses.items()}
+            )
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.config()["businessObjectsUrl"] + "?{}".format(encoded_query)
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Get all business objects of type -> %s from external system -> %s; calling -> %s",
+            type_name,
+            external_system_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get business objects of type -> %s from external system -> %s; status -> %s; error -> %s",
+                    type_name,
+                    external_system_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def get_business_objects_search(
+        self,
+        external_system_id: str,
+        type_name: str,
+    ) -> dict | None:
+        """Get business object type information. Unfortunately this REST API is
+           pretty much limited. It does not return Field names of external system properties
+           and also does not return property groups defined.
+
+        Args:
+            external_system_id (str): External system Id (such as "TM6")
+            type_name (str): Type name of the business object (such as "SAP Customer")
+        Returns:
+            dict: Business Object Search Form or None if the request fails.
+        """
+
+        query = {
+            "ext_system_id": external_system_id,
+            "bo_type": type_name,
+        }
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.config()["businessObjectsSearchUrl"] + "?{}".format(
+            encoded_query
+        )
+        request_header = self.request_form_header()
+
+        logger.info(
+            "Get search form for business object type -> %s and external system -> %s; calling -> %s",
+            type_name,
+            external_system_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get search form for business object type -> %s and external system -> %s; status -> %s; error -> %s",
+                    type_name,
+                    external_system_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
     def get_workspace_types(
         self, expand_workspace_info: bool = True, expand_templates: bool = True
     ) -> dict | None:
         """Get all workspace types configured in Extended ECM.
 
         Args:
-            expand_workspace_info (bool, optional): controls if the workspace info
+            expand_workspace_info (bool, optional): Controls if the workspace info
                                                     is returned as well
-            expand_workspace_info (bool, optional): controls if the list of workspace templates
+            expand_workspace_info (bool, optional): Controls if the list of workspace templates
                                                     per workspace typ is returned as well
         Returns:
             dict: Workspace Types or None if the request fails.
@@ -4127,7 +4686,7 @@ class OTCS:
             }
         """
 
-        request_url = self.config()["businessworkspacetypes"]
+        request_url = self.config()["businessWorkspaceTypesUrl"]
         if expand_templates:
             request_url += "?expand_templates=true"
         else:
@@ -4154,65 +4713,11 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
                     "Failed to get workspace types; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
-
-    # end method definition
-
-    def get_business_object_type(
-        self, external_system_id: str, type_name: str
-    ) -> dict | None:
-        """Get business object type information.
-
-        Args:
-            external_system_id (str): external system Id (such as "TM6")
-            type_name (str): type name (such as "SAP Customer")
-        Returns:
-            dict: Workspace Type information or None if the request fails.
-        """
-
-        request_url = (
-            self.config()["externalSystem"]
-            + "/"
-            + str(external_system_id)
-            + "/botypes/"
-            + str(type_name)
-        )
-        request_header = self.request_form_header()
-
-        logger.info(
-            "Get business object type -> %s for external system -> %s; calling -> %s",
-            type_name,
-            external_system_id,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=request_header,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get business object type -> %s; status -> %s; error -> %s",
-                    type_name,
                     response.status_code,
                     response.text,
                 )
@@ -4232,10 +4737,10 @@ class OTCS:
 
         Args:
             template_id (int): ID of the workspace template
-            external_system_id (str): identifier of the external system (None if no external system)
-            bo_type (str, optional): business object type (None if no external system)
-            bo_id (str, optional): business object identifier / key (None if no external system)
-            parent_id (str, optional): parent ID of the workspaces. Needs only be specified in special
+            external_system_id (int, optional): Identifier of the external system (None if no external system)
+            bo_type (int, optional): Business object type (None if no external system)
+            bo_id (int, optional): Business object identifier / key (None if no external system)
+            parent_id (int, optional): Parent ID of the workspaces. Needs only be specified in special
                                        cases where workspace location cannot be derived from workspace
                                        type definition, e.g. sub-workspace
         Returns:
@@ -4254,16 +4759,15 @@ class OTCS:
             request_url += "&bo_type={}".format(bo_type)
             request_url += "&bo_id={}".format(bo_id)
             logger.info(
-                "Use business object connection -> (%s, %s, %s) for workspace template with ID -> %s",
+                "Include business object connection -> (%s, %s, %s) in workspace create form...",
                 str(external_system_id),
                 str(bo_type),
                 str(bo_id),
-                str(template_id),
             )
         request_header = self.request_form_header()
 
         logger.info(
-            "Get workspace create form for template with ID -> %s; calling -> %s",
+            "Get workspace create form for workspace template ID -> %s; calling -> %s",
             str(template_id),
             request_url,
         )
@@ -4281,7 +4785,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -4298,11 +4802,11 @@ class OTCS:
         """Get a workspace based on the node ID.
 
         Args:
-            node_id (int) is the node Id of the workspace
+            node_id (int): Node ID of the workspace to retrieve.
         Returns:
             dict: Workspace node information or None if no node with this ID is found.
 
-            Example result:
+            Example response:
             {
                 'links': {
                     'data': {...}
@@ -4322,6 +4826,23 @@ class OTCS:
                     {
                         'actions': {...},
                         'data': {
+                            'business_properties': {
+                                'business_object_id': '000004000240',
+                                'business_object_type': 'BUS2007',
+                                'business_object_type_id': 18,
+                                'business_object_type_name': 'Maintenance Order',
+                                'business_object_type_name_multilingual': {...},
+                                'display_url': "https://fiori.qa.idea-te.eimdemo.com:8443/sap/bc/ui2/flp#MaintenanceOrder-displayXecmFactSheet&//C_ObjPgMaintOrder('000004000240')",
+                                'external_system_id': 'TM6',
+                                'external_system_name': 'TM6',
+                                'has_default_display': True,
+                                'has_default_search': True,
+                                'isEarly': False,
+                                'workspace_type_id': 42,
+                                'workspace_type_name': 'Maintenance Order',
+                                'workspace_type_name_multilingual': {},
+                                ...
+                            }
                             'properties': {
                                 'volume_id': -2000,
                                 'id': 36780,
@@ -4351,6 +4872,10 @@ class OTCS:
                                 'size': 7,
                                 ...
                             }
+                            'wksp_info':
+                            {
+                                'wksp_type_icon': '/appimg/ot_bws/icons/16634%2Esvg?v=161194_13949'
+                            }
                         },
                         'metadata': {...},
                         'metadata_order': {...}
@@ -4359,10 +4884,21 @@ class OTCS:
                 'wksp_info': {
                     'wksp_type_icon': None
                 }
+                'workspace_references': [
+                    {
+                        'business_object_id': '000004000240',
+                        'business_object_type': 'BUS2007',
+                        'business_object_type_id': 18,
+                        'external_system_id': 'TM6',
+                        'has_default_display': True,
+                        'has_default_search': True,
+                        'workspace_type_id': 42
+                    }
+                ]
             }
         """
 
-        request_url = self.config()["businessworkspaces"] + "/" + str(node_id)
+        request_url = self.config()["businessWorkspacesUrl"] + "/" + str(node_id)
         request_header = self.request_form_header()
 
         logger.info(
@@ -4382,7 +4918,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -4402,12 +4938,12 @@ class OTCS:
            wrapper method for get_workspace_by_type_and_name()
 
         Args:
-            type_name (str, optional): name of the workspace type
+            type_name (str, optional): Name of the workspace type
             type_id (int, optional): ID of the workspace_type
-            expanded_view (bool, optional): if 'False' then just search in recently
-                                               accessed business workspace for this name and type
-                                               if 'True' (this is the default) then search in all
-                                               workspaces for this name and type
+            expanded_view (bool, optional): If 'False' then just search in recently
+                                            accessed business workspace for this name and type.
+                                            If 'True' (this is the default) then search in all
+                                            workspaces for this name and type.
         Returns:
             dict: Workspace information or None if the workspace is not found.
         """
@@ -4429,14 +4965,14 @@ class OTCS:
         """Lookup workspace based on workspace type and workspace name.
 
         Args:
-            type_name (str): name of the workspace type
+            type_name (str, optional): name of the workspace type
             type_id (int, optional): ID of the workspace_type
-            name (str, optional): name of the workspace, if "" then deliver all instances
-                                  of the given workspace type
-            expanded_view (bool, optional): if 'False' then just search in recently
-                                            accessed business workspace for this name and type
-                                            if 'True' (this is the default) then search in all
-                                            workspaces for this name and type
+            name (str, optional): Name of the workspace, if "" then deliver all instances
+                                  of the given workspace type.
+            expanded_view (bool, optional): If 'False' then just search in recently
+                                            accessed business workspace for this name and type.
+                                            If 'True' (this is the default) then search in all
+                                            workspaces for this name and type.
         Returns:
             dict: Workspace information or None if the workspace is not found.
         """
@@ -4452,9 +4988,11 @@ class OTCS:
         if name:
             query["where_name"] = name
 
-        encodedQuery = urllib.parse.urlencode(query, doseq=True)
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
 
-        request_url = self.config()["businessworkspaces"] + "?{}".format(encodedQuery)
+        request_url = self.config()["businessWorkspacesUrl"] + "?{}".format(
+            encoded_query
+        )
         request_header = self.request_form_header()
 
         if name:
@@ -4484,7 +5022,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if name:
@@ -4518,14 +5056,15 @@ class OTCS:
 
         Args:
             external_system_name (str): Name of the connection
-            business_object_type (str): type of the Business object, e.g. KNA1 for SAP customers
+            business_object_type (str): Type of the Business object, e.g. KNA1 for SAP customers
             business_object_id (str): ID of the business object in the external system
-            return_workspace_metadata (bool): Whether or not workspace metadata (categories) should be returned
-            show_error (bool): treat as error if node is not found
+            return_workspace_metadata (bool, optional): Whether or not workspace metadata (categories) should be returned.
+                                                        Default is False.
+            show_error (bool, optional): Treat as error if node is not found. Default is False.
         Returns:
             dict: Workspace node information or None if no node with this ID is found.
 
-            Example result:
+            Example response:
             {
                 'links': {
                     'data': {...}
@@ -4586,7 +5125,7 @@ class OTCS:
         """
 
         request_url = (
-            self.config()["externalSystem"]
+            self.config()["externalSystemUrl"]
             + "/"
             + external_system_name
             + "/botypes/"
@@ -4620,7 +5159,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 if show_error:
@@ -4656,21 +5195,27 @@ class OTCS:
         bo_type: int | None = None,
         bo_id: int | None = None,
         parent_id: int | None = None,
+        ibo_workspace_id: int | None = None,
+        show_error: bool = True,
     ) -> dict | None:
         """Create a new business workspace.
 
         Args:
             workspace_template_id (int): ID of the workspace template
-            workspace_name (str): name of the workspace
-            workspace_description (str): description of the workspace
-            workspace_type (int): type ID of the workspace
-            category_data (dict): category and attributes
-            external_system_id (str, optional): identifier of the external system (None if no external system)
-            bo_type (str, optional): business object type (None if no external system)
-            bo_id (str, optional): business object identifier / key (None if no external system)
-            parent_id (str, optional): parent ID of the workspaces. Needs only be specified in special
+            workspace_name (str): Name of the workspace
+            workspace_description (str): Description of the workspace
+            workspace_type (int): Type ID of the workspace
+            category_data (dict): Category and attributes
+            external_system_id (str, optional): Identifier of the external system (None if no external system)
+            bo_type (str, optional): Business object type (None if no external system)
+            bo_id (str, optional): Business object identifier / key (None if no external system)
+            parent_id (str, optional): Parent ID of the workspaces. Needs only be specified in special
                                        cases where workspace location cannot be derived from workspace
                                        type definition
+            ibo_workspace_id (int, optional): Node ID of an existing workspace that is already connected to another
+                                              external system. This allows for subsequent calls to coonect the workspace
+                                              to multiple Business Objects (IBO = Identical Business Objects)
+            show_error (bool, optional): Log an error if workspace cration fails. Otherwise log a warning.
         Returns:
             dict: Workspace Create Form data or None if the request fails.
         """
@@ -4679,7 +5224,7 @@ class OTCS:
         if category_data is None:
             category_data = {}
 
-        createWorkspacePostData = {
+        create_workspace_post_data = {
             "template_id": str(workspace_template_id),
             "name": workspace_name,
             "description": workspace_description,
@@ -4690,9 +5235,9 @@ class OTCS:
 
         # Is this workspace connected to a business application / external system?
         if external_system_id and bo_type and bo_id:
-            createWorkspacePostData["ext_system_id"] = str(external_system_id)
-            createWorkspacePostData["bo_type"] = str(bo_type)
-            createWorkspacePostData["bo_id"] = str(bo_id)
+            create_workspace_post_data["ext_system_id"] = str(external_system_id)
+            create_workspace_post_data["bo_type"] = str(bo_type)
+            create_workspace_post_data["bo_id"] = str(bo_id)
             logger.info(
                 "Use business object connection -> (%s, %s, %s) for workspace -> %s",
                 str(external_system_id),
@@ -4700,12 +5245,17 @@ class OTCS:
                 str(bo_id),
                 workspace_name,
             )
+            if ibo_workspace_id:
+                logger.info(
+                    "This is a subsequent call to create a cross-application workspace (IBO)"
+                )
+                create_workspace_post_data["ibo_workspace_id"] = ibo_workspace_id
 
         # If workspace creation location cannot be derived from the workspace type
         # there may be an optional parent parameter passed to this method. This can
         # also be the case if workspaces are nested into each other:
         if parent_id is not None:
-            createWorkspacePostData["parent_id"] = parent_id
+            create_workspace_post_data["parent_id"] = parent_id
             logger.info(
                 "Use specified location -> %s for workspace -> %s",
                 str(parent_id),
@@ -4718,7 +5268,7 @@ class OTCS:
                 str(workspace_type),
             )
 
-        request_url = self.config()["businessworkspaces"]
+        request_url = self.config()["businessWorkspacesUrl"]
         request_header = self.request_form_header()
 
         logger.info(
@@ -4736,7 +5286,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data={"body": json.dumps(createWorkspacePostData)},
+                data={"body": json.dumps(create_workspace_post_data)},
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -4745,16 +5295,25 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
-                logger.error(
-                    "Failed to create workspace -> %s from template with ID -> %s; status -> %s; error -> %s",
-                    workspace_name,
-                    str(workspace_template_id),
-                    response.status_code,
-                    response.text,
-                )
+                if show_error:
+                    logger.error(
+                        "Failed to create workspace -> %s from template with ID -> %s; status -> %s; error -> %s",
+                        workspace_name,
+                        str(workspace_template_id),
+                        response.status_code,
+                        response.text,
+                    )
+                else:
+                    logger.warning(
+                        "Couldn't create workspace -> %s from template with ID -> %s (it may exist already); status -> %s; error -> %s",
+                        workspace_name,
+                        str(workspace_template_id),
+                        response.status_code,
+                        response.text,
+                    )
                 return None
 
     # end method definition
@@ -4775,14 +5334,14 @@ class OTCS:
             dict: Workspace Relationship data (json) or None if the request fails.
         """
 
-        createWorkspaceRelationshipPostData = {
+        create_workspace_relationship_post_data = {
             "rel_bw_id": str(related_workspace_id),
             "rel_type": relationship_type,
         }
 
-        request_url = self.config()["businessworkspaces"] + "/{}/relateditems".format(
-            workspace_id
-        )
+        request_url = self.config()[
+            "businessWorkspacesUrl"
+        ] + "/{}/relateditems".format(workspace_id)
         request_header = self.request_form_header()
 
         logger.info(
@@ -4797,7 +5356,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=createWorkspaceRelationshipPostData,
+                data=create_workspace_relationship_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -4806,7 +5365,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -4830,7 +5389,7 @@ class OTCS:
         """
 
         request_url = (
-            self.config()["businessworkspaces"]
+            self.config()["businessWorkspacesUrl"]
             + "/"
             + str(workspace_id)
             + "/relateditems"
@@ -4856,7 +5415,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -4879,7 +5438,7 @@ class OTCS:
         """
 
         request_url = (
-            self.config()["businessworkspaces"] + "/" + str(workspace_id) + "/roles"
+            self.config()["businessWorkspacesUrl"] + "/" + str(workspace_id) + "/roles"
         )
         request_header = self.request_form_header()
 
@@ -4902,7 +5461,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -4918,21 +5477,21 @@ class OTCS:
     def add_member_to_workspace(
         self, workspace_id: int, role_id: int, member_id: int, show_warning: bool = True
     ) -> dict | None:
-        """Add member to a workspace role. Check that the user is not yet a member.
+        """Add member to a workspace role. Check that the user/group is not yet a member.
 
         Args:
             workspace_id (int): ID of the workspace
             role_id (int): ID of the role
-            member_id (int): User or Group Id
-            show_warning (bool, optional): if True shows a warning if member is already in role
+            member_id (int): User ID or Group ID
+            show_warning (bool, optional): If True logs a warning if member is already in role
         Returns:
             dict: Workspace Role Membership or None if the request fails.
         """
 
-        addMemberToWorkspacePostData = {"id": str(member_id)}
+        add_member_to_workspace_post_data = {"id": str(member_id)}
 
         request_url = self.config()[
-            "businessworkspaces"
+            "businessWorkspacesUrl"
         ] + "/{}/roles/{}/members".format(workspace_id, role_id)
         request_header = self.request_form_header()
 
@@ -4981,7 +5540,7 @@ class OTCS:
         response = requests.post(
             url=request_url,
             headers=request_header,
-            data=addMemberToWorkspacePostData,
+            data=add_member_to_workspace_post_data,
             cookies=self.cookie(),
             timeout=None,
         )
@@ -5010,13 +5569,13 @@ class OTCS:
             workspace_id (int): ID of the workspace
             role_id (int): ID of the role
             member_id (int): User or Group Id
-            show_warning (bool, optional): if True shows a warning if member is not in role
+            show_warning (bool, optional): If True logs a warning if member is not in role
         Returns:
             dict: Workspace Role Membership or None if the request fails.
         """
 
         request_url = self.config()[
-            "businessworkspaces"
+            "businessWorkspacesUrl"
         ] + "/{}/roles/{}/members".format(workspace_id, role_id)
         request_header = self.request_form_header()
 
@@ -5028,21 +5587,21 @@ class OTCS:
             request_url,
         )
 
-        workspaceMembershipResponse = requests.get(
+        response = requests.get(
             url=request_url,
             headers=request_header,
             cookies=self.cookie(),
             timeout=None,
         )
-        if not workspaceMembershipResponse.ok:
+        if not response.ok:
             logger.error(
                 "Failed to get workspace members; status -> %s; error -> %s",
-                workspaceMembershipResponse.status_code,
-                workspaceMembershipResponse.text,
+                response.status_code,
+                response.text,
             )
             return None
 
-        workspace_members = self.parse_request_response(workspaceMembershipResponse)
+        workspace_members = self.parse_request_response(response)
 
         if not self.exist_result_item(workspace_members, "id", member_id):
             if show_warning:
@@ -5055,7 +5614,7 @@ class OTCS:
             return None
 
         request_url = self.config()[
-            "businessworkspaces"
+            "businessWorkspacesUrl"
         ] + "/{}/roles/{}/members/{}".format(workspace_id, role_id, member_id)
 
         logger.info(
@@ -5066,23 +5625,23 @@ class OTCS:
             request_url,
         )
 
-        workspaceMembershipResponse = requests.delete(
+        response = requests.delete(
             url=request_url,
             headers=request_header,
             cookies=self.cookie(),
             timeout=None,
         )
 
-        if workspaceMembershipResponse.ok:
-            return self.parse_request_response(workspaceMembershipResponse)
+        if response.ok:
+            return self.parse_request_response(response)
         else:
             logger.error(
                 "Failed to remove user/group with ID -> %s from role with ID -> %s of workspace with ID -> %s; status -> %s; error -> %s",
                 str(member_id),
                 str(role_id),
                 str(workspace_id),
-                workspaceMembershipResponse.status_code,
-                workspaceMembershipResponse.text,
+                response.status_code,
+                response.text,
             )
             return None
 
@@ -5095,7 +5654,7 @@ class OTCS:
         Args:
             workspace_id (int): ID of the workspace
             role_id (int): ID of the role
-            permissions (list): list of permissions - potential elements:
+            permissions (list): List of permissions - potential elements:
                                 "see"
                                 "see_contents"
                                 "modify"
@@ -5106,15 +5665,16 @@ class OTCS:
                                 "delete_versions"
                                 "delete"
                                 "edit_permissions"
-            apply_to (int):  0 = this item
-                                 1 = sub-items
-                                 2 = This item and sub-items (default)
-                                 3 = This item and immediate sub-items
+            apply_to (int, optional):  Items to apply the permission change. Possible values:
+                                       0 = this item
+                                       1 = sub-items
+                                       2 = This item and sub-items (default)
+                                       3 = This item and immediate sub-items
         Returns:
             dict: Workspace Role Membership or None if the request fails.
         """
 
-        request_url = self.config()["businessworkspaces"] + "/{}/roles/{}".format(
+        request_url = self.config()["businessWorkspacesUrl"] + "/{}/roles/{}".format(
             workspace_id, role_id
         )
 
@@ -5128,7 +5688,7 @@ class OTCS:
             request_url,
         )
 
-        permissionPostData = {
+        permission_post_data = {
             "permissions": permissions,
             "apply_to": apply_to,
         }
@@ -5138,7 +5698,7 @@ class OTCS:
             response = requests.put(
                 url=request_url,
                 headers=request_header,
-                data={"body": json.dumps(permissionPostData)},
+                data={"body": json.dumps(permission_post_data)},
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -5147,7 +5707,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5178,12 +5738,12 @@ class OTCS:
             logger.error("Workspace icon file does not exist -> %s", file_path)
             return None
 
-        updateWorkspaceIconPostBody = {
+        update_workspace_icon_post_body = {
             "file_content_type": file_mimetype,
             "file_filename": os.path.basename(file_path),
         }
 
-        uploadPostFiles = [
+        upload_workspace_icon_post_files = [
             (
                 "file",
                 (
@@ -5195,7 +5755,7 @@ class OTCS:
         ]
 
         request_url = (
-            self.config()["businessworkspaces"] + "/" + str(workspace_id) + "/icons"
+            self.config()["businessWorkspacesUrl"] + "/" + str(workspace_id) + "/icons"
         )
 
         request_header = self.cookie()
@@ -5211,10 +5771,10 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=updateWorkspaceIconPostBody,
+                data=update_workspace_icon_post_body,
+                files=upload_workspace_icon_post_files,
                 headers=request_header,
                 cookies=self.cookie(),
-                files=uploadPostFiles,
                 timeout=None,
             )
             if response.ok:
@@ -5222,7 +5782,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5235,6 +5795,95 @@ class OTCS:
                 return None
 
     # end method definition
+
+    def get_unique_names(self, names: list, subtype: int | None = None) -> dict | None:
+        """Get definition information for Unique Names.
+
+        Args:
+            names (list): list of unique names to lookup.
+            subtype (int): filter unique names for those pointing to a specific subtype
+
+        Returns:
+            dict | None: Unique name definition information or None if REST call fails.
+
+            Example response:
+            {
+                'links': {'data': {...}},
+                'results': [
+                    {
+                        'NodeId': 13653,
+                        'NodeName': 'Functional Location',
+                        'UniqueName': 'ot_templ_func_location'
+                    },
+                    {
+                        'NodeId': 2424,
+                        'NodeName': 'Content Server Document Templates',
+                        'UniqueName': 'Document Templates'
+                    }
+                ]
+            }
+        """
+
+        if not names:
+            logger.error("Missing Unique Names!")
+            return None
+
+        # Add query parameters (these are NOT passed via JSon body!)
+        query = {"where_names": "{" + ", ".join(names) + "}"}
+        if subtype:
+            query["where_subtype"] = subtype
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.config()["uniqueNamesUrl"] + "?{}".format(encoded_query)
+        request_header = self.request_form_header()
+
+        if subtype:
+            logger.info(
+                "Get unique names -> %s with subtype -> %s; calling -> %s",
+                str(names),
+                str(subtype),
+                request_url,
+            )
+        else:
+            logger.info(
+                "Get unique names -> %s; calling -> %s",
+                str(names),
+                request_url,
+            )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                url=request_url,
+                headers=request_header,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.warning("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                if subtype:
+                    logger.warning(
+                        "Failed to get unique names -> %s of subtype -> %s; status -> %s; error -> %s",
+                        str(names),
+                        str(subtype),
+                        response.status_code,
+                        response.text,
+                    )
+                else:
+                    logger.warning(
+                        "Failed to get unique names -> %s; status -> %s; error -> %s",
+                        str(names),
+                        response.status_code,
+                        response.text,
+                    )
+                return None
 
     def create_item(
         self,
@@ -5249,17 +5898,18 @@ class OTCS:
            It does also not accept owner group information.
 
         Args:
-            parent_id (int): node ID of the parent
-            item_type (str): type of the item (e.g. 0 = foler, 140 = URL)
-            item_name (str): name of the item
-            item_description (str, optional): description of the item
-            url (str, optional): address of the URL item (if it is an URL item type)
-            original_id (int, optional): required if a shortcut item is created
+            parent_id (int): Node ID of the parent
+            item_type (str): Type of the item (e.g. 0 = foler, 140 = URL)
+            item_name (str): Name of the item
+            item_description (str, optional): Description of the item
+            url (str, optional): Address of the URL item (if it is an URL item type)
+            original_id (int, optional): Node ID of the original (referenced) item.
+                                         Required if a shortcut item is created
         Returns:
             dict: Request response of the create item call or None if the REST call has failed.
         """
 
-        createItemPostData = {
+        create_item_post_data = {
             "parent_id": parent_id,
             "type": item_type,
             "name": item_name,
@@ -5267,9 +5917,9 @@ class OTCS:
         }
 
         if url:
-            createItemPostData["url"] = url
+            create_item_post_data["url"] = url
         if original_id > 0:
-            createItemPostData["original_id"] = original_id
+            create_item_post_data["original_id"] = original_id
 
         request_url = self.config()["nodesUrlv2"]
         request_header = self.request_form_header()
@@ -5287,7 +5937,7 @@ class OTCS:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.post(
                 url=request_url,
-                data={"body": json.dumps(createItemPostData)},
+                data={"body": json.dumps(create_item_post_data)},
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -5297,7 +5947,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5322,21 +5972,24 @@ class OTCS:
 
         Args:
             node_id (int): ID of the node
-            parent_id (int): node ID of the new parent (move operation)
-            item_name (str): new name of the item
-            item_description (str): new description of the item
+            parent_id (int, optional): node ID of the new parent (in case of a move operation)
+            item_name (str, optional): new name of the item
+            item_description (str, optional): new description of the item
         Returns:
             dict: Response of the update item request or None if the REST call has failed.
         """
 
-        updateItemPutData = {
-            "name": item_name,
-            "description": item_description,
-        }
+        update_item_put_data = {}
 
+        if item_name:
+            # this is a rename operation
+            update_item_put_data["name"] = item_name
+        if item_description:
+            # this is a change description operation
+            update_item_put_data["description"] = item_description
         if parent_id:
             # this is a move operation
-            updateItemPutData["parent_id"] = parent_id
+            update_item_put_data["parent_id"] = parent_id
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id)
         request_header = self.request_form_header()
@@ -5344,7 +5997,7 @@ class OTCS:
         logger.info(
             "Update item -> %s with data -> %s; calling -> %s",
             item_name,
-            str(updateItemPutData),
+            str(update_item_put_data),
             request_url,
         )
 
@@ -5353,7 +6006,7 @@ class OTCS:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "body" tag.
             response = requests.put(
                 url=request_url,
-                data={"body": json.dumps(updateItemPutData)},
+                data={"body": json.dumps(update_item_put_data)},
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -5363,7 +6016,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5384,31 +6037,32 @@ class OTCS:
 
         Returns:
             dict: response of the REST call (converted to a Python dictionary)
-                        Example output:
-                        'results': [
-                            {
-                                'container': False,
-                                'hasTemplates': False,
-                                'name': 'Document',
-                                'subtype': 144,
-                                'templates': [
-                                    {
-                                        'description_multilingual': {...},
-                                        'id': 16817,
-                                        'isDPWizardAvailable': False,
-                                        'mime_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                        'name': 'Innovate Procurement Contract Template 2022.docx',
-                                        'name_multilingual': {...},
-                                        'size': 144365,
-                                        'sizeformatted': '141 KB',
-                                        'type': 144
-                                    },
-                                    {
-                                        ...
-                                    }
-                                ]
-                            }
-                        ]
+
+            Example response:
+            'results': [
+                {
+                    'container': False,
+                    'hasTemplates': False,
+                    'name': 'Document',
+                    'subtype': 144,
+                    'templates': [
+                        {
+                            'description_multilingual': {...},
+                            'id': 16817,
+                            'isDPWizardAvailable': False,
+                            'mime_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                            'name': 'Innovate Procurement Contract Template 2022.docx',
+                            'name_multilingual': {...},
+                            'size': 144365,
+                            'sizeformatted': '141 KB',
+                            'type': 144
+                        },
+                        {
+                            ...
+                        }
+                    ]
+                }
+            ]
         """
 
         request_url = (
@@ -5439,7 +6093,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5481,11 +6135,11 @@ class OTCS:
                                             "12508_9": "MS Word",       # text drop-down
                                         }
                                     }
-            doc_name (str): name of the item
-            doc_description (str, optional): description of the item
+            doc_name (str): Name of the item to create.
+            doc_description (str, optional): Description of the item to create.
         """
 
-        createDocumentPostData = {
+        create_document_post_data = {
             "template_id": template_id,
             "parent_id": parent_id,
             "name": doc_name,
@@ -5516,7 +6170,7 @@ class OTCS:
                 url=request_url,
                 # this seems to only work with a "body" tag and is different form the documentation
                 # on developer.opentext.com
-                data={"body": json.dumps(createDocumentPostData)},
+                data={"body": json.dumps(create_document_post_data)},
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -5526,7 +6180,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5544,9 +6198,9 @@ class OTCS:
             (Properties --> Parameters)
 
         Args:
-            nickname (str): nickname of the Web Reports node.
+            nickname (str): Nickname of the Web Reports node.
         Returns:
-            Response: list of Web Report parameters. Each list item is a dict describing the parameter.
+            Response: List of Web Report parameters. Each list item is a dict describing the parameter.
             Structure of the list items:
             {
                 "type": "string",
@@ -5587,7 +6241,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5639,7 +6293,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5661,7 +6315,7 @@ class OTCS:
             dict: Response or None if the installation of the CS Application has failed.
         """
 
-        installCSApplicationPostData = {"appName": application_name}
+        install_cs_application_post_data = {"appName": application_name}
 
         request_url = self.config()["csApplicationsUrl"] + "/install"
         request_header = self.request_form_header()
@@ -5674,7 +6328,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=installCSApplicationPostData,
+                data=install_cs_application_post_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -5684,7 +6338,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5712,7 +6366,7 @@ class OTCS:
             dict: Response of the request or None if the assignment has failed.
         """
 
-        assignmentPostData = {
+        assignment_post_data = {
             "subject": subject,
             "instruction": instruction,
             "assignees": assignees,
@@ -5737,7 +6391,7 @@ class OTCS:
             # This REST API needs a special treatment: we encapsulate the payload as JSON into a "add_assignment" tag.
             response = requests.post(
                 url=request_url,
-                data={"add_assignment": json.dumps(assignmentPostData)},
+                data={"add_assignment": json.dumps(assignment_post_data)},
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -5747,7 +6401,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5881,7 +6535,7 @@ class OTCS:
             logger.error("Missing permission assignee!")
             return None
 
-        permissionPostData = {
+        permission_post_data = {
             "permissions": permissions,
             "apply_to": apply_to,
         }
@@ -5889,7 +6543,7 @@ class OTCS:
         # Assignees can be specified for owner and group and must be specified for custom:
         #
         if assignee:
-            permissionPostData["right_id"] = assignee
+            permission_post_data["right_id"] = assignee
 
         request_url = (
             self.config()["nodesUrlv2"]
@@ -5917,7 +6571,7 @@ class OTCS:
                 # also allows to add a new assigned permission (user or group):
                 response = requests.post(
                     url=request_url,
-                    data={"body": json.dumps(permissionPostData)},
+                    data={"body": json.dumps(permission_post_data)},
                     headers=request_header,
                     cookies=self.cookie(),
                     timeout=None,
@@ -5926,7 +6580,7 @@ class OTCS:
                 # Owner, Owner Group and Public require REST PUT:
                 response = requests.put(
                     url=request_url,
-                    data={"body": json.dumps(permissionPostData)},
+                    data={"body": json.dumps(permission_post_data)},
                     headers=request_header,
                     cookies=self.cookie(),
                     timeout=None,
@@ -5936,7 +6590,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -5955,7 +6609,7 @@ class OTCS:
 
         Args:
             node_id (int): ID of the node to get the categories for.
-            metadata (bool, optional): expand the attribute definitions of the category. Default is True
+            metadata (bool, optional): expand the attribute definitions of the category. Default is True.
         Returns:
             dict: category response or None if the call to the REST API fails.
         """
@@ -5984,7 +6638,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6039,7 +6693,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6077,7 +6731,9 @@ class OTCS:
 
     # end method definition
 
-    def get_node_category_definition(self, node_id: int, category_name: str):
+    def get_node_category_definition(
+        self, node_id: int, category_name: str
+    ) -> tuple[int, dict]:
         """Get category definition (category id and attribute IDs and types)
 
         Args:
@@ -6088,18 +6744,19 @@ class OTCS:
         Returns:
             int: category ID
             dict: keys are the attribute names. values are sub-dictionaries with the id and type of the attribute.
-                        Example:
-                        {
-                            'Status': {
-                                'id': '12532_2',
-                                'type': 'String'
-                            },
-                            'Legal Approval': {
-                                'id': '12532_3',
-                                'type': 'user'
-                            },
-                            ...
-                        }
+
+            Example response:
+            {
+                'Status': {
+                    'id': '12532_2',
+                    'type': 'String'
+                },
+                'Legal Approval': {
+                    'id': '12532_3',
+                    'type': 'user'
+                },
+                ...
+            }
         """
 
         attribute_definitions = {}
@@ -6127,6 +6784,8 @@ class OTCS:
                         ]
                     attribute_definitions[att_name] = {"id": att_id, "type": att_type}
         return cat_id, attribute_definitions
+
+    # end method definition
 
     def assign_category(
         self,
@@ -6173,7 +6832,7 @@ class OTCS:
                 str(category_id),
                 str(node_id),
             )
-            categoryPostData = {
+            category_post_data = {
                 "category_id": category_id,
             }
 
@@ -6188,7 +6847,7 @@ class OTCS:
             while True:
                 response = requests.post(
                     url=request_url,
-                    data=categoryPostData,
+                    data=category_post_data,
                     headers=request_header,
                     cookies=self.cookie(),
                     timeout=None,
@@ -6198,7 +6857,7 @@ class OTCS:
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     logger.warning("Session has expired - try to re-authenticate...")
-                    self.authenticate(True)
+                    self.authenticate(revalidate=True)
                     retries += 1
                 else:
                     logger.error(
@@ -6239,7 +6898,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6258,7 +6917,7 @@ class OTCS:
         if apply_to_sub_items:
             request_url_apply_sub_items = request_url + "/apply"
 
-            categoryPostData = {
+            category_post_data = {
                 "categories": [{"id": category_id, "action": apply_action}],
                 "add_version": add_version,
                 "clear_existing_categories": clear_existing_categories,
@@ -6270,7 +6929,7 @@ class OTCS:
                 # tag. This is documented worngly on developer.opentext.com
                 response = requests.post(
                     url=request_url_apply_sub_items,
-                    data={"body": json.dumps(categoryPostData)},
+                    data={"body": json.dumps(category_post_data)},
                     headers=request_header,
                     cookies=self.cookie(),
                     timeout=None,
@@ -6280,7 +6939,7 @@ class OTCS:
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     logger.warning("Session has expired - try to re-authenticate...")
-                    self.authenticate(True)
+                    self.authenticate(revalidate=True)
                     retries += 1
                 else:
                     logger.error(
@@ -6339,7 +6998,7 @@ class OTCS:
                 str(node_id),
                 request_url,
             )
-            categoryPutData = {
+            category_put_data = {
                 "category_id": category_id,
                 "{}_{}_{}_{}".format(category_id, set_id, set_row, attribute_id): value,
             }
@@ -6352,7 +7011,7 @@ class OTCS:
                 str(node_id),
                 request_url,
             )
-            categoryPutData = {
+            category_put_data = {
                 "category_id": category_id,
                 "{}_{}".format(category_id, attribute_id): value,
             }
@@ -6361,7 +7020,7 @@ class OTCS:
         while True:
             response = requests.put(
                 url=request_url,
-                data=categoryPutData,
+                data=category_put_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -6371,7 +7030,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6407,7 +7066,7 @@ class OTCS:
         for classification in classifications:
             classification_list.append({"id": classification})
 
-        classificationPostData = {
+        classification_post_data = {
             "class_id": classification_list,
             "apply_to_sub_items": apply_to_sub_items,
         }
@@ -6429,7 +7088,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=classificationPostData,
+                data=classification_post_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -6439,7 +7098,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6468,7 +7127,7 @@ class OTCS:
             dict: Response of the request or None if the assignment of the RM classification has failed.
         """
 
-        rmClassificationPostData = {
+        rm_classification_post_data = {
             "class_id": rm_classification,
             "apply_to_sub_items": apply_to_sub_items,
         }
@@ -6490,7 +7149,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=rmClassificationPostData,
+                data=rm_classification_post_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -6500,7 +7159,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6522,7 +7181,7 @@ class OTCS:
             dict: Response of request or None if the registration of the workspace template has failed.
         """
 
-        registrationPostData = {"ids": "{{ {} }}".format(node_id)}
+        registration_post_data = {"ids": "{{ {} }}".format(node_id)}
 
         request_url = self.config()["xEngProjectTemplateUrl"]
 
@@ -6538,7 +7197,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=registrationPostData,
+                data=registration_post_data,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -6548,7 +7207,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6628,7 +7287,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6670,7 +7329,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6695,7 +7354,7 @@ class OTCS:
             dict: RSI data or None if the request fails.
         """
 
-        updateRMCodesPostData = {}
+        update_rm_codes_post_data = {}
 
         request_url = self.config()["recordsManagementUrl"] + "/rmcodes"
         request_header = self.request_form_header()
@@ -6711,7 +7370,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=updateRMCodesPostData,
+                data=update_rm_codes_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -6721,7 +7380,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6757,11 +7416,11 @@ class OTCS:
             dict: RSI data or None if the request fails.
         """
 
-        if statusDate == "":
+        if status_date == "":
             now = datetime.now()
-            statusDate = now.strftime("%Y-%m-%dT%H:%M:%S")
+            status_date = now.strftime("%Y-%m-%dT%H:%M:%S")
 
-        createRSIPostData = {
+        create_rsi_post_data = {
             "name": name,
             "status": status,
             "statusDate": status_date,
@@ -6784,7 +7443,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=createRSIPostData,
+                data=create_rsi_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -6793,7 +7452,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6840,32 +7499,32 @@ class OTCS:
 
         Args:
             rsi_id (int): ID of an existing RSI the schedule should be created for
-            object_type (str): either "LIV" - Classified Objects (default) or "LRM" - RM Classifications
             stage (str): retention stage - this is the key parameter to define multiple stages (stages are basically schedules)
             event_type (int): 1 Calculated Date, 2 Calendar Calculation, 3 Event Based, 4 Fixed Date, 5 Permanent
-            rule_code (str): rule code - this value must be defined upfront
-            rule_comment (str): comment for the rule
-            date_to_use (int): 91 Create Date, 92 Reserved Data, 93 Modification Date, 94 Status Date, 95 Records Date
-            retention_years (int): years to wait before disposition
-            retention_months (int): month to wait before disposition
-            retention_days (int): days to wait before disposition
-            category_id (int): ID of the category
-            attribute_id (int): ID of the category attribute
-            year_end_month (int): month the year ends (normally 12)
-            year_end_day (int): day the year ends (normally 31)
-            retention_intervals (int): retention intervals
-            fixed_retention (bool): fixedRetention
-            maximum_retention (bool): maximumRetention
-            fixed_date(str): fixed date format : YYYY-MM-DDTHH:mm:ss
-            event_condition (str): eventCondition
-            disposition (str): disposition
-            action_code (int): 0 None, 1 Change Status, 7 Close, 8 Finalize Record, 9 Mark Official, 10 Export, 11 Update Storage Provider, 12 Delete Electronic Format, 15 Purge Versions, 16 Make Rendition, 32 Destroy
-            description (str): description
-            new_status (str): new status
-            min_num_versions_to_keep (int): minimum document versions to keep
-            purge_superseded (bool): purge superseded
-            purge_majors (bool): purge majors
-            mark_official_rendition (bool): mark official rendition
+            object_type (str): either "LIV" - Classified Objects (default) or "LRM" - RM Classifications
+            rule_code (str, optional): rule code - this value must be defined upfront
+            rule_comment (str, optional): comment for the rule
+            date_to_use (int, optional): 91 Create Date, 92 Reserved Data, 93 Modification Date, 94 Status Date, 95 Records Date
+            retention_years (int, optional): years to wait before disposition
+            retention_months (int, optional): month to wait before disposition
+            retention_days (int, optional): days to wait before disposition
+            category_id (int, optional): ID of the category
+            attribute_id (int, optional): ID of the category attribute
+            year_end_month (int, optional): month the year ends (default = 12)
+            year_end_day (int, optional): day the year ends (default = 31)
+            retention_intervals (int, optional): retention intervals
+            fixed_retention (bool, optional): fixedRetention
+            maximum_retention (bool,optional): maximumRetention
+            fixed_date(str, optional): fixed date format : YYYY-MM-DDTHH:mm:ss
+            event_condition (str, optional): eventCondition
+            disposition (str, optional): disposition
+            action_code (int, optional): 0 None, 1 Change Status, 7 Close, 8 Finalize Record, 9 Mark Official, 10 Export, 11 Update Storage Provider, 12 Delete Electronic Format, 15 Purge Versions, 16 Make Rendition, 32 Destroy
+            description (str, optional): description
+            new_status (str, optional): new status
+            min_num_versions_to_keep (int, optional): minimum document versions to keep, . Default is 1.
+            purge_superseded (bool, optional): purge superseded. Default is False.
+            purge_majors (bool, optional): purge majors. Default is False.
+            mark_official_rendition (bool, optional): mark official rendition. Default is False.
         Returns:
             dict: RSI Schedule data or None if the request fails.
         """
@@ -6874,7 +7533,7 @@ class OTCS:
             now = datetime.now()
             fixedDate = now.strftime("%Y-%m-%dT%H:%M:%S")
 
-        createRSISchedulePostData = {
+        create_rsi_schedule_post_data = {
             "objectType": object_type,
             "stage": stage,
             "eventType": event_type,
@@ -6919,7 +7578,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=createRSISchedulePostData,
+                data=create_rsi_schedule_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -6928,7 +7587,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -6957,7 +7616,7 @@ class OTCS:
             hold_type (str): type of the Hold
             name (str): name of the RSI
             comment (str): comment
-            alternate_id (str): alternate hold ID
+            alternate_id (str, optional): alternate hold ID
             parent_id (int, optional): ID of the parent node. If parent_id is 0 the item will be created right under "Hold Management" (top level item)
             date_applied (str, optional): create date of the Hold in this format: YYYY-MM-DDTHH:mm:ss
             date_to_remove (str, optional): suspend date of the Hold in this format: YYYY-MM-DDTHH:mm:ss
@@ -6969,7 +7628,7 @@ class OTCS:
             now = datetime.now()
             date_applied = now.strftime("%Y-%m-%dT%H:%M:%S")
 
-        createHoldPostData = {
+        create_hold_post_data = {
             "type": hold_type,
             "name": name,
             "comment": comment,
@@ -6979,7 +7638,7 @@ class OTCS:
         }
 
         if parent_id > 0:
-            createHoldPostData["parent_id"] = parent_id
+            create_hold_post_data["parent_id"] = parent_id
 
         request_url = self.config()["holdsUrl"]
 
@@ -6994,7 +7653,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=createHoldPostData,
+                data=create_hold_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -7003,7 +7662,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7070,7 +7729,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7111,7 +7770,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7119,7 +7778,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                files=settingsPostFile,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7129,7 +7788,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7166,7 +7825,7 @@ class OTCS:
             request_url,
         )
 
-        settingsPostData = {"updateExistingCodes": update_existing_codes}
+        settings_post_data = {"updateExistingCodes": update_existing_codes}
 
         filename = os.path.basename(file_path)
         if not os.path.exists(file_path):
@@ -7176,7 +7835,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7184,8 +7843,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=settingsPostData,
-                files=settingsPostFile,
+                data=settings_post_data,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7195,7 +7854,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7235,7 +7894,7 @@ class OTCS:
             request_url,
         )
 
-        settingsPostData = {
+        settings_post_data = {
             "updateExistingRSIs": update_existing_rsis,
             "deleteSchedules": delete_schedules,
         }
@@ -7248,7 +7907,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7256,8 +7915,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=settingsPostData,
-                files=settingsPostFile,
+                data=settings_post_data,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7267,7 +7926,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7308,7 +7967,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7316,7 +7975,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                files=settingsPostFile,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7326,7 +7985,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7362,7 +8021,7 @@ class OTCS:
             request_url,
         )
 
-        settingsPostData = {"updateExistingCodes": update_existing_codes}
+        settings_post_data = {"updateExistingCodes": update_existing_codes}
 
         filename = os.path.basename(file_path)
         if not os.path.exists(file_path):
@@ -7372,7 +8031,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7380,8 +8039,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=settingsPostData,
-                files=settingsPostFile,
+                data=settings_post_data,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7391,7 +8050,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7432,7 +8091,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7440,7 +8099,7 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                files=settingsPostFile,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7450,7 +8109,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7486,7 +8145,7 @@ class OTCS:
             request_url,
         )
 
-        settingsPostData = {"includeusers": include_users}
+        settings_post_data = {"includeusers": include_users}
 
         filename = os.path.basename(file_path)
         if not os.path.exists(file_path):
@@ -7496,7 +8155,7 @@ class OTCS:
                 os.path.dirname(file_path),
             )
             return False
-        settingsPostFile = {
+        settings_post_file = {
             "file": (filename, open(file=file_path, encoding="utf-8"), "text/xml")
         }
 
@@ -7504,8 +8163,8 @@ class OTCS:
         while True:
             response = requests.post(
                 url=request_url,
-                data=settingsPostData,
-                files=settingsPostFile,
+                data=settings_post_data,
+                files=settings_post_file,
                 headers=request_header,
                 cookies=self.cookie(),
                 timeout=None,
@@ -7515,7 +8174,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7540,7 +8199,7 @@ class OTCS:
             dict: REST response or None if the REST call fails.
         """
 
-        assignUserSecurityClearancePostData = {
+        assign_user_security_clearance_post_data = {
             "securityLevel": security_clearance,
         }
 
@@ -7561,7 +8220,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=assignUserSecurityClearancePostData,
+                data=assign_user_security_clearance_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -7570,7 +8229,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7596,7 +8255,7 @@ class OTCS:
             dict: REST response or None if the REST call fails.
         """
 
-        assignUserSupplementalMarkingsPostData = {
+        assign_user_supplemental_markings_post_data = {
             "suppMarks": supplemental_markings,
         }
 
@@ -7617,7 +8276,7 @@ class OTCS:
             response = requests.post(
                 url=request_url,
                 headers=request_header,
-                data=assignUserSupplementalMarkingsPostData,
+                data=assign_user_supplemental_markings_post_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -7626,7 +8285,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7689,7 +8348,7 @@ class OTCS:
             dict: REST response or None if the REST call fails.
         """
 
-        aviatorStatusPutData = {
+        aviator_status_put_data = {
             "enabled": status,
         }
 
@@ -7714,7 +8373,7 @@ class OTCS:
             response = requests.put(
                 url=request_url,
                 headers=request_header,
-                data=aviatorStatusPutData,
+                data=aviator_status_put_data,
                 cookies=self.cookie(),
                 timeout=None,
             )
@@ -7723,7 +8382,7 @@ class OTCS:
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 retries += 1
             else:
                 logger.error(
@@ -7737,7 +8396,11 @@ class OTCS:
     # end method definition
 
     def volume_translator(
-        self, current_node_id: int, translator: object, languages: list
+        self,
+        current_node_id: int,
+        translator: object,
+        languages: list,
+        simulate: bool = False,
     ):
         """Experimental code to translate the item names and item descriptions in a given hierarchy.
            The actual translation is done by a tranlator object. This recursive method just
@@ -7748,6 +8411,8 @@ class OTCS:
             translator (object): this object needs to be created based on the "Translator" class
                                  and passed to this method
             languages (list): list of target languages
+            simulate (bool, optional): if True, do not really rename but just traverse and log info.
+                                       the default is False
         """
         # Get current node based on the ID:
         current_node = self.get_node(current_node_id)
@@ -7773,6 +8438,14 @@ class OTCS:
                 names_multilingual[language] = translator.translate(
                     "en", language, names_multilingual["en"]
                 )
+                logger.info(
+                    "Translate name of node -> %s from -> %s (%s) to -> %s (%s)",
+                    current_node_id,
+                    name,
+                    "en",
+                    names_multilingual[language],
+                    language,
+                )
             if (
                 language in descriptions_multilingual
                 and descriptions_multilingual["en"]
@@ -7781,15 +8454,24 @@ class OTCS:
                 descriptions_multilingual[language] = translator.translate(
                     "en", language, descriptions_multilingual["en"]
                 )
+                logger.info(
+                    "Translate description of node -> %s from -> %s (%s) to -> %s (%s)",
+                    current_node_id,
+                    name,
+                    "en",
+                    names_multilingual[language],
+                    language,
+                )
 
         # Rename node multi-lingual:
-        self.rename_node(
-            current_node_id,
-            name,
-            description,
-            names_multilingual,
-            descriptions_multilingual,
-        )
+        if not simulate:
+            self.rename_node(
+                current_node_id,
+                name,
+                description,
+                names_multilingual,
+                descriptions_multilingual,
+            )
 
         # Get children nodes of the current node:
         results = self.get_subnodes(current_node_id, limit=200)["results"]

@@ -12,7 +12,7 @@ translateV3: Translate a string from one language to another using the Google Tr
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -25,7 +25,7 @@ logger = logging.getLogger("pyxecm.customizer.translate")
 
 class Translator:
     """Class for translation of of strings based on the Google Translate API.
-       The class supports V2 and V3 translation APIs
+    The class supports V2 and V3 translation APIs
     """
 
     _config = None

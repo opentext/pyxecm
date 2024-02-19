@@ -77,7 +77,7 @@ assign_sensitivity_label_to_user: Create a new sensitivity label in M365
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2023, OpenText"
+__copyright__ = "Copyright 2024, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -396,6 +396,10 @@ class M365(object):
 
         # Already authenticated and session still valid?
         if self._access_token and not revalidate:
+            logger.info(
+                "Session still valid - return existing access token -> %s",
+                str(self._access_token),
+            )
             return self._access_token
 
         request_url = self.config()["authenticationUrl"]
@@ -437,6 +441,7 @@ class M365(object):
 
         # Store authentication access_token:
         self._access_token = access_token
+
         return self._access_token
 
     # end method definition
@@ -495,6 +500,7 @@ class M365(object):
 
         # Store authentication access_token:
         self._user_access_token = access_token
+
         return self._user_access_token
 
     # end method definition
@@ -519,7 +525,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -580,7 +586,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -666,7 +672,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -719,7 +725,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -775,7 +781,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -841,7 +847,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -889,7 +895,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -963,7 +969,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1013,7 +1019,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1105,7 +1111,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1207,7 +1213,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1270,7 +1276,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1331,7 +1337,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             if response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1391,7 +1397,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1458,7 +1464,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1518,7 +1524,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1595,7 +1601,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1656,7 +1662,7 @@ class M365(object):
                 return False
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1742,7 +1748,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1818,7 +1824,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1867,7 +1873,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -1920,7 +1926,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2076,7 +2082,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2177,7 +2183,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2269,7 +2275,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2319,7 +2325,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2381,7 +2387,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2444,7 +2450,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2527,11 +2533,10 @@ class M365(object):
         # the specific endpoint:
         if update_existing_app:
             request_url += "/" + app_catalog_id + "/appDefinitions"
+
         # Here we need the credentials of an authenticated user!
         # (not the application credentials (client_id, client_secret))
         request_header = self.request_header_user("application/zip")
-
-        # upload_files = {'file': open(app_path, 'rb')}
 
         with open(app_path, "rb") as f:
             app_data = f.read()
@@ -2561,7 +2566,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             if response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2665,7 +2670,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2740,7 +2745,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2800,7 +2805,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2875,7 +2880,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -2988,7 +2993,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -3125,7 +3130,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -3256,7 +3261,7 @@ class M365(object):
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     logger.warning("Session has expired - try to re-authenticate...")
-                    self.authenticate(True)
+                    self.authenticate(revalidate=True)
                     request_header = self.request_header()
                     retries += 1
                 elif response.status_code in [502, 503, 504] and retries < 3:
@@ -3389,7 +3394,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -3473,7 +3478,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -3575,7 +3580,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:
@@ -3647,7 +3652,7 @@ class M365(object):
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
                 logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(True)
+                self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             elif response.status_code in [502, 503, 504] and retries < 3:

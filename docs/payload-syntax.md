@@ -54,7 +54,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
 #### partitions
 
-`partitions` allows to create new partitions in OTDS. It is also possible to directly put the new partition into an existing `access role`:
+`partitions` allows to create new partitions in OTDS. It is also possible to directly put the new partition into an existing `access role`. Also `licenses` this partition should be assigned to can be specified:
 
 === "Terraform / HCL"
 
@@ -66,6 +66,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
           description = "Salesforce user partition"
           synced      = false
           access_role = "Access to cs"
+          licenses    = ["X2", "ADDON_AVIATOR", "ADDON_MEDIA"]
       }
     ]
     ```
@@ -79,11 +80,15 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
         description: "Salesforce user partition"
         synced: False
         access_role: "Access to cs"
+        licenses:
+        - "X2"
+        - "ADDON_AVIATOR"
+        - "ADDON_MEDIA"
     ```
 
 #### oauthClients
 
-`oauthClients` allows to create new OAuth client in OTDS. Each list element includes a switch `enabled` to turn them on or off. This switch can be controlled by a Terraform variable. `name` defines the name of the OTDS OAuth client and `description` should describe what the OAuth client is used for. Each OAuth client has the typical elements such as `confidential`, OTDS `partition`, a `redirect_url`, `permission_scope`, `default_scope`, and `allow_impersonation`. If there's a predefined secret it can be provided by `secret`.
+`oauthClients` allows to create new OAuth client in OTDS. Each list element includes a switch `enabled` to turn them on or off. This switch can be controlled by a Terraform variable. `name` defines the name of the OTDS OAuth client and `description` should describe what the OAuth client is used for. Each OAuth client has the typical elements such as `confidential` (default is `true`), OTDS `partition` (default is `Global`), a `redirect_url`, `permission_scope`, `default_scope`, and `allow_impersonation`. If there's a predefined secret it can be provided by `secret`.
 
 === "Terraform / HCL"
 
@@ -125,7 +130,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
 #### authHandlers
 
-`authHandlers` is a list of additional OTDS authentication handlers. The values can also use terraform variables.
+`authHandlers` is a list of additional OTDS authentication handlers. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. In addition, each handler has a `name`, `type` and an optional `description`. Further values can be specified that depends on the type of the handler. Supported types are `SAML`, `OAUTH`, or `SAP`. The values can also use terraform variables.
 
 === "Terraform / HCL"
 
@@ -239,13 +244,14 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
 #### systemAttributes
 
-`systemAttributes` allows you to set system attributes in OTDS. Each trusted site has a name, value and an optional description.
+`systemAttributes` allows you to set system attributes in OTDS. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. Each system attribute has a `name`, `value` and an optional `description`.
 
 === "Terraform / HCL"
 
     ```terraform
     systemAttributes = [
       {
+        enabled     = true
         name        = "otds.as.SameSiteCookieVal"
         value       = "None"
         description = "SameSite Cookie Attribute"
@@ -258,13 +264,14 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
     ```yaml
     systemAttributes:
     - description: SameSite Cookie Attribute
+      enabled: true
       name: otds.as.SameSiteCookieVal
       value: None
     ```
 
 #### additionalGroupMemberships
 
-`additionalGroupMemberships` allows to put a pre-existing users or groups into existing OTDS groups. Each element consists of a `parent_group` value combined with either a `group_name` or `user_name` value depending whether you wannt to add a user or group.
+`additionalGroupMemberships` allows to put a pre-existing users or groups into existing OTDS groups. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, each element consists of a `parent_group` value combined with either a `group_name` or `user_name` value depending whether you wannt to add a user or group.
 
 === "Terraform / HCL"
 
@@ -287,7 +294,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
 #### additionalAccessRoleMemberships
 
-`additionalAccessRoleMemberships` allows to put pre-existing users for groups into existing OTDS Access Roles. Each element consists of a `access_role` value combined with either a `group_name`, `user_name`, or `partition_name` value depending whether you wannt to add a user, group, or a whole OTDS partition to the OTDS Access Role.
+`additionalAccessRoleMemberships` allows to put pre-existing users for groups into existing OTDS Access Roles. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, each element consists of a `access_role` value combined with either a `group_name`, `user_name`, or `partition_name` value depending whether you wannt to add a user, group, or a whole OTDS partition to the OTDS Access Role.
 
 === "Terraform / HCL"
 
@@ -323,20 +330,24 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
 
 #### groups
 
-`groups` is a list of Extended ECM user groups that are automatically created during the deployment. Each group has a name and (optionally) a list of parent groups. The switch `enabled` is used to turn groups on or off. This switch can be controlled by a Terraform variable. `enable_o365` is used to control whether or not a Microsoft 365 group should be created matching the Extended ECM group. The example below shows two groups. The `Finance` group is a child group of the `Innovate` group. The `Finance` group is also created in Microsoft 365 if the variable `var.enable_o365` evaluates to `true`.
+`groups` is a list of Extended ECM user groups that are automatically created during the deployment. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. In addition, each group has a `name` and (optionally) a list of parent groups. `enable_o365`, `enable_salesforce`, and `enable_core_share` are used to control whether or not a Microsoft 365, Salesforce or Core Share group should be created matching the Extended ECM group. The example below shows two groups. The `Finance` group is a child group of the `Innovate` group. The `Finance` group is also created in Microsoft 365 if the variable `var.enable_o365` evaluates to `true`.
 
 === "Terraform / HCL"
 
     ```terraform
     groups = [
       {
-        name          = "Innovate"
-        parent_groups = []
+        enabled           = true
+        name              = "Innovate"
+        parent_groups     = []
       },
       {
-        name          = "Finance"
-        parent_groups = ["Innovate"]
-        enable_o365   = var.enable_o365
+        enabled           = true
+        name              = "Finance"
+        parent_groups     = ["Innovate"]
+        enable_o365       = var.enable_o365
+        enable_salesforce = var.enable_salesforce
+        enable_core_share = var.enable_core_share
       }
     ]
     ```
@@ -348,6 +359,8 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
     - name: Innovate
       parent_groups: []
     - enable_o365: ${var.enable_o365}
+      enable_salesforce: ${var.enable_salesforce}
+      enable_core_share: ${var.enable_core_share}
       name: Finance
       parent_groups:
       - Innovate
@@ -355,7 +368,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
 
 #### users
 
-`users` is a list of Extended ECM users that are automatically created during deployment. The password of these users is randomly generated and can be printed by `terraform output -json` (all users have the same password). Each user need to have a base group that must be in the `groups` section of the payload. Optionally a user can have a list of additional groups. A user can also have a list of favorites. Favorites can either be the logical name of a workspace instance used in the payload (see workspace below) or it can be a nickname of an Extended item. Users can also have a **security clearance level** and multiple **supplementatal markings**. Both are optional. `security_clearance` is used to define the security clearance level of the user. This needs to match one of the existing security clearnace levels that have been defined in the `securityClearances`section in the payload. `supplemental_markings` defines a list of supplemental markings the user should get. These need to match markings defined in the `supplementalMarkings` section in the payload. The field `privileges` defines the standard privileges of a user. If it is omitted users get the default privileges `["Login", "Public Access"]`. The customizing module is also able to automatically configure Microsoft 365 users for each Extended ECM user. To make this work, the Terraform variable for Office 365 / Microsoft 365 need to be configured. In particular `var.enable_o365` needs to be `true`. In the user settings `enable_o365` has to be set to `true` as well (or you use the variable `var.enable_o365` if the payload is in the `customization.tf` file). `m365_skus` defines a list of Microsoft 365 SKUs that should be assigned to the user. These are the technical SKU IDs that are documented by Microsoft: [Licensing Service Plans](https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference). Inside the `customizing.tf` file you also find a convinient map called `m365_skus` that map the SKU ID to readable names (such as "Microsoft 365 E3" or "Microsoft 365 E5").
+`users` is a list of Extended ECM users that are automatically created during deployment. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. In addition, users should have `name`, `password`, `firstname`, `lastname`, `email`, `title`, and `company`. The `password` of these users can also be randomly generated and can be printed by `terraform output -json` (all users have the same password). Each user need to have a base group that must be in the `groups` section of the payload. Optionally a user can have a list of additional groups. A user can also have a list of favorites. Favorites can either be the logical name of a workspace instance used in the payload (see workspace below) or it can be a nickname of an Extended item. Users can also have a **security clearance level** and multiple **supplementatal markings**. Both are optional. `security_clearance` is used to define the security clearance level of the user. This needs to match one of the existing security clearnace levels that have been defined in the `securityClearances`section in the payload. `supplemental_markings` defines a list of supplemental markings the user should get. These need to match markings defined in the `supplementalMarkings` section in the payload. The field `privileges` defines the standard privileges of a user. If it is omitted users get the default privileges `["Login", "Public Access"]`. The customizing module is also able to automatically configure Microsoft 365 users for each Extended ECM user. To make this work, the Terraform variable for Office 365 / Microsoft 365 need to be configured. In particular `var.enable_o365` needs to be `true`. In the user settings `enable_o365` has to be set to `true` as well (or you use the variable `var.enable_o365` if the payload is in the `customization.tf` file). `m365_skus` defines a list of Microsoft 365 SKUs that should be assigned to the user. These are the technical SKU IDs that are documented by Microsoft: [Licensing Service Plans](https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference). Inside the `customizing.tf` file you also find a convinient map called `m365_skus` that map the SKU ID to readable names (such as "Microsoft 365 E3" or "Microsoft 365 E5"). The `enable_sap`, `enable_successfactors`, `enable_salesforce`, `enable_core_share` allow to automatically create + configure the users in connected SAP S/4HANA, SuccessFactors, Salesforce, and Core Share applications respectively.
 
 === "Terraform / HCL"
 
@@ -376,6 +389,10 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
         privileges            = ["Login", "Public Access", "Content Manager", "Modify Users", "Modify Groups", "User Admin Rights", "Grant Discovery", "System Admin Rights"]
         enable_o365           = var.enable_o365
         m365_skus             = [var.m365_skus["Microsoft 365 E3"]]
+        enable_sap            = var.enable_o365
+        enable_successfactors = var.enable_o365
+        enable_salesforce     = var.enable_o365
+        enable_core_share     = var.enable_o365
         extra_attributes = [
             {
               name  = "oTExtraAttr0"
@@ -395,6 +412,12 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
         favorites             = ["workspace-b", "nickname-b"]
         security_clearance    = 95
         supplemental_markings = ["EU-GDPR-PD", "EUZONE"]
+        privileges            = ["Login", "Public Access"]        enable_o365           = var.enable_o365
+        m365_skus             = [var.m365_skus["Microsoft 365 E5"]]
+        enable_sap            = var.enable_o365
+        enable_successfactors = var.enable_o365
+        enable_salesforce     = var.enable_o365
+        enable_core_share     = var.enable_o365
       }
     ]
     ```
@@ -435,6 +458,11 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
       title: Administrator
     - base_group: Sales
       email: nwheeler@innovate.com
+      enable_o365: ${var.enable_o365}
+      enable_sap: ${var.enable_sap}
+      enable_successfactors: ${var.enable_successfactors}
+      enable_salesforce: ${var.enable_salesforce}
+      enable_core_share: ${var.enable_core_share}
       favorites:
       - workspace-b
       - nickname-b
@@ -445,6 +473,9 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
       lastname: Wheeler
       name: nwheeler
       password: ${local.password}
+      privileges:
+      - Login
+      - Public Access
       security_clearance: 95
       supplemental_markings:
       - EU-GDPR-PD
@@ -454,13 +485,14 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
 
 #### items
 
-`items` and `itemsPost` are lists of Extended ECM items such as folders, shortcuts or URLs that should be created automatically but are not included in transports. All items are created in the `Enterprise Workspace` of Extended ECM or any subfolder. Each item needs to have `name` and `type` values. The parent ID of the item can either be specified by a nick name (`parent_nickname`) or by the path in the Enterprise Workspace (`parent_path`). The value `parent_path` is a list of folder names starting from the root level in the Enterprise Workspaces. `parent_path = ["Administration", "WebReports"]` creates the item in the `Websites` folder which is itself in the `Administration` top-level folder. The list `items` is processed at the beginning of the automation (before transports are applied) and `itemsPost` is applied at the end of the automation (after transports have been applied).
+`items` and `itemsPost` are lists of Extended ECM items such as folders, shortcuts or URLs that should be created automatically but are not included in transports. All items are created in the `Enterprise Workspace` of Extended ECM or any subfolder. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. In addition, each item needs to have `name` and `type` values. The parent ID of the item can either be specified by a nick name (`parent_nickname`) or by the path in the Enterprise Workspace (`parent_path`). The value `parent_path` is a list of folder names starting from the root level in the Enterprise Workspaces. `parent_path = ["Administration", "WebReports"]` creates the item in the `Websites` folder which is itself in the `Administration` top-level folder. The list `items` is processed at the beginning of the automation (before transports are applied) and `itemsPost` is applied at the end of the automation (after transports have been applied).
 
 === "Terraform / HCL"
 
     ```terraform
     items = [
         {
+          enabled           = true
           parent_nickname   = "" # empty string = not set
           parent_path       = ["Administration", "WebReports"]
           name              = "Case Management"
@@ -494,6 +526,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
     ```yaml
     items:
     - description: Case Management with eFiles and eCases
+      enable: true
       name: Case Management
       original_nickname: 0
       original_path: []
@@ -505,6 +538,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
       url: ''
     itemsPost:
     - description: The OpenText web site
+      enabled: true
       name: OpenText Homepage
       original_nickname: 0
       original_path: []
@@ -519,13 +553,14 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
 
 #### permissions
 
-`permissions` and `permissionsPost` are both lists of Exteneded ECM items, each with a specific permission set that should be applied to the item. The item can be specified via a path (list of folder names in Enterprise workspace in top-down order), via a nickname, or via a volume. Permission values are listed as list strings in `[...]` for `owner_permissions`, `owner_group_permissions`, or `public_permissions`. They can be a combination of the following values: `see`, `see_contents`, `modify`, `edit_attributes`, `add_items`, `reserve`, `add_major_version`, `delete_versions`, `delete`, and `edit_permissions`. The `apply_to` specifies if the permissions should only be applied to the item itself (value 0) or only to sub-items (value 1) or the item _and_ its sub-items (value 2). The list specified by `permissions` is applied _before_ the transport packages are applied and `permissionsPost` is applied _after_ the transport packages have been processed.
+`permissions` and `permissionsPost` are both lists of Exteneded ECM items, each with a specific permission set that should be applied to the item. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. In addition, the item can be specified via a path (list of folder names in Enterprise workspace in top-down order), via a nickname, or via a volume. Permission values are listed as list strings in `[...]` for `owner_permissions`, `owner_group_permissions`, or `public_permissions`. They can be a combination of the following values: `see`, `see_contents`, `modify`, `edit_attributes`, `add_items`, `reserve`, `add_major_version`, `delete_versions`, `delete`, and `edit_permissions`. The `apply_to` specifies if the permissions should only be applied to the item itself (value 0) or only to sub-items (value 1) or the item _and_ its sub-items (value 2). The list specified by `permissions` is applied _before_ the transport packages are applied and `permissionsPost` is applied _after_ the transport packages have been processed.
 
 === "Terraform / HCL"
 
     ```terraform
     permissions = [
       {
+        enabled = true
         path = ["...", "..."]
         volume = "..."   # identified by volume type ID
         nickname = "..." # an item with this nick name needs to exist
@@ -554,6 +589,7 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
     ```yaml
     permissions:
     - apply_to: 2
+      enabled: true
       groups:
       - name: '...'
         permissions: []
@@ -574,18 +610,20 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
 
 #### renamings
 
-`renamings` is a list of Extended ECM items (e.g. volume names) that are automatically renamed during deployment. You have to either provide the `nodeid` (only a few node IDs are really know upfront such as 2000 for the Enterprise Workspace) or a `volume` (type ID). In case of volumes there's a list of known volume types defined at the beginning of the `customizing.tf` file with the variable `otcs_volumes`. You can also specific a description that will be used to update the description of the node / item.
+`renamings` is a list of Extended ECM items (e.g. volume names) that are automatically renamed during deployment. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable. In addition, you have to either provide the `nodeid` (only a few node IDs are really know upfront such as 2000 for the Enterprise Workspace) or a `volume` (type ID). In case of volumes there's a list of known volume types defined at the beginning of the `customizing.tf` file with the variable `otcs_volumes`. You can also specific a description that will be used to update the description of the node / item.
 
 === "Terraform / HCL"
 
     ```terraform
     renamings = [
       {
+        enabled     = true
         nodeid      = 2000
         name        = "Innovate"
         description = "Innovate's Enterprise Workspace"
       },
       {
+        enabled     = true
         volume      = var.otcs_volumes["Content Server Document Templates"]
         name        = "Content Server Document Templates"
         description = "Extended ECM Workspace and Document Templates"
@@ -598,17 +636,18 @@ The payload syntax for Extended ECM configurations uses these lists (most elemen
     ```yaml
     renamings:
     - description: Innovate's Enterprise Workspace
+      enabled: true
       name: Innovate
       nodeid: 2000
     - description: Extended ECM Workspace and Document Templates
+      enabled: true
       name: Content Server Document Templates
       volume: ${var.otcs_volumes["Content Server Document Templates"]}
     ```
 
 #### adminSettings
 
-`adminSettings` and `adminSettingsPost` are lists admin stettings that are applied before the transport packages (`adminSettings`) or directly after the transport packages (`adminSettingsPost`) in the customizing process. Each setting is defined by a `description`, the `filename` of an XML file that includes the actual Extended ECM admin settings that are applied automatically (using XML import / LLConfig). These files need to be stored inside the `setting/payload` sub-folder inside the terraform folder.
-Each admin setting may have a field called `enabled` that allows to dyanmically turn on / off admin settings based on a boolean value that may be read from a Terraform variable (or could just be `False` or `True`).
+`adminSettings` and `adminSettingsPost` are lists admin stettings that are applied before the transport packages (`adminSettings`) or directly after the transport packages (`adminSettingsPost`) in the customizing process. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, each setting is defined by a `description`, the `filename` of an XML file that includes the actual Extended ECM admin settings that are applied automatically (using XML import / LLConfig). These files need to be stored inside the `setting/payload` sub-folder inside the terraform folder.
 
 === "Terraform / HCL"
 
@@ -651,8 +690,8 @@ Each admin setting may have a field called `enabled` that allows to dyanmically 
 
 #### externalSystems
 
-`externalSystems` is a list of connections to external business applications such as SAP S/4HANA, Salesforce, or SuccessFactors. Some of the fields are common, some are specific for the type of the external system.
-Each external system has a field called `enabled` that allows to dyanmically turn on / off external system configurations based on a boolean value that may be read from a Terraform variable (or could just be `False` or `True`). The field `external_system_type` needs to have one of these values: `SAP`, `Salesforce`, `SuccessFactors`, or `AppWorks Platform`.
+`externalSystems` is a list of connections to external business applications such as SAP S/4HANA, Salesforce, or SuccessFactors. Some of the payload elements are common, some are specific for the type of the external system.
+Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, the field `external_system_type` needs to have one of these values: `SAP`, `Salesforce`, `SuccessFactors`, `AppWorks Platform` or `Business Scenario Sample`. All other fields are dependent on the selection of the `type` value.
 
 === "Terraform / HCL"
 
@@ -752,7 +791,7 @@ Each external system has a field called `enabled` that allows to dyanmically tur
 
 #### transportPackages
 
-`transportPackages` is a list of transport packages that should be applied automatically. These packages need to be accessible via the provided URLs. The `name` must be the exact file name of the ZIP package. Description is optional.
+`transportPackages` is a list of transport packages that should be applied automatically. These packages need to be accessible via the provided URLs. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, the `name` must be the exact file name of the ZIP package. A value for `description` is optional.
 
 === "Terraform / HCL"
 
@@ -847,7 +886,7 @@ Each external system has a field called `enabled` that allows to dyanmically tur
 
 #### workspaces
 
-`workspaces` is a list of business workspaces instances that should be automatically created. Category, Roles, and Business Relationships can be provided. The `id` needs to be a unique value in the payload. It does not need to be something related to any of the actual Extended ECM workspace data. It is only used to establish relationship between different workspaces in the payload (using the list of IDs in `relationships`). **_Important_**: If the workspace type definition uses a pattern to generate the workspace name then the `name` in the payload should match the pattern in the workspace definition. Otherwise incremental deployments of the payload may not find the existing workspaces and may try to recreate them resulting in an error. The `nickname` is the Extended ECM nickname that allows to refer to this itemwithout knowing its technical ID.
+`workspaces` is a list of business workspaces instances that should be automatically created. Category, Roles, and Business Relationships can be provided. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, the `id` needs to be a unique value in the payload. It does not need to be something related to any of the actual Extended ECM workspace data. It is only used to establish relationship between different workspaces in the payload (using the list of IDs in `relationships`). **_Important_**: If the workspace type definition uses a pattern to generate the workspace name then the `name` in the payload should match the pattern in the workspace type definition. Otherwise incremental deployments of the payload may not find the existing workspaces and may try to recreate them resulting in an error. The `nickname` is the Extended ECM nickname that allows to refer to this item without knowing its technical ID.
 
 Business Object information can be provided with a `business_objects` list. Each list item defines the external system (see above), the business object type, and business object ID. This list is optional.
 
@@ -857,7 +896,7 @@ Classification information is optional and can be provided separately for Record
 
 Category information is provided in a list of blocks. Each block includes the category `name`, `set` name (optional, can be empty of the attribute is not in a set), `attribute` name, and the attribute `value`. Multi-value attributes are a comma-separated list of items in square brackets. The example below shows a customer workspace and a contract workspace that are related to each other (the customer workspace has an attribute `Sales Organization` that has multiple values: 1000 and 2000). The contract workspace has a multi-line attribute set. For multi-line attribute sets the payload needs an additional `row` value that specifies the row number in the multi-line set (starting with 1 for the first row).
 
-A thrid workspace in the example below is for `Material` - it has an additional field called `template_name` which is optional. It can be used if there are multiple templates for one workspace type. If it is not specified and the workspace type has multiple workspace templates the first template is automatically selected.
+A third workspace in the example below is for `Material` - it has an additional field called `template_name` which is optional. It can be used if there are multiple templates for one workspace type. If it is not specified and the workspace type has multiple workspace templates the first template is automatically selected.
 
 === "Terraform / HCL"
 
@@ -1070,7 +1109,7 @@ A thrid workspace in the example below is for `Material` - it has an additional 
 
 #### webReports
 
-`webReports` and `webReportsPost` are two lists of Extended ECM web reports that should be automatically executed during deployment. Having two lists give you the option to run some webReports after the business configuration and some others after demo content has been produced. These Web Reports have typically been deployd to Extended ECM system with the transport warehouse before. Each list item specifies one Web Report. The `nickname` is mandatory and defines the nickname of the Web Report to be executed. So you need to give each webReport you want to run a nickname before putting it in a transport package. The element `description` is optional. The `parameters` set defines parameter name and parameter value pairs. The corresponding Web Report in Extended ECM must have exactly these parameters defined.
+`webReports` and `webReportsPost` are two lists of Extended ECM web reports that should be automatically executed during deployment. Having two lists give you the option to run some webReports after the business configuration and some others after demo content has been produced. These Web Reports have typically been deployd to Extended ECM system with the transport warehouse before. Each list item specifies one Web Report. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, the `nickname` is mandatory and defines the nickname of the Web Report to be executed. So you need to give each webReport you want to run a nickname before putting it in a transport package. The element `description` is optional. The `parameters` set defines parameter name and parameter value pairs. The corresponding Web Report in Extended ECM must have exactly these parameters defined.
 
 === "Terraform / HCL"
 
@@ -1116,7 +1155,7 @@ A thrid workspace in the example below is for `Material` - it has an additional 
 
 #### csApplications
 
-`csApplications` is a list of Content Server Applications that should autmatically be deployed. Each element has a `name` for the application and optionally a `description`.
+`csApplications` is a list of Content Server Applications that should autmatically be deployed. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). In addition, each element has a `name` for the application and optionally a `description`.
 
 === "Terraform / HCL"
 
@@ -1151,7 +1190,7 @@ A thrid workspace in the example below is for `Material` - it has an additional 
 
 #### assignments
 
-`assignments` is a list of assignments. Assignments are typically used for _Extended ECM for Government_. Each assignment assigns either a `workspace` or an Extended ECM item with a `nickname` to a defined list of `users` or `groups`. Assignments have a `subject` (title) and `instructions` for the target users or groups.
+`assignments` is a list of assignments. Assignments are typically used for _Extended ECM for Government_. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). Each assignment assigns either a `workspace` or an Extended ECM item with a `nickname` to a defined list of `users` or `groups`. Assignments have a `subject` (title) and `instructions` for the target users or groups.
 
 === "Terraform / HCL"
 
@@ -1184,28 +1223,279 @@ A thrid workspace in the example below is for `Material` - it has an additional 
 
     ```
 
-#### workspaceTemplateRegistrations
+### Bulk Load Customizing Syntax
 
-`workspaceTemplateRegistrations` is used to register certain workspace templates for the use as projects in _Extended ECM for Engineering_ demo scenarios. Each registration has two mandatory fields. `workspace_type_name` defines the name of the workspace type and `workspace_template_name` defines the specific name of the workspace templates (as each workspace type may have multiple templates).
+For mass loading and generation of workspaces and documents from external data sources the customizing allows to specify bulk datasources, bulk workspaces, bulk workspace relationships and bulk documents. The data sources will be loaded in an internal table representation (we use Pandas Data Frames for this).
+
+#### Bulk Data Sources
+
+Before you can bulk load workspaces, workspace relationships, or documents you have to declare the used data sources. `bulkDatasources` is a list of datasources. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `type`. Supported types are `excel` (Microsoft Excel workbooks), `servicenow` (ServiceNow REST API), `otmm` (OpenText Media Management REST API), `otcs` (Extended ECM REST API), `pht` (internal OpenText System for Product Master Data, REST API), `json` (JSON files), and `xml` (XML files, or whole directories / zip files of XML files). Based on the selected `type` data sources may have many specific fields to configure the specifics of the data source and define how to connect to the data source.
+
+In general, there are a couple of settings that can be applied to all data sources:
+
+- `cleansings` (dictionary, optional, default = {}) to clean the values in defined columns of the data set. Each list item is a dictionary with these keys:
+    - `upper` (bool, optional, default = False)
+    - `lower` (bool, optional, default = False)
+    - `length` (int, optional, default = None)
+    - `replacements` (dict, optional, default = {}) - the keys are regular expressions and the values are replacement values
+- `columns_to_drop` (list, optional, default = []) to remove columns from the data set (black list those to delete)
+- `columns_to_keep` (list, optional, default = []) to keep columns in the data set (white list those to keep)
+- `columns_to_add` (list, optional, default = []) - each list item is a dictionary with these keys:
+    - `source_column` (str, mandatory) - name of the column the base value for the new column is taken from
+    - `name` (str, mandatory) - name of the new column
+    - `reg_exp` (str, optional, default = None)
+    - `prefix` (str, optional, default = "") - prefix to add to the new column value
+    - `suffix` (str, optional, default = "") - suffix to add to the new column value
+    - `length` (int, optional, default = None)
+    - `group_chars` (str, optional, default = None)
+    - `group_separator` (str, optional, default =".")
+- `conditions` (list, optional, default = []) - each list item is a dict with these keys:
+    - `field` (str, mandatory)
+    - `value` (str | bool | list, optional, default = None)
+- `explosions` (list, optional, default = []) - each list item is a dict with these keys:
+    - `explode_field` (str | list, mandatory)
+    - `flatten_fields` (list, optional, default = [])
+    - `split_string_to_list` (bool, optional, default = False)
+- `name_column` (str, optional, default = None) - name of the column in the data source that determines the bulk item name
+- `synonyms_column` (str, optional, default = None)
+
+OpenText Extended ECM / Content Server specific settings (fields):
+
+- `otcs_hostname` (str, mandatory)
+- `otcs_protocol` (str, optional, default = "https")
+- `otcs_port` (str, optional, default = "443")
+- `otcs_basepath` (str, optional, default = "/cs/cs")
+- `otcs_username` (str, mandatory)
+- `otcs_password` (str, mandatory)
+- `otcs_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
+- `otcs_download_dir` (str, optional, default = "/data/contentserver")
+- `otcs_root_node_id` (int, mandatory)
+- `otcs_filter_workspace_depth` (int, optional, default = 0) - 0 = workspaces are located immedeately below given root node
+- `otcs_filter_workspace_subtypes` (list, optional, default = []) - 0 = folder subtype
+- `otcs_filter_workspace_category` (str, optional, default = None)
+- `otcs_filter_workspace_attributes` (dict | list, optional, default = None)
+
+ServiceNow specific settings (fields):
+
+- `sn_base_url` (str, mandatory)
+- `sn_auth_type` (str, optional, default = "basic")
+- `sn_username` (str, optional, default = "")
+- `sn_password` (str, optional, default = "")
+- `sn_client_id` (str, optional, default = None)
+- `sn_client_secret` (str, optional, default = None)
+- `sn_table_name` (str, optional, default = "u_kb_template_technical_article_public")
+- `sn_query` (str, optional, default = None)
+- `sn_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
+- `sn_download_dir` (str, optional, default = "/data/knowledgebase")
+
+OpenText Media management specific settings (fields):
+
+- `otmm_username` (str, optional, default = "")
+- `otmm_password` (str, optional, default = "")
+- `otmm_client_id` (str, optional, default = None)
+- `otmm_client_secret` (str, optional, default = None)
+- `otmm_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
+- `otmm_download_dir` (str, optional, default = "/data/mediaassets")
+- `otmm_business_unit_exclusions` (list, optional, default = [])
+- `otmm_product_exclusions` (list, optional, default = [])
 
 === "Terraform / HCL"
 
     ```terraform
-      workspaceTemplateRegistrations = [
-        {
-          workspace_type_name     = "SAP PPM Project"
-          workspace_template_name = "Project"
+    bulkDatasources = [
+      {
+        enabled     = true
+        name        = "ntsb"
+        description = "NTSB Data Source from https://www.ntsb.gov"
+        type        = "json"
+        json_files  = ["/datasources/ntsb-2024-01.json", "/datasources/ntsb-2024-02.json", "/datasources/ntsb-1962-2023.json"]
+
+        # columns to keep. If empty we keep all columns
+        columns_to_keep = [
+          "cm_mkey",
+          "cm_ntsbNum",
+          "...",
+        ]
+        # columns to drop. If empty we drop no columns
+        columns_to_drop = []
+        explosions = [
+          {
+            explode_field = "cm_vehicles"
+            flatten_fields = ["make", "model", "operatorName"]
+          }
+        ]
+        conditions= [
+            {
+                "field": "cm_vehicles_operatorName",
+                "value": [
+                  "AIR CANADA",
+                  "AIR CHINA",
+                  "..."
+                ],
+                "regex": false,
+            },
+        ]
+
+        cleansings = {
+          "airportName": {
+            "upper": true
+            "replacements" : {
+              "-": " ",  # replace hypen with space
+              "/": " ",  # replace slash with space
+              " AIRPORT$": "",  # remove " AIRPORT" at the end of names
+              " AIRPOR$": "",  # remove " AIRPOR" at the end of names
+              " ARPT$": "",  # remove " ARPT" at the end of names
+              " AIRP$": "",  # remove " AIRP" at the end of names
+              " A$": "",  # remove " A" at the end of names (abbreviation for Airport)
+            }
+          }
         }
-      ]
+      }
+    ]
     ```
 
-=== "YAML"
+#### Bulk Workspaces
 
-    ```yaml
-    workspaceTemplateRegistrations:
-    - workspace_template_name: Project
-      workspace_type_name: SAP PPM Project
+To bulk load workspaces you can define a payload section `bulkWorkspaces` which can produce a large number of workspaces based on placeholders that are filled with data from a defined datasource. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `data_source` that specifies the name of a data source in the `bulkDatasources` payload section.
+
+These are the settings in a single bulkDatasource list element:
+
+- `enabled` (bool, optional, default = True)
+- `type_name` (str, mandatory) - type of the workspace
+- `data_source` (str, mandatory)
+- `force_reload` (bool, optional, default = True)
+- `enforce_updates` (bool, optional, default = False)
+- `unique` (list, optional, default = []) - list of fields (columns) that should be unique -> deduplication
+- `sort` (list, optional, default = []) - list of fields to sort the data frame by
+- `name` (str, mandatory)
+- `description` (str, optional, default = "")
+- `template_name` (str, optional, default = take first template)
+- `categories` (list, optional, default = []) - each list item is a dictionary that may have these keys:
+    - `name` (str, mandatory)
+    - `set` (str, default = "")
+    - `row` (int, optional)
+    - `attribute` (str, mandatory)
+    - `value` (str, optional if value_field is specified, default = None)
+    - `value_field` (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
+    - `value_type` (str, optional, default = "string") - values can be string or list, if list then string with comma-separated values will be converted to a list
+    - `list_splitter` (str, optional, default = ";,")
+    - `lookup_data_source` (str, optional, default = None)
+    - `is_key` (bool, optional, default = False) - find document with old name. For this we expect a "key" value to be defined in the bulk workspace and one of the category / attribute item to be marked with "is_key" = True
+- `external_create_date` (str, optional, default = "")
+- `external_modify_date` (str, optional, default = "")
+- `key` (str, optional, default = None) - lookup key for workspaces other then the name
+- `replacements` (dict, optional, default = {}) - Each dictionary item has the field name as the dictionary key and a list of regular expressions as dictionary value
+ - `nickname` (str, optional, default = None)
+ - `conditions` (list, optional, default = []) - each list item is a dictionary that may have these keys:
+    - `field` (str, mandatory)
+    - `value` (str | bool | list, optional, default = None)
+
+=== "Terraform / HCL"
+
+    ```terraform
+    bulkWorkspaces = [
+      {
+        data_source    = "ntsb"
+        name           = "{airportName} ({airportId})"
+        nickname       = "ws_location_{airportName}_{airportId}"
+        description    = ""
+        type_name      = "Location"
+        template_name  = "Location"
+        conditions     = [
+          {
+            field = "{airportName}"
+          },
+          {
+            field = "{airportId}"
+          }
+        ]
+        unique       = ["airportName", "airportId"]
+        sort         = ["airportName"]  # sorting may help to avoid name clashes between threads
+        replacements = {} # no "local" replacements
+      },
+      {
+        data_source    = "ntsb"
+        name           = "{cm_vehicles.make}"
+        nickname       = "ws_manufacturer_{cm_vehicles.make}"
+        description    = ""
+        type_name      = "Manufacturer"
+        template_name  = "Manufacturer"
+        conditions     = [
+          {
+            field = "{cm_mode}"
+            value = "Aviation"
+          },
+          {
+            field = "{cm_vehicles.make}"
+          }
+        ]
+        unique = ["cm_vehicles_make"]
+        sort   = ["cm_vehicles_make"]  # sorting may help to avoid name clashes between threads
+        replacements = {} # no "local" replacements
+      },
+      {
+        data_source    = "ntsb"
+        name           = "{cm_vehicles.operatorName}"
+        nickname       = "ws_operator_{cm_vehicles.operatorName}"
+        description    = ""
+        type_name      = "Operator"
+        template_name  = "Operator"
+        conditions     = [
+          {
+            field = "{cm_vehicles.operatorName}"
+          }
+        ]
+        unique = ["cm_vehicles_operatorName"] # we must have an underscore here as this is a generated top-level field
+        sort   = ["cm_vehicles_operatorName"] # sorting may help with avoiding name clashes between threads
+        replacements = {} # no "local" replacements
+      },
+      {
+        data_source    = "ntsb"
+        name           = "{cm_ntsbNum}"
+        nickname       = "ws_incident_{cm_ntsbNum}"
+        description    = ""
+        type_name      = "Incident"
+        template_name  = "Incident"
+        unique         = ["cm_ntsbNum"] # the explosion may generate multiple lines for one NTSB number
+        replacements   = {} # no "local" replacements
+        categories = [
+          {
+            name        = "Incident"
+            set         = ""
+            attribute   = "Key"
+            value_field = "{cm_mkey}"
+          },
+          {
+            name        = "Incident"
+            set         = ""
+            attribute   = "Status"
+            value_field = "{cm_completionStatus}"
+          },
+          {
+            name        = "Incident"
+            set         = ""
+            attribute   = "Has Safety Recommendation"
+            value_field = "{cm_hasSafetyRec}"
+          },
+          {
+            name        = "Incident"
+            set         = ""
+            attribute   = "Highest Injury Level"
+            value_field = "{cm_highestInjury}"
+          },
+          ...
+        ]
+      },
+    ]
     ```
+
+#### Bulk Workspace Relationships
+
+To be completed...
+
+#### Bulk Documents
+
+To be completed...
 
 ### Advanced Customizing Syntax
 

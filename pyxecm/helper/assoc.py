@@ -165,7 +165,19 @@ class Assoc:
     @classmethod
     def extract_substring(
         cls, input_string: str, start_sequence: str, stop_sequence: str
-    ):
+    ) -> str | None:
+        """A generic method to extract a substring that is delimited
+           by a strart and stop sequence.
+
+        Args:
+            input_string (str): Input string to search the delimited substring in.
+            start_sequence (str): Start esequence of characters.
+            stop_sequence (str): Stopß sequence of characters
+
+        Returns:
+            str | None: the deliminated substring or None if not found.
+        """
+
         start_index = input_string.find(start_sequence)
         if start_index == -1:
             return None
@@ -179,6 +191,17 @@ class Assoc:
 
     @classmethod
     def extract_assoc_string(cls, input_string: str, is_escaped: bool = False) -> str:
+        """Extract an Assoc from a string. The assoc is deliminated by A< ... >.
+
+        Args:
+            input_string (str): Input string that includes the Assoc as a substring.
+            is_escaped (bool, optional): Whether or not the input string includes the
+                                         assoc escaped or not.
+
+        Returns:
+            str: the assoc string
+        """
+
         if is_escaped:
             assoc_string = cls.extract_substring(input_string, "A&lt;", "&gt;")
         else:

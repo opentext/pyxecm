@@ -39,20 +39,20 @@ __email__ = "mdiefenb@opentext.com"
 
 import logging
 
+logger = logging.getLogger("pyxecm.customizer.sap")
+
 try:
     import pyrfc
 
     _has_pyrfc = True
 
 except ModuleNotFoundError as module_exception:
-    logging.error("pyrfc not installed, SAP integration impatcted")
+    logger.error("pyrfc not installed, SAP integration impacted")
     _has_pyrfc = False
 
 except ImportError as import_exception:
-    logging.error("pyrfc could not be loaded, SAP integration impatcted")
+    logger.error("pyrfc could not be loaded, SAP integration impacted")
     _has_pyrfc = False
-
-logger = logging.getLogger("pyxecm.customizer.sap")
 
 
 class SAP(object):

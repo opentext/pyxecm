@@ -30,6 +30,8 @@ dependencies = [
   'python-hcl2',
   'xmltodict',
   'lxml',
+  'openpyxl',
+  'pandas',
 ]
 keywords = [
   "opentext",

@@ -248,18 +248,18 @@ class OTPD:
         # Step2: fetch session id from the response, and hit j_security_check with proper authentication
         # Step3: get session id from the response, add to self. It can be used for other transactions
         session = requests.Session()
-        logger.info("Initiating dummy rest call to Tomcat to get initial session id")
+        logger.debug("Initiating dummy rest call to Tomcat to get initial session id")
         response = session.put(request_url, json=payload)
         logger.info(response.text)
         if response.ok:
-            logger.info("Url to authenticate Tomcat for Session id -> %s", auth_url)
+            logger.debug("Url to authenticate Tomcat for Session id -> %s", auth_url)
             session_response = session.post(auth_url)
             if session_response.ok:
-                logger.info(
+                logger.debug(
                     "Response for -> %s is -> %s", auth_url, str(session_response)
                 )
                 session_dict = session.cookies.get_dict()
-                logger.info(
+                logger.debug(
                     "Session id to perform Rest API calls to Tomcat -> %s",
                     session_dict["JSESSIONID"],
                 )
@@ -296,7 +296,7 @@ class OTPD:
         request_url = self.config()["otpdImportDatabaseUrl"]
 
         logger.info(
-            "Importing Database backup -> %s, into PowerDocs ServerManager on -> %s",
+            "Importing PowerDocs database backup -> %s, into PowerDocs ServerManager on -> %s",
             filename,
             request_url,
         )
@@ -308,7 +308,7 @@ class OTPD:
             return response
         else:
             logger.error(
-                "Failed to Import Database backup -> %s into -> %s; error -> %s",
+                "Failed to import PowerDocs database backup -> %s into -> %s; error -> %s",
                 filename,
                 request_url,
                 response.text,
@@ -340,10 +340,11 @@ class OTPD:
 
         request_url = self.config()["settingsUrl"]
 
-        logger.info(
-            "Update setting -> %s with value -> %s; calling -> %s",
+        logger.debug(
+            "Update PowerDocs setting -> %s with value -> %s (tenant -> %s); calling -> %s",
             setting_name,
             setting_value,
+            tenant_name,
             request_url,
         )
 
@@ -363,13 +364,15 @@ class OTPD:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(True)
                 retries += 1
             else:
                 logger.error(
-                    "Failed to update setting -> %s; error -> %s",
+                    "Failed to update PowerDocs setting -> %s with value -> %s (tenant -> %s); error -> %s",
                     setting_name,
+                    setting_value,
+                    tenant_name,
                     response.text,
                 )
                 return None

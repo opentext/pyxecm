@@ -20,6 +20,7 @@ import logging
 import socket
 import time
 import requests
+from lxml import html
 
 logger = logging.getLogger("pyxecm.web")
 
@@ -47,7 +48,7 @@ class HTTP(object):
             bool: True is reachable, False otherwise
         """
 
-        logger.info(
+        logger.debug(
             "Test if host -> %s is reachable on port -> %s ...", hostname, str(port)
         )
         try:
@@ -67,7 +68,7 @@ class HTTP(object):
             )
             return False
         else:
-            logger.info("Host is reachable at -> %s:%s", hostname, str(port))
+            logger.debug("Host is reachable at -> %s:%s", hostname, str(port))
             return True
 
     # end method definition
@@ -81,6 +82,8 @@ class HTTP(object):
         timeout: int = 60,
         retries: int = 0,
         wait_time: int = 0,
+        wait_on_status: list | None = None,
+        show_error: bool = True,
     ):
         """Issues an http request to a given URL.
 
@@ -93,6 +96,9 @@ class HTTP(object):
             timeout (int, optional): timeout in seconds
             retries (int, optional): number of retries. If -1 then unlimited retries.
             wait_time (int, optional): number of seconds to wait after each try
+            wait_on_status (list, optional): list of status codes we want to wait on. If None
+                                             or empty then we wait for all return codes if
+                                             wait_time > 0
         Returns:
             Response of call
         """
@@ -100,61 +106,179 @@ class HTTP(object):
         if not headers:
             headers = requestHeaders
 
-        logger.info(
-            "Make HTTP Request to URL -> %s using -> %s method with payload -> %s (max number of retries = %s)",
-            url,
-            method,
-            str(payload),
-            str(retries),
+        message = "Make HTTP Request to URL -> {} using -> {} method".format(
+            url, method
         )
+        if payload:
+            message += " with payload -> {}".format(payload)
+        if retries:
+            message += " (max number of retries -> {}, wait time between retries -> {})".format(
+                retries, wait_time
+            )
+            try:
+                retries = int(retries)
+            except ValueError:
+                logger.warning(
+                    "HTTP request -> retries is not a valid integer value: %s, defaulting to 0 retries ",
+                    retries,
+                )
+                retries = 0
+
+        logger.debug(message)
 
         try_counter = 1
 
         while True:
-            response = requests.request(
-                method=method, url=url, data=payload, headers=headers, timeout=timeout
-            )
-
-            if not response.ok and retries == 0:
-                logger.error(
-                    "HTTP request -> %s to url -> %s failed; status -> %s; error -> %s",
-                    method,
-                    url,
-                    response.status_code,
-                    response.text,
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    data=payload,
+                    headers=headers,
+                    timeout=timeout,
                 )
-                return response
-
-            elif response.ok:
-                logger.info(
-                    "HTTP request -> %s to url -> %s succeeded with status -> %s!",
-                    method,
-                    url,
-                    response.status_code,
-                )
-                if wait_time > 0:
-                    logger.info("Sleeping %s seconds...", wait_time)
-                    time.sleep(wait_time)
-                return response
-
-            else:
+                logger.debug("%s", response.text)
+            except Exception as exc:
+                response = None
                 logger.warning(
-                    "HTTP request -> %s to url -> %s failed (try %s); status -> %s; error -> %s",
+                    "HTTP request -> %s to url -> %s failed failed (try %s); error -> %s",
                     method,
                     url,
                     try_counter,
-                    response.status_code,
-                    response.text,
+                    exc,
                 )
-                if wait_time > 0:
-                    logger.warning(
-                        "Sleeping %s seconds and then trying once more...",
-                        str(wait_time),
+
+                # do we have an error and don't want to retry?
+            if response is not None:
+                # Do we have a successful result?
+                if response.ok:
+                    logger.debug(
+                        "HTTP request -> %s to url -> %s succeeded with status -> %s!",
+                        method,
+                        url,
+                        response.status_code,
                     )
-                    time.sleep(wait_time)
-                else:
-                    logger.warning("Trying once more...")
-                retries -= 1
-                try_counter += 1
+
+                    if wait_on_status and response.status_code in wait_on_status:
+                        logger.debug(
+                            "%s is in wait_on_status list: %s",
+                            response.status_code,
+                            wait_on_status,
+                        )
+                    else:
+                        return response
+
+                elif not response.ok:
+                    message = "HTTP request -> {} to url -> {} failed; status -> {}; error -> {}".format(
+                        method,
+                        url,
+                        response.status_code,
+                        (
+                            response.text
+                            if response.headers.get("content-type")
+                            == "application/json"
+                            else "see debug log"
+                        ),
+                    )
+                    if show_error and retries == 0:
+                        logger.error(message)
+                    else:
+                        logger.warning(message)
+
+            # Check if another retry is allowed, if not return None
+            if retries == 0:
+                return None
+
+            if wait_time > 0:
+                logger.warning(
+                    "Sleeping %s seconds and then trying once more...",
+                    str(wait_time),
+                )
+                time.sleep(wait_time)
+
+            retries -= 1
+            try_counter += 1
 
     # end method definition
+
+    def download_file(
+        self,
+        url: str,
+        filename: str,
+        timeout: int = 120,
+        retries: int = 0,
+        wait_time: int = 0,
+        wait_on_status: list | None = None,
+        show_error: bool = True,
+    ) -> bool:
+        """Download a file from a URL
+
+        Args:
+            url (str): URL
+            filename (str): filename to save
+            timeout (int, optional): timeout in seconds
+            retries (int, optional): number of retries. If -1 then unlimited retries.
+            wait_time (int, optional): number of seconds to wait after each try
+            wait_on_status (list, optional): list of status codes we want to wait on. If None
+                                             or empty then we wait for all return codes if
+                                             wait_time > 0
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+
+        response = self.http_request(
+            url=url,
+            method="GET",
+            retries=retries,
+            timeout=timeout,
+            wait_time=wait_time,
+            wait_on_status=wait_on_status,
+            show_error=show_error,
+        )
+
+        if response is None:
+            return False
+
+        if response.ok:
+            with open(filename, "wb") as f:
+                f.write(response.content)
+            logger.debug("File downloaded successfully as -> %s", filename)
+            return True
+
+        return False
+
+    # end method definition
+
+    def extract_content(self, url: str, xpath: str) -> str | None:
+        """Extract a string from a response of a HTTP request
+           based on an XPath.
+
+        Args:
+            url (str): URL to open
+            xpath (str): XPath expression to apply to the result
+
+        Returns:
+            str | None: Extracted string or None in case of an error.
+        """
+
+        # Send a GET request to the URL
+        response = requests.get(url, timeout=None)
+
+        # Check if request was successful
+        if response.status_code == 200:
+            # Parse the HTML content
+            tree = html.fromstring(response.content)
+
+            # Extract content using XPath
+            elements = tree.xpath(xpath)
+
+            # Get text content of all elements and join them
+            content = "\n".join([elem.text_content().strip() for elem in elements])
+
+            # Return the extracted content
+            return content
+        else:
+            # If request was not successful, print error message
+            logger.error(response.status_code)
+            return None

@@ -8,6 +8,7 @@ pymdown-extensions
 
 requests
 requests_toolbelt
+xmltodict
 setuptools
 kubernetes
 zipfile36

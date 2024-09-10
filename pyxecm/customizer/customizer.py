@@ -59,7 +59,7 @@ import requests
 
 # OpenText specific modules:
 import yaml
-from pyxecm import OTAC, OTCS, OTDS, OTIV, OTPD
+from pyxecm import OTAC, OTCS, OTDS, OTIV, OTPD, OTMM, CoreShare
 from pyxecm.customizer.k8s import K8s
 from pyxecm.customizer.m365 import M365
 from pyxecm.customizer.payload import Payload
@@ -74,7 +74,7 @@ class CustomizerSettings:
     """Class to manage settings"""
 
     placeholder_values: dict = field(default_factory=dict)
-    stop_on_error: bool = os.environ.get("LOGLEVEL", "INFO") == "DEBUG"
+    stop_on_error: bool = os.environ.get("STOP_ON_ERROR", "false").lower() == "true"
     cust_log_file: str = "/tmp/customizing.log"
     customizer_start_time = customizer_end_time = datetime.now()
 
@@ -123,6 +123,7 @@ class CustomizerSettingsOTCS:
     port: int = os.environ.get("OTCS_SERVICE_PORT_OTCS", 8080)
     port_backend: int = os.environ.get("OTCS_SERVICE_PORT_OTCS", 8080)
     port_frontend: int = 80
+    base_path: str = "/cs/cs"
     admin: str = os.environ.get("OTCS_ADMIN", "admin")
     password: str = os.environ.get("OTCS_PASSWORD")
     partition: str = os.environ.get("OTCS_PARTITION", "Content Server Members")
@@ -142,7 +143,11 @@ class CustomizerSettingsOTCS:
     replicas_frontend = 0
     replicas_backend = 0
 
+    # Add configuration options for Customizer behaviour
     update_admin_user: bool = True
+    upload_config_files: bool = True
+    upload_status_files: bool = True
+    upload_log_file: bool = True
 
 
 @dataclass
@@ -231,7 +236,23 @@ class CustomizerSettingsM365:
     password: str = os.environ.get("O365_PASSWORD", "")
     domain: str = os.environ.get("O365_DOMAIN", "")
     sku_id: str = os.environ.get("O365_SKU_ID", "c7df2760-2c81-4ef7-b578-5b5392b571df")
-    teams_app_name: str = "OpenText Extended ECM"
+    teams_app_name: str = os.environ.get("O365_TEAMS_APP_NAME", "OpenText Extended ECM")
+    teams_app_external_id: str = os.environ.get(
+        "O365_TEAMS_APP_ID", "dd4af790-d8ff-47a0-87ad-486318272c7a"
+    )
+
+
+@dataclass
+class CustomizerSettingsCoreShare:
+    """Class for Core Share related settings"""
+
+    enabled: bool = os.environ.get("CORE_SHARE_ENABLED", "false").lower() == "true"
+    base_url: str = os.environ.get("CORE_SHARE_BASE_URL", "https://core.opentext.com")
+    sso_url: str = os.environ.get("CORE_SHARE_SSO_URL", "https://sso.core.opentext.com")
+    client_id: str = os.environ.get("CORE_SHARE_CLIENT_ID", "")
+    client_secret = os.environ.get("CORE_SHARE_CLIENT_SECRET", "")
+    username: str = os.environ.get("CORE_SHARE_USERNAME", "")
+    password: str = os.environ.get("CORE_SHARE_PASSWORD", "")
 
 
 @dataclass
@@ -258,6 +279,7 @@ class Customizer:
         k8s: CustomizerSettingsK8S = CustomizerSettingsK8S(),
         otawp: CustomizerSettingsOTAWP = CustomizerSettingsOTAWP(),
         m365: CustomizerSettingsM365 = CustomizerSettingsM365(),
+        core_share: CustomizerSettingsCoreShare = CustomizerSettingsCoreShare(),
         aviator: CustomizerSettingsAviator = CustomizerSettingsAviator(),
     ):
         self.settings = settings
@@ -286,6 +308,9 @@ class Customizer:
         # Microsoft 365 Environment variables:
         self.m365_settings = m365
 
+        # Core Share Environment variables:
+        self.core_share_settings = core_share
+
         # Aviator variables:
         self.aviator_settings = aviator
 
@@ -299,15 +324,18 @@ class Customizer:
         self.otiv_object: OTIV | None = None
         self.k8s_object: K8s | None = None
         self.m365_object: M365 | None = None
+        self.core_share_object: CoreShare | None = None
         self.browser_automation_object: BrowserAutomation | None = None
 
-    def log_header(self, text: str, char: str = "=", length: int = 60):
+    # end initializer
+
+    def log_header(self, text: str, char: str = "=", length: int = 80):
         """Helper method to output a section header in the log file
 
         Args:
-            text (str): _description_
+            text (str): Headline text to output into the log file.
             char (str, optional): header line character. Defaults to "=".
-            length (int, optional): maxium length. Defaults to 60.
+            length (int, optional): maxium length. Defaults to 80.
         Returns:
             None
         """
@@ -329,7 +357,7 @@ class Customizer:
             "%s %s %s", char * char_count, text, char * (char_count + extra_char)
         )
 
-        # end function definition
+    # end method definition
 
     def init_m365(self) -> M365:
         """Initialize the M365 object we use to talk to the Microsoft Graph API.
@@ -373,8 +401,12 @@ class Customizer:
             "Microsoft 365 Default License SKU   = %s", self.m365_settings.sku_id
         )
         logger.info(
-            "Microsoft 365 Teams App             = %s",
+            "Microsoft 365 Teams App Name        = %s",
             self.m365_settings.teams_app_name,
+        )
+        logger.info(
+            "Microsoft 365 Teams App External ID = %s",
+            self.m365_settings.teams_app_external_id,
         )
 
         m365_object = M365(
@@ -384,16 +416,265 @@ class Customizer:
             domain=self.m365_settings.domain,
             sku_id=self.m365_settings.sku_id,
             teams_app_name=self.m365_settings.teams_app_name,
+            teams_app_external_id=self.m365_settings.teams_app_external_id,
         )
 
         if m365_object and m365_object.authenticate():
             logger.info("Connected to Microsoft Graph API.")
-            return m365_object
         else:
             logger.error("Failed to connect to Microsoft Graph API.")
             return m365_object
 
-        # end function definition
+        logger.info(
+            "Download M365 Teams App -> '%s' (external ID = %s) from Extended ECM (OTCS)...",
+            self.m365_settings.teams_app_name,
+            self.m365_settings.teams_app_external_id,
+        )
+
+        # Download MS Teams App from OTCS (this has with 23.2 a nasty side-effect
+        # of unsetting 2 checkboxes on that config page - we reset these checkboxes
+        # with the settings file "O365Settings.xml"):
+        response = self.otcs_frontend_object.download_config_file(
+            "/cs/cs?func=officegroups.DownloadTeamsPackage",
+            "/tmp/ot.xecm.teams.zip",
+        )
+        # this app upload will be done with the user credentials - this is required:
+        m365_object.authenticate_user(
+            self.m365_settings.user, self.m365_settings.password
+        )
+
+        # Check if the app is already installed in the apps catalog
+        # ideally we want to use the
+        app_exist = False
+
+        # If the App External ID is provided via Env variable then we
+        # prefer to use it instead of the App name:
+        if self.m365_settings.teams_app_external_id:
+            logger.info(
+                "Check if M365 Teams App -> '%s' (%s) is already installed in catalog using external app ID...",
+                self.m365_settings.teams_app_name,
+                self.m365_settings.teams_app_external_id,
+            )
+            response = m365_object.get_teams_apps(
+                filter_expression="externalId eq '{}'".format(
+                    self.m365_settings.teams_app_external_id
+                )
+            )
+            # this should always be True as ID is unique:
+            app_exist = m365_object.exist_result_item(
+                response=response,
+                key="externalId",
+                value=self.m365_settings.teams_app_external_id,
+            )
+        # If the app could not be found via the external ID we fall back to
+        # search for the app by name:
+        if not app_exist:
+            if self.m365_settings.teams_app_external_id:
+                logger.info(
+                    "Could not find M365 Teams App using the external ID -> %s. Try to lookup the app by name -> '%s' instead...",
+                    self.m365_settings.teams_app_external_id,
+                    self.m365_settings.teams_app_name,
+                )
+            logger.info(
+                "Check if M365 Teams App -> '%s' is already installed in catalog (using app name)...",
+                self.m365_settings.teams_app_name,
+            )
+            response = m365_object.get_teams_apps(
+                filter_expression="contains(displayName, '{}')".format(
+                    self.m365_settings.teams_app_name
+                )
+            )
+            app_exist = m365_object.exist_result_item(
+                response=response,
+                key="displayName",
+                value=self.m365_settings.teams_app_name,
+            )
+        if app_exist:
+            # We double check that we have the effective name of the app
+            # in the catalog to avoid errors when the app is looked up
+            # by its wrong name in the customizer automation. This can
+            # happen if the app is installed manually or the environment
+            # variable is set to a wrong name.
+            app_catalog_name = m365_object.get_result_value(response, "displayName")
+            if app_catalog_name != self.m365_settings.teams_app_name:
+                logger.warning(
+                    "The Extended ECM app name -> '%s' in the M365 Teams catalog does not match the defined app name '%s'! Somebody must have manually installed the app with the wrong name!",
+                    app_catalog_name,
+                    self.m365_settings.teams_app_name,
+                )
+                # Align the name in the settings dict with the existing name in the catalog.
+                self.m365_settings.teams_app_name = app_catalog_name
+                # Align the name in the M365 object config dict with the existing name in the catalog.
+                m365_object.config()["teamsAppName"] = app_catalog_name
+            app_internal_id = m365_object.get_result_value(
+                response=response, key="id", index=0
+            )  # 0 = Index = first item
+            # Store the internal ID for later use
+            m365_object.config()["teamsAppInternalId"] = app_internal_id
+            app_catalog_version = m365_object.get_result_value(
+                response=response,
+                key="version",
+                index=0,
+                sub_dict_name="appDefinitions",
+            )
+            logger.info(
+                "M365 Teams App -> '%s' (external ID = %s) is already in app catalog with app internal ID -> %s and version -> %s. Check if we have a newer version to upload...",
+                self.m365_settings.teams_app_name,
+                self.m365_settings.teams_app_external_id,
+                app_internal_id,
+                app_catalog_version,
+            )
+            app_download_version = m365_object.extract_version_from_app_manifest(
+                app_path="/tmp/ot.xecm.teams.zip"
+            )
+            if app_catalog_version < app_download_version:
+                logger.info(
+                    "Upgrading Extended ECM Teams App in catalog from version -> %s to version -> %s...",
+                    app_catalog_version,
+                    app_download_version,
+                )
+                response = m365_object.upload_teams_app(
+                    app_path="/tmp/ot.xecm.teams.zip",
+                    update_existing_app=True,
+                    app_catalog_id=app_internal_id,
+                )
+                app_internal_id = m365_object.get_result_value(
+                    response=response,
+                    key="teamsAppId",
+                )
+                if app_internal_id:
+                    logger.info(
+                        "Successfully upgraded Extended ECM Teams App -> %s (external ID = %s). Internal App ID -> %s",
+                        self.m365_settings.teams_app_name,
+                        self.m365_settings.teams_app_external_id,
+                        app_internal_id,
+                    )
+                    # Store the internal ID for later use
+                    m365_object.config()["teamsAppInternalId"] = app_internal_id
+                else:
+                    logger.error(
+                        "Failed to upgrade Extended ECM Teams App -> %s (external ID = %s).",
+                        self.m365_settings.teams_app_name,
+                        self.m365_settings.teams_app_external_id,
+                    )
+            else:
+                logger.info(
+                    "No upgrade required. The downloaded version -> %s is not newer than the version -> %s which is already in the M365 app catalog.",
+                    app_download_version,
+                    app_catalog_version,
+                )
+        else:  # Extended ECM M365 Teams app is not yet installed...
+            logger.info(
+                "Extended Teams ECM App -> '%s' (external ID = %s) is not yet in app catalog. Installing as new app...",
+                self.m365_settings.teams_app_name,
+                self.m365_settings.teams_app_external_id,
+            )
+            response = m365_object.upload_teams_app(
+                app_path="/tmp/ot.xecm.teams.zip", update_existing_app=False
+            )
+            app_internal_id = m365_object.get_result_value(
+                response=response,
+                key="id",  # for new installs it is NOT "teamsAppId" but "id" as we use a different M365 Graph API endpoint !!!
+            )
+            if app_internal_id:
+                logger.info(
+                    "Successfully installed Extended ECM Teams App -> '%s' (external ID = %s). Internal App ID -> %s",
+                    self.m365_settings.teams_app_name,
+                    self.m365_settings.teams_app_external_id,
+                    app_internal_id,
+                )
+                # Store the internal ID for later use
+                m365_object.config()["teamsAppInternalId"] = app_internal_id
+            else:
+                logger.error(
+                    "Failed to install Extended ECM Teams App -> '%s' (external ID = %s).",
+                    self.m365_settings.teams_app_name,
+                    self.m365_settings.teams_app_external_id,
+                )
+
+        # logger.info("======== Upload Outlook Add-In ============")
+
+        # # Download MS Outlook Add-In from OTCS:
+        # MANIFEST_FILE = "/tmp/BusinessWorkspace.Manifest.xml"
+        # if not self.otcs_frontend_object.download_config_file(
+        #     "/cs/cs?func=outlookaddin.DownloadManifest",
+        #     MANIFEST_FILE,
+        #     "DeployedContentServer",
+        #     self.otcs_settings.public_url,
+        # ):
+        #     logger.error("Failed to download M365 Outlook Add-In from Extended ECM!")
+        # else:
+        #     # THIS IS NOT IMPLEMENTED DUE TO LACK OF M365 GRAPH API SUPPORT!
+        #     # Do it manually for now: https://admin.microsoft.com/#/Settings/IntegratedApps
+        #     logger.info("Successfully downloaded M365 Outlook Add-In from Extended ECM to %s", MANIFEST_FILE)
+        #     m365_object.upload_outlook_app(MANIFEST_FILE)
+
+        return m365_object
+
+    # end method definition
+
+    def init_coreshare(self) -> M365:
+        """Initialize the Core Share object we use to talk to the Core Share API.
+
+        Args:
+            None
+        Returns:
+            object: CoreShare object or None if the object couldn't be created or
+                    the authentication fails.
+        """
+
+        logger.info(
+            "Core Share Base URL             = %s", self.core_share_settings.base_url
+        )
+        logger.info(
+            "Core Share SSO URL              = %s", self.core_share_settings.sso_url
+        )
+        logger.info(
+            "Core Share Client ID            = %s", self.core_share_settings.client_id
+        )
+        logger.debug(
+            "Core Share Client Secret        = %s",
+            self.core_share_settings.client_secret,
+        )
+        logger.info(
+            "Core Share User                 = %s",
+            (
+                self.core_share_settings.username
+                if self.core_share_settings.username != ""
+                else "<not configured>"
+            ),
+        )
+        logger.debug(
+            "Core Share Password             = %s",
+            (
+                self.core_share_settings.password
+                if self.core_share_settings.password != ""
+                else "<not configured>"
+            ),
+        )
+
+        core_share_object = CoreShare(
+            base_url=self.core_share_settings.base_url,
+            sso_url=self.core_share_settings.sso_url,
+            client_id=self.core_share_settings.client_id,
+            client_secret=self.core_share_settings.client_secret,
+            username=self.core_share_settings.username,
+            password=self.core_share_settings.password,
+        )
+
+        if core_share_object and core_share_object.authenticate_admin():
+            logger.info("Connected to Core Share as Tenant Admin.")
+        else:
+            logger.error("Failed to connect to Core Share as Tenant Admin.")
+
+        if core_share_object and core_share_object.authenticate_user():
+            logger.info("Connected to Core Share as Tenant Service User.")
+        else:
+            logger.error("Failed to connect to Core Share as Tenant Service User.")
+
+        return core_share_object
+
+    # end method definition
 
     def init_k8s(self) -> K8s:
         """Initialize the Kubernetes object we use to talk to the Kubernetes API.
@@ -407,10 +688,10 @@ class Customizer:
         """
 
         logger.info("Connection parameters Kubernetes (K8s):")
-        logger.info("K8s inCluster -> %s", self.k8s_settings.in_cluster)
-        logger.info("K8s namespace -> %s", self.k8s_settings.namespace)
+        logger.info("K8s inCluster       = %s", self.k8s_settings.in_cluster)
+        logger.info("K8s namespace       = %s", self.k8s_settings.namespace)
         logger.info(
-            "K8s kubeconfig file -> %s",
+            "K8s kubeconfig file = %s",
             self.k8s_settings.kubeconfig_file,
         )
 
@@ -430,14 +711,14 @@ class Customizer:
         )
         if not otcs_frontend_scale:
             logger.error(
-                "Cannot find Kubernetes Stateful Set for OTCS Frontends -> %s",
+                "Cannot find Kubernetes Stateful Set -> '%s' for OTCS Frontends!",
                 self.otcs_settings.k8s_statefulset_frontend,
             )
             sys.exit()
 
         self.otcs_settings.replicas_frontend = otcs_frontend_scale.spec.replicas  # type: ignore
         logger.info(
-            "Stateful Set -> %s has -> %s replicas",
+            "Stateful Set -> '%s' has -> %s replicas",
             self.otcs_settings.k8s_statefulset_frontend,
             self.otcs_settings.replicas_frontend,
         )
@@ -448,21 +729,21 @@ class Customizer:
         )
         if not otcs_backend_scale:
             logger.error(
-                "Cannot find Kubernetes Stateful Set for OTCS Backends -> %s",
+                "Cannot find Kubernetes Stateful Set -> '%s' for OTCS Backends!",
                 self.otcs_settings.k8s_statefulset_backend,
             )
             sys.exit()
 
         self.otcs_settings.replicas_backend = otcs_backend_scale.spec.replicas  # type: ignore
         logger.info(
-            "Stateful Set -> %s has -> %s replicas",
+            "Stateful Set -> '%s' has -> %s replicas",
             self.otcs_settings.k8s_statefulset_backend,
             self.otcs_settings.replicas_backend,
         )
 
         return k8s_object
 
-        # end function definition
+    # end method definition
 
     def init_otds(self) -> OTDS:
         """Initialize the OTDS object and parameters and authenticate at OTDS once it is ready.
@@ -519,7 +800,7 @@ class Customizer:
 
         return otds_object
 
-        # end function definition
+    # end method definition
 
     def init_otac(self) -> OTAC:
         """Initialize the OTAC object and parameters.
@@ -557,6 +838,16 @@ class Customizer:
             self.otds_settings.password,
         )
 
+        # This is a work-around as OTCS container automation is not
+        # enabling the certificate reliable.
+        response = otac_object.enable_certificate(
+            cert_name="SP_otcs-admin-0", cert_type="ARC"
+        )
+        if not response:
+            logger.error("Failed to enable OTAC certificate for Extended ECM!")
+        else:
+            logger.info("Successfully enabled OTAC certificate for Extended ECM!")
+
         # is there a known server configured for Archive Center (to sync content with)
         if otac_object and self.otac_settings.known_server != "":
             # wait until the OTAC pod is in ready state
@@ -587,7 +878,7 @@ class Customizer:
 
         return otac_object
 
-        # end function definition
+    # end method definition
 
     def init_otcs(
         self,
@@ -646,6 +937,7 @@ class Customizer:
             partition_name,
             resource_name,
             otds_ticket=otds_ticket,
+            base_path=self.otcs_settings.base_path,
         )
 
         # It is important to wait for OTCS to be configured - otherwise we
@@ -666,17 +958,17 @@ class Customizer:
             otcs_cookie = otcs_object.authenticate()
         logger.info("OTCS is ready now.")
 
-        if self.otcs_settings.update_admin_user:
-            # Set first name and last name of Admin user (ID = 1000):
-            otcs_object.update_user(1000, field="first_name", value="Terrarium")
-            otcs_object.update_user(1000, field="last_name", value="Admin")
+        #        if self.otcs_settings.update_admin_user:
+        # Set first name and last name of Admin user (ID = 1000):
+        #            otcs_object.update_user(1000, field="first_name", value="Terrarium")
+        #            otcs_object.update_user(1000, field="last_name", value="Admin")
 
         if "OTCS_RESSOURCE_ID" not in self.settings.placeholder_values:
-            self.settings.placeholder_values[
-                "OTCS_RESSOURCE_ID"
-            ] = self.otds_object.get_resource(self.otcs_settings.resource_name)[
-                "resourceID"
-            ]
+            self.settings.placeholder_values["OTCS_RESSOURCE_ID"] = (
+                self.otds_object.get_resource(self.otcs_settings.resource_name)[
+                    "resourceID"
+                ]
+            )
             logger.debug(
                 "Placeholder values after OTCS init = %s",
                 self.settings.placeholder_values,
@@ -686,9 +978,9 @@ class Customizer:
             otcs_resource = self.otds_object.get_resource(
                 self.otcs_settings.resource_name
             )
-            otcs_resource[
-                "logoutURL"
-            ] = f"{self.otawp_settings.public_protocol}://{self.otawp_settings.public_url}/home/system/wcp/sso/sso_logout.htm"
+            otcs_resource["logoutURL"] = (
+                f"{self.otawp_settings.public_protocol}://{self.otawp_settings.public_url}/home/system/wcp/sso/sso_logout.htm"
+            )
             otcs_resource["logoutMethod"] = "GET"
 
             self.otds_object.update_resource(name="cs", resource=otcs_resource)
@@ -698,7 +990,7 @@ class Customizer:
 
         return otcs_object
 
-        # end function definition
+    # end method definition
 
     def init_otiv(self) -> OTIV | None:
         """Initialize the OTIV (Intelligent Viewing) object and its OTDS settings.
@@ -750,9 +1042,27 @@ class Customizer:
             )
             return None
 
+        # Workaround for VAT-4580 (24.2.0)
+        update_publisher = self.otds_object.update_user(
+            partition="Content Server Service Users",
+            user_id="iv-publisher",
+            attribute_name="oTType",
+            attribute_value="ServiceUser",
+        )
+        while update_publisher is None:
+            update_publisher = self.otds_object.update_user(
+                partition="Content Server Service Users",
+                user_id="iv-publisher",
+                attribute_name="oTType",
+                attribute_value="ServiceUser",
+            )
+            time.sleep(30)
+
+        logger.info("OTDS user iv-publisher -> updating oTType=ServiceUser")
+
         return otiv_object
 
-        # end function definition
+    # end method definition
 
     def init_otpd(self) -> OTPD:
         """Initialize the OTPD (PowerDocs) object and parameters.
@@ -829,7 +1139,7 @@ class Customizer:
         logger.info("OTAWP K8s Config Map   = %s", self.otawp_settings.k8s_configmap)
 
         logger.info(
-            "Wait for OTCS to create its OTDS resource with name -> %s...",
+            "Wait for OTCS to create its OTDS resource with name -> '%s'...",
             self.otcs_settings.resource_name,
         )
 
@@ -838,7 +1148,7 @@ class Customizer:
         otcs_resource = self.otds_object.get_resource(self.otcs_settings.resource_name)
         while otcs_resource is None:
             logger.warning(
-                "OTDS resource for Content Server with name -> %s does not exist yet. Waiting...",
+                "OTDS resource for Content Server with name -> '%s' does not exist yet. Waiting...",
                 self.otcs_settings.resource_name,
             )
             time.sleep(30)
@@ -1150,7 +1460,7 @@ class Customizer:
         )
         while otcs_partition is None:
             logger.warning(
-                "OTDS user partition for Content Server with name -> %s does not exist yet. Waiting...",
+                "OTDS user partition for Content Server with name -> '%s' does not exist yet. Waiting...",
                 self.otcs_settings.partition,
             )
 
@@ -1188,7 +1498,7 @@ class Customizer:
         # check if the license file exists, otherwise skip for versions pre 24.1
         if os.path.isfile(self.otawp_settings.license_file):
             logger.info(
-                "OTAWP license file (%s) found, assiging to ressource %s",
+                "Found OTAWP license file -> '%s', assiging it to ressource '%s'...",
                 self.otawp_settings.license_file,
                 self.otawp_settings.resource_name,
             )
@@ -1201,14 +1511,14 @@ class Customizer:
             )
             if not otawp_license:
                 logger.error(
-                    "Couldn't apply license -> %s for product -> %s to OTDS resource -> %s",
+                    "Couldn't apply license -> '%s' for product -> '%s' to OTDS resource -> '%s'",
                     self.otawp_settings.license_file,
                     self.otawp_settings.product_name,
                     awp_resource["resourceID"],
                 )
             else:
                 logger.info(
-                    "Successfully applied license -> %s for product -> %s to OTDS resource -> %s",
+                    "Successfully applied license -> '%s' for product -> '%s' to OTDS resource -> '%s'",
                     self.otawp_settings.license_file,
                     self.otawp_settings.product_name,
                     awp_resource["resourceID"],
@@ -1237,20 +1547,20 @@ class Customizer:
                     )
                     if not assigned_license:
                         logger.error(
-                            "Partition -> %s could not be assigned to license -> %s (%s)",
+                            "Partition -> '%s' could not be assigned to license -> '%s' (%s)",
                             partition_name,
                             self.otawp_settings.product_name,
                             "USERS",
                         )
                     else:
                         logger.info(
-                            "Partition -> %s successfully assigned to license -> %s (%s)",
+                            "Partition -> '%s' successfully assigned to license -> '%s' (%s)",
                             partition_name,
                             self.otawp_settings.product_name,
                             "USERS",
                         )
 
-        # end function definition
+    # end method definition
 
     def restart_otcs_service(self, otcs_object: OTCS, extra_wait_time: int = 60):
         """Restart the Content Server service in all OTCS pods
@@ -1273,11 +1583,11 @@ class Customizer:
         for x in range(0, self.otcs_settings.replicas_frontend):
             pod_name = self.otcs_settings.k8s_statefulset_frontend + "-" + str(x)
 
-            logger.info("Deactivate Liveness probe for pod -> %s", pod_name)
+            logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name, ["/bin/sh", "-c", "touch /tmp/keepalive"]
             )
-            logger.info("Restarting pod -> %s", pod_name)
+            logger.info("Restarting pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name, ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"]
             )
@@ -1289,11 +1599,11 @@ class Customizer:
         for x in range(0, self.otcs_settings.replicas_backend):
             pod_name = self.otcs_settings.k8s_statefulset_backend + "-" + str(x)
 
-            logger.info("Deactivate Liveness probe for pod -> %s", pod_name)
+            logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name, ["/bin/sh", "-c", "touch /tmp/keepalive"]
             )
-            logger.info("Restarting pod -> %s", pod_name)
+            logger.info("Restarting pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name, ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"]
             )
@@ -1313,7 +1623,7 @@ class Customizer:
         for x in range(0, self.otcs_settings.replicas_frontend):
             pod_name = self.otcs_settings.k8s_statefulset_frontend + "-" + str(x)
 
-            logger.info("Reactivate Liveness probe for pod -> %s", pod_name)
+            logger.info("Reactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name, ["/bin/sh", "-c", "rm /tmp/keepalive"]
             )
@@ -1321,7 +1631,7 @@ class Customizer:
         for x in range(0, self.otcs_settings.replicas_backend):
             pod_name = self.otcs_settings.k8s_statefulset_backend + "-" + str(x)
 
-            logger.info("Reactivate Liveness probe for pod -> %s", pod_name)
+            logger.info("Reactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name, ["/bin/sh", "-c", "rm /tmp/keepalive"]
             )
@@ -1337,7 +1647,7 @@ class Customizer:
             time.sleep(extra_wait_time)
         logger.info("Continue customizing...")
 
-        # end function definition
+    # end method definition
 
     def restart_otac_service(self) -> bool:
         """Restart the Archive Center spawner service in OTAC pod
@@ -1352,7 +1662,7 @@ class Customizer:
             return False
 
         logger.info(
-            "Restarting spawner service in Archive Center pod -> %s",
+            "Restarting spawner service in Archive Center pod -> '%s'",
             self.otac_settings.k8s_pod_name,
         )
         # The Archive Center Spawner needs to be run in "interactive" mode - otherwise the command will "hang":
@@ -1370,7 +1680,7 @@ class Customizer:
         else:
             return False
 
-        # end function definition
+    # end method definition
 
     def restart_otawp_pod(self):
         """Delete the AppWorks Platform Pod to make Kubernetes restart it.
@@ -1382,7 +1692,7 @@ class Customizer:
 
         self.k8s_object.delete_pod(self.otawp_settings.k8s_statefulset + "-0")
 
-        # end function definition
+    # end method definition
 
     def consolidate_otds(self):
         """Consolidate OTDS resources
@@ -1395,7 +1705,7 @@ class Customizer:
         if self.otawp_settings.enabled:  # is AppWorks Platform deployed?
             self.otds_object.consolidate(self.otawp_settings.resource_name)
 
-        # end function definition
+    # end method definition
 
     def import_powerdocs_configuration(self, otpd_object: OTPD):
         """Import a database export (zip file) into the PowerDocs database
@@ -1408,7 +1718,7 @@ class Customizer:
             # Download file from remote location specified by the OTPD_DBIMPORTFILE
             # this must be a public place without authentication:
             logger.info(
-                "Download PowerDocs database file from URL -> %s",
+                "Download PowerDocs database file from URL -> '%s'",
                 self.otpd_settings.db_importfile,
             )
 
@@ -1416,7 +1726,7 @@ class Customizer:
                 package = requests.get(self.otpd_settings.db_importfile, timeout=60)
                 package.raise_for_status()
                 logger.info(
-                    "Successfully downloaded PowerDocs database file -> %s; status code -> %s",
+                    "Successfully downloaded PowerDocs database file -> '%s'; status code -> %s",
                     self.otpd_settings.db_importfile,
                     package.status_code,
                 )
@@ -1437,7 +1747,7 @@ class Customizer:
             except requests.exceptions.HTTPError as err:
                 logger.error("Request error -> %s", err)
 
-        # end function definition
+    # end method definition
 
     def set_maintenance_mode(self, enable: bool = True):
         """Enable or Disable Maintenance Mode
@@ -1475,12 +1785,14 @@ class Customizer:
             )
             logger.info("OTCS frontend is now back in Production Mode!")
 
+    # end method definition
+
     def customization_run(self):
         """Central function to initiate the customization"""
         # Set Timer for duration calculation
-        self.settings.customizer_start_time = (
-            self.settings.customizer_end_time
-        ) = datetime.now()
+        self.settings.customizer_start_time = self.settings.customizer_end_time = (
+            datetime.now()
+        )
 
         # Initialize the OTDS, OTCS and OTPD objects and wait for the
         # pods to be ready. If any of this fails we bail out:
@@ -1563,119 +1875,40 @@ class Customizer:
         else:
             self.otpd_object = None
 
+        if self.core_share_settings.enabled:  # is Core Share enabled?
+            self.log_header("Initialize Core Share")
+
+            self.core_share_object = self.init_coreshare()
+            if not self.core_share_object:
+                logger.error("Failed to initialize Core Share - exiting...")
+                sys.exit()
+        else:
+            self.core_share_object = None
+
         if (
             self.m365_settings.enabled
             and self.m365_settings.user != ""
             and self.m365_settings.password != ""
         ):  # is M365 enabled?
-            self.log_header("Initialize MS Graph API")
+            self.log_header("Initialize Microsoft 365")
 
             # Initialize the M365 object and connection to M365 Graph API:
             self.m365_object = self.init_m365()
-
-            self.log_header("Upload MS Teams App")
-
-            # Download MS Teams App from OTCS (this has with 23.2 a nasty side-effect
-            # of unsetting 2 checkboxes on that config page - we reset these checkboxes
-            # with the settings file "O365Settings.xml"):
-            response = self.otcs_frontend_object.download_config_file(
-                "/cs/cs?func=officegroups.DownloadTeamsPackage",
-                "/tmp/ot.xecm.teams.zip",
-            )
-            # this app upload will be done with the user credentials - this is required:
-            self.m365_object.authenticate_user(
-                self.m365_settings.user, self.m365_settings.password
-            )
-
-            # Check if the app is already installed in the apps catalog:
-            response = self.m365_object.get_teams_apps(
-                f"contains(displayName, '{self.m365_settings.teams_app_name}')"
-            )
-            if self.m365_object.exist_result_item(
-                response, "displayName", self.m365_settings.teams_app_name
-            ):
-                app_catalog_id = self.m365_object.get_result_value(
-                    response=response, key="id", index=0
-                )  # 0 = Index = first item
-                app_catalog_version = self.m365_object.get_result_value(
-                    response=response,
-                    key="version",
-                    index=0,
-                    sub_dict_name="appDefinitions",
-                )
-                logger.info(
-                    "Extended ECM Teams App is already in app catalog with app catalog ID -> %s and version -> %s. Check if we have a newer version to upload...",
-                    app_catalog_id,
-                    app_catalog_version,
-                )
-                app_upload_version = self.m365_object.extract_version_from_app_manifest(
-                    app_path="/tmp/ot.xecm.teams.zip"
-                )
-                if app_catalog_version < app_upload_version:
-                    logger.info(
-                        "Upgrading Extended ECM Teams App in catalog from version -> %s to version -> %s...",
-                        app_catalog_version,
-                        app_upload_version,
-                    )
-                    response = self.m365_object.upload_teams_app(
-                        app_path="/tmp/ot.xecm.teams.zip",
-                        update_existing_app=True,
-                        app_catalog_id=app_catalog_id,
-                    )
-                else:
-                    logger.info(
-                        "No upgrade required. The upload version -> %s is not newer than the version -> %s which is in the M365 app catalog.",
-                        app_upload_version,
-                        app_catalog_version,
-                    )
-            else:
-                logger.info(
-                    "Extended Teams ECM App is not yet in app catalog. Installing as new app..."
-                )
-                response = self.m365_object.upload_teams_app(
-                    app_path="/tmp/ot.xecm.teams.zip"
-                )
-
-            # logger.info("======== Upload Outlook Add-In ============")
-
-            # # Download MS Outlook Add-In from OTCS:
-            # MANIFEST_FILE = "/tmp/BusinessWorkspace.Manifest.xml"
-            # if not self.otcs_frontend_object.download_config_file(
-            #     "/cs/cs?func=outlookaddin.DownloadManifest",
-            #     MANIFEST_FILE,
-            #     "DeployedContentServer",
-            #     self.otcs_settings.public_url,
-            # ):
-            #     logger.error("Failed to download M365 Outlook Add-In from Extended ECM!")
-            # else:
-            #     # THIS IS NOT IMPLEMENTED DUE TO LACK OF M365 GRAPH API SUPPORT!
-            #     # Do it manually for now: https://admin.microsoft.com/#/Settings/IntegratedApps
-            #     logger.info("Successfully downloaded M365 Outlook Add-In from Extended ECM to %s", MANIFEST_FILE)
-            #     self.m365_object.upload_outlook_app(MANIFEST_FILE)
-        else:
-            self.m365_object = None
-
-        # self.log_header("Initialize Browser Automation...")
-
-        # We initialize a Selenium based browser automation for
-        # those die-hard settings that cannot be automated via REST API
-        # nor LLConfig nor Transport:
-        # self.browser_automation_object = self.init_browser_automation()
-        # if not self.browser_automation_object:
-        #     logger.error("Failed to initialize Browser Automation - exiting...")
-        #     sys.exit()
+            if not self.m365_object:
+                logger.error("Failed to initialize Microsoft 365!")
+                sys.exit()
 
         self.log_header("Processing Payload")
 
         cust_payload_list = []
         # Is uncompressed payload provided?
         if os.path.exists(self.settings.cust_payload):
-            logger.info("Found payload file -> %s", self.settings.cust_payload)
+            logger.info("Found payload file -> '%s'", self.settings.cust_payload)
             cust_payload_list.append(self.settings.cust_payload)
         # Is compressed payload provided?
         if os.path.exists(self.settings.cust_payload_gz):
             logger.info(
-                "Found compressed payload file -> %s", self.settings.cust_payload_gz
+                "Found compressed payload file -> '%s'", self.settings.cust_payload_gz
             )
             cust_payload_list.append(self.settings.cust_payload_gz)
 
@@ -1683,16 +1916,16 @@ class Customizer:
         if os.path.exists(self.settings.cust_payload_external):
             for filename in os.scandir(self.settings.cust_payload_external):
                 if filename.is_file() and os.path.getsize(filename) > 0:
-                    logger.info("Found external payload file -> %s", filename.path)
+                    logger.info("Found external payload file -> '%s'", filename.path)
                     cust_payload_list.append(filename.path)
         else:
             logger.info(
-                "No external payload file -> %s", self.settings.cust_payload_external
+                "No external payload file -> '%s'", self.settings.cust_payload_external
             )
 
         for cust_payload in cust_payload_list:
             # Open the payload file. If this fails we bail out:
-            logger.info("Starting processing of payload -> %s", cust_payload)
+            logger.info("Starting processing of payload -> '%s'", cust_payload)
 
             # Set startTime for duration calculation
             start_time = datetime.now()
@@ -1708,11 +1941,13 @@ class Customizer:
                 otcs_restart_callback=self.restart_otcs_service,
                 otiv_object=self.otiv_object,
                 m365_object=self.m365_object,
+                core_share_object=self.core_share_object,
                 browser_automation_object=self.browser_automation_object,
                 placeholder_values=self.settings.placeholder_values,  # this dict includes placeholder replacements for the Ressource IDs of OTAWP and OTCS
                 log_header_callback=self.log_header,
                 stop_on_error=self.settings.stop_on_error,
                 aviator_enabled=self.aviator_settings.enabled,
+                upload_status_files=self.otcs_settings.upload_status_files,
             )
             # Load the payload file and initialize the payload sections:
             if not payload_object.init_payload():
@@ -1728,50 +1963,53 @@ class Customizer:
             self.consolidate_otds()
 
             # Upload payload file for later review to Enterprise Workspace
-            self.log_header("Upload Payload file to Extended ECM")
-            response = self.otcs_backend_object.get_node_from_nickname(
-                self.settings.cust_target_folder_nickname
-            )
-            target_folder_id = self.otcs_backend_object.get_result_value(response, "id")
-            if not target_folder_id:
-                target_folder_id = 2000  # use Enterprise Workspace as fallback
-            # Write YAML file with upadated payload (including IDs, etc.).
-            # We need to write to /tmp as initial location is read-only:
-            payload_file = os.path.basename(cust_payload)
-            payload_file = (
-                payload_file[: -len(".gz.b64")]
-                if payload_file.endswith(".gz.b64")
-                else payload_file
-            )
-            cust_payload = "/tmp/" + payload_file
-
-            with open(cust_payload, "w", encoding="utf-8") as file:
-                yaml.dump(payload_object.get_payload(), file)
-
-            # Check if the payload file has been uploaded before.
-            # This can happen if we re-run the python container.
-            # In this case we add a version to the existing document:
-            response = self.otcs_backend_object.get_node_by_parent_and_name(
-                int(target_folder_id), os.path.basename(cust_payload)
-            )
-            target_document_id = self.otcs_backend_object.get_result_value(
-                response, "id"
-            )
-            if target_document_id:
-                response = self.otcs_backend_object.add_document_version(
-                    int(target_document_id),
-                    cust_payload,
-                    os.path.basename(cust_payload),
-                    "text/plain",
-                    "Updated payload file after re-run of customization",
+            if self.otcs_settings.upload_config_files:
+                self.log_header("Upload Payload file to Extended ECM")
+                response = self.otcs_backend_object.get_node_from_nickname(
+                    self.settings.cust_target_folder_nickname
                 )
-            else:
-                response = self.otcs_backend_object.upload_file_to_parent(
-                    cust_payload,
-                    os.path.basename(cust_payload),
-                    "text/plain",
-                    int(target_folder_id),
+                target_folder_id = self.otcs_backend_object.get_result_value(
+                    response, "id"
                 )
+                if not target_folder_id:
+                    target_folder_id = 2000  # use Enterprise Workspace as fallback
+                # Write YAML file with upadated payload (including IDs, etc.).
+                # We need to write to /tmp as initial location is read-only:
+                payload_file = os.path.basename(cust_payload)
+                payload_file = (
+                    payload_file[: -len(".gz.b64")]
+                    if payload_file.endswith(".gz.b64")
+                    else payload_file
+                )
+                cust_payload = "/tmp/" + payload_file
+
+                with open(cust_payload, "w", encoding="utf-8") as file:
+                    yaml.dump(payload_object.get_payload(), file)
+
+                # Check if the payload file has been uploaded before.
+                # This can happen if we re-run the python container.
+                # In this case we add a version to the existing document:
+                response = self.otcs_backend_object.get_node_by_parent_and_name(
+                    int(target_folder_id), os.path.basename(cust_payload)
+                )
+                target_document_id = self.otcs_backend_object.get_result_value(
+                    response, "id"
+                )
+                if target_document_id:
+                    response = self.otcs_backend_object.add_document_version(
+                        int(target_document_id),
+                        cust_payload,
+                        os.path.basename(cust_payload),
+                        "text/plain",
+                        "Updated payload file after re-run of customization",
+                    )
+                else:
+                    response = self.otcs_backend_object.upload_file_to_parent(
+                        cust_payload,
+                        os.path.basename(cust_payload),
+                        "text/plain",
+                        int(target_folder_id),
+                    )
 
             duration = datetime.now() - start_time
             self.log_header(
@@ -1819,9 +2057,11 @@ class Customizer:
                 self.otds_object.impersonate_resource(self.otawp_settings.resource_name)
 
         # Upload log file for later review to "Deployment" folder in "Administration" folder
-        if os.path.exists(self.settings.cust_log_file):
+        if (
+            os.path.exists(self.settings.cust_log_file)
+            and self.otcs_settings.upload_log_file
+        ):
             self.log_header("Upload log file to Extended ECM")
-            #            logger.info("========== Upload log file to Extended ECM =============")
             response = self.otcs_backend_object.get_node_from_nickname(
                 self.settings.cust_target_folder_nickname
             )
@@ -1839,18 +2079,19 @@ class Customizer:
             )
             if target_document_id:
                 response = self.otcs_backend_object.add_document_version(
-                    int(target_document_id),
-                    self.settings.cust_log_file,
-                    os.path.basename(self.settings.cust_log_file),
-                    "text/plain",
-                    "Updated Python Log after re-run of customization",
+                    node_id=int(target_document_id),
+                    file_url=self.settings.cust_log_file,
+                    file_name=os.path.basename(self.settings.cust_log_file),
+                    mime_type="text/plain",
+                    description="Updated Python Log after re-run of customization",
                 )
             else:
                 response = self.otcs_backend_object.upload_file_to_parent(
-                    self.settings.cust_log_file,
-                    os.path.basename(self.settings.cust_log_file),
-                    "text/plain",
-                    int(target_folder_id),
+                    file_url=self.settings.cust_log_file,
+                    file_name=os.path.basename(self.settings.cust_log_file),
+                    mime_type="text/plain",
+                    parent_id=int(target_folder_id),
+                    description="Initial Python Log after first run of customization",
                 )
 
         self.settings.customizer_end_time = datetime.now()
@@ -1860,29 +2101,4 @@ class Customizer:
             )
         )
 
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        datefmt="%d-%b-%Y %H:%M:%S",
-        level=logging.INFO,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
-    my_customizer = Customizer(
-        otcs=CustomizerSettingsOTCS(
-            hostname="otcs.eng.terrarium.cloud",
-            hostname_backend="otcs.eng.terrarium.cloud",
-            hostname_frontend="otcs.eng.terrarium.cloud",
-            protocol="https",
-            port_backend=443,
-        ),
-        otds=CustomizerSettingsOTDS(hostname="otds.eng.terrarium.cloud"),
-        otpd=CustomizerSettingsOTPD(enabled=False),
-        k8s=CustomizerSettingsK8S(enabled=False),
-        otiv=CustomizerSettingsOTIV(enabled=True),
-    )
-
-    my_customizer.customization_run()
+    # end method definition

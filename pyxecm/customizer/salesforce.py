@@ -1,5 +1,6 @@
 """
 Salesforce Module to interact with the Salesforce API
+See: https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/intro_rest.htm
 
 Class: Salesforce
 Methods:
@@ -14,15 +15,29 @@ exist_result_item: Check if an dict item is in the response
                    of the Salesforce API call
 get_result_value: Check if a defined value (based on a key) is in the Salesforce API response
 
-authenticate : Authenticates at Salesforce API
+authenticate: Authenticates at Salesforce API
 
-get_user: Get a Salesforce user based on its ID.
-add_user: Add a new Salesforce user.
-
+get_object_id_by_name: Get the ID of a given Salesforce object with a given type and name
 get_object: Get a Salesforce object based on a defined
             field value and return selected result fields.
 add_object: Add object to Salesforce. This is a generic wrapper method
             for the actual add methods.
+
+get_group: Get a Salesforce group based on its ID.
+add_group: Add a new Salesforce group.
+update_group: Update a Salesforce group.
+get_group_members: Get Salesforce group members
+add_group_member: Add a user or group to a Salesforce group
+
+get_all_user_profiles: Get all user profiles
+get_user_profile_id: Get a user profile ID by profile name
+get_user_id: Get a user ID by user name
+get_user: Get a Salesforce user based on its ID.
+add_user: Add a new Salesforce user.
+update_user: Update a Salesforce user.
+update_user_password: Update the password of a Salesforce user.
+update_user_photo: update the Salesforce user photo.
+
 add_account: Add a new Account object to Salesforce.
 add_product: Add a new Product object to Salesforce.
 add_opportunity: Add a new Opportunity object to Salesfoce.
@@ -38,6 +53,7 @@ __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
+import os
 import json
 import logging
 
@@ -46,12 +62,13 @@ import requests
 
 logger = logging.getLogger("pyxecm.customizer.salesforce")
 
-request_login_headers = {
+REQUEST_LOGIN_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
     "Accept": "application/json",
 }
 
 REQUEST_TIMEOUT = 60
+SALESFORCE_API_VERSION = "v60.0"
 
 class Salesforce(object):
     """Used to retrieve and automate stettings in Salesforce."""
@@ -84,21 +101,56 @@ class Salesforce(object):
             security_token (str, optional): security token for Salesforce login
         """
 
+        # The instance URL is also returned by the authenticate call
+        # but typically it is identical to the base_url.
+        self._instance_url = base_url
+
         salesforce_config = {}
 
-        # Set the authentication endpoints and credentials
-        salesforce_config["baseUrl"] = base_url
+        # Store the credentials and parameters in a config dictionary:
         salesforce_config["clientId"] = client_id
         salesforce_config["clientSecret"] = client_secret
         salesforce_config["username"] = username
         salesforce_config["password"] = password
         salesforce_config["securityToken"] = security_token
+
+        # Set the Salesforce URLs and REST API endpoints:
+        salesforce_config["baseUrl"] = base_url
+        salesforce_config["objectUrl"] = salesforce_config[
+            "baseUrl"
+        ] + "/services/data/{}/sobjects/".format(SALESFORCE_API_VERSION)
+        salesforce_config["queryUrl"] = salesforce_config[
+            "baseUrl"
+        ] + "/services/data/{}/query/".format(SALESFORCE_API_VERSION)
+        salesforce_config["compositeUrl"] = salesforce_config[
+            "baseUrl"
+        ] + "/services/data/{}/composite/".format(SALESFORCE_API_VERSION)
+        salesforce_config["connectUrl"] = salesforce_config[
+            "baseUrl"
+        ] + "/services/data/{}/connect/".format(SALESFORCE_API_VERSION)
+        salesforce_config["toolingUrl"] = salesforce_config[
+            "baseUrl"
+        ] + "/services/data/{}/tooling/".format(SALESFORCE_API_VERSION)
         if authorization_url:
             salesforce_config["authenticationUrl"] = authorization_url
         else:
             salesforce_config["authenticationUrl"] = (
                 salesforce_config["baseUrl"] + "/services/oauth2/token"
             )
+        # URLs that are based on the objectURL (sobjects/):
+        salesforce_config["userUrl"] = salesforce_config["objectUrl"] + "User/"
+        salesforce_config["groupUrl"] = salesforce_config["objectUrl"] + "Group/"
+        salesforce_config["groupMemberUrl"] = (
+            salesforce_config["objectUrl"] + "GroupMember/"
+        )
+        salesforce_config["accountUrl"] = salesforce_config["objectUrl"] + "Account/"
+        salesforce_config["productUrl"] = salesforce_config["objectUrl"] + "Product2/"
+        salesforce_config["opportunityUrl"] = (
+            salesforce_config["objectUrl"] + "Opportunity/"
+        )
+        salesforce_config["caseUrl"] = salesforce_config["objectUrl"] + "Case/"
+        salesforce_config["assetUrl"] = salesforce_config["objectUrl"] + "Asset/"
+        salesforce_config["contractUrl"] = salesforce_config["objectUrl"] + "Contract/"
 
         # Set the data for the token request
         salesforce_config["authenticationData"] = {
@@ -110,6 +162,8 @@ class Salesforce(object):
         }
 
         self._config = salesforce_config
+
+    # end method definition
 
     def config(self) -> dict:
         """Returns the configuration dictionary
@@ -143,8 +197,10 @@ class Salesforce(object):
 
         request_header = {
             "Authorization": "Bearer {}".format(self._access_token),
-            "Content-Type": content_type,
         }
+        if content_type:
+            request_header["Content-Type"] = content_type
+
         return request_header
 
     # end method definition
@@ -278,16 +334,16 @@ class Salesforce(object):
 
         # Already authenticated and session still valid?
         if self._access_token and not revalidate:
-            logger.info(
+            logger.debug(
                 "Session still valid - return existing access token -> %s",
                 str(self._access_token),
             )
             return self._access_token
 
         request_url = self.config()["authenticationUrl"]
-        request_header = request_login_headers
+        request_header = REQUEST_LOGIN_HEADERS
 
-        logger.info("Requesting Salesforce Access Token from -> %s", request_url)
+        logger.debug("Requesting Salesforce Access Token from -> %s", request_url)
 
         authenticate_post_body = self.credentials()
 
@@ -346,18 +402,17 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/query/"
+        request_url = self.config()["queryUrl"]
 
         query = f"SELECT Id FROM {object_type} WHERE {name_field} = '{name}'"
 
         retries = 0
         while True:
             response = requests.get(
-                request_url,
+                url=request_url,
                 headers=request_header,
                 params={"q": query},
                 timeout=REQUEST_TIMEOUT,
@@ -367,49 +422,19 @@ class Salesforce(object):
                 object_id = self.get_result_value(response, "Id")
                 return object_id
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             else:
                 logger.error(
-                    "Failed to get Salesforce object ID for object type -> %s and object name -> %s; status -> %s; error -> %s",
+                    "Failed to get Salesforce object ID for object type -> '%s' and object name -> '%s'; status -> %s; error -> %s",
                     object_type,
                     name,
                     response.status_code,
                     response.text,
                 )
                 return None
-
-    # end method definition
-
-    def get_profile_id(self, profile_name: str) -> Optional[str]:
-        """Get a user profile ID by profile name.
-
-        Args:
-            profile_name (str): Name of the User Profile.
-
-        Returns:
-            Optional[str]: Technical ID of the user profile.
-        """
-
-        return self.get_object_id_by_name(object_type="Profile", name=profile_name)
-
-    # end method definition
-
-    def get_user_id(self, username: str) -> Optional[str]:
-        """Get a user ID by user name.
-
-        Args:
-            username (str): Name of the User.
-
-        Returns:
-            Optional[str]: Technical ID of the user
-        """
-
-        return self.get_object_id_by_name(
-            object_type="User", name=username, name_field="Username"
-        )
 
     # end method definition
 
@@ -433,11 +458,33 @@ class Salesforce(object):
 
         Returns:
             dict | None: Dictionary with the Salesforce object data.
+
+            Example response:
+            {
+                'totalSize': 2,
+                'done': True,
+                'records': [
+                    {
+                        'attributes': {
+                            'type': 'Opportunity',
+                            'url': '/services/data/v60.0/sobjects/Opportunity/006Dn00000EclybIAB'
+                        },
+                        'Id': '006Dn00000EclybIAB'
+                    },
+                    {
+                        'attributes': {
+                            'type': 'Opportunity',
+                            'url': '/services/data/v60.0/sobjects/Opportunity/006Dn00000EclyfIAB'
+                        },
+                        'Id': '006Dn00000EclyfIAB'
+                    }
+                ]
+            }
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
+
         if search_field and not search_value:
             logger.error(
                 "No search value has been provided for search field -> %s!",
@@ -445,7 +492,7 @@ class Salesforce(object):
             )
             return None
         if not result_fields:
-            logger.info(
+            logger.debug(
                 "No result fields defined. Using 'FIELDS(STANDARD)' to deliver all standard fields of the object."
             )
             result_fields = ["FIELDS(STANDARD)"]
@@ -456,19 +503,21 @@ class Salesforce(object):
         query += " LIMIT {}".format(str(limit))
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/query/?q={query}"
+        request_url = self.config()["queryUrl"] + "?q={}".format(query)
 
-        logger.info(
+        logger.debug(
             "Sending query -> %s to Salesforce; calling -> %s", query, request_url
         )
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=30)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -491,9 +540,10 @@ class Salesforce(object):
 
         Args:
             object_type (str): Type of the Salesforce business object, like "Account" or "Case".
+            **kwargs (dict): keyword / value ictionary with additional parameters
 
         Returns:
-            dict | None: Dictionary with the Salesforce Case data or None if the request fails.
+            dict | None: Dictionary with the Salesforce object data or None if the request fails.
         """
 
         match object_type:
@@ -568,27 +618,40 @@ class Salesforce(object):
 
     # end method definition
 
-    def get_user(self, user_id: str) -> dict | None:
-        """Get a Salesforce user based on its ID.
+    def get_group_id(self, groupname: str) -> Optional[str]:
+        """Get a group ID by group name.
 
         Args:
-            user_id (str): ID of the Salesforce user
+            groupname (str): Name of the Group.
 
         Returns:
-            dict | None: Dictionary with the Salesforce user data or None if the request fails.
+            Optional[str]: Technical ID of the group
+        """
+
+        return self.get_object_id_by_name(
+            object_type="Group", name=groupname, name_field="Name"
+        )
+
+    # end method definition
+
+    def get_group(self, group_id: str) -> dict | None:
+        """Get a Salesforce group based on its ID.
+
+        Args:
+            group_id (str): ID of the Salesforce group
+
+        Returns:
+            dict | None: Dictionary with the Salesforce group data or None if the request fails.
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = (
-            f"{self._instance_url}/services/data/v52.0/sobjects/User/{user_id}"
-        )
+        request_url = self.config()["groupUrl"] + group_id
 
-        logger.info(
-            "Get Salesforce user with ID -> %s; calling -> %s", user_id, request_url
+        logger.debug(
+            "Get Salesforce group with ID -> %s; calling -> %s", group_id, request_url
         )
 
         retries = 0
@@ -599,14 +662,254 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
             else:
                 logger.error(
-                    "Failed to get Salesforce user -> %s; status -> %s; error -> %s",
-                    user_id,
+                    "Failed to get Salesforce group -> %s; status -> %s; error -> %s",
+                    group_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def add_group(
+        self,
+        group_name: str,
+        group_type: str = "Regular",
+    ) -> dict | None:
+        """Add a new Salesforce group.
+
+        Args:
+            group_name (str): Name of the new Salesforce group
+
+        Returns:
+            dict | None: Dictionary with the Salesforce Group data or None if the request fails.
+
+            Example response:
+            {
+                'id': '00GDn000000KWE0MAO',
+                'success': True,
+                'errors': []
+            }
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_header = self.request_header()
+        request_url = self.config()["groupUrl"]
+
+        payload = {"Name": group_name, "Type": group_type}
+
+        logger.debug(
+            "Adding Salesforce group -> %s; calling -> %s", group_name, request_url
+        )
+
+        retries = 0
+        while True:
+            response = requests.post(
+                request_url,
+                headers=request_header,
+                data=json.dumps(payload),
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to add Salesforce group -> %s; status -> %s; error -> %s",
+                    group_name,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_group(
+        self,
+        group_id: str,
+        update_data: dict,
+    ) -> dict:
+        """Update a Salesforce group.
+
+        Args:
+            group_id (str): The Salesforce group ID.
+            update_data (dict): Dictionary containing the fields to update.
+
+        Returns:
+            dict: Response from the Salesforce API.
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_header = self.request_header()
+
+        request_url = self.config()["groupUrl"] + group_id
+
+        logger.debug(
+            "Update Salesforce group with ID -> %s; calling -> %s",
+            group_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.patch(
+                request_url,
+                json=update_data,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to update Salesforce group -> %s; status -> %s; error -> %s",
+                    group_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def get_group_members(self, group_id: str) -> list | None:
+        """Get Salesforce group members
+
+        Args:
+            group_id (str): Id of the group to retrieve the members
+
+        Returns:
+            list | None: result
+
+            Example response:
+            {
+                'totalSize': 1,
+                'done': True,
+                'records': [
+                    {
+                        'attributes': {
+                            'type': 'GroupMember',
+                            'url': '/services/data/v60.0/sobjects/GroupMember/011Dn000000ELhwIAG'
+                        },
+                        'UserOrGroupId': '00GDn000000KWE5MAO'
+                    }
+                ]
+            }
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_header = self.request_header()
+
+        request_url = self.config()["queryUrl"]
+
+        query = f"SELECT UserOrGroupId FROM GroupMember WHERE GroupId = '{group_id}'"
+        params = {"q": query}
+
+        logger.debug(
+            "Get members of Salesforce group with ID -> %s; calling -> %s",
+            group_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                request_url,
+                headers=request_header,
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to retrieve members of Salesforce group with ID -> %s; status -> %s; error -> %s",
+                    group_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def add_group_member(self, group_id: str, member_id: str) -> dict | None:
+        """Add a user or group to a Salesforce group
+
+        Args:
+            group_id (str): ID of the Salesforce Group to add member to.
+            member_id (str): ID of the user or group.
+
+        Returns:
+            dict | None: Dictionary with the Salesforce membership data or None if the request fails.
+
+            Example response (id is the membership ID):
+            {
+                'id': '011Dn000000ELhwIAG',
+                'success': True,
+                'errors': []
+            }
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_url = self.config()["groupMemberUrl"]
+
+        request_header = self.request_header()
+
+        payload = {"GroupId": group_id, "UserOrGroupId": member_id}
+
+        logger.debug(
+            "Add member with ID -> %s to Salesforce group with ID -> %s; calling -> %s",
+            member_id,
+            group_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.post(
+                request_url,
+                headers=request_header,
+                json=payload,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to retrieve members of Salesforce group with ID -> %s; status -> %s; error -> %s",
+                    group_id,
                     response.status_code,
                     response.text,
                 )
@@ -648,11 +951,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/query/"
+        request_url = self.config()["queryUrl"]
 
         query = "SELECT Id, Name, CreatedById, CreatedDate, Description, LastModifiedById, LastModifiedDate, PermissionsCustomizeApplication, PermissionsEditTask, PermissionsImportLeads FROM Profile"
 
@@ -667,7 +969,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -681,27 +983,112 @@ class Salesforce(object):
 
     # end method definition
 
+    def get_user_profile_id(self, profile_name: str) -> Optional[str]:
+        """Get a user profile ID by profile name.
+
+        Args:
+            profile_name (str): Name of the User Profile.
+
+        Returns:
+            Optional[str]: Technical ID of the user profile.
+        """
+
+        return self.get_object_id_by_name(object_type="Profile", name=profile_name)
+
+    # end method definition
+
+    def get_user_id(self, username: str) -> Optional[str]:
+        """Get a user ID by user name.
+
+        Args:
+            username (str): Name of the User.
+
+        Returns:
+            Optional[str]: Technical ID of the user
+        """
+
+        return self.get_object_id_by_name(
+            object_type="User", name=username, name_field="Username"
+        )
+
+    # end method definition
+
+    def get_user(self, user_id: str) -> dict | None:
+        """Get a Salesforce user based on its ID.
+
+        Args:
+            user_id (str): ID of the Salesforce user
+
+        Returns:
+            dict | None: Dictionary with the Salesforce user data or None if the request fails.
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_header = self.request_header()
+        request_url = self.config()["userUrl"] + user_id
+
+        logger.debug(
+            "Get Salesforce user with ID -> %s; calling -> %s", user_id, request_url
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to get Salesforce user -> %s; status -> %s; error -> %s",
+                    user_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
     def add_user(
         self,
         username: str,
         email: str,
-        password: str,
         firstname: str,
         lastname: str,
+        title: str | None = None,
+        department: str | None = None,
+        company_name: str = "Innovate",
+        profile_name: Optional[str] = "Standard User",
         profile_id: Optional[str] = None,
+        time_zone_key: Optional[str] = "America/Los_Angeles",
+        email_encoding_key: Optional[str] = "ISO-8859-1",
+        locale_key: Optional[str] = "en_US",
         alias: Optional[str] = None,
     ) -> dict | None:
-        """Add a new Salesforce user.
+        """Add a new Salesforce user. The password has to be set separately.
 
         Args:
             username (str): Login name of the new user
             email (str): Email of the new user
-            password (str): Password of the new user
             firstname (str): First name of the new user.
             lastname (str): Last name of the new user.
+            title (str): Title of the user.
+            department (str): Department of the user.
+            company_name (str): Name of the Company of the user.
+            profile_name (str): Profile name like "Standard User"
             profile_id (str, optional): Profile ID of the new user. Defaults to None.
                                         Use method get_all_user_profiles() to determine
-                                        the desired Profile for the user.
+                                        the desired Profile for the user. Or pass the profile_name.
+            time_zone_key (str, optional) in format country/city like "America/Los_Angeles",
+            email_encoding_key (str, optional). Default is "ISO-8859-1".
+            locale_key (str, optional). Default is "en_US".
             alias (str, optional): Alias of the new user. Defaults to None.
 
         Returns:
@@ -709,23 +1096,32 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/User/"
+        request_url = self.config()["userUrl"]
+
+        # if just a profile name is given then we determine the profile ID by the name:
+        if profile_name and not profile_id:
+            profile_id = self.get_user_profile_id(profile_name)
 
         payload = {
             "Username": username,
             "Email": email,
-            "Password": password,
             "FirstName": firstname,
             "LastName": lastname,
             "ProfileId": profile_id,
-            "Alias": alias,
+            "Department": department,
+            "CompanyName": company_name,
+            "Title": title,
+            "Alias": alias if alias else username,
+            "TimeZoneSidKey": time_zone_key,  # Set default TimeZoneSidKey
+            "LocaleSidKey": locale_key,  # Set default LocaleSidKey
+            "EmailEncodingKey": email_encoding_key,  # Set default EmailEncodingKey
+            "LanguageLocaleKey": locale_key,  # Set default LanguageLocaleKey
         }
 
-        logger.info(
+        logger.debug(
             "Adding Salesforce user -> %s; calling -> %s", username, request_url
         )
 
@@ -740,7 +1136,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -748,6 +1144,193 @@ class Salesforce(object):
                 logger.error(
                     "Failed to add Salesforce user -> %s; status -> %s; error -> %s",
                     username,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_user(
+        self,
+        user_id: str,
+        update_data: dict,
+    ) -> dict:
+        """Update a Salesforce user.
+
+        Args:
+            user_id (str): The Salesforce user ID.
+            update_data (dict): Dictionary containing the fields to update.
+
+        Returns:
+            dict: Response from the Salesforce API.
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_header = self.request_header()
+
+        request_url = self.config()["userUrl"] + user_id
+
+        logger.debug(
+            "Update Salesforce user with ID -> %s; calling -> %s", user_id, request_url
+        )
+
+        retries = 0
+        while True:
+            response = requests.patch(
+                request_url,
+                json=update_data,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to update Salesforce user -> %s; status -> %s; error -> %s",
+                    user_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_user_password(
+        self,
+        user_id: str,
+        password: str,
+    ) -> dict:
+        """Update the password of a Salesforce user.
+
+        Args:
+            user_id (str): The Salesforce user ID.
+            password (str): New user password.
+
+        Returns:
+            dict: Response from the Salesforce API.
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        request_header = self.request_header()
+
+        request_url = self.config()["userUrl"] + "{}/password".format(user_id)
+
+        logger.debug(
+            "Update password of Salesforce user with ID -> %s; calling -> %s",
+            user_id,
+            request_url,
+        )
+
+        update_data = {"NewPassword": password}
+
+        retries = 0
+        while True:
+            response = requests.post(
+                request_url,
+                json=update_data,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to update password of Salesforce user -> %s; status -> %s; error -> %s",
+                    user_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def update_user_photo(
+        self,
+        user_id: str,
+        photo_path: str,
+    ) -> dict | None:
+        """Update the Salesforce user photo.
+
+        Args:
+            user_id (str): Salesforce ID of the user
+            photo_path (str): file system path with the location of the photo
+        Returns:
+            dict | None: Dictionary with the Salesforce User data or None if the request fails.
+        """
+
+        if not self._access_token or not self._instance_url:
+            self.authenticate()
+
+        # Check if the photo file exists
+        if not os.path.isfile(photo_path):
+            logger.error("Photo file -> %s not found!", photo_path)
+            return None
+
+        try:
+            # Read the photo file as binary data
+            with open(photo_path, "rb") as image_file:
+                photo_data = image_file.read()
+        except OSError as exception:
+            # Handle any errors that occurred while reading the photo file
+            logger.error(
+                "Error reading photo file -> %s; error -> %s", photo_path, exception
+            )
+            return None
+
+        request_header = self.request_header(content_type=None)
+
+        data = {"json": json.dumps({"cropX": 0, "cropY": 0, "cropSize": 200})}
+        request_url = self.config()["connectUrl"] + f"user-profiles/{user_id}/photo"
+        files = {
+            "fileUpload": (
+                photo_path,
+                photo_data,
+                "application/octet-stream",
+            )
+        }
+
+        logger.debug(
+            "Update profile photo of Salesforce user with ID -> %s; calling -> %s",
+            user_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.post(
+                request_url,
+                files=files,
+                data=data,
+                headers=request_header,
+                verify=False,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to update profile photo of Salesforce user with ID -> %s; status -> %s; error -> %s",
+                    user_id,
                     response.status_code,
                     response.text,
                 )
@@ -783,11 +1366,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/Account/"
+        request_url = self.config()["accountUrl"]
 
         payload = {
             "Name": account_name,
@@ -800,7 +1382,7 @@ class Salesforce(object):
         }
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.info(
+        logger.debug(
             "Adding Salesforce account -> %s; calling -> %s", account_name, request_url
         )
 
@@ -815,7 +1397,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -851,11 +1433,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/Product2/"
+        request_url = self.config()["productUrl"]
 
         payload = {
             "Name": product_name,
@@ -865,7 +1446,7 @@ class Salesforce(object):
         }
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.info(
+        logger.debug(
             "Add Salesforce product -> %s; calling -> %s", product_name, request_url
         )
 
@@ -880,7 +1461,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -922,11 +1503,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/Opportunity/"
+        request_url = self.config()["opportunityUrl"]
 
         payload = {
             "Name": name,
@@ -939,7 +1519,7 @@ class Salesforce(object):
             payload["Description"] = description
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.info(
+        logger.debug(
             "Add Salesforce opportunity -> %s; calling -> %s", name, request_url
         )
 
@@ -954,7 +1534,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -966,6 +1546,8 @@ class Salesforce(object):
                     response.text,
                 )
                 return None
+
+    # end method definition
 
     def add_case(
         self,
@@ -990,6 +1572,7 @@ class Salesforce(object):
             priority (str): Priority of the case. Typical values: "High", "Medium", "Low".
             origin (str): origin (source) of the case. Typical values: "Email", "Phone", "Web"
             account_id (str): technical ID of the related Account
+            owner_id (str): owner of the case
             asset_id (str): technical ID of the related Asset
             product_id (str): technical ID of the related Product
             kwargs (Any): additional values (e.g. custom fields)
@@ -999,11 +1582,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/Case/"
+        request_url = self.config()["caseUrl"]
 
         payload = {
             "Subject": subject,
@@ -1021,7 +1603,7 @@ class Salesforce(object):
             payload["ProductId"] = product_id
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.info("Add Salesforce case -> %s; calling -> %s", subject, request_url)
+        logger.debug("Add Salesforce case -> %s; calling -> %s", subject, request_url)
 
         retries = 0
         while True:
@@ -1034,7 +1616,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1077,11 +1659,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/Asset/"
+        request_url = self.config()["assetUrl"]
 
         payload = {
             "Name": asset_name,
@@ -1095,7 +1676,7 @@ class Salesforce(object):
             payload["Description"] = description
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.info(
+        logger.debug(
             "Add Salesforce asset -> %s; calling -> %s", asset_name, request_url
         )
 
@@ -1110,7 +1691,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1151,11 +1732,10 @@ class Salesforce(object):
         """
 
         if not self._access_token or not self._instance_url:
-            logger.error("Authentication required.")
-            return None
+            self.authenticate()
 
         request_header = self.request_header()
-        request_url = f"{self._instance_url}/services/data/v52.0/sobjects/Contract/"
+        request_url = self.config()["contractUrl"]
 
         payload = {
             "AccountId": account_id,
@@ -1169,7 +1749,7 @@ class Salesforce(object):
             payload["ContractType"] = contract_type
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.info(
+        logger.debug(
             "Adding Salesforce contract for account ID -> %s; calling -> %s",
             account_id,
             request_url,
@@ -1186,7 +1766,7 @@ class Salesforce(object):
             if response.ok:
                 return self.parse_request_response(response)
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1

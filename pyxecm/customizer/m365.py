@@ -30,6 +30,7 @@ update_user: Update selected properties of an M365 user
 get_user_licenses: Get the assigned license SKUs of a user
 assign_license_to_user: Add an M365 license to a user (e.g. to use Office 365)
 get_user_photo: Get the photo of a M365 user
+download_user_photo: Download the M365 user photo and save it to the local file system
 update_user_photo: Update a user with a profile photo (which must be in local file system)
 
 get_groups: Get list all all groups in M365 tenant
@@ -63,6 +64,7 @@ upload_teams_app: Upload a new app package to the catalog of MS Teams apps
 remove_teams_app: Remove MS Teams App for the app catalog
 assign_teams_app_to_user: Assign (add) a MS Teams app to a M365 user.
 upgrade_teams_app_of_user: Upgrade a MS teams app for a user.
+remove_teams_app_from_user: Remove a M365 Teams app from a M365 user.
 assign_teams_app_to_team: Assign (add) a MS Teams app to a M365 team
                           (so that it afterwards can be added as a Tab in a M365 Teams Channel)
 upgrade_teams_app_of_team: Upgrade a MS teams app for a specific team.
@@ -74,6 +76,17 @@ add_sensitivity_label: Assign a existing sensitivity label to a user.
                        THIS IS CURRENTLY NOT WORKING!
 assign_sensitivity_label_to_user: Create a new sensitivity label in M365
                                   THIS IS CURRENTLY NOT WORKING!
+
+upload_outlook_app: Upload the M365 Outlook Add-In as "Integrated" App to M365 Admin Center. (NOT WORKING)
+get_app_registration: Find an Azure App Registration based on its name
+add_app_registration: Add an Azure App Registration
+update_app_registration: Update an Azure App Registration
+
+get_mail: Get email from inbox of a given user and a given sender (from)
+get_mail_body: Get full email body for a given email ID
+extract_url_from_message_body: Parse the email body to extract (a potentially multi-line) URL from the body.
+delete_mail: Delete email from inbox of a given user and a given email ID.
+email_verification: Process email verification
 """
 
 __author__ = "Dr. Marc Diefenbruch"
@@ -90,8 +103,12 @@ import time
 import urllib.parse
 import zipfile
 from urllib.parse import quote
+from datetime import datetime
 
 import requests
+
+from pyxecm.helper.web import HTTP
+from pyxecm.customizer.browser_automation import BrowserAutomation
 
 logger = logging.getLogger("pyxecm.customizer.m365")
 
@@ -100,6 +117,7 @@ request_login_headers = {
     "Accept": "application/json",
 }
 
+REQUEST_TIMEOUT = 60
 
 class M365(object):
     """Used to automate stettings in Microsoft 365 via the Graph API."""
@@ -107,6 +125,7 @@ class M365(object):
     _config: dict
     _access_token = None
     _user_access_token = None
+    _http_object: HTTP | None = None
 
     def __init__(
         self,
@@ -116,6 +135,7 @@ class M365(object):
         domain: str,
         sku_id: str,
         teams_app_name: str,
+        teams_app_external_id: str,
     ):
         """Initialize the M365 object
 
@@ -126,6 +146,7 @@ class M365(object):
             domain (str): M365 domain
             sku_id (str): License SKU for M365 users
             teams_app_name (str): name of the Extended ECM app for MS Teams
+            teams_app_external_id (str): external ID of the Extended ECM app for MS Teams
         """
 
         m365_config = {}
@@ -137,6 +158,10 @@ class M365(object):
         m365_config["domain"] = domain
         m365_config["skuId"] = sku_id
         m365_config["teamsAppName"] = teams_app_name
+        m365_config["teamsAppExternalId"] = (
+            teams_app_external_id  # this is the external App ID
+        )
+        m365_config["teamsAppInternalId"] = None  # will be set later...
         m365_config[
             "authenticationUrl"
         ] = "https://login.microsoftonline.com/{}/oauth2/v2.0/token".format(tenant_id)
@@ -162,6 +187,7 @@ class M365(object):
         m365_config["applicationsUrl"] = m365_config["graphUrl"] + "applications"
 
         self._config = m365_config
+        self._http_object = HTTP()
 
     def config(self) -> dict:
         """Returns the configuration dictionary
@@ -396,7 +422,7 @@ class M365(object):
 
         # Already authenticated and session still valid?
         if self._access_token and not revalidate:
-            logger.info(
+            logger.debug(
                 "Session still valid - return existing access token -> %s",
                 str(self._access_token),
             )
@@ -405,7 +431,7 @@ class M365(object):
         request_url = self.config()["authenticationUrl"]
         request_header = request_login_headers
 
-        logger.info("Requesting M365 Access Token from -> %s", request_url)
+        logger.debug("Requesting M365 Access Token from -> %s", request_url)
 
         authenticate_post_body = self.credentials()
         authenticate_response = None
@@ -415,7 +441,7 @@ class M365(object):
                 request_url,
                 data=authenticate_post_body,
                 headers=request_header,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.ConnectionError as exception:
             logger.warning(
@@ -459,7 +485,7 @@ class M365(object):
         request_url = self.config()["authenticationUrl"]
         request_header = request_login_headers
 
-        logger.info(
+        logger.debug(
             "Requesting M365 Access Token for user -> %s from -> %s",
             username,
             request_url,
@@ -473,7 +499,7 @@ class M365(object):
                 request_url,
                 data=authenticate_post_body,
                 headers=request_header,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.ConnectionError as exception:
             logger.warning(
@@ -515,16 +541,18 @@ class M365(object):
         request_url = self.config()["usersUrl"]
         request_header = self.request_header()
 
-        logger.info("Get list of all users; calling -> %s", request_url)
+        logger.debug("Get list of all users; calling -> %s", request_url)
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -573,19 +601,46 @@ class M365(object):
             }
         """
 
+        # Some sanity checks:
+        if not "@" in user_email or not "." in user_email:
+            logger.error("User email -> %s is not a valid email address", user_email)
+            return None
+
+        # if there's an alias in the E-Mail Adress we remove it as
+        # MS Graph seems to not support an alias to lookup a user object.
+        if "+" in user_email:
+            logger.info(
+                "Removing Alias from email address -> %s to determine M365 principal name...",
+                user_email,
+            )
+            # Find the index of the '+' character
+            alias_index = user_email.find("+")
+
+            # Find the index of the '@' character
+            domain_index = user_email.find("@")
+
+            # Construct the email address without the alias
+            user_email = user_email[:alias_index] + user_email[domain_index:]
+            logger.info(
+                "M365 user principal name -> %s",
+                user_email,
+            )
+
         request_url = self.config()["usersUrl"] + "/" + user_email
         request_header = self.request_header()
 
-        logger.info("Get M365 user -> %s; calling -> %s", user_email, request_url)
+        logger.debug("Get M365 user -> %s; calling -> %s", user_email, request_url)
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -606,7 +661,7 @@ class M365(object):
                         response.text,
                     )
                 else:
-                    logger.info("M365 User -> %s not found.", user_email)
+                    logger.debug("M365 User -> %s not found.", user_email)
                 return None
 
     # end method definition
@@ -657,7 +712,7 @@ class M365(object):
         request_url = self.config()["usersUrl"]
         request_header = self.request_header()
 
-        logger.info("Adding M365 user -> %s; calling -> %s", email, request_url)
+        logger.debug("Adding M365 user -> %s; calling -> %s", email, request_url)
 
         retries = 0
         while True:
@@ -665,13 +720,13 @@ class M365(object):
                 request_url,
                 data=json.dumps(user_post_body),
                 headers=request_header,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -698,6 +753,9 @@ class M365(object):
         """Update selected properties of an M365 user. Documentation
            on user properties is here: https://learn.microsoft.com/en-us/graph/api/user-update
 
+        Args:
+            user_id (str): ID of the user (can also be email). This is also the unique identifier
+            updated_settings (dict): new data to update the user with
         Returns:
             dict | None: Response of the M365 Graph API  or None if the call fails.
         """
@@ -705,8 +763,8 @@ class M365(object):
         request_url = self.config()["usersUrl"] + "/" + user_id
         request_header = self.request_header()
 
-        logger.info(
-            "Updating M365 user -> %s with -> %s; calling -> %s",
+        logger.debug(
+            "Updating M365 user with ID -> %s with -> %s; calling -> %s",
             user_id,
             str(updated_settings),
             request_url,
@@ -718,13 +776,13 @@ class M365(object):
                 request_url,
                 json=updated_settings,
                 headers=request_header,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -775,12 +833,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -830,7 +890,7 @@ class M365(object):
             "removeLicenses": [],
         }
 
-        logger.info(
+        logger.debug(
             "Assign M365 license -> %s to M365 user -> %s; calling -> %s",
             sku_id,
             user_id,
@@ -840,13 +900,16 @@ class M365(object):
         retries = 0
         while True:
             response = requests.post(
-                request_url, json=license_post_body, headers=request_header, timeout=60
+                request_url,
+                json=license_post_body,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -885,16 +948,18 @@ class M365(object):
         # Set image as content type:
         request_header = self.request_header("image/*")
 
-        logger.info("Get photo of user -> %s; calling -> %s", user_id, request_url)
+        logger.debug("Get photo of user -> %s; calling -> %s", user_id, request_url)
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return response.content  # this is the actual image - not json!
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -915,7 +980,88 @@ class M365(object):
                         response.text,
                     )
                 else:
-                    logger.info("User -> %s does not yet have a photo.", user_id)
+                    logger.debug("M365 User -> %s does not yet have a photo.", user_id)
+                return None
+
+    # end method definition
+
+    def download_user_photo(self, user_id: str, photo_path: str) -> str:
+        """Download the M365 user photo and save it to the local file system
+
+        Args:
+            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
+            photo_path (str): Directory where the photo should be saved
+        Returns:
+            str: name of the photo file in the file system (with full path) or None if
+                 the call of the REST API fails.
+        """
+
+        request_url = self.config()["usersUrl"] + "/" + user_id + "/photo/$value"
+        request_header = self.request_header("application/json")
+
+        logger.debug(
+            "Downloading photo for M365 user with ID -> %s; calling -> %s",
+            user_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                request_url,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
+                stream=True,
+            )
+            if response.ok:
+                content_type = response.headers.get("Content-Type", "image/png")
+                if content_type == "image/jpeg":
+                    file_extension = "jpg"
+                elif content_type == "image/png":
+                    file_extension = "png"
+                else:
+                    file_extension = "img"  # Default extension if type is unknown
+                file_path = os.path.join(
+                    photo_path, "{}.{}".format(user_id, file_extension)
+                )
+
+                try:
+                    with open(file_path, "wb") as file:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            file.write(chunk)
+                    logger.info(
+                        "Photo for M365 user with ID -> %s saved to %s",
+                        user_id,
+                        file_path,
+                    )
+                    return file_path
+                except OSError as exception:
+                    logger.error(
+                        "Error saving photo for user with ID -> %s; error -> %s",
+                        user_id,
+                        exception,
+                    )
+                    return None
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header("application/json")
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to download photo for user with ID -> %s; status -> %s; error -> %s",
+                    user_id,
+                    response.status_code,
+                    response.text,
+                )
                 return None
 
     # end method definition
@@ -952,8 +1098,8 @@ class M365(object):
 
         data = photo_data
 
-        logger.info(
-            "Update M365 user -> %s with photo -> %s; calling -> %s",
+        logger.debug(
+            "Update M365 user with ID -> %s with photo -> %s; calling -> %s",
             user_id,
             photo_path,
             request_url,
@@ -962,13 +1108,13 @@ class M365(object):
         retries = 0
         while True:
             response = requests.put(
-                request_url, headers=request_header, data=data, timeout=60
+                request_url, headers=request_header, data=data, timeout=REQUEST_TIMEOUT
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -982,7 +1128,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to update user -> %s with photo -> %s; status -> %s; error -> %s",
+                    "Failed to update user with ID -> %s with photo -> %s; status -> %s; error -> %s",
                     user_id,
                     photo_path,
                     response.status_code,
@@ -1004,7 +1150,7 @@ class M365(object):
         request_url = self.config()["groupsUrl"]
         request_header = self.request_header()
 
-        logger.info("Get list of all M365 groups; calling -> %s", request_url)
+        logger.debug("Get list of all M365 groups; calling -> %s", request_url)
 
         retries = 0
         while True:
@@ -1012,13 +1158,13 @@ class M365(object):
                 request_url,
                 headers=request_header,
                 params={"$top": str(max_number)},
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1101,16 +1247,18 @@ class M365(object):
         request_url = self.config()["groupsUrl"] + "?" + encoded_query
         request_header = self.request_header()
 
-        logger.info("Get M365 group -> %s; calling -> %s", group_name, request_url)
+        logger.debug("Get M365 group -> %s; calling -> %s", group_name, request_url)
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1131,7 +1279,7 @@ class M365(object):
                         response.text,
                     )
                 else:
-                    logger.info("M365 Group -> %s not found.", group_name)
+                    logger.debug("M365 Group -> %s not found.", group_name)
                 return None
 
     # end method definition
@@ -1197,7 +1345,7 @@ class M365(object):
         request_url = self.config()["groupsUrl"]
         request_header = self.request_header()
 
-        logger.info("Adding M365 group -> %s; calling -> %s", name, request_url)
+        logger.debug("Adding M365 group -> %s; calling -> %s", name, request_url)
         logger.debug("M365 group attributes -> %s", group_post_body)
 
         retries = 0
@@ -1206,13 +1354,13 @@ class M365(object):
                 request_url,
                 data=json.dumps(group_post_body),
                 headers=request_header,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1261,7 +1409,7 @@ class M365(object):
         )
         request_header = self.request_header()
 
-        logger.info(
+        logger.debug(
             "Get members of M365 group -> %s (%s); calling -> %s",
             group_name,
             group_id,
@@ -1270,12 +1418,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1316,7 +1466,7 @@ class M365(object):
             "@odata.id": self.config()["directoryObjects"] + "/" + member_id
         }
 
-        logger.info(
+        logger.debug(
             "Adding member -> %s to group -> %s; calling -> %s",
             member_id,
             group_id,
@@ -1329,14 +1479,14 @@ class M365(object):
                 request_url,
                 headers=request_header,
                 data=json.dumps(group_member_post_body),
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
 
             # Check if Session has expired - then re-authenticate and try once more
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1379,7 +1529,7 @@ class M365(object):
         )
         request_header = self.request_header()
 
-        logger.info(
+        logger.debug(
             "Check if user -> %s is in group -> %s; calling -> %s",
             member_id,
             group_id,
@@ -1388,7 +1538,9 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 response = self.parse_request_response(response)
                 if not "value" in response or len(response["value"]) == 0:
@@ -1396,7 +1548,7 @@ class M365(object):
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1449,7 +1601,7 @@ class M365(object):
         )
         request_header = self.request_header()
 
-        logger.info(
+        logger.debug(
             "Get owners of M365 group -> %s (%s); calling -> %s",
             group_name,
             group_id,
@@ -1458,12 +1610,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1504,7 +1658,7 @@ class M365(object):
             "@odata.id": self.config()["directoryObjects"] + "/" + owner_id
         }
 
-        logger.info(
+        logger.debug(
             "Adding owner -> %s to M365 group -> %s; calling -> %s",
             owner_id,
             group_id,
@@ -1517,13 +1671,13 @@ class M365(object):
                 request_url,
                 headers=request_header,
                 data=json.dumps(group_member_post_body),
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1558,7 +1712,9 @@ class M365(object):
         request_url = (
             self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.group"
         )
-        response = requests.get(request_url, headers=request_header, timeout=60)
+        response = requests.get(
+            request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+        )
         deleted_groups = self.parse_request_response(response)
 
         for group in deleted_groups["value"]:
@@ -1568,7 +1724,9 @@ class M365(object):
         request_url = (
             self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.user"
         )
-        response = requests.get(request_url, headers=request_header, timeout=60)
+        response = requests.get(
+            request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+        )
         deleted_users = self.parse_request_response(response)
 
         for user in deleted_users["value"]:
@@ -1591,16 +1749,18 @@ class M365(object):
         request_url = self.config()["directoryUrl"] + "/deletedItems/" + item_id
         request_header = self.request_header()
 
-        logger.info("Purging deleted item -> %s; calling -> %s", item_id, request_url)
+        logger.debug("Purging deleted item -> %s; calling -> %s", item_id, request_url)
 
         retries = 0
         while True:
-            response = requests.delete(request_url, headers=request_header, timeout=60)
+            response = requests.delete(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1644,7 +1804,7 @@ class M365(object):
         request_url = self.config()["groupsUrl"] + "/" + group_id + "/team"
         request_header = self.request_header()
 
-        logger.info(
+        logger.debug(
             "Check if M365 Group -> %s has a M365 Team connected; calling -> %s",
             group_name,
             request_url,
@@ -1652,16 +1812,18 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
 
             if response.status_code == 200:  # Group has a Team assigned!
-                logger.info("Group -> %s has a M365 Team connected.", group_name)
+                logger.debug("Group -> %s has a M365 Team connected.", group_name)
                 return True
             elif response.status_code == 404:  # Group does not have a Team assigned!
-                logger.info("Group -> %s has no M365 Team connected.", group_name)
+                logger.debug("Group -> %s has no M365 Team connected.", group_name)
                 return False
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1734,20 +1896,22 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.info(
-            "Lookup Microsoft 365 Teams with name -> %s; calling -> %s",
+        logger.debug(
+            "Lookup Microsoft 365 Teams with name -> '%s'; calling -> %s",
             name,
             request_url,
         )
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1785,7 +1949,7 @@ class M365(object):
         group_id = self.get_result_value(response, "id", 0)
         if not group_id:
             logger.error(
-                "M365 Group -> %s not found. It is required for creating a corresponding M365 Team.",
+                "M365 Group -> '%s' not found. It is required for creating a corresponding M365 Team.",
                 name,
             )
             return None
@@ -1793,7 +1957,7 @@ class M365(object):
         response = self.get_group_owners(name)
         if response is None or not "value" in response or not response["value"]:
             logger.warning(
-                "M365 Group -> %s has no owners. This is required for creating a corresponding M365 Team.",
+                "M365 Group -> '%s' has no owners. This is required for creating a corresponding M365 Team.",
                 name,
             )
             return None
@@ -1808,7 +1972,7 @@ class M365(object):
         request_url = self.config()["teamsUrl"]
         request_header = self.request_header()
 
-        logger.info("Adding M365 Team -> %s; calling -> %s", name, request_url)
+        logger.debug("Adding M365 Team -> %s; calling -> %s", name, request_url)
         logger.debug("M365 Team attributes -> %s", team_post_body)
 
         retries = 0
@@ -1817,13 +1981,13 @@ class M365(object):
                 request_url,
                 data=json.dumps(team_post_body),
                 headers=request_header,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1837,7 +2001,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to add M365 Team -> %s; status -> %s; error -> %s",
+                    "Failed to add M365 Team -> '%s'; status -> %s; error -> %s",
                     name,
                     response.status_code,
                     response.text,
@@ -1859,7 +2023,7 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.info(
+        logger.debug(
             "Delete Microsoft 365 Teams with ID -> %s; calling -> %s",
             team_id,
             request_url,
@@ -1867,12 +2031,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.delete(request_url, headers=request_header, timeout=60)
+            response = requests.delete(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1911,21 +2077,23 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.info(
-            "Delete all Microsoft 365 Teams with name -> %s; calling -> %s",
+        logger.debug(
+            "Delete all Microsoft 365 Teams with name -> '%s'; calling -> %s",
             name,
             request_url,
         )
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 existing_teams = self.parse_request_response(response)
                 break
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -1962,16 +2130,16 @@ class M365(object):
                     counter += 1
 
                 logger.info(
-                    "%s M365 Teams with name -> %s have been deleted.",
+                    "%s M365 Teams with name -> '%s' have been deleted.",
                     str(counter),
                     name,
                 )
                 return True
             else:
-                logger.info("No M365 Teams with name -> %s found.", name)
+                logger.info("No M365 Teams with name -> '%s' found.", name)
                 return False
         else:
-            logger.error("Failed to retrieve M365 Teams with name -> %s", name)
+            logger.error("Failed to retrieve M365 Teams with name -> '%s'", name)
             return False
 
     # end method definition
@@ -1995,19 +2163,20 @@ class M365(object):
         if not "value" in response or not response["value"]:
             return False
         groups = response["value"]
+
         logger.info(
             "Found -> %s existing M365 groups. Checking which ones should be deleted...",
             len(groups),
         )
 
-        # Process all groups and check if the< should be
+        # Process all groups and check if they should be
         # deleted:
         for group in groups:
             group_name = group["displayName"]
             # Check if group is in exception list:
             if group_name in exception_list:
                 logger.info(
-                    "M365 Group name -> %s is on the exception list. Skipping...",
+                    "M365 Group name -> '%s' is on the exception list. Skipping...",
                     group_name,
                 )
                 continue
@@ -2016,7 +2185,7 @@ class M365(object):
                 result = re.search(pattern, group_name)
                 if result:
                     logger.info(
-                        "M365 Group name -> %s is matching pattern -> %s. Delete it now...",
+                        "M365 Group name -> '%s' is matching pattern -> %s. Delete it now...",
                         group_name,
                         pattern,
                     )
@@ -2024,7 +2193,7 @@ class M365(object):
                     break
             else:
                 logger.info(
-                    "M365 Group name -> %s is not matching any delete pattern. Skipping...",
+                    "M365 Group name -> '%s' is not matching any delete pattern. Skipping...",
                     group_name,
                 )
         return True
@@ -2068,20 +2237,22 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.info(
-            "Retrieve channels of Microsoft 365 Team -> %s; calling -> %s",
+        logger.debug(
+            "Retrieve channels of Microsoft 365 Team -> '%s'; calling -> %s",
             name,
             request_url,
         )
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2151,7 +2322,7 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.erro(
+            logger.error(
                 "Cannot find Channel -> %s on M365 Team -> %s", channel_name, team_name
             )
             return None
@@ -2168,7 +2339,7 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.info(
+        logger.debug(
             "Retrieve Tabs of Microsoft 365 Teams -> %s and Channel -> %s; calling -> %s",
             team_name,
             channel_name,
@@ -2177,12 +2348,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2257,24 +2430,26 @@ class M365(object):
         request_url = self.config()["teamsAppsUrl"] + "?" + encoded_query
 
         if filter_expression:
-            logger.info(
+            logger.debug(
                 "Get list of MS Teams Apps using filter -> %s; calling -> %s",
                 filter_expression,
                 request_url,
             )
         else:
-            logger.info("Get list of all MS Teams Apps; calling -> %s", request_url)
+            logger.debug("Get list of all MS Teams Apps; calling -> %s", request_url)
 
         request_header = self.request_header()
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2297,34 +2472,58 @@ class M365(object):
     # end method definition
 
     def get_teams_app(self, app_id: str) -> dict | None:
-        """Get a specific MS Teams app in catalog based on the known app ID
+        """Get a specific MS Teams app in catalog based on the known (internal) app ID
 
         Args:
-            app_id (str): ID of the app
+            app_id (str): ID of the app (this is NOT the external ID but the internal ID)
         Returns:
             dict: response of the MS Graph API call or None if the call fails.
+
+            Examle response:
+            {
+                '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps(appDefinitions())/$entity',
+                'id': 'ccabe3fb-316f-40e0-a486-1659682cb8cd',
+                'externalId': 'dd4af790-d8ff-47a0-87ad-486318272c7a',
+                'displayName': 'Extended ECM',
+                'distributionMethod': 'organization',
+                'appDefinitions@odata.context': "https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps('ccabe3fb-316f-40e0-a486-1659682cb8cd')/appDefinitions",
+                'appDefinitions': [
+                    {
+                        'id': 'Y2NhYmUzZmItMzE2Zi00MGUwLWE0ODYtMTY1OTY4MmNiOGNkIyMyNC4yLjAjI1B1Ymxpc2hlZA==',
+                        'teamsAppId': 'ccabe3fb-316f-40e0-a486-1659682cb8cd',
+                        'displayName': 'Extended ECM',
+                        'version': '24.2.0',
+                        'publishingState': 'published',
+                        'shortDescription': 'Add a tab for an Extended ECM business workspace.',
+                        'description': 'View and interact with OpenText Extended ECM business workspaces',
+                        'lastModifiedDateTime': None,
+                        'createdBy': None,
+                        'authorization': {...}
+                    }
+                ]
+            }
         """
 
         query = {"$expand": "AppDefinitions"}
         encoded_query = urllib.parse.urlencode(query, doseq=True)
         request_url = self.config()["teamsAppsUrl"] + "/" + app_id + "?" + encoded_query
 
-        #        request_url = self.config()["teamsAppsUrl"] + "/" + app_id
-
-        logger.info(
-            "Get MS Teams App with ID -> %s; calling -> %s", app_id, request_url
+        logger.debug(
+            "Get M365 Teams App with ID -> %s; calling -> %s", app_id, request_url
         )
 
         request_header = self.request_header()
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2370,7 +2569,8 @@ class M365(object):
             + "/teamwork/installedApps?"
             + encoded_query
         )
-        logger.info(
+
+        logger.debug(
             "Get list of M365 Teams Apps for user -> %s using query -> %s; calling -> %s",
             user_id,
             query,
@@ -2381,12 +2581,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2433,7 +2635,8 @@ class M365(object):
             + "/installedApps?"
             + encoded_query
         )
-        logger.info(
+
+        logger.debug(
             "Get list of M365 Teams Apps for M365 Team -> %s using query -> %s; calling -> %s",
             team_id,
             query,
@@ -2444,12 +2647,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2501,6 +2706,7 @@ class M365(object):
             but requires a token of a user authenticated with username + password.
             See https://learn.microsoft.com/en-us/graph/api/teamsapp-publish
             (permissions table on that page)
+            For updates see: https://learn.microsoft.com/en-us/graph/api/teamsapp-update?view=graph-rest-1.0&tabs=http
 
         Args:
             app_path (str): file path (with directory) to the app package to upload
@@ -2511,6 +2717,34 @@ class M365(object):
                                   after installation (which is tenant specific)
         Returns:
             dict: Response of the MS GRAPH API REST call or None if the request fails
+
+            The responses are different depending if it is an install or upgrade!!
+
+            Example return for upgrades ("teamsAppId" is the "internal" ID of the app):
+            {
+                '@odata.context': "https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps('3f749cca-8cb0-4925-9fa0-ba7aca2014af')/appDefinitions/$entity",
+                'id': 'M2Y3NDljY2EtOGNiMC00OTI1LTlmYTAtYmE3YWNhMjAxNGFmIyMyNC4yLjAjI1B1Ymxpc2hlZA==',
+                'teamsAppId': '3f749cca-8cb0-4925-9fa0-ba7aca2014af',
+                'displayName': 'IDEA-TE - Extended ECM 24.2.0',
+                'version': '24.2.0',
+                'publishingState': 'published',
+                'shortDescription': 'Add a tab for an Extended ECM business workspace.',
+                'description': 'View and interact with OpenText Extended ECM business workspaces',
+                'lastModifiedDateTime': None,
+                'createdBy': None,
+                'authorization': {
+                    'requiredPermissionSet': {...}
+                }
+            }
+
+            Example return for new installations ("id" is the "internal" ID of the app):
+            {
+                '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps/$entity',
+                'id': '6c672afd-37fc-46c6-8365-d499aba3808b',
+                'externalId': 'dd4af790-d8ff-47a0-87ad-486318272c7a',
+                'displayName': 'OpenText Extended ECM',
+                'distributionMethod': 'organization'
+            }
         """
 
         if update_existing_app and not app_catalog_id:
@@ -2520,12 +2754,12 @@ class M365(object):
             return None
 
         if not os.path.exists(app_path):
-            logger.error("M365 Teams app file -> {} does not exist!")
+            logger.error("M365 Teams app file -> %s does not exist!", app_path)
             return None
 
         # Ensure that the app file is a zip file
         if not app_path.endswith(".zip"):
-            logger.error("M365 Teams app file -> {} must be a zip file!")
+            logger.error("M365 Teams app file -> %s must be a zip file!", app_path)
             return None
 
         request_url = self.config()["teamsAppsUrl"]
@@ -2545,12 +2779,13 @@ class M365(object):
             # Ensure that the app file contains a manifest.json file
             if "manifest.json" not in z.namelist():
                 logger.error(
-                    "M365 Teams app file -> {} does not contain a manifest.json file!"
+                    "M365 Teams app file -> '%s' does not contain a manifest.json file!",
+                    app_path,
                 )
                 return None
 
-        logger.info(
-            "Upload M365 Teams app -> %s to the MS Teams catalog; calling -> %s",
+        logger.debug(
+            "Upload M365 Teams app -> '%s' to the MS Teams catalog; calling -> %s",
             app_path,
             request_url,
         )
@@ -2558,14 +2793,17 @@ class M365(object):
         retries = 0
         while True:
             response = requests.post(
-                request_url, headers=request_header, data=app_data, timeout=60
+                request_url,
+                headers=request_header,
+                data=app_data,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
 
             # Check if Session has expired - then re-authenticate and try once more
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2580,7 +2818,7 @@ class M365(object):
             else:
                 if update_existing_app:
                     logger.warning(
-                        "Failed to update existing M365 Teams app -> %s (may be because it is not a new version); status -> %s; error -> %s",
+                        "Failed to update existing M365 Teams app -> '%s' (may be because it is not a new version); status -> %s; error -> %s",
                         app_path,
                         response.status_code,
                         response.text,
@@ -2588,7 +2826,7 @@ class M365(object):
 
                 else:
                     logger.error(
-                        "Failed to upload new M365 Teams app -> %s; status -> %s; error -> %s",
+                        "Failed to upload new M365 Teams app -> '%s'; status -> %s; error -> %s",
                         app_path,
                         response.status_code,
                         response.text,
@@ -2610,11 +2848,13 @@ class M365(object):
         request_header = self.request_header_user()
 
         # Make the DELETE request to remove the app from the app catalog
-        response = requests.delete(request_url, headers=request_header, timeout=60)
+        response = requests.delete(
+            request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+        )
 
         # Check the status code of the response
         if response.status_code == 204:
-            logger.info(
+            logger.debug(
                 "The M365 Teams app with ID -> %s has been successfully removed from the app catalog.",
                 app_id,
             )
@@ -2627,21 +2867,47 @@ class M365(object):
 
     # end method definition
 
-    def assign_teams_app_to_user(self, user_id: str, app_name: str) -> dict | None:
+    def assign_teams_app_to_user(
+        self,
+        user_id: str,
+        app_name: str = "",
+        app_internal_id: str = "",
+        show_error: bool = False,
+    ) -> dict | None:
         """Assigns (adds) a M365 Teams app to a M365 user.
+
+           See: https://learn.microsoft.com/en-us/graph/api/userteamwork-post-installedapps?view=graph-rest-1.0&tabs=http
 
         Args:
             user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            app_name (str): exact name of the app
+            app_name (str, optional): exact name of the app. Not needed if app_internal_id is provided
+            app_internal_id (str, optional): internal ID of the app. If not provided it will be derived from app_name
+            show_error (bool): whether or not an error should be displayed if the
+                               user is not found.
         Returns:
             dict: response of the MS Graph API call or None if the call fails.
         """
 
-        response = self.get_teams_apps(f"contains(displayName, '{app_name}')")
-        app_id = self.get_result_value(response, "id", 0)
-        if not app_id:
-            logger.error("M365 Teams App -> %s not found!", app_name)
+        if not app_internal_id and not app_name:
+            logger.error(
+                "Either the internal App ID or the App name need to be provided!"
+            )
             return None
+
+        if not app_internal_id:
+            response = self.get_teams_apps(
+                filter_expression="contains(displayName, '{}')".format(app_name)
+            )
+            app_internal_id = self.get_result_value(
+                response=response, key="id", index=0
+            )
+            if not app_internal_id:
+                logger.error(
+                    "M365 Teams App -> '%s' not found! Cannot assign App to user -> %s.",
+                    app_name,
+                    user_id,
+                )
+                return None
 
         request_url = (
             self.config()["usersUrl"] + "/" + user_id + "/teamwork/installedApps"
@@ -2649,13 +2915,13 @@ class M365(object):
         request_header = self.request_header()
 
         post_body = {
-            "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_id
+            "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_internal_id
         }
 
-        logger.info(
-            "Assign M365 Teams app -> %s (%s) to M365 user -> %s; calling -> %s",
+        logger.debug(
+            "Assign M365 Teams app -> '%s' (%s) to M365 user -> %s; calling -> %s",
             app_name,
-            app_id,
+            app_internal_id,
             user_id,
             request_url,
         )
@@ -2663,13 +2929,16 @@ class M365(object):
         retries = 0
         while True:
             response = requests.post(
-                request_url, json=post_body, headers=request_header, timeout=60
+                request_url,
+                json=post_body,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2682,38 +2951,57 @@ class M365(object):
                 time.sleep((retries + 1) * 60)
                 retries += 1
             else:
-                logger.error(
-                    "Failed to assign M365 Teams app -> %s (%s) to M365 user -> %s; status -> %s; error -> %s",
-                    app_name,
-                    app_id,
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
+                if show_error:
+                    logger.error(
+                        "Failed to assign M365 Teams app -> '%s' (%s) to M365 user -> %s; status -> %s; error -> %s",
+                        app_name,
+                        app_internal_id,
+                        user_id,
+                        response.status_code,
+                        response.text,
+                    )
+                else:
+                    logger.warning(
+                        "Failed to assign M365 Teams app -> '%s' (%s) to M365 user -> %s (could be because the app is assigned organization-wide); status -> %s; warning -> %s",
+                        app_name,
+                        app_internal_id,
+                        user_id,
+                        response.status_code,
+                        response.text,
+                    )
                 return None
 
     # end method definition
 
-    def upgrade_teams_app_of_user(self, user_id: str, app_name: str) -> dict | None:
+    def upgrade_teams_app_of_user(
+        self, user_id: str, app_name: str, app_installation_id: str | None = None
+    ) -> dict | None:
         """Upgrade a MS teams app for a user. The call will fail if the user does not
             already have the app assigned. So this needs to be checked before
             calling this method.
+            See: https://learn.microsoft.com/en-us/graph/api/userteamwork-teamsappinstallation-upgrade?view=graph-rest-1.0&tabs=http
 
         Args:
             user_id (str): M365 GUID of the user (can also be the M365 email of the user)
             app_name (str): exact name of the app
+            app_installation_id (str): ID of the app installation for the user. This is neither the internal nor
+                                       external app ID. It is specific for each user and app.
         Returns:
             dict: response of the MS Graph API call or None if the call fails.
         """
 
-        response = self.get_teams_apps_of_user(
-            user_id, "contains(teamsAppDefinition/displayName, '{}')".format(app_name)
-        )
-        # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
-        app_installation_id = self.get_result_value(response, "id", 0)
+        if not app_installation_id:
+            response = self.get_teams_apps_of_user(
+                user_id=user_id,
+                filter_expression="contains(teamsAppDefinition/displayName, '{}')".format(
+                    app_name
+                ),
+            )
+            # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
+            app_installation_id = self.get_result_value(response, "id", 0)
         if not app_installation_id:
             logger.error(
-                "M365 Teams app -> %s not found for user with ID -> %s. Cannot upgrade app for this user!",
+                "M365 Teams app -> '%s' not found for user with ID -> %s. Cannot upgrade app for this user!",
                 app_name,
                 user_id,
             )
@@ -2729,8 +3017,8 @@ class M365(object):
         )
         request_header = self.request_header()
 
-        logger.info(
-            "Upgrade M365 Teams app -> %s (%s) of M365 user with ID -> %s; calling -> %s",
+        logger.debug(
+            "Upgrade M365 Teams app -> '%s' (%s) of M365 user with ID -> %s; calling -> %s",
             app_name,
             app_installation_id,
             user_id,
@@ -2739,12 +3027,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.post(request_url, headers=request_header, timeout=60)
+            response = requests.post(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2758,7 +3048,89 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to upgrade M365 Teams app -> %s (%s) of M365 user -> %s; status -> %s; error -> %s",
+                    "Failed to upgrade M365 Teams app -> '%s' (%s) of M365 user -> %s; status -> %s; error -> %s",
+                    app_name,
+                    app_installation_id,
+                    user_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def remove_teams_app_from_user(
+        self, user_id: str, app_name: str, app_installation_id: str | None = None
+    ) -> dict | None:
+        """Remove a M365 Teams app from a M365 user.
+
+           See: https://learn.microsoft.com/en-us/graph/api/userteamwork-delete-installedapps?view=graph-rest-1.0&tabs=http
+
+        Args:
+            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
+            app_name (str): exact name of the app
+        Returns:
+            dict: response of the MS Graph API call or None if the call fails.
+        """
+
+        if not app_installation_id:
+            response = self.get_teams_apps_of_user(
+                user_id=user_id,
+                filter_expression="contains(teamsAppDefinition/displayName, '{}')".format(
+                    app_name
+                ),
+            )
+            # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
+            app_installation_id = self.get_result_value(response, "id", 0)
+        if not app_installation_id:
+            logger.error(
+                "M365 Teams app -> '%s' not found for user with ID -> %s. Cannot remove app from this user!",
+                app_name,
+                user_id,
+            )
+            return None
+
+        request_url = (
+            self.config()["usersUrl"]
+            + "/"
+            + user_id
+            + "/teamwork/installedApps/"
+            + app_installation_id
+        )
+        request_header = self.request_header()
+
+        logger.debug(
+            "Remove M365 Teams app -> '%s' (%s) from M365 user with ID -> %s; calling -> %s",
+            app_name,
+            app_installation_id,
+            user_id,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.delete(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to remove M365 Teams app -> '%s' (%s) from M365 user -> %s; status -> %s; error -> %s",
                     app_name,
                     app_installation_id,
                     user_id,
@@ -2788,8 +3160,9 @@ class M365(object):
             "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_id
         }
 
-        logger.info(
-            "Assign M365 Teams app -> %s to M365 Team -> %s; calling -> %s",
+        logger.debug(
+            "Assign M365 Teams app -> '%s' (%s) to M365 Team -> %s; calling -> %s",
+            self.config()["teamsAppName"],
             app_id,
             team_id,
             request_url,
@@ -2798,13 +3171,16 @@ class M365(object):
         retries = 0
         while True:
             response = requests.post(
-                request_url, json=post_body, headers=request_header, timeout=60
+                request_url,
+                json=post_body,
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2818,7 +3194,8 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to assign M365 Teams app -> %s to M365 Team -> %s; status -> %s; error -> %s",
+                    "Failed to assign M365 Teams app -> '%s' (%s) to M365 Team -> %s; status -> %s; error -> %s",
+                    self.config()["teamsAppName"],
                     app_id,
                     team_id,
                     response.status_code,
@@ -2848,7 +3225,7 @@ class M365(object):
         app_installation_id = self.get_result_value(response, "id", 0)
         if not app_installation_id:
             logger.error(
-                "M365 Teams app -> %s not found for M365 Team with ID -> %s. Cannot upgrade app for this team!",
+                "M365 Teams app -> '%s' not found for M365 Team with ID -> %s. Cannot upgrade app for this team!",
                 app_name,
                 team_id,
             )
@@ -2864,8 +3241,8 @@ class M365(object):
         )
         request_header = self.request_header()
 
-        logger.info(
-            "Upgrade app -> %s (%s) of M365 team with ID -> %s; calling -> %s",
+        logger.debug(
+            "Upgrade app -> '%s' (%s) of M365 team with ID -> %s; calling -> %s",
             app_name,
             app_installation_id,
             team_id,
@@ -2874,12 +3251,14 @@ class M365(object):
 
         retries = 0
         while True:
-            response = requests.post(request_url, headers=request_header, timeout=60)
+            response = requests.post(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -2893,7 +3272,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to upgrade app -> %s (%s) of M365 team with ID -> %s; status -> %s; error -> %s",
+                    "Failed to upgrade M365 Teams app -> '%s' (%s) of M365 team with ID -> %s; status -> %s; error -> %s",
                     app_name,
                     app_installation_id,
                     team_id,
@@ -2945,8 +3324,10 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.erro(
-                "Cannot find Channel -> %s on M365 Team -> %s", channel_name, team_name
+            logger.error(
+                "Cannot find Channel -> '%s' on M365 Team -> '%s'",
+                channel_name,
+                team_name,
             )
             return None
         channel_id = channel["id"]
@@ -2974,8 +3355,8 @@ class M365(object):
             },
         }
 
-        logger.info(
-            "Add Tab -> %s with App ID -> %s to Channel -> %s of Microsoft 365 Team -> %s; calling -> %s",
+        logger.debug(
+            "Add Tab -> '%s' with App ID -> %s to Channel -> '%s' of Microsoft 365 Team -> '%s'; calling -> %s",
             tab_name,
             app_id,
             channel_name,
@@ -2986,13 +3367,16 @@ class M365(object):
         retries = 0
         while True:
             response = requests.post(
-                request_url, headers=request_header, json=tab_config, timeout=60
+                request_url,
+                headers=request_header,
+                json=tab_config,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -3006,7 +3390,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to add Tab for M365 Team -> %s (%s) and Channel -> %s (%s); status -> %s; error -> %s; tab config -> %s",
+                    "Failed to add Tab for M365 Team -> '%s' (%s) and Channel -> '%s' (%s); status -> %s; error -> %s; tab config -> %s",
                     team_name,
                     team_id,
                     channel_name,
@@ -3058,8 +3442,10 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.erro(
-                "Cannot find Channel -> %s for M365 Team -> %s", channel_name, team_name
+            logger.error(
+                "Cannot find Channel -> '%s' for M365 Team -> '%s'",
+                channel_name,
+                team_name,
             )
             return None
         channel_id = channel["id"]
@@ -3075,8 +3461,8 @@ class M365(object):
             None,
         )
         if not tab:
-            logger.erro(
-                "Cannot find Tab -> %s on M365 Team -> %s (%s) and Channel -> %s (%s)",
+            logger.error(
+                "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)",
                 tab_name,
                 team_name,
                 team_id,
@@ -3108,8 +3494,8 @@ class M365(object):
             },
         }
 
-        logger.info(
-            "Update Tab -> %s (%s) of Channel -> %s (%s) for Microsoft 365 Teams -> %s (%s) with configuration -> %s; calling -> %s",
+        logger.debug(
+            "Update Tab -> '%s' (%s) of Channel -> '%s' (%s) for Microsoft 365 Teams -> '%s' (%s) with configuration -> %s; calling -> %s",
             tab_name,
             tab_id,
             channel_name,
@@ -3123,13 +3509,16 @@ class M365(object):
         retries = 0
         while True:
             response = requests.patch(
-                request_url, headers=request_header, json=tab_config, timeout=60
+                request_url,
+                headers=request_header,
+                json=tab_config,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -3143,7 +3532,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to update Tab -> %s (%s) for M365 Team -> %s (%s) and Channel -> %s (%s); status -> %s; error -> %s",
+                    "Failed to update Tab -> '%s' (%s) for M365 Team -> '%s' (%s) and Channel -> '%s' (%s); status -> %s; error -> %s",
                     tab_name,
                     tab_id,
                     team_name,
@@ -3189,8 +3578,10 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.erro(
-                "Cannot find Channel -> %s for M365 Team -> %s", channel_name, team_name
+            logger.error(
+                "Cannot find Channel -> '%s' for M365 Team -> '%s'",
+                channel_name,
+                team_name,
             )
             return False
         channel_id = channel["id"]
@@ -3206,8 +3597,8 @@ class M365(object):
             item for item in response["value"] if item["displayName"] == tab_name
         ]
         if not tab_list:
-            logger.erro(
-                "Cannot find Tabs with name -> %s on M365 Team -> %s (%s) and Channel -> %s (%s)",
+            logger.error(
+                "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)",
                 tab_name,
                 team_name,
                 team_id,
@@ -3231,8 +3622,8 @@ class M365(object):
 
             request_header = self.request_header()
 
-            logger.info(
-                "Delete Tab -> %s (%s) from Channel -> %s (%s) of Microsoft 365 Teams -> %s (%s); calling -> %s",
+            logger.debug(
+                "Delete Tab -> '%s' (%s) from Channel -> '%s' (%s) of Microsoft 365 Teams -> '%s' (%s); calling -> %s",
                 tab_name,
                 tab_id,
                 channel_name,
@@ -3245,11 +3636,11 @@ class M365(object):
             retries = 0
             while True:
                 response = requests.delete(
-                    request_url, headers=request_header, timeout=60
+                    request_url, headers=request_header, timeout=REQUEST_TIMEOUT
                 )
                 if response.ok:
-                    logger.info(
-                        "Tab -> %s (%s) has been deleted from Channel -> %s (%s) of Microsoft 365 Teams -> %s (%s)",
+                    logger.debug(
+                        "Tab -> '%s' (%s) has been deleted from Channel -> '%s' (%s) of Microsoft 365 Teams -> '%s' (%s)",
                         tab_name,
                         tab_id,
                         channel_name,
@@ -3260,7 +3651,7 @@ class M365(object):
                     break
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
-                    logger.warning("Session has expired - try to re-authenticate...")
+                    logger.debug("Session has expired - try to re-authenticate...")
                     self.authenticate(revalidate=True)
                     request_header = self.request_header()
                     retries += 1
@@ -3274,7 +3665,7 @@ class M365(object):
                     retries += 1
                 else:
                     logger.error(
-                        "Failed to delete Tab -> %s (%s) for M365 Team -> %s (%s) and Channel -> %s (%s); status -> %s; error -> %s",
+                        "Failed to delete Tab -> '%s' (%s) for M365 Team -> '%s' (%s) and Channel -> '%s' (%s); status -> %s; error -> %s",
                         tab_name,
                         tab_id,
                         team_name,
@@ -3334,22 +3725,25 @@ class M365(object):
         request_url = self.config()["securityUrl"] + "/sensitivityLabels"
         request_header = self.request_header()
 
-        logger.info(
-            "Create M365 sensitivity label -> %s; calling -> %s", name, request_url
+        logger.debug(
+            "Create M365 sensitivity label -> '%s'; calling -> %s", name, request_url
         )
 
         # Send the POST request to create the label
         response = requests.post(
-            request_url, headers=request_header, data=json.dumps(payload), timeout=60
+            request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
         )
 
         # Check the response status code
         if response.status_code == 201:
-            logger.info("Label -> %s has been created successfully!", name)
+            logger.debug("Label -> '%s' has been created successfully!", name)
             return response
         else:
             logger.error(
-                "Failed to create the M365 label -> %s! Response status code -> %s",
+                "Failed to create the M365 label -> '%s'! Response status code -> %s",
                 name,
                 response.status_code,
             )
@@ -3377,8 +3771,8 @@ class M365(object):
         )
         request_header = self.request_header()
 
-        logger.info(
-            "Assign label -> %s to user -> %s; calling -> %s",
+        logger.debug(
+            "Assign label -> '%s' to user -> '%s'; calling -> %s",
             label_name,
             user_email,
             request_url,
@@ -3387,13 +3781,13 @@ class M365(object):
         retries = 0
         while True:
             response = requests.post(
-                request_url, headers=request_header, json=body, timeout=60
+                request_url, headers=request_header, json=body, timeout=REQUEST_TIMEOUT
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -3407,7 +3801,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Failed to assign label -> %s to M365 user -> %s; status -> %s; error -> %s",
+                    "Failed to assign label -> '%s' to M365 user -> '%s'; status -> %s; error -> %s",
                     label_name,
                     user_email,
                     response.status_code,
@@ -3438,7 +3832,7 @@ class M365(object):
 
         #        request_header = self.request_header()
 
-        logger.info("Install Outlook Add-in from %s (NOT IMPLEMENTED)", app_path)
+        logger.debug("Install Outlook Add-in from '%s' (NOT IMPLEMENTED)", app_path)
 
         response = None
 
@@ -3464,20 +3858,22 @@ class M365(object):
         ] + "?$filter=displayName eq '{}'".format(app_registration_name)
         request_header = self.request_header()
 
-        logger.info(
-            "Get Azure App Registration -> %s; calling -> %s",
+        logger.debug(
+            "Get Azure App Registration -> '%s'; calling -> %s",
             app_registration_name,
             request_url,
         )
 
         retries = 0
         while True:
-            response = requests.get(request_url, headers=request_header, timeout=60)
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -3491,7 +3887,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Cannot find Azure App Registration -> %s; status -> %s; error -> %s",
+                    "Cannot find Azure App Registration -> '%s'; status -> %s; error -> %s",
                     app_registration_name,
                     response.status_code,
                     response.text,
@@ -3573,13 +3969,13 @@ class M365(object):
                 request_url,
                 headers=request_header,
                 json=app_registration_data,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -3593,7 +3989,7 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Cannot add App Registration -> %s; status -> %s; error -> %s",
+                    "Cannot add App Registration -> '%s'; status -> %s; error -> %s",
                     app_registration_name,
                     response.status_code,
                     response.text,
@@ -3632,8 +4028,8 @@ class M365(object):
         request_url = self.config()["applicationsUrl"] + "/" + app_registration_id
         request_header = self.request_header()
 
-        logger.info(
-            "Update App Registration -> %s (%s); calling -> %s",
+        logger.debug(
+            "Update App Registration -> '%s' (%s); calling -> %s",
             app_registration_name,
             app_registration_id,
             request_url,
@@ -3645,13 +4041,13 @@ class M365(object):
                 request_url,
                 headers=request_header,
                 json=app_registration_data,
-                timeout=60,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 request_header = self.request_header()
                 retries += 1
@@ -3665,12 +4061,531 @@ class M365(object):
                 retries += 1
             else:
                 logger.error(
-                    "Cannot update App Registration -> %s (%s); status -> %s; error -> %s",
+                    "Cannot update App Registration -> '%s' (%s); status -> %s; error -> %s",
                     app_registration_name,
                     app_registration_id,
                     response.status_code,
                     response.text,
                 )
                 return None
+
+    # end method definition
+
+    def get_mail(
+        self,
+        user_id: str,
+        sender: str,
+        subject: str,
+        num_emails: int | None = None,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get email from inbox of a given user and a given sender (from)
+           This requires Mail.Read Application permissions for the Azure App being used.
+
+        Args:
+            user_id (str): M365 ID of the user
+            sender (str): sender email address to filter for
+            num_emails (int, optional): number of matching emails to retrieve
+            show_error (bool): whether or not an error should be displayed if the
+                               user is not found.
+        Returns:
+            dict: Email or None of the request fails.
+        """
+
+        # Attention: you  can easily run in limitation of the MS Graph API. If selection + filtering
+        # is too complex you can get this error: "The restriction or sort order is too complex for this operation."
+        # that's why we first just do the ordering and then do the filtering on sender and subject
+        # separately
+        request_url = (
+            self.config()["usersUrl"]
+            + "/"
+            + user_id
+            #            + "/messages?$filter=from/emailAddress/address eq '{}' and contains(subject, '{}')&$orderby=receivedDateTime desc".format(
+            + "/messages?$orderby=receivedDateTime desc"
+        )
+        if num_emails:
+            request_url += "&$top={}".format(num_emails)
+
+        request_header = self.request_header()
+
+        logger.debug(
+            "Retrieve mails for user -> %s from -> '%s' with subject -> '%s'; calling -> %s",
+            user_id,
+            sender,
+            subject,
+            request_url,
+        )
+
+        retries = 0
+        while True:
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
+            if response.ok:
+                response = self.parse_request_response(response)
+                messages = response["value"] if response else []
+
+                # Filter the messages by sender and subject in code
+                filtered_messages = [
+                    msg
+                    for msg in messages
+                    if msg.get("from", {}).get("emailAddress", {}).get("address")
+                    == sender
+                    and subject in msg.get("subject", "")
+                ]
+                response["value"] = filtered_messages
+                return response
+
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                if show_error:
+                    logger.error(
+                        "Cannot retrieve emails for user -> %s; status -> %s; error -> %s",
+                        user_id,
+                        response.status_code,
+                        response.text,
+                    )
+                else:
+                    logger.warning(
+                        "Cannot retrieve emails for user -> %s; status -> %s; warning -> %s",
+                        user_id,
+                        response.status_code,
+                        response.text,
+                    )
+                return None
+
+    # end method definition
+
+    def get_mail_body(self, user_id: str, email_id: str) -> str:
+        """Get full email body for a given email ID
+           This requires Mail.Read Application permissions for the Azure App being used.
+
+        Args:
+            user_id (str): M365 ID of the user
+            email_id (str): M365 ID of the email
+        Returns:
+            str: Email body or None of the request fails.
+        """
+
+        request_url = (
+            self.config()["usersUrl"]
+            + "/"
+            + user_id
+            + "/messages/"
+            + email_id
+            + "/$value"
+        )
+
+        request_header = self.request_header()
+
+        retries = 0
+        while True:
+            response = requests.get(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
+            if response.ok:
+                return response.content.decode("utf-8")
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Cannot retrieve emails body for user -> %s and email -> %s; status -> %s; error -> %s",
+                    user_id,
+                    email_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def extract_url_from_message_body(
+        self,
+        message_body: str,
+        search_pattern: str,
+        multi_line: bool = False,
+        multi_line_end_marker: str = "%3D",
+        line_end_marker: str = "=",
+        replacements: list | None = None,
+    ) -> str | None:
+        """Parse the email body to extract (a potentially multi-line) URL from the body.
+
+        Args:
+            message_body (str): Text of the Email body
+            search_pattern (str): Pattern thatneeds to be in first line of the URL. This
+                                  makes sure it is the right URL we are looking for.
+            multi_line (bool, optional): Is the URL spread over multiple lines?. Defaults to False.
+            multi_line_end_marker (str, optional): If it is a multi-line URL, what marks the end
+                                                   of the URL in the last line? Defaults to "%3D".
+            line_end_marker (str, optional): What makrs the end of lines 1-(n-1)? Defaults to "=".
+        Returns:
+            str: URL text thathas been extracted.
+        """
+
+        if not message_body:
+            return None
+
+        # Split all the lines after a CRLF:
+        lines = [line.strip() for line in message_body.split("\r\n")]
+
+        # Filter out the complete URL from the extracted URLs
+        found = False
+
+        url = ""
+
+        for line in lines:
+            if found:
+                # Remove line end marker - many times a "="
+                if line.endswith(line_end_marker):
+                    line = line[:-1]
+                for replacement in replacements:
+                    line = line.replace(replacement["from"], replacement["to"])
+                # We consider an empty line after we found the URL to indicate the end of the URL:
+                if line == "":
+                    break
+                url += line
+            if multi_line and line.endswith(multi_line_end_marker):
+                break
+            if not search_pattern in line:
+                continue
+            # Fine https:// in the current line:
+            index = line.find("https://")
+            if index == -1:
+                continue
+            # If there's any text in front of https in that line cut it:
+            line = line[index:]
+            # Remove line end marker - many times a "="
+            if line.endswith(line_end_marker):
+                line = line[:-1]
+            for replacement in replacements:
+                line = line.replace(replacement["from"], replacement["to"])
+            found = True
+            url += line
+            if not multi_line:
+                break
+
+        return url
+
+    # end method definition
+
+    def delete_mail(self, user_id: str, email_id: str) -> dict | None:
+        """Delete email from inbox of a given user and a given email ID.
+           This requires Mail.ReadWrite Application permissions for the Azure App being used.
+
+        Args:
+            user_id (str): M365 ID of the user
+            email_id (str): M365 ID of the email
+        Returns:
+            dict: Email or None of the request fails.
+        """
+
+        request_url = (
+            self.config()["usersUrl"] + "/" + user_id + "/messages/" + email_id
+        )
+
+        request_header = self.request_header()
+
+        retries = 0
+        while True:
+            response = requests.delete(
+                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            )
+            if response.ok:
+                return self.parse_request_response(response)
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                request_header = self.request_header()
+                retries += 1
+            elif response.status_code in [502, 503, 504] and retries < 3:
+                logger.warning(
+                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                    response.status_code,
+                    (retries + 1) * 60,
+                )
+                time.sleep((retries + 1) * 60)
+                retries += 1
+            else:
+                logger.error(
+                    "Cannot delete email -> %s from inbox of user -> %s; status -> %s; error -> %s",
+                    email_id,
+                    user_id,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+    # end method definition
+
+    def email_verification(
+        self,
+        user_email: str,
+        sender: str,
+        subject: str,
+        url_search_pattern: str,
+        line_end_marker: str = "=",
+        multi_line: bool = True,
+        multi_line_end_marker: str = "%3D",
+        replacements: list | None = None,
+        max_retries: int = 6,
+        use_browser_automation: bool = False,
+        password: str = "",
+        password_field_id: str = "",
+        password_confirmation_field_id: str = "",
+        password_submit_xpath: str = "",
+        terms_of_service_xpath: str = "",
+    ) -> bool:
+        """Process email verification
+
+        Args:
+            user_email (str): Email address of user recieving the verification mail.
+            sender (str): Email sender (address)
+            subject (str): Email subject to look for (can be substring)
+            url_search_pattern (str): String the URL needs to contain to identify it.
+            multi_line_end_marker (str): If the URL spans multiple lines this is the "end" marker for the last line.
+            replacements (list): if the URL needs some treatment these replacements can be applied.
+        Result:
+            bool: True = Success, False = Failure
+        """
+
+        # Determine the M365 user for the current user by
+        # the email address:
+        m365_user = self.get_user(user_email=user_email)
+        m365_user_id = self.get_result_value(m365_user, "id")
+        if not m365_user_id:
+            logger.warning("Cannot find M365 user -> %s", user_email)
+            return False
+
+        if replacements is None:
+            replacements = [{"from": "=3D", "to": "="}]
+
+        retries = 0
+        while retries < max_retries:
+            response = self.get_mail(
+                user_id=m365_user_id,
+                sender=sender,
+                subject=subject,
+                show_error=False,
+            )
+            if response and response["value"]:
+                emails = response["value"]
+                # potentially there may be multiple matching emails,
+                # we want the most recent one (from today):
+                latest_email = max(emails, key=lambda x: x["receivedDateTime"])
+                # Extract just the date:
+                latest_email_date = latest_email["receivedDateTime"].split("T")[0]
+                # Get the current date (today):
+                today_date = datetime.today().strftime("%Y-%m-%d")
+                # We do a sanity check here: the verification mail should be from today,
+                # otherwise we assume it is an old mail and we need to wait for the
+                # new verification mail to yet arrive:
+                if latest_email_date != today_date:
+                    logger.info(
+                        "Verification email not yet received (latest mail from -> %s). Waiting %s seconds...",
+                        latest_email_date,
+                        10 * (retries + 1),
+                    )
+                    time.sleep(10 * (retries + 1))
+                    retries += 1
+                    continue
+                email_id = latest_email["id"]
+                # The full email body needs to be loaded with a separate REST call:
+                body_text = self.get_mail_body(user_id=m365_user_id, email_id=email_id)
+                # Extract the verification URL.
+                if body_text:
+                    url = self.extract_url_from_message_body(
+                        message_body=body_text,
+                        search_pattern=url_search_pattern,
+                        line_end_marker=line_end_marker,
+                        multi_line=multi_line,
+                        multi_line_end_marker=multi_line_end_marker,
+                        replacements=replacements,
+                    )
+                else:
+                    url = ""
+                if not url:
+                    logger.warning("Cannot find verification link in the email body!")
+                    return False
+                # Simulate a "click" on this URL:
+                if use_browser_automation:
+                    # Core Share needs a full browser:
+                    browser_automation_object = BrowserAutomation(
+                        take_screenshots=True,
+                        automation_name="email-verification",
+                    )
+                    logger.info(
+                        "Open URL -> %s to verify account or email change (using browser automation)",
+                        url,
+                    )
+                    success = browser_automation_object.get_page(url)
+                    if success:
+                        user_interaction_required = False
+                        logger.info(
+                            "Successfully opened URL. Browser title is -> '%s'.",
+                            browser_automation_object.get_title(),
+                        )
+                        if password_field_id:
+                            password_field = browser_automation_object.find_elem(
+                                find_elem=password_field_id, show_error=False
+                            )
+                            if password_field:
+                                # The subsequent processing is only required if
+                                # the returned page requests a password change:
+                                user_interaction_required = True
+                                logger.info(
+                                    "Found password field on returned page - it seems email verification requests password entry!"
+                                )
+                                result = browser_automation_object.find_elem_and_set(
+                                    find_elem=password_field_id,
+                                    elem_value=password,
+                                    is_sensitive=True,
+                                )
+                                if not result:
+                                    logger.error(
+                                        "Failed to enter password in field -> '%s'",
+                                        password_field_id,
+                                    )
+                                    success = False
+                            else:
+                                logger.info(
+                                    "No user interaction required (no password change or terms of service acceptance)."
+                                )
+                        if user_interaction_required and password_confirmation_field_id:
+                            password_confirm_field = (
+                                browser_automation_object.find_elem(
+                                    find_elem=password_confirmation_field_id,
+                                    show_error=False,
+                                )
+                            )
+                            if password_confirm_field:
+                                logger.info(
+                                    "Found password confirmation field on returned page - it seems email verification requests consecutive password entry!"
+                                )
+                                result = browser_automation_object.find_elem_and_set(
+                                    find_elem=password_confirmation_field_id,
+                                    elem_value=password,
+                                    is_sensitive=True,
+                                )
+                                if not result:
+                                    logger.error(
+                                        "Failed to enter password in field -> '%s'",
+                                        password_confirmation_field_id,
+                                    )
+                                    success = False
+                        if user_interaction_required and password_submit_xpath:
+                            password_submit_button = (
+                                browser_automation_object.find_elem(
+                                    find_elem=password_submit_xpath,
+                                    find_method="xpath",
+                                    show_error=False,
+                                )
+                            )
+                            if password_submit_button:
+                                logger.info(
+                                    "Submit password change dialog with button -> '%s' (found with XPath -> %s)",
+                                    password_submit_button.text,
+                                    password_submit_xpath,
+                                )
+                                result = browser_automation_object.find_elem_and_click(
+                                    find_elem=password_submit_xpath, find_method="xpath"
+                                )
+                                if not result:
+                                    logger.error(
+                                        "Failed to press submit button -> %s",
+                                        password_submit_xpath,
+                                    )
+                                    success = False
+                            # TODO is this sleep required? The Terms of service dialog has some weird animation
+                            # which may require this. It seems it is rtequired!
+                            time.sleep(1)
+                            terms_accept_button = browser_automation_object.find_elem(
+                                find_elem=terms_of_service_xpath,
+                                find_method="xpath",
+                                show_error=False,
+                            )
+                            if terms_accept_button:
+                                logger.info(
+                                    "Accept terms of service with button -> '%s' (found with XPath -> %s)",
+                                    terms_accept_button.text,
+                                    terms_of_service_xpath,
+                                )
+                                result = browser_automation_object.find_elem_and_click(
+                                    find_elem=terms_of_service_xpath,
+                                    find_method="xpath",
+                                )
+                                if not result:
+                                    logger.error(
+                                        "Failed to accept terms of service with button -> '%s'",
+                                        terms_accept_button.text,
+                                    )
+                                    success = False
+                            else:
+                                logger.info("No Terms of Service acceptance required.")
+                # end if use_browser_automation
+                else:
+                    # Salesforce (other than Core Share) is OK with the simple HTTP GET request:
+                    logger.info("Open URL -> %s to verify account or email change", url)
+                    response = self._http_object.http_request(url=url, method="GET")
+                    success = response and response.ok
+
+                if success:
+                    logger.info("Remove email from inbox of user -> %s...", user_email)
+                    response = self.delete_mail(user_id=m365_user_id, email_id=email_id)
+                    if not response:
+                        logger.warning(
+                            "Couldn't remove the mail from the inbox of user -> %s",
+                            user_email,
+                        )
+                    # We have success now and can break from the while loop
+                    return True
+                else:
+                    logger.error(
+                        "Failed to process e-mail verification for user -> %s",
+                        user_email,
+                    )
+                    return False
+            # end if response and response["value"]
+            else:
+                logger.info(
+                    "Verification email not yet received (no mails with sender -> %s and subject -> '%s' found). Waiting %s seconds...",
+                    sender,
+                    subject,
+                    10 * (retries + 1),
+                )
+                time.sleep(10 * (retries + 1))
+                retries += 1
+        # end while
+
+        logger.warning(
+            "Verification mail for user -> %s has not arrived in time.", user_email
+        )
+
+        return False
 
     # end method definition

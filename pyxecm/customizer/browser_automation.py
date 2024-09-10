@@ -9,6 +9,7 @@ Methods:
 __init__ : class initializer. Start the browser session.
 set_chrome_options: Sets chrome options for Selenium. Chrome options for headless browser is enabled
 get_page: Load a page into the browser based on a given URL.
+find_elem: Find an page element
 find_elem_and_click: Find an page element and click it
 find_elem_and_set: Find an page element and fill it with a new text.
 find_element_and_download: Clicks a page element to initiate a download.
@@ -31,12 +32,17 @@ try:
     from selenium.webdriver.chrome.options import Options
     from selenium import webdriver
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.action_chains import ActionChains
+    from selenium.webdriver.remote.webelement import WebElement
     from selenium.common.exceptions import (
         WebDriverException,
         NoSuchElementException,
         ElementNotInteractableException,
         ElementClickInterceptedException,
+        TimeoutException,
+        MoveTargetOutOfBoundsException,
     )
+
 except ModuleNotFoundError as module_exception:
     logger.warning("Module selenium is not installed")
 
@@ -48,11 +54,14 @@ except ModuleNotFoundError as module_exception:
 
         ID: str = ""
 
+    class WebElement:
+        """Dummy class to avoid errors if selenium module cannot be imported"""
+
 
 try:
     import chromedriver_autoinstaller
 except ModuleNotFoundError as module_exception:
-    logger.warning("Module chromedriver_autoinstaller is not installed")
+    logger.warning("Module chromedriver_autoinstaller is not installed!")
 
 
 class BrowserAutomation:
@@ -60,9 +69,9 @@ class BrowserAutomation:
 
     def __init__(
         self,
-        base_url: str,
-        user_name: str,
-        user_password: str,
+        base_url: str = "",
+        user_name: str = "",
+        user_password: str = "",
         download_directory: str = "/tmp",
         take_screenshots: bool = False,
         automation_name: str = "screen",
@@ -81,7 +90,7 @@ class BrowserAutomation:
             automation_name
         )
 
-        if self.take_screenshots:
+        if self.take_screenshots and not os.path.exists(self.screenshot_directory):
             os.makedirs(self.screenshot_directory)
         chromedriver_autoinstaller.install()
         self.browser = webdriver.Chrome(options=self.set_chrome_options())
@@ -128,7 +137,7 @@ class BrowserAutomation:
         screenshot_file = "{}/{}-{}.png".format(
             self.screenshot_directory, self.screenshot_names, self.screen_counter
         )
-        logger.info("Save browser screenshot to -> %s", screenshot_file)
+        logger.debug("Save browser screenshot to -> %s", screenshot_file)
         result = self.browser.get_screenshot_as_file(screenshot_file)
         self.screen_counter += 1
 
@@ -146,13 +155,13 @@ class BrowserAutomation:
         page_url = self.base_url + url
 
         try:
-            logger.info("Load page -> %s", page_url)
+            logger.debug("Load page -> %s", page_url)
             self.browser.get(page_url)
         except WebDriverException as exception:
             logger.error("Cannot load page -> %s; error -> %s", page_url, exception)
             return False
 
-        logger.info("Page title after get page -> %s", self.browser.title)
+        logger.debug("Page title after get page -> %s", self.browser.title)
 
         if self.take_screenshots:
             self.take_screenshot()
@@ -161,14 +170,62 @@ class BrowserAutomation:
 
     # end method definition
 
-    def find_elem_and_click(self, find_elem: str, find_method: str = By.ID) -> bool:
-        """Find an page element and click it.
+    def get_title(self) -> str:
+        """Get the browser title. This is handy to validate a certain page is loaded after get_page()
+
+        Returns:
+            str: Title of the browser window
+        """
+
+        if not self.browser:
+            logger.error("Browser not initialized!")
+            return None
+
+        return self.browser.title
+
+    # end method definition
+
+    def scroll_to_element(self, element: WebElement):
+        """Scroll an element into view to make it clickable
+
+        Args:
+            element (WebElement): Web element that has been identified before
+        """
+
+        if not element:
+            logger.error("Undefined element!")
+            return
+
+        try:
+            actions = ActionChains(self.browser)
+            actions.move_to_element(element).perform()
+        except NoSuchElementException:
+            logger.error("Element not found in the DOM")
+        except TimeoutException:
+            logger.error("Timed out waiting for the element to be present or visible")
+        except ElementNotInteractableException:
+            logger.error("Element is not interactable!")
+        except MoveTargetOutOfBoundsException:
+            logger.error("Element is out of bounds!")
+        except WebDriverException as e:
+            logger.error("WebDriverException occurred -> %s", str(e))
+
+    # end method definition
+
+    def find_elem(
+        self,
+        find_elem: str,
+        find_method: str = By.ID,
+        show_error: bool = True,
+    ) -> WebElement:
+        """Find an page element.
 
         Args:
             find_elem (str): name of the page element
-            find_method (str): either By.ID, By.NAME, By.CLASS_NAME, BY.XPATH
+            find_method (str, optional): either By.ID, By.NAME, By.CLASS_NAME, BY.XPATH
+            show_error (bool, optional): show an error if the element is not found or not clickable
         Returns:
-            bool: True if successful, False otherwise
+            WebElement: web element or None in case an error occured.
         """
 
         # We don't want to expose class "By" outside this module,
@@ -183,30 +240,99 @@ class BrowserAutomation:
             find_method = By.XPATH
         else:
             logger.error("Unsupported find method!")
-            return False
+            return None
 
         try:
             elem = self.browser.find_element(by=find_method, value=find_elem)
         except NoSuchElementException as exception:
+            if show_error:
+                logger.error(
+                    "Cannot find page element -> %s by -> %s; error -> %s",
+                    find_elem,
+                    find_method,
+                    exception,
+                )
+                return None
+            else:
+                logger.warning(
+                    "Cannot find page element -> %s by -> %s",
+                    find_elem,
+                    find_method,
+                )
+                return None
+        except TimeoutException as exception:
             logger.error(
-                "Cannot find page element -> %s by -> %s; error -> %s",
-                find_elem,
-                find_method,
+                "Timed out waiting for the element to be present or visible; error -> %s",
                 exception,
             )
+            return None
+        except ElementNotInteractableException as exception:
+            logger.error("Element is not interactable!; error -> %s", exception)
+            return None
+        except MoveTargetOutOfBoundsException:
+            logger.error("Element is out of bounds!")
+            return None
+        except WebDriverException as e:
+            logger.error("WebDriverException occurred -> %s", str(e))
+            return None
+
+        logger.debug("Found page element -> %s by -> %s", find_elem, find_method)
+
+        return elem
+
+    # end method definition
+
+    def find_elem_and_click(
+        self,
+        find_elem: str,
+        find_method: str = By.ID,
+        scroll_to_element: bool = True,
+        show_error: bool = True,
+    ) -> bool:
+        """Find an page element and click it.
+
+        Args:
+            find_elem (str): name of the page element
+            find_method (str, optional): either By.ID, By.NAME, By.CLASS_NAME, BY.XPATH
+            scroll_to_element (bool, optional): scroll the element into view
+            show_error (bool, optional): show an error if the element is not found or not clickable
+        Returns:
+            bool: True if successful, False otherwise
+        """
+
+        if not find_elem:
+            if show_error:
+                logger.error("Missing element name! Cannot find HTML element!")
+            else:
+                logger.warning("Missing element name! Cannot find HTML element!")
             return False
 
-        logger.info("Found element -> %s by -> %s", find_elem, find_method)
+        elem = self.find_elem(
+            find_elem=find_elem, find_method=find_method, show_error=show_error
+        )
+
+        if not elem:
+            return not show_error
 
         try:
-            elem.click()
-        except ElementClickInterceptedException as exception:
-            logger.error(
-                "Cannot click page element -> %s; error -> %s", find_elem, exception
-            )
-            return False
+            if scroll_to_element:
+                self.scroll_to_element(elem)
 
-        logger.info("Successfully clicked element -> %s", find_elem)
+            elem.click()
+        except (
+            ElementClickInterceptedException,
+            ElementNotInteractableException,
+        ) as exception:
+            if show_error:
+                logger.error(
+                    "Cannot click page element -> %s; error -> %s", find_elem, exception
+                )
+                return False
+            else:
+                logger.warning("Cannot click page element -> %s", find_elem)
+                return True
+
+        logger.debug("Successfully clicked element -> %s", find_elem)
 
         if self.take_screenshots:
             self.take_screenshot()
@@ -227,42 +353,23 @@ class BrowserAutomation:
         Args:
             find_elem (str): name of the page element
             elem_value (str): new text string for the page element
-            find_method (str): either By.ID, By.NAME, By.CLASS_NAME, or By.XPATH
+            find_method (str, optional): either By.ID, By.NAME, By.CLASS_NAME, or By.XPATH
+            is_sensitive (bool, optional): True for suppressing sensitive information in logging
         Returns:
             bool: True if successful, False otherwise
         """
 
-        # We don't want to expose class "By" outside this module,
-        # so we map the string values to the By class values:
-        if find_method == "id":
-            find_method = By.ID
-        elif find_method == "name":
-            find_method = By.NAME
-        elif find_method == "class_name":
-            find_method = By.CLASS_NAME
-        elif find_method == "xpath":
-            find_method = By.XPATH
-        else:
-            logger.error("Unsupported find method!")
-            return False
+        elem = self.find_elem(
+            find_elem=find_elem, find_method=find_method, show_error=True
+        )
 
-        logger.info("Try to find element -> %s by -> %s...", find_elem, find_method)
-
-        try:
-            elem = self.browser.find_element(find_method, find_elem)
-        except NoSuchElementException as exception:
-            logger.error(
-                "Cannot find page element -> %s by -> %s; error -> %s",
-                find_elem,
-                find_method,
-                exception,
-            )
+        if not elem:
             return False
 
         if not is_sensitive:
-            logger.info("Set element -> %s to value -> %s...", find_elem, elem_value)
+            logger.debug("Set element -> %s to value -> %s...", find_elem, elem_value)
         else:
-            logger.info("Set element -> %s to value -> <sensitive>...", find_elem)
+            logger.debug("Set element -> %s to value -> <sensitive>...", find_elem)
 
         try:
             elem.clear()  # clear existing text in the input field
@@ -322,13 +429,16 @@ class BrowserAutomation:
         user_field: str = "otds_username",
         password_field: str = "otds_password",
         login_button: str = "loginbutton",
+        page: str = "",
     ) -> bool:
         """Login to target system via the browser"""
 
         self.logged_in = False
 
         if (
-            not self.get_page()  # assuming the base URL leads towards the login page
+            not self.get_page(
+                url=page
+            )  # assuming the base URL leads towards the login page
             or not self.find_elem_and_set(
                 find_elem=user_field, elem_value=self.user_name
             )
@@ -346,7 +456,7 @@ class BrowserAutomation:
             )
             return False
 
-        logger.info("Page title after login -> %s", self.browser.title)
+        logger.debug("Page title after login -> %s", self.browser.title)
 
         # Some special handling for Salesforce login:
         if "Verify" in self.browser.title:
@@ -375,7 +485,7 @@ class BrowserAutomation:
             wait_time (float): time in seconds to wait
         """
 
-        logger.info("Implicit wait for max -> %s seconds...", str(wait_time))
+        logger.debug("Implicit wait for max -> %s seconds...", str(wait_time))
         self.browser.implicitly_wait(wait_time)
 
     def end_session(self):

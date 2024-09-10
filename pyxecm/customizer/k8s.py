@@ -263,7 +263,7 @@ class K8s:
         if not pod:
             logger.error("Pod -> %s does not exist", pod_name)
 
-        logger.info("Execute command -> %s in pod -> %s", command, pod_name)
+        logger.debug("Execute command -> %s in pod -> %s", command, pod_name)
 
         retry_counter = 1
 
@@ -292,7 +292,7 @@ class K8s:
                 )
                 retry_counter = retry_counter + 1
                 exception = exc
-                logger.info("Wait %s seconds before next retry...", str(time_retry))
+                logger.debug("Wait %s seconds before next retry...", str(time_retry))
                 time.sleep(time_retry)
                 continue
 
@@ -371,17 +371,17 @@ class K8s:
             got_response = False
             response.update(timeout=timeout)
             if response.peek_stdout():
-                logger.info(response.read_stdout().replace("\n", " "))
+                logger.debug(response.read_stdout().replace("\n", " "))
                 got_response = True
             if response.peek_stderr():
                 if write_stderr_to_error_log:
                     logger.error(response.read_stderr().replace("\n", " "))
                 else:
-                    logger.info(response.read_stderr().replace("\n", " "))
+                    logger.debug(response.read_stderr().replace("\n", " "))
                 got_response = True
             if commands:
                 command = commands.pop(0)
-                logger.info("Execute command -> %s in pod -> %s", command, pod_name)
+                logger.debug("Execute command -> %s in pod -> %s", command, pod_name)
                 response.write_stdin(command + "\n")
             else:
                 # We continue as long as we get some response during timeout period
@@ -888,7 +888,7 @@ class K8s:
                 backend = path.backend
                 service = backend.service
 
-                logger.info(
+                logger.debug(
                     "Replace backend service -> %s (%s) with new backend service -> %s (%s)",
                     service.name,
                     service.port.number,

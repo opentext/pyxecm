@@ -1,6 +1,6 @@
 site_name: pyxecm
 
-site_url: https://example.com/
+site_url: https://opentext.github.io/pyxecm/
 
 theme:
   name: "material"
@@ -53,12 +53,16 @@ nav:
       - Archive Center (OTAC): pyxecm/otac.md
       - Intelligent Viewing (OTIV): pyxecm/otiv.md
       - PowerDocs (OTPD): pyxecm/otpd.md
+      - Media Management (OTMM): pyxecm/otmm.md
+      - Core Share: pyxecm/coreshare.md           
   - Customizer Python Classes:
       - Payload: pyxecm/payload.md
       - Customizer: pyxecm/customizer.md
       - Browser Automation: pyxecm/browser.md
       - K8s: pyxecm/k8s.md
       - Microsoft 365: pyxecm/m365.md
+      - SuccessFactors: pyxecm/successfactors.md
+      - Salesforce: pyxecm/salesforce.md
       - SAP: pyxecm/sap.md
       - Translate: pyxecm/translate.md
   - Helper Python Classes:

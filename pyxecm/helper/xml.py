@@ -3,6 +3,10 @@
 Class: XML
 Methods:
 
+load_xml_file: Load an XML file into a Python list of dictionaries
+load_xml_files_from_directory: Load all XML files from a directory that matches defined file names
+                               then using the XPath to identify a set of elements and convert them
+                               into a Python list of dictionaries.
 get_xml_element: Retrieve an XML Element from a string using an XPath expression
 modify_xml_element: Update the text (= content) of an XML element
 search_setting: Search a JSON-like setting inside an XML text telement
@@ -21,10 +25,12 @@ __email__ = "mdiefenb@opentext.com"
 import logging
 import os
 import re
+import fnmatch
 
 # we need lxml instead of stadard xml.etree to have xpath capabilities!
 from lxml import etree
 import xmltodict
+import zipfile
 
 # import xml.etree.ElementTree as etree
 from pyxecm.helper.assoc import Assoc
@@ -33,7 +39,129 @@ logger = logging.getLogger("pyxecm.xml")
 
 
 class XML:
-    """XML Class to parse and update Extended ECM transport packages"""
+    """XML Class to handle XML processing, e.g. to parse and update Extended ECM transport packages"""
+
+    @classmethod
+    def load_xml_file(
+        cls, file_path: str, xpath: str, dir_name: str | None = None
+    ) -> list | None:
+        """Load an XML file into a Python list of dictionaries
+
+        Args:
+            file_path (str): Path to XML file
+            xpath (str): XPath to select sub-elements
+
+        Returns:
+            dict | None: _description_
+        """
+
+        try:
+
+            tree = etree.parse(file_path)
+            if not tree:
+                return []
+
+            # Perform the XPath query to select 'child' elements
+            elements = tree.xpath(xpath)  # Adjust XPath as needed
+
+            # Convert the selected elements to dictionaries
+            results = []
+            tag = xpath.split("/")[-1]
+            for element in elements:
+                element_dict = xmltodict.parse(etree.tostring(element))
+                if tag in element_dict:
+                    element_dict = element_dict[tag]
+                if dir_name:
+                    element_dict["directory"] = dir_name
+                results.append(element_dict)
+
+        except IOError as e:
+            logger.error("IO Error -> %s", str(e))
+        except etree.XMLSyntaxError as e:
+            logger.error("XML Syntax Error -> %s", str(e))
+        except etree.DocumentInvalid as e:
+            logger.error("Document Invalid -> %s", str(e))
+
+        return results
+
+    # end method definition
+
+    @classmethod
+    def load_xml_files_from_directory(
+        cls, path_to_root: str, filenames: list | None, xpath: str | None = None
+    ) -> list | None:
+        """Load all XML files from a directory that matches defined file names
+           then using the XPath to identify a set of elements and convert them
+           into a Python list of dictionaries.
+
+        Args:
+            path_to_root (str): Path to the root element of the
+                                directory structure
+            filenames (list): list of filenames. If empty all filenames ending
+                              with ".xml" are used.
+            xpath (str, optional): XPath to the elements we want to select
+
+        Returns:
+            list: List of dictionaries
+        """
+
+        try:
+
+            # Check if the provided path is a directory
+            if not os.path.isdir(path_to_root) and not path_to_root.endswith(".zip"):
+                logger.error(
+                    "The provided path '%s' is not a valid directory or Zip file.",
+                    path_to_root,
+                )
+                return False
+
+            if path_to_root.endswith(".zip"):
+                zip_file_folder = os.path.splitext(path_to_root)[0]
+                if not os.path.exists(zip_file_folder):
+                    logger.info(
+                        "Unzipping -> '%s' into folder -> '%s'...",
+                        path_to_root,
+                        zip_file_folder,
+                    )
+                    with zipfile.ZipFile(path_to_root, "r") as zfile:
+                        zfile.extractall(zip_file_folder)
+                else:
+                    logger.info(
+                        "Zip file is already extracted (path -> '%s' exists). Reusing extracted data...",
+                        zip_file_folder,
+                    )
+                path_to_root = zip_file_folder
+
+            results = []
+
+            # Walk through the directory
+            for root, _, files in os.walk(path_to_root):
+                for file_data in files:
+                    file_path = os.path.join(root, file_data)
+                    file_size = os.path.getsize(file_path)
+                    file_name = os.path.basename(file_path)
+                    dir_name = os.path.dirname(file_path)
+
+                    if any(
+                        fnmatch.fnmatch(file_path, pattern) for pattern in filenames
+                    ) and file_name.endswith(".xml"):
+                        logger.info(
+                            "Load XML file -> '%s' of size -> %s", file_path, file_size
+                        )
+                        results += cls.load_xml_file(
+                            file_path, xpath=xpath, dir_name=dir_name
+                        )
+
+        except NotADirectoryError as nde:
+            logger.error("Error -> %s", str(nde))
+        except FileNotFoundError as fnfe:
+            logger.error("Error -> %s", str(fnfe))
+        except PermissionError as pe:
+            logger.error("Error -> %s", str(pe))
+
+        return results
+
+    # end method definition
 
     @classmethod
     def get_xml_element(cls, xml_content: str, xpath: str):
@@ -55,6 +183,8 @@ class XML:
 
         return element
 
+    # end method definition
+
     @classmethod
     def modify_xml_element(cls, xml_content: str, xpath: str, new_value: str):
         """Update the text (= content) of an XML element
@@ -71,6 +201,8 @@ class XML:
             element.text = new_value
         else:
             logger.warning("XML Element -> %s not found.", xpath)
+
+    # end method definition
 
     @classmethod
     def search_setting(
@@ -122,6 +254,8 @@ class XML:
         else:
             return None
 
+    # end method definition
+
     @classmethod
     def replace_setting(
         cls,
@@ -170,6 +304,8 @@ class XML:
 
         return new_text
 
+    # end method definition
+
     @classmethod
     def replace_in_xml_files(
         cls,
@@ -216,8 +352,8 @@ class XML:
                     # if xpath is given we do an intelligent replacement
                     if xpath:
                         xml_modified = False
-                        logger.info("Replacement with xpath...")
-                        logger.info(
+                        logger.debug("Replacement with xpath...")
+                        logger.debug(
                             "XML path -> %s, setting -> %s, assoc element -> %s",
                             xpath,
                             setting,
@@ -225,17 +361,15 @@ class XML:
                         )
                         tree = etree.parse(file_path)
                         if not tree:
-                            logger.erro(
-                                "Cannot parse XML tree -> {}. Skipping...".format(
-                                    file_path
-                                )
+                            logger.error(
+                                "Cannot parse XML tree -> %s. Skipping...", file_path
                             )
                             continue
                         root = tree.getroot()
                         # find the matching XML elements using the given XPath:
                         elements = root.xpath(xpath)
                         if not elements:
-                            logger.info(
+                            logger.debug(
                                 "The XML file -> %s does not have any element with the given XML path -> %s. Skipping...",
                                 file_path,
                                 xpath,
@@ -243,7 +377,7 @@ class XML:
                             continue
                         for element in elements:
                             # as XPath returns a list
-                            logger.info(
+                            logger.debug(
                                 "Found XML element -> %s in file -> %s using xpath -> %s",
                                 element.tag,
                                 filename,
@@ -251,7 +385,7 @@ class XML:
                             )
                             # the simple case: replace the complete text of the XML element
                             if not setting and not assoc_elem:
-                                logger.info(
+                                logger.debug(
                                     "Replace complete text of XML element -> %s from -> %s to -> %s",
                                     xpath,
                                     element.text,
@@ -261,7 +395,7 @@ class XML:
                                 xml_modified = True
                             # In this case we want to set a complete value of a setting (basically replacing a whole line)
                             elif setting and not assoc_elem:
-                                logger.info(
+                                logger.debug(
                                     "Replace single setting -> %s in XML element -> %s with new value -> %s",
                                     setting,
                                     xpath,
@@ -271,7 +405,7 @@ class XML:
                                     element.text, setting, is_simple=True
                                 )
                                 if setting_value:
-                                    logger.info(
+                                    logger.debug(
                                         "Found existing setting value -> %s",
                                         setting_value,
                                     )
@@ -290,7 +424,7 @@ class XML:
                                         replace_setting = (
                                             '"' + setting + '":"' + replace_string + '"'
                                         )
-                                    logger.info(
+                                    logger.debug(
                                         "Replacement setting -> %s", replace_setting
                                     )
                                     element.text = cls.replace_setting(
@@ -308,7 +442,7 @@ class XML:
                                     continue
                             # in this case the text is just one assoc (no setting substructure)
                             elif not setting and assoc_elem:
-                                logger.info(
+                                logger.debug(
                                     "Replace single Assoc value -> %s in XML element -> %s with -> %s",
                                     assoc_elem,
                                     xpath,
@@ -322,13 +456,13 @@ class XML:
                                     assoc_string=assoc_string
                                 )
                                 logger.debug("Assoc Dict -> %s", str(assoc_dict))
-                                assoc_dict[
-                                    assoc_elem
-                                ] = replace_string  # escaped_replace_string
+                                assoc_dict[assoc_elem] = (
+                                    replace_string  # escaped_replace_string
+                                )
                                 assoc_string_new: str = Assoc.dict_to_string(
                                     assoc_dict=assoc_dict
                                 )
-                                logger.info(
+                                logger.debug(
                                     "Replace assoc with -> %s", assoc_string_new
                                 )
                                 element.text = assoc_string_new
@@ -336,7 +470,7 @@ class XML:
                                 xml_modified = True
                             # In this case we have multiple settings with their own assocs
                             elif setting and assoc_elem:
-                                logger.info(
+                                logger.debug(
                                     "Replace single Assoc value -> %s in setting -> %s in XML element -> %s with -> %s",
                                     assoc_elem,
                                     setting,
@@ -347,7 +481,7 @@ class XML:
                                     element.text, setting, is_simple=False
                                 )
                                 if setting_value:
-                                    logger.info(
+                                    logger.debug(
                                         "Found setting value -> %s", setting_value
                                     )
                                     assoc_string: str = Assoc.extract_assoc_string(
@@ -361,13 +495,13 @@ class XML:
                                     escaped_replace_string = replace_string.replace(
                                         "'", "\\\\\u0027"
                                     )
-                                    logger.info(
+                                    logger.debug(
                                         "Escaped replacement string -> %s",
                                         escaped_replace_string,
                                     )
-                                    assoc_dict[
-                                        assoc_elem
-                                    ] = escaped_replace_string  # escaped_replace_string
+                                    assoc_dict[assoc_elem] = (
+                                        escaped_replace_string  # escaped_replace_string
+                                    )
                                     assoc_string_new: str = Assoc.dict_to_string(
                                         assoc_dict=assoc_dict
                                     )
@@ -378,7 +512,7 @@ class XML:
                                     replace_setting = (
                                         '"' + setting + '":"' + assoc_string_new + '"'
                                     )
-                                    logger.info(
+                                    logger.debug(
                                         "Replacement setting -> %s", replace_setting
                                     )
                                     # here we need to apply a "trick". It is required
@@ -407,7 +541,7 @@ class XML:
                                     )
                                     continue
                         if xml_modified:
-                            logger.info(
+                            logger.debug(
                                 "XML tree has been modified. Write updated file -> %s...",
                                 file_path,
                             )
@@ -465,7 +599,7 @@ class XML:
                             found = True
                     # this is not using xpath - do a simple search and replace
                     else:
-                        logger.info("Replacement without xpath...")
+                        logger.debug("Replacement without xpath...")
                         with open(file_path, "r", encoding="UTF-8") as f:
                             contents = f.read()
                         # Replace all occurrences of the search pattern with the replace string
@@ -473,7 +607,7 @@ class XML:
 
                         # Write the updated contents to the file if there were replacements
                         if contents != new_contents:
-                            logger.info(
+                            logger.debug(
                                 "Found search string -> %s in XML file -> %s. Write updated file...",
                                 search_pattern,
                                 file_path,
@@ -484,6 +618,8 @@ class XML:
                             found = True
 
         return found
+
+    # end method definition
 
     @classmethod
     def extract_from_xml_files(
@@ -511,18 +647,18 @@ class XML:
                     # Read the contents of the file
                     file_path = os.path.join(subdir, filename)
 
-                    logger.info("Extraction with xpath -> %s...", xpath)
+                    logger.debug("Extraction with xpath -> %s...", xpath)
                     tree = etree.parse(file_path)
                     if not tree:
-                        logger.erro(
-                            "Cannot parse XML tree -> {}. Skipping...".format(file_path)
+                        logger.error(
+                            "Cannot parse XML file -> '%s'. Skipping...", file_path
                         )
                         continue
                     root = tree.getroot()
                     # find the matching XML elements using the given XPath:
                     elements = root.xpath(xpath)
                     if not elements:
-                        logger.info(
+                        logger.debug(
                             "The XML file -> %s does not have any element with the given XML path -> %s. Skipping...",
                             file_path,
                             xpath,
@@ -530,7 +666,7 @@ class XML:
                         continue
                     for element in elements:
                         # as XPath returns a list
-                        logger.info(
+                        logger.debug(
                             "Found XML element -> %s in file -> %s using xpath -> %s. Add it to result list.",
                             element.tag,
                             filename,
@@ -551,4 +687,4 @@ class XML:
 
         return extracted_data_list
 
-        # end method definition
+    # end method definition

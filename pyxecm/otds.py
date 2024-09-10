@@ -213,6 +213,8 @@ class OTDS:
         """
         return self._config
 
+    # end method definition
+
     def cookie(self) -> dict:
         """Returns the login cookie of OTDS.
            This is set by the authenticate() method
@@ -221,6 +223,8 @@ class OTDS:
             dict: OTDS cookie
         """
         return self._cookie
+
+    # end method definition
 
     def credentials(self) -> dict:
         """Returns the credentials (username + password)
@@ -233,6 +237,8 @@ class OTDS:
             "password": self.config()["password"],
         }
 
+    # end method definition
+
     def base_url(self) -> str:
         """Returns the base URL of OTDS
 
@@ -240,6 +246,8 @@ class OTDS:
             str: base URL
         """
         return self.config()["baseUrl"]
+
+    # end method definition
 
     def rest_url(self) -> str:
         """Returns the REST URL of OTDS
@@ -249,6 +257,8 @@ class OTDS:
         """
         return self.config()["restUrl"]
 
+    # end method definition
+
     def credential_url(self) -> str:
         """Returns the Credentials URL of OTDS
 
@@ -256,6 +266,8 @@ class OTDS:
             str: Credentials URL
         """
         return self.config()["credentialUrl"]
+
+    # end method definition
 
     def auth_handler_url(self) -> str:
         """Returns the Auth Handler URL of OTDS
@@ -265,6 +277,8 @@ class OTDS:
         """
         return self.config()["authHandlerUrl"]
 
+    # end method definition
+
     def partition_url(self) -> str:
         """Returns the Partition URL of OTDS
 
@@ -272,6 +286,8 @@ class OTDS:
             str: Partition URL
         """
         return self.config()["partitionUrl"]
+
+    # end method definition
 
     def access_role_url(self) -> str:
         """Returns the Access Role URL of OTDS
@@ -281,6 +297,8 @@ class OTDS:
         """
         return self.config()["accessRoleUrl"]
 
+    # end method definition
+
     def oauth_client_url(self) -> str:
         """Returns the OAuth Client URL of OTDS
 
@@ -288,6 +306,8 @@ class OTDS:
             str: OAuth Client URL
         """
         return self.config()["oauthClientUrl"]
+
+    # end method definition
 
     def resource_url(self) -> str:
         """Returns the Resource URL of OTDS
@@ -297,6 +317,8 @@ class OTDS:
         """
         return self.config()["resourceUrl"]
 
+    # end method definition
+
     def license_url(self) -> str:
         """Returns the License URL of OTDS
 
@@ -304,6 +326,8 @@ class OTDS:
             str: License URL
         """
         return self.config()["licenseUrl"]
+
+    # end method definition
 
     def token_url(self) -> str:
         """Returns the Token URL of OTDS
@@ -313,6 +337,8 @@ class OTDS:
         """
         return self.config()["tokenUrl"]
 
+    # end method definition
+
     def users_url(self) -> str:
         """Returns the Users URL of OTDS
 
@@ -320,6 +346,8 @@ class OTDS:
             str: Users URL
         """
         return self.config()["usersUrl"]
+
+    # end method definition
 
     def groups_url(self) -> str:
         """Returns the Groups URL of OTDS
@@ -329,6 +357,8 @@ class OTDS:
         """
         return self.config()["groupsUrl"]
 
+    # end method definition
+
     def system_config_url(self) -> str:
         """Returns the System Config URL of OTDS
 
@@ -337,6 +367,8 @@ class OTDS:
         """
         return self.config()["systemConfigUrl"]
 
+    # end method definition
+
     def consolidation_url(self) -> str:
         """Returns the Consolidation URL of OTDS
 
@@ -344,6 +376,8 @@ class OTDS:
             str: Consolidation URL
         """
         return self.config()["consolidationUrl"]
+
+    # end method definition
 
     def parse_request_response(
         self,
@@ -396,7 +430,7 @@ class OTDS:
 
         # Already authenticated and session still valid?
         if self._cookie and not revalidate:
-            logger.info(
+            logger.debug(
                 "Session still valid - return existing cookie -> %s",
                 str(self._cookie),
             )
@@ -404,7 +438,7 @@ class OTDS:
 
         otds_ticket = "NotSet"
 
-        logger.info("Requesting OTDS ticket from -> %s", self.credential_url())
+        logger.debug("Requesting OTDS ticket from -> %s", self.credential_url())
 
         response = None
         try:
@@ -429,7 +463,7 @@ class OTDS:
                 return None
             else:
                 otds_ticket = authenticate_dict["ticket"]
-                logger.info("Ticket -> %s", otds_ticket)
+                logger.debug("Ticket -> %s", otds_ticket)
         else:
             logger.error("Failed to request an OTDS ticket; error -> %s", response.text)
             return None
@@ -462,7 +496,7 @@ class OTDS:
             dict: Request response (dictionary) or None if the REST call fails
         """
 
-        logger.info("Reading license file -> %s...", path_to_license_file)
+        logger.debug("Reading license file -> %s...", path_to_license_file)
         try:
             with open(path_to_license_file, "rt", encoding="UTF-8") as license_file:
                 license_content = license_file.read()
@@ -491,14 +525,14 @@ class OTDS:
             if existing_license:
                 request_url += "/" + existing_license[0]["id"]
             else:
-                logger.info(
+                logger.debug(
                     "No existing license for resource -> %s found - adding a new license...",
                     resource_id,
                 )
                 # change strategy to create a new license:
                 update = False
 
-        logger.info(
+        logger.debug(
             "Adding product license -> %s for product -> %s to resource -> %s; calling -> %s",
             path_to_license_file,
             product_description,
@@ -530,7 +564,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -574,7 +608,7 @@ class OTDS:
             + "&validOnly=false"
         )
 
-        logger.info(
+        logger.debug(
             "Get license for resource -> %s; calling -> %s", resource_id, request_url
         )
 
@@ -593,7 +627,7 @@ class OTDS:
                 return response_dict["licenseObjects"]["_licenses"]
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -619,7 +653,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.license_url(), license_id)
 
-        logger.info(
+        logger.debug(
             "Deleting product license -> %s from resource -> %s; calling -> %s",
             license_id,
             resource_id,
@@ -638,7 +672,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -707,7 +741,7 @@ class OTDS:
 
         request_url = self.license_url() + "/object/" + license_location
 
-        logger.info(
+        logger.debug(
             "Assign license feature -> %s of license -> %s associated with resource -> %s to user -> %s; calling -> %s",
             license_feature,
             license_location,
@@ -726,7 +760,7 @@ class OTDS:
                 timeout=None,
             )
             if response.ok:
-                logger.info(
+                logger.debug(
                     "Added license feature -> %s for user -> %s",
                     license_feature,
                     user_id,
@@ -734,7 +768,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -812,7 +846,7 @@ class OTDS:
 
         request_url = self.license_url() + "/object/" + license_location
 
-        logger.info(
+        logger.debug(
             "Assign license feature -> %s of license -> %s associated with resource -> %s to partition -> %s; calling -> %s",
             license_feature,
             license_location,
@@ -831,7 +865,7 @@ class OTDS:
                 timeout=None,
             )
             if response.ok:
-                logger.info(
+                logger.debug(
                     "Added license feature -> %s for partition -> %s",
                     license_feature,
                     partition_name,
@@ -839,7 +873,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -925,7 +959,7 @@ class OTDS:
             + license_feature
         )
 
-        logger.info(
+        logger.debug(
             "Get licensed objects for license -> %s and license feature -> %s associated with resource -> %s; calling -> %s",
             license_name,
             license_feature,
@@ -945,7 +979,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1102,7 +1136,7 @@ class OTDS:
 
         request_url = self.partition_url()
 
-        logger.info(
+        logger.debug(
             "Adding user partition -> %s (%s); calling -> %s",
             name,
             description,
@@ -1122,7 +1156,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1149,7 +1183,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.config()["partitionUrl"], name)
 
-        logger.info("Getting user partition -> %s; calling -> %s", name, request_url)
+        logger.debug("Getting user partition -> %s; calling -> %s", name, request_url)
 
         retries = 0
         while True:
@@ -1163,7 +1197,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1213,7 +1247,7 @@ class OTDS:
 
         request_url = self.users_url()
 
-        logger.info(
+        logger.debug(
             "Adding user -> %s to partition -> %s; calling -> %s",
             name,
             partition,
@@ -1234,7 +1268,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1260,7 +1294,7 @@ class OTDS:
 
         request_url = self.users_url() + "/" + user_id + "@" + partition
 
-        logger.info(
+        logger.debug(
             "Get user -> %s in partition -> %s; calling -> %s",
             user_id,
             partition,
@@ -1279,7 +1313,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1317,14 +1351,14 @@ class OTDS:
             request_url += "?{}".format(encodedQuery)
 
         if partition:
-            logger.info(
+            logger.debug(
                 "Get all users in partition -> %s (limit -> %s); calling -> %s",
                 partition,
                 limit,
                 request_url,
             )
         else:
-            logger.info(
+            logger.debug(
                 "Get all users (limit -> %s); calling -> %s",
                 limit,
                 request_url,
@@ -1342,7 +1376,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1390,7 +1424,7 @@ class OTDS:
 
         request_url = self.users_url() + "/" + user_id
 
-        logger.info(
+        logger.debug(
             "Update user -> %s attribute -> %s to value -> %s; calling -> %s",
             user_id,
             attribute_name,
@@ -1411,9 +1445,12 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
+            elif response.status_code == 404:
+                logger.warning("User does not exist -> %s", user_id)
+                return None
             else:
                 logger.error(
                     "Failed to update user -> %s; error -> %s (%s)",
@@ -1437,7 +1474,7 @@ class OTDS:
 
         request_url = self.users_url() + "/" + user_id + "@" + partition
 
-        logger.info(
+        logger.debug(
             "Delete user -> %s in partition -> %s; calling -> %s",
             user_id,
             partition,
@@ -1456,7 +1493,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1484,7 +1521,7 @@ class OTDS:
 
         request_url = "{}/{}/password".format(self.users_url(), user_id)
 
-        logger.info(
+        logger.debug(
             "Resetting password for user -> %s; calling -> %s", user_id, request_url
         )
 
@@ -1501,7 +1538,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1534,7 +1571,7 @@ class OTDS:
 
         request_url = self.groups_url()
 
-        logger.info(
+        logger.debug(
             "Adding group -> %s to partition -> %s; calling -> %s",
             name,
             partition,
@@ -1555,7 +1592,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1596,7 +1633,7 @@ class OTDS:
 
         request_url = self.groups_url() + "/" + group
 
-        logger.info("Get group -> %s; calling -> %s", group, request_url)
+        logger.debug("Get group -> %s; calling -> %s", group, request_url)
 
         retries = 0
         while True:
@@ -1610,7 +1647,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1638,7 +1675,7 @@ class OTDS:
 
         request_url = self.users_url() + "/" + user + "/memberof"
 
-        logger.info(
+        logger.debug(
             "Adding user -> %s to group -> %s; calling -> %s", user, group, request_url
         )
 
@@ -1655,7 +1692,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1684,7 +1721,7 @@ class OTDS:
 
         request_url = self.groups_url() + "/" + group + "/memberof"
 
-        logger.info(
+        logger.debug(
             "Adding group -> %s to parent group -> %s; calling -> %s",
             group,
             parent_group,
@@ -1705,7 +1742,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1751,7 +1788,7 @@ class OTDS:
 
         request_url = self.config()["resourceUrl"]
 
-        logger.info(
+        logger.debug(
             "Adding resource -> %s (%s); calling -> %s", name, description, request_url
         )
 
@@ -1768,7 +1805,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1794,7 +1831,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.config()["resourceUrl"], name)
 
-        logger.info("Retrieving resource -> %s; calling -> %s", name, request_url)
+        logger.debug("Retrieving resource -> %s; calling -> %s", name, request_url)
 
         retries = 0
         while True:
@@ -1808,7 +1845,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1821,7 +1858,7 @@ class OTDS:
                         response.text,
                     )
                 else:
-                    logger.info("Resource -> %s not found.", name)
+                    logger.debug("Resource -> %s not found.", name)
                 return None
 
     # end method definition
@@ -1841,7 +1878,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.config()["resourceUrl"], name)
 
-        logger.info("Updating resource -> %s; calling -> %s", name, request_url)
+        logger.debug("Updating resource -> %s; calling -> %s", name, request_url)
 
         retries = 0
         while True:
@@ -1856,7 +1893,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1869,7 +1906,7 @@ class OTDS:
                         response.text,
                     )
                 else:
-                    logger.info("Resource -> %s not found.", name)
+                    logger.debug("Resource -> %s not found.", name)
                 return None
 
     # end method definition
@@ -1887,7 +1924,7 @@ class OTDS:
 
         request_url = "{}/{}/activate".format(self.config()["resourceUrl"], resource_id)
 
-        logger.info(
+        logger.debug(
             "Activating resource -> %s; calling -> %s", resource_id, request_url
         )
 
@@ -1904,7 +1941,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1929,7 +1966,7 @@ class OTDS:
 
         request_url = self.config()["accessRoleUrl"]
 
-        logger.info("Retrieving access roles; calling -> %s", request_url)
+        logger.debug("Retrieving access roles; calling -> %s", request_url)
 
         retries = 0
         while True:
@@ -1943,7 +1980,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -1967,7 +2004,7 @@ class OTDS:
 
         request_url = self.config()["accessRoleUrl"] + "/" + access_role
 
-        logger.info(
+        logger.debug(
             "Retrieving access role -> %s; calling -> %s", access_role, request_url
         )
 
@@ -1983,7 +2020,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2020,7 +2057,7 @@ class OTDS:
             self.config()["accessRoleUrl"], access_role
         )
 
-        logger.info(
+        logger.debug(
             "Add user partition -> %s to access role -> %s; calling -> %s",
             partition,
             access_role,
@@ -2039,7 +2076,7 @@ class OTDS:
             if response.ok:
                 return True
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2079,14 +2116,14 @@ class OTDS:
         accessRoleUsers = accessRolesGetResponse["accessRoleMembers"]["users"]
         for user in accessRoleUsers:
             if user["displayName"] == user_id:
-                logger.info(
+                logger.debug(
                     "User -> %s already added to access role -> %s",
                     user_id,
                     access_role,
                 )
                 return True
 
-        logger.info(
+        logger.debug(
             "User -> %s is not yet in access role -> %s - adding...",
             user_id,
             access_role,
@@ -2099,7 +2136,7 @@ class OTDS:
             self.config()["accessRoleUrl"], access_role
         )
 
-        logger.info(
+        logger.debug(
             "Add user -> %s to access role -> %s; calling -> %s",
             user_id,
             access_role,
@@ -2118,7 +2155,7 @@ class OTDS:
             if response.ok:
                 return True
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2157,12 +2194,12 @@ class OTDS:
         accessRoleGroups = accessRolesGetResponse["accessRoleMembers"]["groups"]
         for accessRoleGroup in accessRoleGroups:
             if accessRoleGroup["name"] == group:
-                logger.info(
+                logger.debug(
                     "Group -> %s already added to access role -> %s", group, access_role
                 )
                 return True
 
-        logger.info(
+        logger.debug(
             "Group -> %s is not yet in access role -> %s - adding...",
             group,
             access_role,
@@ -2175,7 +2212,7 @@ class OTDS:
             self.config()["accessRoleUrl"], access_role
         )
 
-        logger.info(
+        logger.debug(
             "Add group -> %s to access role -> %s; calling -> %s",
             group,
             access_role,
@@ -2194,7 +2231,7 @@ class OTDS:
             if response.ok:
                 return True
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2237,7 +2274,7 @@ class OTDS:
 
         request_url = "{}/{}/attributes".format(self.config()["accessRoleUrl"], name)
 
-        logger.info(
+        logger.debug(
             "Update access role -> %s with attributes -> %s; calling -> %s",
             name,
             accessRolePutBodyJson,
@@ -2257,7 +2294,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2293,7 +2330,7 @@ class OTDS:
         request_url = "{}/system_attributes".format(self.config()["systemConfigUrl"])
 
         if description:
-            logger.info(
+            logger.debug(
                 "Add system attribute -> %s (%s) with value -> %s; calling -> %s",
                 name,
                 description,
@@ -2301,7 +2338,7 @@ class OTDS:
                 request_url,
             )
         else:
-            logger.info(
+            logger.debug(
                 "Add system attribute -> %s with value -> %s; calling -> %s",
                 name,
                 value,
@@ -2321,7 +2358,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2347,7 +2384,7 @@ class OTDS:
 
         request_url = "{}/whitelist".format(self.config()["systemConfigUrl"])
 
-        logger.info("Retrieving trusted sites; calling -> %s", request_url)
+        logger.debug("Retrieving trusted sites; calling -> %s", request_url)
 
         retries = 0
         while True:
@@ -2361,7 +2398,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2396,7 +2433,7 @@ class OTDS:
 
         request_url = "{}/whitelist".format(self.config()["systemConfigUrl"])
 
-        logger.info("Add trusted site -> %s; calling -> %s", trusted_site, request_url)
+        logger.debug("Add trusted site -> %s; calling -> %s", trusted_site, request_url)
 
         response = requests.put(
             url=request_url,
@@ -2484,7 +2521,7 @@ class OTDS:
 
         request_url = "{}/audit".format(self.config()["systemConfigUrl"])
 
-        logger.info("Enable audit; calling -> %s", request_url)
+        logger.debug("Enable audit; calling -> %s", request_url)
 
         response = requests.put(
             url=request_url,
@@ -2605,7 +2642,7 @@ class OTDS:
 
         request_url = self.oauth_client_url()
 
-        logger.info(
+        logger.debug(
             "Adding oauth client -> %s (%s); calling -> %s",
             description,
             client_id,
@@ -2625,7 +2662,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2651,7 +2688,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.oauth_client_url(), client_id)
 
-        logger.info("Get oauth client -> %s; calling -> %s", client_id, request_url)
+        logger.debug("Get oauth client -> %s; calling -> %s", client_id, request_url)
 
         retries = 0
         while True:
@@ -2665,7 +2702,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2696,7 +2733,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.oauth_client_url(), client_id)
 
-        logger.info(
+        logger.debug(
             "Update OAuth client -> %s with -> %s; calling -> %s",
             client_id,
             updates,
@@ -2716,7 +2753,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2741,7 +2778,7 @@ class OTDS:
 
         request_url = self.config()["accessRoleUrl"] + "/" + access_role_name
 
-        logger.info(
+        logger.debug(
             "Get access role -> %s; calling -> %s", access_role_name, request_url
         )
 
@@ -2758,7 +2795,7 @@ class OTDS:
                 break
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -2823,7 +2860,7 @@ class OTDS:
         )
 
         if response.ok:
-            logger.info(
+            logger.debug(
                 "OauthClients partition successfully added to access role -> %s",
                 access_role_name,
             )
@@ -2925,7 +2962,7 @@ class OTDS:
 
         request_url = "{}/{}".format(self.auth_handler_url(), name)
 
-        logger.info(
+        logger.debug(
             "Getting authentication handler -> %s; calling -> %s", name, request_url
         )
 
@@ -2941,7 +2978,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -3070,12 +3107,214 @@ class OTDS:
                     "_description": "Specifies the SAML binding to use for the response to an AuthnRequest",
                     "_value": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
                 },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim1",
+                    "_name": "Claim 1",
+                    "_description": "SAML attribute/claim that should be mapped to an OTDS user attribute. This value is case sensitive. Note that mapped claims are only relevant if the corresponding account is auto-provisioned in OTDS. See the Administration Guide for details.",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute1",
+                    "_name": "OTDS Attribute 1",
+                    "_description": "OTDS user attribute to which the SAML attribute/claim should be mapped",
+                    "_value": "mail",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim2",
+                    "_name": "Claim 2",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute2",
+                    "_name": "OTDS Attribute 2",
+                    "_value": "givenName",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim3",
+                    "_name": "Claim 3",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute3",
+                    "_name": "OTDS Attribute 3",
+                    "_value": "sn",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim4",
+                    "_name": "Claim 4",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute4",
+                    "_name": "OTDS Attribute 4",
+                    "_value": "displayName",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim5",
+                    "_name": "Claim 5",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/streetaddress",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute5",
+                    "_name": "OTDS Attribute 5",
+                    "_value": "oTStreetAddress",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim6",
+                    "_name": "Claim 6",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/locality",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute6",
+                    "_name": "OTDS Attribute 6",
+                    "_value": "l",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim7",
+                    "_name": "Claim 7",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/stateorprovince",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute7",
+                    "_name": "OTDS Attribute 7",
+                    "_value": "st",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim8",
+                    "_name": "Claim 8",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/postalcode",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute8",
+                    "_name": "OTDS Attribute 8",
+                    "_value": "postalCode",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim9",
+                    "_name": "Claim 9",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/country",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute9",
+                    "_name": "OTDS Attribute 9",
+                    "_value": "countryName",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim10",
+                    "_name": "Claim 10",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/otherphone",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute10",
+                    "_name": "OTDS Attribute 10",
+                    "_value": "oTTelephoneNumber",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim11",
+                    "_name": "Claim 11",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/homephone",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute11",
+                    "_name": "OTDS Attribute 11",
+                    "_value": "homePhone",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim12",
+                    "_name": "Claim 12",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/dateofbirth",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute12",
+                    "_name": "OTDS Attribute 12",
+                    "_value": "birthDate",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim13",
+                    "_name": "Claim 13",
+                    "_value": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/gender",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute13",
+                    "_name": "OTDS Attribute 13",
+                    "_value": "gender",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim14",
+                    "_name": "Claim 14",
+                    "_value": "",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute14",
+                    "_name": "OTDS Attribute 14",
+                    "_value": "",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim15",
+                    "_name": "Claim 15",
+                    "_value": "http://schemas.xmlsoap.org/claims/Group",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute15",
+                    "_name": "OTDS Attribute 15",
+                    "_value": "oTMemberOf",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim16",
+                    "_name": "Claim 16",
+                    "_value": "http://schemas.xmlsoap.org/claims/Department",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute16",
+                    "_name": "OTDS Attribute 16",
+                    "_value": "oTDepartment",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim17",
+                    "_name": "Claim 17",
+                    "_value": "http://schemas.xmlsoap.org/claims/Title",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute17",
+                    "_name": "OTDS Attribute 17",
+                    "_value": "title",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim18",
+                    "_name": "Claim 18",
+                    "_value": "",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute18",
+                    "_name": "OTDS Attribute 18",
+                    "_value": "",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim19",
+                    "_name": "Claim 19",
+                    "_value": "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute19",
+                    "_name": "OTDS Attribute 19",
+                    "_value": "oTMemberOf",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claim20",
+                    "_name": "Claim 20",
+                    "_value": "",
+                },
+                {
+                    "_key": "com.opentext.otds.as.drivers.saml.claimAttribute20",
+                    "_name": "OTDS Attribute 20",
+                    "_value": "",
+                },
             ],
         }
 
         request_url = self.auth_handler_url()
 
-        logger.info(
+        logger.debug(
             "Adding SAML auth handler -> %s (%s); calling -> %s",
             name,
             description,
@@ -3095,7 +3334,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -3196,7 +3435,7 @@ class OTDS:
         # 2. Create the auth handler in OTDS
         request_url = self.auth_handler_url()
 
-        logger.info(
+        logger.debug(
             "Adding SAP auth handler -> %s (%s); calling -> %s",
             name,
             description,
@@ -3222,7 +3461,7 @@ class OTDS:
         # 3. Upload the certificate file:
 
         # Check that the certificate (PSE) file is readable:
-        logger.info("Reading certificate file -> %s...", certificate_file)
+        logger.debug("Reading certificate file -> %s...", certificate_file)
         try:
             # PSE files are binary - so we need to open with "rb":
             with open(certificate_file, "rb") as certFile:
@@ -3246,21 +3485,21 @@ class OTDS:
             certContentDecoded = base64.b64decode(certContent, validate=True)
             certContentEncoded = base64.b64encode(certContentDecoded).decode("utf-8")
             if certContentEncoded == certContent.decode("utf-8"):
-                logger.info(
+                logger.debug(
                     "Certificate file -> %s is base64 encoded", certificate_file
                 )
                 cert_file_encoded = True
             else:
                 cert_file_encoded = False
         except TypeError:
-            logger.info(
+            logger.debug(
                 "Certificate file -> %s is not base64 encoded", certificate_file
             )
             cert_file_encoded = False
 
         if cert_file_encoded:
             certificate_file = "/tmp/" + os.path.basename(certificate_file)
-            logger.info("Writing decoded certificate file -> %s...", certificate_file)
+            logger.debug("Writing decoded certificate file -> %s...", certificate_file)
             try:
                 # PSE files need to be binary - so we need to open with "wb":
                 with open(certificate_file, "wb") as certFile:
@@ -3289,7 +3528,7 @@ class OTDS:
 
         request_url = self.auth_handler_url() + "/" + name + "/files"
 
-        logger.info(
+        logger.debug(
             "Uploading certificate file -> %s for SAP auth handler -> %s (%s); calling -> %s",
             certificate_file,
             name,
@@ -3705,7 +3944,7 @@ class OTDS:
 
         request_url = self.auth_handler_url()
 
-        logger.info(
+        logger.debug(
             "Adding OAuth auth handler -> %s (%s); calling -> %s",
             name,
             description,
@@ -3725,7 +3964,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -3767,7 +4006,7 @@ class OTDS:
 
         request_url = "{}".format(self.consolidation_url())
 
-        logger.info(
+        logger.debug(
             "Consolidation of resource -> %s; calling -> %s", resource_dn, request_url
         )
 
@@ -3784,7 +4023,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -3825,7 +4064,7 @@ class OTDS:
 
         request_url = "{}/{}/impersonation".format(self.resource_url(), resource_name)
 
-        logger.info(
+        logger.debug(
             "Impersonation settings for resource -> %s; calling -> %s",
             resource_name,
             request_url,
@@ -3844,7 +4083,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -3884,7 +4123,7 @@ class OTDS:
 
         request_url = "{}/{}/impersonation".format(self.oauth_client_url(), client_id)
 
-        logger.info(
+        logger.debug(
             "Impersonation settings for OAuth Client -> %s; calling -> %s",
             client_id,
             request_url,
@@ -3903,7 +4142,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -3948,7 +4187,7 @@ class OTDS:
 
         request_url = "{}/passwordpolicy".format(self.config()["systemConfigUrl"])
 
-        logger.info("Getting password policy; calling -> %s", request_url)
+        logger.debug("Getting password policy; calling -> %s", request_url)
 
         retries = 0
         while True:
@@ -3962,7 +4201,7 @@ class OTDS:
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
@@ -4009,7 +4248,7 @@ class OTDS:
 
         request_url = "{}/passwordpolicy".format(self.config()["systemConfigUrl"])
 
-        logger.info(
+        logger.debug(
             "Update password policy with these new values -> %s; calling -> %s",
             update_values,
             request_url,
@@ -4028,7 +4267,7 @@ class OTDS:
                 return True
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:

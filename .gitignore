@@ -1,0 +1,11 @@
+public/
+dist/
+pyxecm.egg-info/
+__pycache__/
+.venv/
+debug/
+__pycache__
+build/
+.env
+pyxecm/.vscode/
+~$*

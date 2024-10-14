@@ -32,6 +32,8 @@ dependencies = [
   'lxml',
   'openpyxl',
   'pandas',
+  'python-magic',
+  'websockets',
 ]
 keywords = [
   "opentext",

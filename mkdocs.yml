@@ -55,6 +55,7 @@ nav:
       - PowerDocs (OTPD): pyxecm/otpd.md
       - Media Management (OTMM): pyxecm/otmm.md
       - Core Share: pyxecm/coreshare.md           
+      - Aviator Search: pyxecm/avts.md         
   - Customizer Python Classes:
       - Payload: pyxecm/payload.md
       - Customizer: pyxecm/customizer.md

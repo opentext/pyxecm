@@ -2,30 +2,30 @@
 Payload Module to implement functions to process Terrarium payload
 
 This code processes a YAML payload file that includes various settings:
-* WebHooks (URLs) to call (e.g. to start-up external services or applications)
-* OTDS partitions and OAuth clients
-* OTDS trusted sites and system attributes
-* OTDS licenses
-* Extended ECM users and groups
-* Microsoft 365 user, groups, and teams
-* Salesforce users and groups
-* SuccessFactors users
-* Core Share users and groups
-* Extended ECM Admin Settings (LLConfig)
-* Extended ECM External System Connections (SAP, SuccessFactors, ...)
-* Extended ECM Transport Packages (scenarios and demo content)
-* Extended ECM CS Applications (typically based on Web Reports)
-* Extended ECM Web Reports to run
-* Extended ECM Workspaces to create (incl. members, workspace relationships)
-* Extended ECM User photos, user favorites and user settings
-* Extended ECM Items to create and permissions to apply
-* Extended ECM Items to rename
-* Extended ECM Documents to generate (from templates)
-* Extended ECM Assignments (used e.g. for Government scenario)
-* Extended ECM Records Management settings, Security Clearance, Supplemental Markings, and Holds
-* SAP RFCs (Remote Function Calls)
-* Commands to execute in Kubernetes Pods
-* Browser Automations (for things that cannot be automated via an API)
+- WebHooks (URLs) to call (e.g. to start-up external services or applications)
+- OTDS partitions and OAuth clients
+- OTDS trusted sites and system attributes
+- OTDS licenses
+- Extended ECM users and groups
+- Microsoft 365 user, groups, and teams
+- Salesforce users and groups
+- SuccessFactors users
+- Core Share users and groups
+- Extended ECM Admin Settings (LLConfig)
+- Extended ECM External System Connections (SAP, SuccessFactors, ...)
+- Extended ECM Transport Packages (scenarios and demo content)
+- Extended ECM CS Applications (typically based on Web Reports)
+- Extended ECM Web Reports to run
+- Extended ECM Workspaces to create (incl. members, workspace relationships)
+- Extended ECM User photos, user favorites and user settings
+- Extended ECM Items to create and permissions to apply
+- Extended ECM Items to rename
+- Extended ECM Documents to generate (from templates)
+- Extended ECM Assignments (used e.g. for Government scenario)
+- Extended ECM Records Management settings, Security Clearance, Supplemental Markings, and Holds
+- SAP RFCs (Remote Function Calls)
+- Commands to execute in Kubernetes Pods
+- Browser Automations (for things that cannot be automated via an API)
 
 This code typically runs in a container as part of the cloud automation.
 
@@ -65,7 +65,9 @@ determine_workspace_type_and_template_id: determine the IDs of type and template
 
 process_payload: process payload (main method)
 process_web_hooks: process list of web hooks
-process_partitions: process the OTDS partitions
+process_resources: process OTDS resources in payload and create them in OTDS
+process_synchronized_partition: process OTDS synchronized partitions in payload and create them in OTDS
+process_partitions: process OTDS partitions in payload and create them in OTDS
 process_partition_licenses: process the licenses that should be assigned to OTDS partitions
                             (this includes existing partitions)
 process_oauth_clients: process the OTDS OAuth clients
@@ -130,6 +132,7 @@ process_assignments: process assignments of workspaces / documents to users / gr
 process_user_licenses: process and apply licenses to all Extended ECM users (used for OTIV)
 process_exec_pod_commands: process Kubernetes pod commands
 process_document_generators: Generate documents for a defined workspace type based on template
+process_workflows: Initiate and process workflows for a defined workspace type and folder path
 process_browser_automations: process Selenium-based browser automation payload
 init_sap: initalize SAP object for RFC communication
 process_sap_rfcs: process SAP Remote Function Calls (RFC) to trigger automation in SAP S/4HANA
@@ -146,6 +149,8 @@ process_bulk_workspaces_synonym_lookup: Use a datasource to lookup the workspace
 process_bulk_workspaces_lookup: Use a combination of workspace name, workspace type, and workspace datasource
                                (using synonyms) to lookup the workspace name and ID
 process_bulk_workspace_relationships: Process workspaces in payload and bulk create them in Extended ECM (multi-threaded)
+get_bulk_workspace_relationship_endpoint: Determine the node ID of the workspace that is one of the endpoints
+                                          of the workspace relationship (either 'from' or 'to')
 process_bulk_workspace_relationships_worker: This is the thread worker to create workspaces relationships in bulk.
 prepare_category_data: Prepare the category information for a new or updated item (document or workspace)
 process_bulk_documents: Process bulkDocuments in payload and bulk create them in Extended ECM (multi-threaded)
@@ -175,15 +180,20 @@ import threading
 import traceback
 import copy
 import time
+from datetime import datetime, timedelta
 import fnmatch
-
 import base64
 import gzip
+from ast import literal_eval
+
+from dateutil.parser import parse
+
 import yaml
 import hcl2.api
 
+
 # OpenText specific modules:
-from pyxecm import OTAC, OTCS, OTDS, OTIV, OTMM, CoreShare
+from pyxecm import OTAC, OTCS, OTDS, OTIV, OTMM, CoreShare, OTAWP, AVTS
 from pyxecm.customizer.k8s import K8s
 from pyxecm.customizer.m365 import M365
 from pyxecm.customizer.sap import SAP
@@ -241,6 +251,7 @@ class Payload:
     _servicenow: ServiceNow | None
     _browser_automation: BrowserAutomation | None
     _custom_settings_dir = ""
+    _otawp: OTAWP | None
 
     # _payload_source (string): This is either path + filename of the yaml payload
     # or an path + filename of the Terraform HCL payload
@@ -271,6 +282,19 @@ class Payload:
     # - headers (dict, optional, default = {})
     _webhooks = []
     _webhooks_post = []
+
+    # _resources: List of OTDS resources. Each element
+    # is a dict with these keys:
+    # - enabled (bool, optional, default = True)
+    # - name (str, mandatory)
+    # - description (str, optional)
+    # - display_name (str, optional)
+    # - activate (bool, optional, default = True) - if a secret is provided the resource will automatically be activated
+    # - allow_impersonation (bool, optional, default = True)
+    # - resource_id (str, optional, default = None) - a predefined resource ID. If specified, also secrethas to be provided
+    # - secret (string, optional, default = None) - a predefined secret. Should be 24 characters long and should end with '=='
+    # - additional_payload (dict, optional)
+    _resources = []
 
     # _partitions: List of OTDS partitions (for users and groups). Each element
     # is a dict with these keys:
@@ -321,7 +345,7 @@ class Payload:
     # _trusted_sites: List of OTDS trasted sites. Each element
     # is a dict with these keys:
     # - enabled (bool, optional, default = True)
-    # - url (str)
+    # - url (str, mandatory)
     _trusted_sites = []
 
     # _system_attributes: List of OTDS System Attributes. Each element
@@ -568,6 +592,16 @@ class Payload:
     # - exec_as_user (str, optional, default = "")
     _doc_generators = []
 
+    # _workflows: List of workflow initiations inside workspace instances of a workspace type
+    # Each element is a dict with these keys:
+    # - enabled (bool, optional, default = True)
+    # - worklow_nickname (str, mandatory) - the nickname of the workflow
+    # - initiate_as_user (str, mandatory) - user that initiates the workflow
+    # - workspace_type (str, mandatory) - for each instance of the given workspace type a workflow is started
+    # - workspace_folder_path (list, optional) - the subfolder that contains the document the workflow is started with
+    # - attributes (list, optional) - the list of attributes (name, value) the workflow is started with
+    _workflows = []
+
     # _browser_automations: List of browser automation for things that can only be
     # automated via the web user interface. Each element is a dict with these keys:
     # - enabled (bool, optional, default = True)
@@ -643,8 +677,9 @@ class Payload:
     # - sn_password (str, optional, default = "")
     # - sn_client_id (str, optional, default = None)
     # - sn_client_secret (str, optional, default = None)
-    # - sn_table_name (str, optional, default = "u_kb_template_technical_article_public")
-    # - sn_query (str, optional, default = None)
+    # - sn_queries (list, mandatory if type = servicenow)
+    #   * sn_table_name (str, mandatory) - name of the ServiceNow database table for the query
+    #   * sn_query (str, mandatory) - query string
     # - sn_thread_number (int, optional, default = BULK_THREAD_NUMBER)
     # - sn_download_dir (str, optional, default = "/data/knowledgebase")
     # - otcs_hostname (str, mandatory if type = otcs)
@@ -658,8 +693,19 @@ class Payload:
     # - otcs_root_node_id (int, mandatory if type = otcs)
     # - otcs_filter_workspace_depth (int, optional, default = 0)
     # - otcs_filter_workspace_subtype (int, optional, default = 0)
-    # - otcs_filter_workspace_category (str, optional, default = None)
+    # - otcs_filter_workspace_category (str, optional, default = None) - name of the category the workspace needs to have
     # - otcs_filter_workspace_attributes (dict | list, optional, default = None)
+    #   * set (str, optional, default = None) - name of the attribute set
+    #   * row (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
+    #   * attribute (str, mandatory) - name of the attribute
+    #   * value (str, mandatory) - value the attribute should have to pass the filter
+    # - otcs_filter_item_depth (int, optional, default = None)
+    # - otcs_filter_item_category (str, optional, default = None) - name of the category the workspace needs to have
+    # - otcs_filter_item_attributes (dict | list, optional, default = None)
+    #   * set (str, optional, default = None) - name of the attribute set
+    #   * row (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
+    #   * attribute (str, mandatory) - name of the attribute
+    #   * value (str, mandatory) - value the attribute should have to pass the filter
     # - cleansings (dict, optional, default = {}) - the keys of this dict are the field names! The values of the dict are sub-dicts with these keys:
     #   * upper (bool, optional, default = False)
     #   * lower (bool, optional, default = False)
@@ -676,13 +722,21 @@ class Payload:
     #   * length (int, optional, default = None)
     #   * group_chars (str, optional, default = None)
     #   * group_separator (str, optional, default =".")
+    # - columns_to_add_list (list, optional, default = []): add a new column with list values. Each payload item is a dictionary with these keys:
+    #   * source_columns (str, mandatory) - names of the columns from which row values are taken from to create the list of string values
+    #   * name (str, mandatory) - name of the new column
+    # - columns_to_add_table (list, optional, default = []): add a new column with table values. Each payload item is a dictionary with these keys:
+    #   * source_columns (str, mandatory) - names of the columns from which row values are taken from to create a list of dictionary values. It is expected that the source columns already have list items or are strings with delimiter-separated values.
+    #   * name (str, mandatory) - name of the new column
+    #   * list_splitter (str, optional, default = ",")
     # - conditions (list, optional, default = []) - each list item is a dict with these keys:
     #   * field (str, mandatory)
     #   * value (str | bool | list, optional, default = None)
     # - explosions (list, optional, default = []) - each list item is a dict with these keys:
-    #   * explode_field (str | list, mandatory)
+    #   * explode_fields (str | list, mandatory)
     #   * flatten_fields (list, optional, default = [])
     #   * split_string_to_list (bool, optional, default = False)
+    #   * list_splitter (str, optional, default = ",;") - string with characters that are used to split a string into list items.
     # - name_column (str, optional, default = None)
     # - synonyms_column (str, optional, default = None)
     _bulk_datasources = []
@@ -692,8 +746,9 @@ class Payload:
     # - enabled (bool, optional, default = True)
     # - type_name (str, mandatory) - type of the workspace
     # - data_source (str, mandatory)
-    # - force_reload (bool, optional, default = True)
-    # - enforce_updates (bool, optional, default = False)
+    # - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
+    # - copy_data_source (bool, optional, default = False) - to avoid sideeffects for repeative usage of the data source
+    # - operations (list, optional, default = ["create"]) - possible values: "create", "update", "delete", "recreate" (delete existing + create new)
     # - unique (list, optional, default = []) - list of fields (columns) that should be unique -> deduplication
     # - sort (list, optional, default = []) - list of fields to sort the data frame by
     # - name (str, mandatory)
@@ -706,9 +761,11 @@ class Payload:
     #   * attribute (str, mandatory)
     #   * value (str, optional if value_field is specified, default = None)
     #   * value_field (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-    #   * value_type (str, optional, default = "string") - values can be string or list, if list then string with comma-separated values will be converted to a list
+    #   * value_type (str, optional, default = "string") - possible values: "string", "date", "list" and "table". If list then string with comma-separated values will be converted to a list.
+    #   * attribute_mapping (dict, optional, default = None) - only relevant for value_type = "table" - defines a mapping from the data frame column names to the category attribute names
     #   * list_splitter (str, optional, default = ";,")
     #   * lookup_data_source (str, optional, default = None)
+    #   * lookup_data_failure_drop (bool, optional, default = False) - should we clear / drop values that cannot be looked up?
     #   * is_key (bool,optional, default = False) - find document with old name. For this we expect a "key" value to be defined in the bulk workspace and one of the category / attribute item to be marked with "is_key" = True
     # - workspaces (dict, dynamically bult up, default = {}) - list of already generated workspaces
     # - external_create_date (str, optional, default = "")
@@ -728,17 +785,23 @@ class Payload:
     # - from_workspace_type (str, optional, default = None)
     # - from_workspace_name (str, optional, default = None)
     # - from_workspace_data_source (str, optional, default = None)
+    # - from_sub_workspace_name (str, optional, default = None) - if the related workspace is a sub-workspace
+    # - from_sub_workspace_path (list, optional, default = None) - the folder path under the main workspace where the sub-workspaces are located
     # - to_workspace (str, mandatory)
     # - to_workspace_type (str, optional, default = None)
     # - to_workspace_name (str, optional, default = None)
     # - to_workspace_data_source (str, optional, default = None)
-    # - relationship_type (str, optional, default = "child")
+    # - to_sub_workspace_name (str, optional, default = None) - if the related workspace is a sub-workspace
+    # - to_sub_workspace_path (list, optional, default = None) - the folder path under the main workspace where the sub-workspaces are located
+    # - type (str, optional, default = "child") - type of the relationship (defines if the _from_ workspace is the parent or the child)
     # - data_source (str, mandatory)
+    # - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
     # - copy_data_source (bool, optional, default = False) - to avoid sideeffects for repeative usage of the data source
     # - explosions (list, optional, default = []) - each list item is a dict with these keys:
-    #   * explode_field (str | list, mandatory)
+    #   * explode_fields (str | list, mandatory)
     #   * flatten_fields (list, optional, default = [])
     #   * split_string_to_list (bool, optional, default = False)
+    #   * list_splitter (str, optional, default = ",;") - string with characters that are used to split a string into list items.
     # - unique (list, optional, default = [])
     # - sort (list, optional, default = [])
     # - thread_number (int, optional, default = BULK_THREAD_NUMBER)
@@ -752,10 +815,16 @@ class Payload:
     # is a dict with these keys:
     # - enabled (bool, optional, default = True)
     # - data_source (str, mandatory)
+    # - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
+    # - copy_data_source (bool, optional, default = False) - to avoid sideeffects for repeative usage of the data source
     # - explosions (list of dicts, optional, default = [])
-    # - unique (list, optional, default = []) - list of fields (columns) that should be unique -> deduplication
+    #   * explode_fields (str | list, mandatory)
+    #   * flatten_fields (list, optional, default = [])
+    #   * split_string_to_list (bool, optional, default = False)
+    #   * list_splitter (str, optional, default = ",;") - string with characters that are used to split a string into list items.
+    # - unique (list, optional, default = []) - list of column names which values should be unique -> deduplication
     # - sort (list, optional, default = []) - list of fields to sort the data frame by
-    # - enforce_updates (bool, optional, default = False)
+    # - operations (list, optional, default = ["create"])
     # - name (str, mandatory) - can include placeholder surrounded by {...}
     # - name_alt (str, optional, default = None) - can include placeholder surrounded by {...}
     # - description (str, optional, default = None) - can include placeholder surrounded by {...}
@@ -777,9 +846,11 @@ class Payload:
     #   * attribute (str, mandatory)
     #   * value (str, optional if value_field is specified, default = None)
     #   * value_field (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-    #   * value_type (str, optional, default = "string") - values can be string or list, if list then string with comma-separated values will be converted to a list
+    #   * value_type (str, optional, default = "string") - possible values: "string", "date", "list" and "table". If list then string with comma-separated values will be converted to a list.
+    #   * attribute_mapping (dict, optional, default = None) - only relevant for value_type = "table" - defines a mapping from the data frame column names to the category attribute names
     #   * list_splitter (str, optional, default = ";,")
     #   * lookup_data_source (str, optional, default = None)
+    #   * lookup_data_failure_drop (bool, optional, default = False) - should we clear / drop values that cannot be looked up?
     #   * is_key (bool, optional, default = False) - find document is old name. For this we expect a "key" value to be defined for the bulk document and one of the category / attribute item to be marked with "is_key" = True
     # - thread_number (int, optional, default = BULK_THREAD_NUMBER)
     # - external_create_date (str, optional, default = "")
@@ -819,6 +890,9 @@ class Payload:
 
     _transport_extractions: list = []
     _transport_replacements: list = []
+    _otawpsection = []
+
+    _avts_repositories: list = []
 
     # Disable Status files
     upload_status_files: bool = True
@@ -842,6 +916,8 @@ class Payload:
         stop_on_error: bool = False,
         aviator_enabled: bool = False,
         upload_status_files: bool = True,
+        otawp_object: OTAWP | None = None,
+        avts_object: AVTS | None = None,
     ):
         """Initialize the Payload object
 
@@ -883,6 +959,7 @@ class Payload:
         self._otmm = None
         self._otcs_source = None
         self._pht = None  # the OpenText prodcut hierarchy
+        self._avts = avts_object
         self._browser_automation = browser_automation_object
         self._custom_settings_dir = custom_settings_dir
         self._placeholder_values = placeholder_values
@@ -891,6 +968,7 @@ class Payload:
         self._aviator_enabled = aviator_enabled
         self._http_object = HTTP()
         self.upload_status_files = upload_status_files
+        self._otawp = otawp_object
 
     # end method definition
 
@@ -900,7 +978,7 @@ class Payload:
             target(*args, **kwargs)
         except Exception as e:
             thread_name = threading.current_thread().name
-            logger.error("Thread %s: failed with exception %s", thread_name, e)
+            logger.error("Thread '%s': failed with exception -> %s", thread_name, e)
             logger.error(traceback.format_exc())
 
     # end method definition
@@ -1036,13 +1114,18 @@ class Payload:
         # Retrieve all the payload sections and store them in lists:
         self._webhooks = self.get_payload_section("webHooks")
         self._webhooks_post = self.get_payload_section("webHooksPost")
+        self._resources = self.get_payload_section("resources")
         self._partitions = self.get_payload_section("partitions")
+        self._synchronized_partition = self.get_payload_section("synchronizedPartitions")
         self._oauth_clients = self.get_payload_section("oauthClients")
         self._auth_handlers = self.get_payload_section("authHandlers")
         self._trusted_sites = self.get_payload_section("trustedSites")
         self._system_attributes = self.get_payload_section("systemAttributes")
         self._groups = self.get_payload_section("groups")
         self._users = self.get_payload_section("users")
+        if self._users:
+            # Check if multiple user instances should be created
+            self.init_payload_user_instances()
         self._admin_settings = self.get_payload_section("adminSettings")
         self._admin_settings_post = self.get_payload_section("adminSettingsPost")
         self._exec_pod_commands = self.get_payload_section("execPodCommands")
@@ -1085,12 +1168,50 @@ class Payload:
         )
         self._holds = self.get_payload_section("holds")
         self._doc_generators = self.get_payload_section("documentGenerators")
+        self._workflows = self.get_payload_section("workflows")
         self._browser_automations = self.get_payload_section("browserAutomations")
         self._browser_automations_post = self.get_payload_section(
             "browserAutomationsPost"
         )
-
+        self._otawpsection = self.get_payload_section("platformCustomConfig")
+        self._avts_repositories = self.get_payload_section("avtsRepositories")
         return self._payload
+
+    # end method definition
+
+    def init_payload_user_instances(self):
+        """Read setting for Multiple User instances"""
+
+        for dic in self._payload_sections:
+            if dic.get("name") == "users":
+                users_payload = dic
+                break
+        user_instances = users_payload.get("additional_instances", 0)
+
+        if user_instances == 0:
+            logger.info("No additional user instances configured (default = 0)")
+            return
+
+        i = 0
+
+        original_users = copy.deepcopy(self._users)
+        while i <= user_instances:
+            for user in copy.deepcopy(original_users):
+                user["name"] = user["name"] + "-" + str(i).zfill(2)
+                user["lastname"] = user["lastname"] + " " + str(i).zfill(2)
+                user["enable_sap"] = False
+                user["enable_o365"] = False
+                user["enable_core_share"] = False
+                user["enable_salesforce"] = False
+                user["enable_successfactors"] = False
+
+                logger.info("Creating additional user instance -> '%s'", user["name"])
+                logger.debug("Create user instance -> %s", user)
+                self._users.append(user)
+
+            i = i + 1
+
+        return
 
     # end method definition
 
@@ -1128,12 +1249,85 @@ class Payload:
 
     # end method definition
 
+    def ot_awp_create_project(self) -> bool:
+        """
+        Initiates the configuration of AppWorks projects.
+        This method is responsible for setting up the necessary configurations for AppWorks projects.
+        If the payload contains a `platformCustomConfig` section, it will execute the corresponding actions
+        to process and apply the custom configuration.
+
+        Returns:
+            bool: `True` on success, `False` on failure.
+        """
+
+        if self._otawpsection == []:
+            logger.info("OTAWP configuration not enabled")
+            return False
+
+        if self._otawpsection is not None:
+            platform = self._otawpsection.get("platform", {})
+            if platform is not None:
+                cws = platform.get("cws", {})
+                if cws is not None:
+                    workspaces = cws.get("workspaces", [])
+                    if workspaces is not None:
+                        ispod_running = self._k8s.verify_pod_status("appworks-0")
+                        logger.info(ispod_running)
+                        if ispod_running is False:
+                            return False
+                        self._otawp.authenticate(False)
+                        for workspace in workspaces:
+                            workspace_name = workspace.get("name")
+                            workspace_path = workspace.get("path")
+                            workspace_gui_id = workspace.get("workspaceGuiID")
+                            respose = self._otawp.create_workspace_with_retry(
+                                workspace_name, workspace_gui_id
+                            )
+                            if not self._otawp.validate_workspace_response(
+                                respose, workspace_name
+                            ):
+                                return False
+                            if not self._otawp.is_workspace_already_exists(
+                                respose, workspace_name
+                            ):
+                                self._otawp.sync_workspace(
+                                    workspace_name, workspace_gui_id
+                                )
+                                self._k8s.exec_pod_command(
+                                    "appworks-0",
+                                    [
+                                        "/bin/sh",
+                                        "-c",
+                                        f'cp -r "{workspace_path}/"* "/opt/appworks/cluster/shared/cws/sync/system/{workspace_name}"',
+                                    ],
+                                )
+                            self._otawp.sync_workspace(workspace_name, workspace_gui_id)
+                            projects = workspace.get("projects", [])
+                            if projects is not None:
+                                for project in projects:
+                                    if not self._otawp.publish_project(
+                                        workspace_name,
+                                        project.get("name"),
+                                        workspace_gui_id,
+                                        project.get("documentId"),
+                                    ):
+                                        return False
+
+                self._otawp.create_loanruntime_from_config_file(platform)
+            self._otawp.create_roles_from_config_file(self._otawpsection, self._otds)
+            self._otawp.create_users_from_config_file(self._otawpsection, self._otds)
+
+        return True
+
+    # end method definition
+
     def get_all_group_names(self) -> list:
         """Construct a list of all group name
 
         Returns:
             list: list of all group names
         """
+
         return [group.get("name") for group in self._groups]
 
     # end method definition
@@ -1345,7 +1539,7 @@ class Payload:
         payload_specific: bool = True,
         prefix: str = "success_",
     ) -> list | None:
-        """Get the status file and read it into a dictionary.
+        """Get the status file and read it into a list of dictionaries.
 
         Args:
             payload_section_name (str): name of the payload section. This
@@ -1356,7 +1550,7 @@ class Payload:
                                      payload file)
             prefix (str, optional): prefix of the file. Typically, either "success_" or "failure_"
         Returns:
-            dict: content of the status file as a dictionary or None in case of an error
+            list: content of the status file as a list of dictionaries or None in case of an error
         """
 
         logger.info(
@@ -1369,7 +1563,7 @@ class Payload:
         )  # read from Personal Workspace of Admin
         source_folder_id = self._otcs.get_result_value(response, "id")
         if not source_folder_id:
-            source_folder_id = 2004  # use Personal Workspace of Admin as fallback
+            source_folder_id = 2004  # use Personal Workspace ID of Admin as fallback
 
         file_name = self.get_status_file_name(
             payload_section_name=payload_section_name,
@@ -1384,18 +1578,8 @@ class Payload:
         if not status_file_id:
             logger.error("Cannot find status file -> '%s'", file_name)
             return None
-        content = self._otcs.get_document_content(status_file_id)
 
-        try:
-            json_data = json.loads(content.decode("utf-8"))
-            if isinstance(json_data, list):
-                return json_data
-            else:
-                logger.error("File content is in JSON format but not a list.")
-                return None
-        except json.JSONDecodeError as e:
-            logger.error("File content is not in valid JSON format; error -> %s", e)
-            return None
+        return self._otcs.get_json_document(status_file_id)
 
     # end method definition
 
@@ -1404,7 +1588,7 @@ class Payload:
         return self._payload
 
     def get_users(self) -> list:
-        """Get all useres"""
+        """Get all users"""
         return self._users
 
     def get_groups(self) -> list:
@@ -1797,7 +1981,7 @@ class Payload:
         response = self._otcs.get_workspace_by_type_and_name(
             type_name=workspace["type_name"], name=workspace["name"]
         )
-        workspace_id = self._otcs.get_result_value(response, "id")
+        workspace_id = self._otcs.get_result_value(response=response, key="id")
         if workspace_id:
             # Write nodeID back into the payload
             workspace["nodeId"] = workspace_id
@@ -1937,6 +2121,12 @@ class Payload:
 
         for payload_section in self._payload_sections:
             match payload_section["name"]:
+                case "avtsRepositories":
+                    self._log_header_callback("Process Aviator Search repositories")
+                    self.process_avts_repositories()
+                case "platformCustomConfig":
+                    self._log_header_callback("Process Create AppWorks workspaces")
+                    self.ot_awp_create_project()
                 case "webHooks":
                     self._log_header_callback("Process Web Hooks")
                     self.process_web_hooks(webhooks=self._webhooks)
@@ -1945,11 +2135,17 @@ class Payload:
                     self.process_web_hooks(
                         webhooks=self._webhooks_post, section_name="webHooksPost"
                     )
+                case "resources":
+                    self._log_header_callback("Process OTDS Resources")
+                    self.process_resources()
                 case "partitions":
                     self._log_header_callback("Process OTDS Partitions")
                     self.process_partitions()
                     self._log_header_callback("Assign OTCS Licenses to Partitions")
                     self.process_partition_licenses()
+                case "synchronizedPartitions":
+                    self._log_header_callback("Process OTDS synchronizedPartition")
+                    self.process_synchronized_partition()
                 case "oauthClients":
                     self._log_header_callback("Process OTDS OAuth Clients")
                     self.process_oauth_clients()
@@ -2162,9 +2358,15 @@ class Payload:
                     self._log_header_callback("Process Bulk Workspaces")
                     self.process_bulk_workspaces()
                 case "bulkWorkspaceRelationships":
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
                     self._log_header_callback("Process Bulk Workspace Relationships")
                     self.process_bulk_workspace_relationships()
                 case "bulkDocuments":
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
                     self._log_header_callback("Process Bulk Documents")
                     self.process_bulk_documents()
                 case "sapRFCs":
@@ -2252,6 +2454,17 @@ class Payload:
 
                     self._log_header_callback("Process Document Generators")
                     self.process_document_generators()
+                case "workflowInitiations":
+                    # If a payload file (e.g. additional ones) does not have
+                    # transportPackages then it can happen that the
+                    # self._workspace_types is not yet initialized. As we need
+                    # this structure for workflowInitiations we initialize it here:
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
+
+                    self._log_header_callback("Process Workflows")
+                    self.process_workflows()
                 case "browserAutomations":
                     self._log_header_callback("Process Browser Automations")
                     self.process_browser_automations(
@@ -2264,7 +2477,9 @@ class Payload:
                         section_name="browserAutomationsPost",
                     )
                 case "workspaceTypes":
-                    pass
+                    if not self._workspace_types:
+                        self._log_header_callback("Process Workspace Types")
+                        self.process_workspace_types()
                 case _:
                     logger.error(
                         "Illegal payload section name -> '%s' in payloadSections!",
@@ -2380,6 +2595,234 @@ class Payload:
 
     # end method definition
 
+    def process_resources(self, section_name: str = "resources") -> bool:
+        """Process OTDS resources in payload and create them in OTDS.
+
+        Args:
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections). This
+                                          name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        if not self._resources:
+            logger.info("Payload section -> '%s' is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        for resource in self._resources:
+            resource_name = resource.get("name")
+            if not resource_name:
+                logger.error("OTDS Resource does not have a name. Skipping...")
+                success = False
+                continue
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in resource and not resource["enabled"]:
+                logger.info(
+                    "Payload for OTDS Resource -> '%s' is disabled. Skipping...",
+                    resource_name,
+                )
+                continue
+
+            resource_description = resource.get("description", "")
+            display_name = resource.get("display_name", "")
+            additional_payload = resource.get("additional_payload", {})
+            activate_resource = resource.get("activate", True)
+            resource_id = resource.get("resource_id", None)
+            allow_impersonation = resource.get("allow_impersonation", True)
+            secret = resource.get("secret", None)
+
+            # Check if Partition does already exist
+            # (in an attempt to make the code idem-potent)
+            logger.info(
+                "Check if OTDS resource -> '%s' does already exist...", resource_name
+            )
+            response = self._otds.get_resource(name=resource_name, show_error=False)
+            if response:
+                logger.info(
+                    "OTDS Resource -> '%s' does already exist. Skipping...",
+                    resource_name,
+                )
+                continue
+
+            # Only continue if Partition does not exist already
+            logger.info("Resource -> '%s' does not exist. Creating...", resource_name)
+
+            response = self._otds.add_resource(
+                name=resource_name,
+                description=resource_description,
+                display_name=display_name,
+                allow_impersonation=allow_impersonation,
+                resource_id=resource_id,
+                secret=secret,
+                additional_payload=additional_payload,
+            )
+            if response:
+                logger.info("Added OTDS resource -> '%s'", resource_name)
+            else:
+                logger.error("Failed to add OTDS resource -> '%s'", resource_name)
+                success = False
+                continue
+
+            # If resource_id and secret are provided then the resource will
+            # automatically be activated.
+            if activate_resource and not secret:
+                resource_id = response["resourceID"]
+                logger.info(
+                    "Activate OTDS resource -> '%s' with ID -> %s...",
+                    resource_name,
+                    resource_id,
+                )
+                response = self._otds.activate_resource(resource_id=resource_id)
+
+        self.write_status_file(success, section_name, self._resources)
+
+        return success
+    
+    # end method definition
+    
+    def process_synchronized_partition(self, section_name: str = "synchronizedPartitions") -> bool:
+        """Process OTDS synchronizedPartitions in payload and create them in OTDS.
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+        
+        # check if section present, if not return True 
+        if not self._synchronized_partition:
+            logger.info("Payload section -> '%s' is empty. Skipping...", section_name)
+            return True
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+        
+        success = True
+
+        for partition in self._synchronized_partition:
+            partition_name = partition["spec"].get("profileName")
+            if not partition_name:
+                logger.error("synchronizedPartition does not have a profileName. Skipping...")
+                success = False
+                continue
+            
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in partition and not partition["enabled"]:
+                logger.info(
+                    "Payload for synchronizedPartitions -> '%s' is disabled. Skipping...",
+                    partition_name,
+                )
+                continue
+
+            partition_description = partition["spec"].get("description")
+
+            # Check if Partition does already exist
+            # (in an attempt to make the code idem-potent)
+            logger.info(
+                "Check if OTDS synchronizedPartition -> '%s' does already exist...", partition_name
+            )
+            response = self._otds.get_partition(partition_name, show_error=False)
+            if response:
+                logger.info(
+                    "synchronizedPartition -> '%s' does already exist. Skipping...", partition_name
+                )
+                continue
+
+            # Only continue if synchronized Partition does not exist already
+            logger.info("synchronizedPartition -> '%s' does not exist. Creating...", partition_name)
+
+            response = self._otds.add_synchronized_partition(partition_name, partition_description, partition["spec"])
+            if response:
+                logger.info("Added synchronized partition to OTDS-> '%s'", partition_name)
+            else:
+                logger.error("Failed to add synchronized partition to OTDS -> '%s'", partition_name)
+                success = False
+                continue
+
+            reponse = self._otds.import_synchronized_partition_members(partition_name)
+            if response:
+                logger.info("Imported members to synchronized partition to OTDS-> '%s'", partition_name)
+            else:
+                logger.error("Failed to Imported members to synchronized partition to OTDS -> '%s'", partition_name)
+                success = False
+                continue
+
+            access_role = partition.get("access_role")
+            if access_role:
+                response = self._otds.add_partition_to_access_role(
+                    access_role, partition_name
+                )
+                if response:
+                    logger.info(
+                        "Added OTDS partition -> '%s' to access role -> '%s'",
+                        partition_name,
+                        access_role,
+                    )
+                else:
+                    logger.error(
+                        "Failed to add OTDS partition -> '%s' to access role -> '%s'",
+                        partition_name,
+                        access_role,
+                    )
+                    success = False
+                    continue
+
+            # Partions may have an optional list of licenses in
+            # the payload. Assign the partition to all these licenses:
+            partition_specific_licenses = partition.get("licenses")
+            if partition_specific_licenses:
+                # We assume these licenses are Extended ECM licenses!
+                otcs_resource_name = self._otcs.config()["resource"]
+                otcs_resource = self._otds.get_resource(otcs_resource_name)
+                if not otcs_resource:
+                    logger.error(
+                        "Cannot find OTCS resource -> '%s'", otcs_resource_name
+                    )
+                    success = False
+                    continue
+                otcs_resource_id = otcs_resource["resourceID"]
+                license_name = "EXTENDED_ECM"
+                for license_feature in partition_specific_licenses:
+                    assigned_license = self._otds.assign_partition_to_license(
+                        partition_name,
+                        otcs_resource_id,
+                        license_feature,
+                        license_name,
+                    )
+
+                    if not assigned_license:
+                        logger.error(
+                            "Failed to assign partition -> '%s' to license feature -> '%s' of license -> '%s'!",
+                            partition_name,
+                            license_feature,
+                            license_name,
+                        )
+                        success = False
+                    else:
+                        logger.info(
+                            "Successfully assigned partition -> '%s' to license feature -> '%s' of license -> '%s'",
+                            partition_name,
+                            license_feature,
+                            license_name,
+                        )
+
+        self.write_status_file(success, section_name, self._partitions)
+
+        return success
+        
+    # end method definition
+    
     def process_partitions(self, section_name: str = "partitions") -> bool:
         """Process OTDS partitions in payload and create them in OTDS.
 
@@ -3038,9 +3481,9 @@ class Payload:
 
             response = self._otds.add_trusted_site(url)
             if response:
-                logger.info("Added OTDS trusted site -> %s", url)
+                logger.info("Added OTDS trusted site -> '%s'", url)
             else:
-                logger.error("Failed to add trusted site -> %s", url)
+                logger.error("Failed to add trusted site -> '%s'", url)
                 success = False
 
         self.write_status_file(success, section_name, self._trusted_sites)
@@ -3099,13 +3542,13 @@ class Payload:
             )
             if response:
                 logger.info(
-                    "Added OTDS system attribute -> '%s' with value -> %s",
+                    "Added OTDS system attribute -> '%s' with value -> '%s'",
                     attribute_name,
                     attribute_value,
                 )
             else:
                 logger.error(
-                    "Failed to add OTDS system attribute -> '%s' with value -> %s",
+                    "Failed to add OTDS system attribute -> '%s' with value -> '%s'",
                     attribute_name,
                     attribute_value,
                 )
@@ -3539,7 +3982,7 @@ class Payload:
                 )
             else:
                 logger.error(
-                    "Failed to create Salesforce group -> %s!",
+                    "Failed to create Salesforce group -> '%s'!",
                     group_name,
                 )
                 success = False
@@ -3549,7 +3992,7 @@ class Payload:
         for group in self._groups:
             if not "salesforce_id" in group:
                 logger.info(
-                    "Group -> %s does not have an Salesforce ID. Skipping...",
+                    "Group -> '%s' does not have an Salesforce ID. Skipping...",
                     group["name"],
                 )
                 # Not all groups may be enabled for Salesforce. This is not an error.
@@ -3900,6 +4343,11 @@ class Payload:
                         success = False
                 # for some unclear reason the user is not added to its base group in OTDS
                 # so we do this explicitly:
+                logger.info(
+                    "Add user -> '%s' to its base group -> '%s'",
+                    user["name"],
+                    user["base_group"],
+                )
                 response = self._otds.add_user_to_group(
                     user["name"], user["base_group"]
                 )
@@ -4409,7 +4857,7 @@ class Payload:
             # if the user does not have its own inbox) and click the
             # verification link...
 
-            if need_email_verification:
+            if need_email_verification and user.get("enable_o365", False):
                 logger.info(
                     "Processing Email verification for user -> '%s' (%s). Wait a few seconds to make sure verification mail in user's inbox...",
                     user_name,
@@ -4827,7 +5275,7 @@ class Payload:
             # if the user does not have its own inbox) and click the
             # verification link...
 
-            if need_email_verification:
+            if need_email_verification and user.get("enable_o365", False):
                 logger.info(
                     "Processing Email verification for user -> '%s' (%s). Wait a few seconds to make sure verification mail in user's inbox...",
                     user_name,
@@ -6140,17 +6588,18 @@ class Payload:
                 # update the payload dict with a "reachable" key/value pair:
                 if not self.check_external_system(external_system):
                     logger.warning(
-                       "External System connection -> '%s' (%s) is not reachable! Skipping to next external system...",
-                       system_name,
-                       system_type,
+                        "External System connection -> '%s' (%s) is not reachable! Skipping to next external system...",
+                        system_name,
+                        system_type,
                     )
                     success = False
                     continue
             else:
                 logger.info(
-                    "skip_connection_test is %s; Skipping external system check for %s...", 
+                    "skip_connection_test is %s; Skipping external system check for %s...",
                     skip_connection_test,
-                    system_name)
+                    system_name,
+                )
 
             # Read either username/password (BASIC) or client ID / secret (OAuth)
             match auth_method:
@@ -6395,7 +6844,7 @@ class Payload:
                 logger.error("Failed to deploy transport -> '%s'", name)
                 success = False
                 if self._stop_on_error:
-                    break
+                    raise Exception("STOP_ON_ERROR enabled -> Stopping execution")
             else:
                 logger.info("Successfully deployed transport -> '%s'", name)
                 # Save the extractions for later processing, e.g. in process_business_object_types()
@@ -8687,7 +9136,7 @@ class Payload:
                     workspace["nodeId"] = workspace_id
                 else:
                     logger.error(
-                        "Failed to create workspace -> '%s' of type -> %s!",
+                        "Failed to create workspace -> '%s' of type -> '%s'!",
                         name,
                         type_name,
                     )
@@ -8705,6 +9154,8 @@ class Payload:
                     # This is important to make the python container idem-potent.
                     response = self._otcs.get_workspace(workspace["nodeId"])
                     workspace["name"] = self._otcs.get_result_value(response, "name")
+                    # Also update the 'name' variable accordingly, as it is used below.
+                    name = workspace["name"]
 
                     logger.info(
                         "Successfully created workspace with final name -> '%s' and node ID -> %s",
@@ -8858,7 +9309,22 @@ class Payload:
                 str(index),
                 row["name"],
             )
-            success = self.process_workspace(workspace=row.dropna().to_dict())
+            # Convert the row to a dictionary - omitting any empty column:
+            workspace = row.dropna().to_dict()
+            # workspace is a mutable dictionary that may be updated
+            # by process_workspace():
+            success = self.process_workspace(workspace=workspace)
+            # We need to make sure the row (and the whole data frame)
+            # gets these updates back (and adds new columns such as "nodeId"):
+            for key, value in workspace.items():
+                row[key] = value  # This will update existing keys and add new ones
+            logger.debug("Final values of row %s -> %s", str(index), str(row))
+
+            # As iterrows() creates a copy of the data we need to
+            # write the changes back into the partition
+            partition.loc[index] = row
+
+            # row.update(pd.Series(workspace)) # this doesn't wortk as it is not adding new values
             if success:
                 result["success_counter"] += 1
             else:
@@ -8887,7 +9353,9 @@ class Payload:
             bool: True if payload has been processed without errors, False otherwise
 
         Side Effects:
-            Set workspace["nodeId] to the node ID of the created workspace
+            Set workspace["nodeId"] to the node ID of the created workspace and update
+            the workspace["name"] to the final name of the workspaces (which may be different
+            from the ones in the payload depending on workspace type configutrations)
         """
 
         if not self._workspaces:
@@ -8896,7 +9364,20 @@ class Payload:
 
         # If this payload section has been processed successfully before we
         # can return True and skip processing it once more:
-        if self.check_status_file(section_name):
+        if self.check_status_file(payload_section_name=section_name):
+
+            # Read the list of created workspaces from the json file in admin Home
+            # This is important in case of restart / rerun of customizer pod
+            # as this data structure is used later on for workspace relationship
+            # processing (and other) and the workspaces dictionaries have been
+            # updated with "nodeId" and "name" (the final names of the workspaces
+            # that can be different from the names in the payload)
+            logger.info(
+                "Re-Initialize workspace list from status file -> '%s' to have final names and node IDs...",
+                self.get_status_file_name(payload_section_name=section_name),
+            )
+            self._workspaces = self.get_status_file(section_name)
+
             return True
 
         success: bool = True
@@ -8908,6 +9389,16 @@ class Payload:
             results = []
 
             df = Data(self._workspaces)
+
+            # Add empty column for "nodeId" so that the worker threads can properly fill it:
+            df.get_data_frame()["nodeId"] = None
+
+            logger.info(
+                "Created a data frame with -> %s rows from the workspaces list with -> %s elements.",
+                str(len(df)),
+                str(len(self._workspaces)),
+            )
+            df.print_info()
 
             partitions = df.partitionate(THREAD_NUMBER)
 
@@ -8928,6 +9419,28 @@ class Payload:
                 logger.info("Waiting for Thread -> %s to complete...", str(thread.name))
                 thread.join()
                 logger.info("Thread -> %s has completed.", str(thread.name))
+
+            # As we have basically created a copy of self._workspaces into the Pandas
+            # data frame (see df = Data(...) above) and the workspace processing
+            # updates the workspaces data with "nodeID" and the final
+            # workspace names, we need to write the Pandas Data frame
+            # back into the self._workspaces data structure for further processing
+            # e.g. in the process_workspace_relationships. Otherwise the
+            # changes to "nodeId" or "name" would be lost. We need to do it
+            # in 2 steps as we want to avoid to have NaN values in the resulting dicts:
+            # 1. Convert the data frame back to a list of dictionaries:
+            updated_workspaces = df.get_data_frame().to_dict(orient="records")
+            # 2. Remove any dictionary item that has a "NaN" scalar value
+            # (pd.notna() only works on scalar values, not on lists!):
+            self._workspaces = [
+                #                {k: v for k, v in w.items() if pd.notna(v)} for w in updated_workspaces
+                {
+                    key: value
+                    for key, value in updated_workspace.items()
+                    if not pd.api.types.is_scalar(value) or pd.notna(value)
+                }
+                for updated_workspace in updated_workspaces
+            ]
 
             # Check if all threads have completed without error / failure.
             # If there's a single failure in on of the thread results we
@@ -8993,25 +9506,31 @@ class Payload:
         # otherwise we cannot establish the relationship:
         if not "id" in workspace:
             logger.warning(
-                "Workspace without ID cannot have a relationship. Skipping to next workspace...",
+                "Workspace without logical ID in payload cannot have a relationship. Skipping to next workspace...",
             )
             return False
 
         workspace_id = workspace["id"]
-        logger.info("Workspace -> '%s' has relationships - creating...", name)
+        logger.info(
+            "Workspace -> '%s' (type -> '%s') has relationships - creating...",
+            name,
+            workspace["type_name"],
+        )
 
-        # now determine the actual node IDs of the workspaces (have been created above):
+        # now determine the actual node IDs of the workspaces (has been created before):
         workspace_node_id = self.determine_workspace_id(workspace)
         if not workspace_node_id:
             logger.warning(
-                "Workspace without node ID cannot have a relationship (workspace creation may have failed). Skipping to next workspace...",
+                "Workspace -> '%s' (type -> '%s') has no node ID and cannot have a relationship (workspace creation may have failed or final name is different from payload). Skipping to next workspace...",
+                name,
+                workspace["type_name"],
             )
             return False
 
         logger.debug(
             "Workspace with logical ID -> %s has node ID -> %s",
-            workspace_id,
-            workspace_node_id,
+            str(workspace_id),
+            str(workspace_node_id),
         )
 
         success: bool = True
@@ -9044,7 +9563,9 @@ class Payload:
             related_workspace_node_id = self.determine_workspace_id(related_workspace)
             if not related_workspace_node_id:
                 logger.warning(
-                    "Related Workspace without node ID (workspaces creation may have failed). Skipping to next workspace...",
+                    "Related Workspace -> '%s' (type -> '%s') has no node ID (workspaces creation may have failed or name is different from payload). Skipping to next workspace...",
+                    related_workspace["name"],
+                    related_workspace["type_name"],
                 )
                 continue
 
@@ -9065,14 +9586,14 @@ class Payload:
             if existing_workspace_relationship:
                 logger.info(
                     "Workspace relationship between workspace ID -> %s and related workspace ID -> %s does already exist. Skipping...",
-                    workspace_node_id,
+                    str(workspace_node_id),
                     related_workspace_node_id,
                 )
                 continue
 
             logger.info(
                 "Create Workspace Relationship between workspace node ID -> %s and workspace node ID -> %s",
-                workspace_node_id,
+                str(workspace_node_id),
                 related_workspace_node_id,
             )
 
@@ -9222,7 +9743,7 @@ class Payload:
                 result = self.process_workspace_relationship(workspace=workspace)
                 success = (
                     success and result
-                )  # if a single result is False then mark this in 'success' variable.
+                )  # if a single result is False then the 'success' variable becomes 'False' as well.
 
         self.write_status_file(success, section_name, self._workspaces)
 
@@ -10204,10 +10725,17 @@ class Payload:
                 )
                 is_workspace = False
                 if favorite_item:
-                    logger.info(
-                        "Found favorite item (workspace) in payload -> %s",
-                        favorite_item["name"],
-                    )
+                    if favorite_item.get("enabled", True):
+                        logger.info(
+                            "Found favorite item (workspace) -> '%s' in payload and it is enabled",
+                            favorite_item["name"],
+                        )
+                    else:
+                        logger.info(
+                            "Found favorite item (workspace) -> '%s' in payload but it is not enabled. Skipping...",
+                            favorite_item["name"],
+                        )
+                        continue
                     favorite_id = self.determine_workspace_id(favorite_item)
                     if not favorite_id:
                         logger.warning(
@@ -10227,7 +10755,6 @@ class Payload:
                     if favorite_type == 848:
                         is_workspace = True
 
-                    #                    if favorite_item is None:
                     if favorite_id is None:
                         logger.warning(
                             "Favorite -> '%s' neither found as workspace ID nor as nickname. Skipping to next favorite...",
@@ -10238,13 +10765,13 @@ class Payload:
                 response = self._otcs.add_favorite(favorite_id)
                 if response is None:
                     logger.warning(
-                        "Favorite ID -> %s couldn't be added for user -> %s!",
+                        "Favorite ID -> %s couldn't be added for user -> '%s'!",
                         favorite_id,
                         user_name,
                     )
                 else:
                     logger.info(
-                        "Added favorite for user -> %s, node ID -> %s.",
+                        "Added favorite for user -> '%s', node ID -> %s.",
                         user_name,
                         favorite_id,
                     )
@@ -11859,6 +12386,8 @@ class Payload:
                 continue
             command = exec_pod_command["command"]
 
+            container = exec_pod_command.get("container", None)
+
             # Check if element has been disabled in payload (enabled = false).
             # In this case we skip the element:
             if "enabled" in exec_pod_command and not exec_pod_command["enabled"]:
@@ -11884,7 +12413,9 @@ class Payload:
                 not "interactive" in exec_pod_command
                 or exec_pod_command["interactive"] is False
             ):
-                result = self._k8s.exec_pod_command(pod_name, command)
+                result = self._k8s.exec_pod_command(
+                    pod_name, command, container=container
+                )
             else:
                 if not "timeout" in exec_pod_command:
                     result = self._k8s.exec_pod_command_interactive(pod_name, command)
@@ -11900,14 +12431,14 @@ class Payload:
             # 3. result is a non-empty string - this is OK - print it to log
             if result is None:
                 logger.error(
-                    "Execution of command -> '%s' in pod -> '%s' failed",
+                    "Execution of command -> %s in pod -> '%s' failed",
                     command,
                     pod_name,
                 )
                 success = False
             elif result != "":
                 logger.info(
-                    "Execution of command -> '%s' in pod -> '%s' returned result -> %s",
+                    "Execution of command -> %s in pod -> '%s' returned result -> %s",
                     command,
                     pod_name,
                     result,
@@ -11916,7 +12447,7 @@ class Payload:
                 # It is not an error if no result is returned. It depends on the nature of the command
                 # if a result is written to stdout or stderr.
                 logger.info(
-                    "Execution of command -> '%s' in pod -> '%s' did not return a result",
+                    "Execution of command -> %s in pod -> '%s' did not return a result",
                     command,
                     pod_name,
                 )
@@ -12247,6 +12778,413 @@ class Payload:
             cookie = self._otcs.authenticate(revalidate=True)
 
         self.write_status_file(success, section_name, self._doc_generators)
+
+        return success
+
+    # end method definition
+
+    def process_workflow_attributes(
+        self, attributes: list, workflow_attribute_definition: dict
+    ):
+        """Process the attributes in the workflow steps. This method
+           adds the IDs for the attribute to the payload dicts. The
+           IDs are needed for the workflow REST API calls.
+
+        Args:
+            attributes (list): the list of attributes (payload) processed in the workflow step
+            workflow_attribute_definition (dict): the workflow attribute definition
+
+        Returns:
+            None. The mutable dictionary in the workflow_step is updated with the IDs.
+        """
+
+        # now we need to get the technical attribute IDs from
+        # the workflow definition and map them
+        # with the attribute names from the payload:
+        for attribute in attributes:
+            attribute_name = attribute["name"]
+            attribute_value = attribute["value"]
+            attribute_type = attribute.get("type", None)
+
+            # Special treatment for type user: determine the ID for the login name.
+            # the ID is the actual value we have to put in the attribute:
+            if attribute_type and attribute_type.lower() == "user":
+                user = self._otcs.get_user(name=attribute_value, show_error=True)
+                user_id = self._otcs.get_result_value(response=user, key="id")
+                if not user_id:
+                    logger.error(
+                        "Cannot find user with login name -> '%s'. Skipping...",
+                        attribute_value,
+                    )
+                    continue
+                attribute_value = user_id
+                attribute["value"] = user_id
+
+            attribute_definition = workflow_attribute_definition.get(
+                attribute_name, None
+            )
+            if not attribute_definition:
+                logger.error(
+                    "Cannot find the attribute -> '%s' in the workflow definition. Skipping..."
+                )
+                continue
+            # Enrich the attribute dictionary with the attribute ID from the workflow definition:
+            attribute["id"] = attribute_definition["id"]
+            # Enrich the attribute dictionary with the attribute form ID from the workflow definition:
+            attribute["form_id"] = attribute_definition["form_id"]
+
+        if attributes:
+            logger.info(
+                "Updated workflow step attributes with IDs -> %s",
+                str(attributes),
+            )
+
+        return True
+
+    # end method definition
+
+    def process_workflow_step(
+        self,
+        workflow_id: int,
+        workflow_step: dict,
+        workflow_attribute_definition: dict,
+        documents: list | None = None,
+        process_id: int | None = None,
+    ) -> bool:
+        """Process a workflow step of a workflow.
+
+        Args:
+            workflow_id (int): Node ID of the workflow (the workflow map)
+            workflow_step (dict): Payload dictionary for a single workflow step._
+        """
+
+        if not "action" in workflow_step:
+            logger.error("Missing workflow action in workflow step.")
+            return False
+        action = workflow_step["action"]
+
+        if not "exec_as_user" in workflow_step:
+            logger.error("Missing workflow user in workflow step.")
+            return False
+        exec_as_user = workflow_step["exec_as_user"]
+
+        # Find the user in the users payload:
+        exec_user = next(
+            (item for item in self._users if item["name"] == exec_as_user),
+            None,
+        )
+        # Have we found the user in the payload?
+        if exec_user is None:
+            logger.error(
+                "Cannot find user with login name -> '%s' for workflow processing.",
+                exec_as_user,
+            )
+            return False
+
+        logger.info("Executing workflow step as user -> '%s'", exec_as_user)
+        # we change the otcs credentials to the user:
+        self._otcs.set_credentials(exec_user["name"], exec_user["password"])
+
+        # we re-authenticate as the user:
+        logger.info("Authenticate user -> '%s'...", exec_as_user)
+        # True = force new login with new user
+        cookie = self._otcs.authenticate(revalidate=True)
+        if not cookie:
+            logger.error("Couldn't authenticate user -> '%s'", exec_as_user)
+            return False
+
+        # "attributes" is optional:
+        if not "attributes" in workflow_step:
+            logger.warning(
+                "No workflow attributes specified in the payload for this workflow step.",
+            )
+            attributes = []
+            workflow_step_values = None
+        else:
+            attributes = workflow_step["attributes"]
+            logger.info(
+                "Workflow step has attributes -> %s. Adding attribute IDs to the payload names...",
+                str(attributes),
+            )
+            # Update / enrich the attributes in the workflow step with the IDs
+            # from the workflow definition (this CHANGES the attributes!)
+            self.process_workflow_attributes(
+                attributes=attributes,
+                workflow_attribute_definition=workflow_attribute_definition,
+            )
+            # Prepare the data for the REST call to
+            # update the process:
+            workflow_step_values = {
+                attr["form_id"]: attr["value"]
+                for attr in attributes
+                if "form_id" in attr and "value" in attr
+            }
+
+        if action == "Initiate":
+            # Create a draft process in preparation for the workflow initiation:
+            response = self._otcs.create_draft_process(
+                workflow_id=workflow_id, documents=documents, attach_documents=True
+            )
+            draftprocess_id = self._otcs.get_result_value(
+                response=response, key="draftprocess_id", property_name=""
+            )
+            if not draftprocess_id:
+                logger.error(
+                    "Failed to create draft process for workflow ID -> %s as user -> '%s'",
+                    str(workflow_id),
+                    exec_as_user,
+                )
+                return False
+            else:
+                logger.info(
+                    "Successfully generated draft process with ID -> %s%s",
+                    str(draftprocess_id),
+                    " attching document IDs -> " + str(documents) if documents else "",
+                )
+            workflow_step["draftprocess_id"] = draftprocess_id
+
+            # Check if a due date is specified. The payload has
+            # a relative offset in number of days that we add to
+            # the current date:
+            due_in_days = workflow_step.get("due_in_days", None)
+            if due_in_days:
+                due_date = datetime.now() + timedelta(days=int(due_in_days))
+                due_date = due_date.strftime("%Y-%m-%d")
+            else:
+                due_date = None
+            # Record the due date in the workflow step dictionary
+            workflow_step["due_date"] = due_date
+
+            # Update the draft process with title, due date
+            # and workflow attribute values from the payload:
+            response = self._otcs.update_draft_process(
+                draftprocess_id=draftprocess_id,
+                title=workflow_step.get("title", None),
+                due_date=due_date,
+                values=workflow_step_values,
+            )
+
+            # Initiate the draft process. This creates
+            # the running workflow instance:
+            response = self._otcs.initiate_draft_process(
+                draftprocess_id=draftprocess_id,
+                comment=workflow_step.get("comment", None),
+            )
+            process_id = self._otcs.get_result_value(
+                response=response, key="process_id", property_name=""
+            )
+            if not process_id:
+                logger.error(
+                    "Failed to initiate process for workflow with ID -> %s as user -> '%s'",
+                    str(workflow_id),
+                    exec_as_user,
+                )
+                return False
+            logger.info(
+                "Successfully initiated process with ID -> %s for workflow with ID -> %s as user -> '%s'",
+                str(process_id),
+                str(workflow_id),
+                exec_as_user,
+            )
+            workflow_step["process_id"] = process_id
+        else:
+            if not process_id:
+                logger.error(
+                    "Workflow step cannot be executed as process is not initiated (process ID not set)"
+                )
+                return False
+            response = self._otcs.get_process_task(
+                process_id=process_id,
+            )
+            # Are there any workflow attributes to update with new values?
+            if attributes:
+                response = self._otcs.update_process_task(
+                    process_id=process_id, values=workflow_step_values
+                )
+            # Execute the step action defined in the payload
+            response = self._otcs.update_process_task(
+                process_id=process_id, action=action
+            )
+
+        return True
+
+    # end method definition
+
+    def process_workflows(self, section_name: str = "workflows") -> bool:
+        """Initiate and process workflows for a defined workspace type and folder path
+
+        Args:
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections)
+                                          This name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        if not self._workflows:
+            logger.info("Payload section -> '%s' is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        # save admin credentials for later switch back to admin user:
+        admin_credentials = self._otcs.credentials()
+
+        for workflow in self._workflows:
+            if not "workflow_nickname" in workflow:
+                logger.error(
+                    "To initiate and process workflows for documents in workspaces the workflow nickname needs to be specified in the payload! Skipping to next workflow initiation..."
+                )
+                success = False
+                continue
+            workflow_nickname = workflow["workflow_nickname"]
+            workflow_node = self._otcs.get_node_from_nickname(
+                nickname=workflow_nickname
+            )
+            workflow_id = self._otcs.get_result_value(response=workflow_node, key="id")
+            workflow_name = self._otcs.get_result_value(
+                response=workflow_node, key="name"
+            )
+            if not workflow_id:
+                logger.error(
+                    "Cannot find workflow by nickname -> '%s'! Skipping to next workflow...",
+                    workflow_nickname,
+                )
+                success = False
+                continue
+
+            if not "workspace_type" in workflow:
+                logger.error(
+                    "To process workflow -> '%s' for documents in workspaces the workspace type needs to be specified in the payload! Skipping to next workflow...",
+                    workflow_name,
+                )
+                success = False
+                continue
+            workspace_type = workflow["workspace_type"]
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if "enabled" in workflow and not workflow["enabled"]:
+                logger.info(
+                    "Payload for workflow -> '%s' of workspace type -> '%s' is disabled. Skipping...",
+                    workflow_name,
+                    workspace_type,
+                )
+                continue
+            workspace_type = workflow["workspace_type"]
+            # Find the workspace type with the name given in the _workspace_types
+            # datastructure that has been generated by process_workspace_types() method before:
+            workspace_type_id = next(
+                (
+                    item["id"]
+                    for item in self._workspace_types
+                    if item["name"] == workspace_type
+                ),
+                None,
+            )
+            workspace_instances = self._otcs.get_workspace_instances(
+                type_name=workspace_type, type_id=workspace_type_id
+            )
+            if not workspace_instances or not workspace_instances["results"]:
+                logger.warning(
+                    "No workspace instances found for workspace type -> '%s' (%s). Skipping processing of workflow -> '%s'.",
+                    workspace_type,
+                    workspace_type_id,
+                    workflow_name,
+                )
+                success = False
+                continue
+
+            if not "workspace_folder_path" in workflow:
+                logger.info(
+                    "No workspace folder path defined for workspaces of type -> '%s'. Workflows will be started for documents in workspace root.",
+                    workspace_type,
+                )
+                workspace_folder_path = []
+            else:
+                workspace_folder_path = workflow["workspace_folder_path"]
+
+            if not "steps" in workflow:
+                logger.error(
+                    "To process workflow -> '%s', workflow steps ('steps') needs to be specified in the payload! Skipping to next workflow initiation...",
+                    workflow_name,
+                )
+                success = False
+                continue
+            workflow_steps = workflow["steps"]
+
+            # Get the attribute details (name, ID, type) from the workflow definition:
+            workflow_attribute_definition = self._otcs.get_workflow_attributes(
+                workflow_id=workflow_id
+            )
+
+            for workspace_instance in workspace_instances["results"]:
+                workspace_id = workspace_instance["data"]["properties"]["id"]
+                workspace_name = workspace_instance["data"]["properties"]["name"]
+                if workspace_folder_path:
+                    workspace_folder = self._otcs.get_node_by_workspace_and_path(
+                        workspace_id=workspace_id, path=workspace_folder_path
+                    )
+                    if workspace_folder:
+                        workspace_folder_id = self._otcs.get_result_value(
+                            workspace_folder, "id"
+                        )
+                    else:
+                        # If the workspace template is not matching
+                        # the path we may have an error here. Then
+                        # we fall back to workspace root level.
+                        logger.warning(
+                            "Folder path does not exist in workspace -> '%s'. Using workspace root level instead...",
+                            workspace_name,
+                        )
+                        workspace_folder_id = workspace_id
+                else:
+                    workspace_folder_id = workspace_id
+
+                # Get all documents (-3 = non-container) from the defined folder:
+                response = self._otcs.get_subnodes(
+                    parent_node_id=workspace_folder_id, filter_node_types=-3
+                )
+                documents = self._otcs.get_result_values(response=response, key="id")
+
+                process_id = None
+                for workflow_step in workflow_steps:
+                    result = self.process_workflow_step(
+                        workflow_id=workflow_id,
+                        workflow_step=workflow_step,
+                        workflow_attribute_definition=workflow_attribute_definition,
+                        documents=documents,
+                        process_id=process_id,
+                    )
+                    # If the step fails we are bailing out as it doesn't make
+                    # sense to continue with further steps:
+                    if not result:
+                        success = False
+                        break
+                    if "process_id" in workflow_step:
+                        process_id = workflow_step["process_id"]
+
+        # end for workflow in self._workflows
+
+        # Set back admin credentials:
+        self._otcs.set_credentials(
+            admin_credentials["username"], admin_credentials["password"]
+        )
+        # Authenticate back as the admin user:
+        logger.info(
+            "Authenticate as admin user -> '%s'...", admin_credentials["username"]
+        )
+        # True = force new login with new user
+        self._otcs.authenticate(revalidate=True)
+
+        self.write_status_file(success, section_name, self._workflows)
 
         return success
 
@@ -12825,18 +13763,32 @@ class Payload:
             "otcs_filter_workspace_attributes", None
         )
 
+        # Filter item by depth under the given root:
+        otcs_filter_item_depth = data_source.get("otcs_filter_item_depth", None)
+        # Filter workspace by category name (only consider items as workspace if they have the category):
+        otcs_filter_item_category = data_source.get("otcs_filter_item_category", None)
+        # Filter workspace by attribute values (only consider items as workspace if they have the attributes with the defined values):
+        otcs_filter_item_attributes = data_source.get(
+            "otcs_filter_item_attributes", None
+        )
+
         if not otcs_root_node_id:
             logger.error(
                 "Content Server root node ID for traversal is missing in payload of bulk data source. Cannot load data!"
             )
             return None
 
+        # Ensure Root_node_id is a list of integers
+        if not isinstance(otcs_root_node_id, list):
+            otcs_root_node_id = [otcs_root_node_id]
+        otcs_root_node_id = [int(item) for item in otcs_root_node_id]
+
         logger.info(
             "Loading data from Content Server (folder, workspaces, items) from root ID -> %s.",
             otcs_root_node_id,
         )
 
-        # 2. Creating the ServiceNow object:
+        # 2. Creating the OTCS object:
         self._otcs_source = OTCS(
             protocol=otcs_protocol,
             hostname=otcs_hostname,
@@ -12848,19 +13800,24 @@ class Payload:
             download_dir=otcs_download_dir,
         )
 
-        # 3. Authenticate at ServiceNow
+        # 3. Authenticate at OTCS
         self._otcs_source.authenticate()
 
         # 4. Load the Content Server data into the Data object (Pandas DataFrame):
-        if not self._otcs_source.load_items(
-            node_id=otcs_root_node_id,
-            filter_workspace_depth=otcs_filter_workspace_depth,
-            filter_workspace_subtypes=otcs_filter_workspace_subtypes,
-            filter_workspace_category=otcs_filter_workspace_category,
-            filter_workspace_attributes=otcs_filter_workspace_attributes,
-        ):
-            logger.error("Failure during load of Content Server items!")
-            return None
+
+        for root_node in otcs_root_node_id:
+            if not self._otcs_source.load_items(
+                node_id=root_node,
+                filter_workspace_depth=otcs_filter_workspace_depth,
+                filter_workspace_subtypes=otcs_filter_workspace_subtypes,
+                filter_workspace_category=otcs_filter_workspace_category,
+                filter_workspace_attributes=otcs_filter_workspace_attributes,
+                filter_item_depth=otcs_filter_item_depth,
+                filter_item_category=otcs_filter_item_category,
+                filter_item_attributes=otcs_filter_item_attributes,
+            ):
+                logger.error("Failure during load of Content Server items!")
+                return None
         data = self._otcs_source.get_data()
         if not data:
             logger.error("Failure during load of Content Server items! No data loaded!")
@@ -12880,7 +13837,7 @@ class Payload:
             Data: Data class that includes a Pandas DataFrame
 
         Side Effects:
-            self._servicenow is set to the PHT object created by this method
+            self._servicenow is set to the ServiceNow object created by this method
         """
 
         # 1. Read and validate values from the data source payload:
@@ -12898,7 +13855,11 @@ class Payload:
         sn_table_name = data_source.get(
             "sn_table_name", "u_kb_template_technical_article_public"
         )
+        sn_queries = data_source.get("sn_queries", [])
         sn_query = data_source.get("sn_query", None)
+        if sn_query is not None:
+            sn_queries.append({"table": sn_table_name, "query": sn_query})
+
         sn_thread_number = data_source.get("sn_thread_number", BULK_THREAD_NUMBER)
         sn_download_dir = data_source.get("sn_download_dir", "/data/knowledgebase")
         if (
@@ -12919,11 +13880,6 @@ class Payload:
                 "ServiceNow OAuth Authentication needs client ID and client secret in payload!"
             )
             return None
-
-        logger.info(
-            "Loading data from ServiceNow (Knowledge Base Articles) with query -> '%s'",
-            sn_query,
-        )
 
         # 2. Creating the ServiceNow object:
         self._servicenow = ServiceNow(
@@ -12946,11 +13902,29 @@ class Payload:
             logger.info("Successfully authenticated at ServiceNow -> %s", sn_base_url)
 
         # 4. Load the ServiceNow data into the Data object (Pandas DataFrame):
-        if not self._servicenow.load_articles(table_name=sn_table_name, query=sn_query):
-            logger.error("Failure during load of ServiceNow articles!")
-            return None
+        for item in sn_queries:
+            sn_table_name = item["sn_table_name"]
+            sn_query = item["sn_query"]
+
+            logger.info(
+                "Loading data from ServiceNow table -> '%s' with query -> '%s'",
+                sn_table_name,
+                sn_query,
+            )
+
+            if not self._servicenow.load_articles(
+                table_name=sn_table_name, query=sn_query
+            ):
+                logger.error(
+                    "Failure during load of ServiceNow articles from table -> '%s' using query -> '%s' !",
+                    sn_table_name,
+                    sn_query,
+                )
+                continue
+
         data = self._servicenow.get_data()
-        if not data:
+
+        if data is None:
             logger.error(
                 "Failure during load of ServiceNow articles! No articles loaded!"
             )
@@ -13336,43 +14310,43 @@ class Payload:
         match data_source_type:
             case "excel":
                 data = self.process_bulk_datasource_excel(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error("Failure during load of ServiceNow articles!")
                     return None
             case "servicenow":
                 data = self.process_bulk_datasource_servicenow(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error("Failure during load of ServiceNow articles!")
                     return None
             case "otmm":
                 data = self.process_bulk_datasource_otmm(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error(
                         "Failure during load of OpenText Media Management assets!"
                     )
                     return None
             case "otcs":
                 data = self.process_bulk_datasource_otcs(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error(
                         "Failure during load of OpenText Content Server items!"
                     )
                     return None
             case "pht":
                 data = self.process_bulk_datasource_pht(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error(
                         "Failure during load of OpenText Product Hierarchy (PHT)!"
                     )
                     return None
             case "json":
                 data = self.process_bulk_datasource_json(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error("Failure during load of JSON data source!")
                     return None
             case "xml":
                 data = self.process_bulk_datasource_xml(data_source=data_source)
-                if not data:
+                if data is None:
                     logger.error("Failure during load of XML data source!")
                     return None
             case _:
@@ -13380,6 +14354,10 @@ class Payload:
                     "Illegal data source type. Types supported: 'excel', 'servicenow', 'otmm', 'otcs', 'pht', 'json'"
                 )
                 return None
+
+        if data.get_data_frame().empty:
+            logger.warning("Data source is empty - nothing loaded.")
+            return None
 
         logger.info(
             "Data Frame for source -> '%s' has %s row(s) and %s column(s) after data loading.",
@@ -13392,6 +14370,8 @@ class Payload:
         columns_to_drop = data_source.get("columns_to_drop", [])
         columns_to_keep = data_source.get("columns_to_keep", [])
         columns_to_add = data_source.get("columns_to_add", [])
+        columns_to_add_list = data_source.get("columns_to_add_list", [])
+        columns_to_add_table = data_source.get("columns_to_add_table", [])
         conditions = data_source.get("conditions", [])
         explosions = data_source.get("explosions", [])
 
@@ -13411,6 +14391,33 @@ class Payload:
                 length=add_column.get("length", None),
                 group_chars=add_column.get("group_chars", None),
                 group_separator=add_column.get("group_separator", "."),
+            )
+
+        # Add columns with list values from a list of other columns
+        # if specified in data_source:
+        for add_column in columns_to_add_list:
+            if not "source_columns" in add_column or not "name" in add_column:
+                logger.error(
+                    "Add list columns is missing name or source columns. Column will not be added."
+                )
+                continue
+            data.add_column_list(
+                source_columns=add_column["source_columns"],
+                new_column=add_column["name"],
+            )
+
+        # Add columns with list values from a list of other columns
+        # if specified in data_source:
+        for add_column in columns_to_add_table:
+            if not "source_columns" in add_column or not "name" in add_column:
+                logger.error(
+                    "Add table columns is missing name or source columns. Column will not be added."
+                )
+                continue
+            data.add_column_table(
+                source_columns=add_column["source_columns"],
+                new_column=add_column["name"],
+                delimiter=add_column.get("list_splitter", ","),
             )
 
         # Drop columns if specified in data_source:
@@ -13441,6 +14448,7 @@ class Payload:
             explode_field = explosion["explode_field"]
             flatten_fields = explosion.get("flatten_fields", [])
             split_string_to_list = explosion.get("split_string_to_list", False)
+            list_splitter = explosion.get("list_splitter", None)
             logger.info(
                 "Starting explosion of data source '%s' by field(s) -> '%s' (type -> '%s'). Size of data set before explosion -> %s",
                 data_source_name,
@@ -13453,6 +14461,8 @@ class Payload:
                 flatten_fields=flatten_fields,
                 make_unique=False,
                 split_string_to_list=split_string_to_list,
+                separator=list_splitter,
+                reset_index=True,
             )
             logger.info("Size of data set after explosion -> %s", str(len(data)))
 
@@ -13545,18 +14555,70 @@ class Payload:
                 char="-",
             )
 
+            copy_data_source = bulk_workspace.get("copy_data_source", False)
             force_reload = bulk_workspace.get("force_reload", True)
 
             # Load and prepare the data source for the bulk processing:
-            data = self.process_bulk_datasource(
-                data_source_name=data_source_name, force_reload=force_reload
-            )
+            if copy_data_source:
+                logger.info(
+                    "Take a copy of data source -> %s to avoid side-effects for repeative usage of the data source...",
+                    data_source_name,
+                )
+                data = Data(
+                    self.process_bulk_datasource(
+                        data_source_name=data_source_name, force_reload=force_reload
+                    )
+                )
+            else:
+                data = self.process_bulk_datasource(
+                    data_source_name=data_source_name, force_reload=force_reload
+                )
             if not data:
                 logger.error(
                     "Failed to load data source for bulk workspace type -> '%s'",
                     type_name,
                 )
                 continue
+
+            # Check if fields with list substructures should be exploded.
+            # We may want to do this outside the bulkDatasource to only
+            # explode for bulkDocuments and not for bulkWorkspaces or
+            # bulkWorkspaceRelationships:
+            explosions = bulk_workspace.get("explosions", [])
+            for explosion in explosions:
+                # explode field can be a string or a list
+                # exploding multiple fields at once avoids
+                # combinatorial explosions - this is VERY
+                # different from exploding columns one after the other!
+                if (
+                    not "explode_field" in explosion
+                    and not "explode_fields" in explosion
+                ):
+                    logger.error("Missing explosion field(s)!")
+                    continue
+                # we want to be backwards compatible...
+                if "explode_field" in explosion:
+                    explode_fields = explosion["explode_field"]
+                else:
+                    explode_fields = explosion["explode_fields"]
+                flatten_fields = explosion.get("flatten_fields", [])
+                split_string_to_list = explosion.get("split_string_to_list", False)
+                list_splitter = explosion.get("list_splitter", None)
+                logger.info(
+                    "Starting explosion of bulk workspaces by field(s) -> %s (type -> %s). Size of data set before explosion -> %s",
+                    explode_fields,
+                    type(explode_fields),
+                    str(len(data)),
+                )
+                data.explode_and_flatten(
+                    explode_field=explode_fields,
+                    flatten_fields=flatten_fields,
+                    make_unique=False,
+                    split_string_to_list=split_string_to_list,
+                    separator=list_splitter,
+                    reset_index=True,
+                )
+                logger.info("Size of data set after explosion -> %s", str(len(data)))
 
             # Check if duplicate lines for given fields should be removed:
             if "unique" in bulk_workspace and bulk_workspace["unique"]:
@@ -13627,24 +14689,29 @@ class Payload:
 
             # check if the template to be used is specified in the payload:
             if "template_name" in bulk_workspace:
-                template_name = bulk_workspace["template_name"]
+                template_name_field = bulk_workspace["template_name"]
                 workspace_template = next(
                     (
                         item
                         for item in workspace_type["templates"]
-                        if item["name"] == template_name
+                        if item["name"] == template_name_field
                     ),
                     None,
                 )
                 if workspace_template:  # does this template exist?
                     logger.info(
                         "Workspace Template -> '%s' has been specified in payload and it does exist.",
-                        template_name,
+                        template_name_field,
+                    )
+                elif "{" in template_name_field and "}" in template_name_field:
+                    logger.info(
+                        "Workspace Template -> '%s' has been specified in payload and contains placeholders, validation cannot be performed.",
+                        template_name_field,
                     )
                 else:
                     logger.error(
                         "Workspace Template -> '%s' has been specified in payload but it doesn't exist!",
-                        template_name,
+                        template_name_field,
                     )
                     logger.error(
                         "Workspace Type -> '%s' has only these templates -> %s",
@@ -13656,14 +14723,11 @@ class Payload:
             # template to be used is NOT specified in the payload - then we just take the first one:
             else:
                 workspace_template = workspace_type["templates"][0]
+                template_name_field = None
                 logger.info(
                     "Workspace Template has not been specified in payload - we just take the first one (%s)",
                     workspace_template,
                 )
-
-            template_id = workspace_template["id"]
-            template_name = workspace_template["name"]
-            workspace_type_id = workspace_type["id"]
 
             if not "categories" in bulk_workspace:
                 logger.info(
@@ -13674,15 +14738,14 @@ class Payload:
                 categories = bulk_workspace["categories"]
 
             # Should existing workspaces be updated? No is the default.
-            enforce_updates = bulk_workspace.get("enforce_updates", False)
+            operations = bulk_workspace.get("operations", ["create"])
 
             logger.info(
-                "Bulk create Workspaces (name field -> %s, type -> '%s') from workspace template -> '%s' (%s). Enforce Updates -> %s.",
+                "Bulk create Workspaces (name field -> %s, type -> '%s') from workspace template -> '%s'. Operations -> %s.",
                 workspace_name_field,
                 type_name,
-                template_name,
-                template_id,
-                str(enforce_updates),
+                template_name_field,
+                str(operations),
             )
 
             # see if bulkWorkspace definition has a specific thread number
@@ -13706,12 +14769,12 @@ class Payload:
                         self.process_bulk_workspaces_worker,
                         bulk_workspace,
                         partition,
-                        template_id,
-                        workspace_type_id,
+                        workspace_type,
+                        template_name_field,
                         workspace_name_field,
                         workspace_description_field,
                         categories,
-                        enforce_updates,
+                        operations,
                         results,
                     ),
                 )
@@ -13731,20 +14794,24 @@ class Payload:
             for result in results:
                 if not result["success"]:
                     logger.info(
-                        "Thread -> %s completed with %s failed, %s skipped, and %s created %s workspaces.",
+                        "Thread -> %s completed with %s failed, %s skipped, %s created, %s updated, and %s deleted '%s' workspaces.",
                         str(result["thread_id"]),
                         str(result["failure_counter"]),
                         str(result["skipped_counter"]),
-                        str(result["success_counter"]),
+                        str(result["create_counter"]),
+                        str(result["update_counter"]),
+                        str(result["delete_counter"]),
                         type_name,
                     )
                     success = False
                 else:
                     logger.info(
-                        "Thread -> %s completed successful with %s skipped, and %s created %s workspaces.",
+                        "Thread -> %s completed successful with %s skipped, %s created, %s updated, and %s deleted '%s' workspaces.",
                         str(result["thread_id"]),
                         str(result["skipped_counter"]),
-                        str(result["success_counter"]),
+                        str(result["create_counter"]),
+                        str(result["update_counter"]),
+                        str(result["delete_counter"]),
                         type_name,
                     )
                 # Record all generated workspaces. If this should allow us
@@ -13761,7 +14828,8 @@ class Payload:
     def process_bulk_categories(
         self, row: pd.Series, index: str, categories: list, replacements: list
     ) -> list:
-        """Helper method to replace the value placeholders the bulk category structures with the Pandas Series (row)
+        """Helper method to replace the value placeholders the bulk category structures
+           in the payload with values from the Pandas Series (row)
 
         Args:
             row (pd.Series): current row
@@ -13775,10 +14843,85 @@ class Payload:
         # list and dicts are "mutable" data structures in Python!
         worker_categories = copy.deepcopy(categories)
 
+        # In this first loop we expand table-value attributes into a new
+        # list of category / attribute payload. The value of table-value attributes
+        # is a list of dictionaries (in a string we evaluate into a Python
+        # datastructure)
+        worker_categories_expanded = []
+        for category_item in worker_categories:
+            if "value_type" in category_item and category_item["value_type"] == "table":
+                value_field = category_item["value_field"]
+
+                # The following method always returns a string even if the value is actually a list.
+                # TODO: consider to change replace_bulk_placeholders to return "str | list".
+                # But this may be difficult as we still want to support multiple placeholders in one string...
+                value = self.replace_bulk_placeholders(
+                    input_string=value_field,
+                    row=row,
+                    index=None,
+                    replacements=replacements,
+                )
+                if not value:
+                    logger.warning(
+                        "Value table-type attribute is empty (value field -> %s). Cannot parse table. Skipping...",
+                        value_field,
+                    )
+                    continue
+
+                try:
+                    value_table = literal_eval(value)
+                except (SyntaxError, ValueError) as e:
+                    logger.error(
+                        "Cannot parse table-type attribute; value field -> %s; error -> %s",
+                        value_field,
+                        str(e),
+                    )
+                    continue
+
+                if not isinstance(value_table, list):
+                    logger.error("Table-type value requires a list of dictionaries!")
+                    continue
+
+                # Get the mapping of the loader generated columns in the Data Frame to the
+                # attribute names in the target OTCS category. If no mapping
+                # is in the payload, then it is assumed that the category
+                # attribute names are identical to the column names in the Data Frame
+                #
+                # Example mapping:
+                #
+                # attribute_mapping = {
+                #   "Application": "u_product_model",
+                #   "Version": "u_version_name"
+                # }
+
+                attribute_mapping = category_item.get("attribute_mapping", None)
+
+                row_index = 1
+                for value_row in value_table:
+                    for key, value in value_row.items():
+                        attribute = {}
+                        attribute["name"] = category_item.get("name", "")
+                        attribute["set"] = category_item.get("set", "")
+                        attribute["row"] = row_index
+                        # check if we have a mapping for this attribute in the payload:
+                        if attribute_mapping and key in attribute_mapping:
+                            attribute["attribute"] = attribute_mapping[key]
+                        else:
+                            attribute["attribute"] = key
+                        # For tables values can be None if the number of
+                        # list items in the source columns are not equal
+                        # To avoid the warning below we set the value to empty string
+                        # if it is None:
+                        attribute["value"] = value if value is not None else ""
+                        worker_categories_expanded.append(attribute)
+                    row_index += 1
+            else:
+                worker_categories_expanded.append(category_item)
+
         # this loop generates "value" for each
         # "value_field". "value_field" may also contain lists
         # that are either delimited by [...] or by a "value_type" with value "list"
-        for category_item in worker_categories:
+        for category_item in worker_categories_expanded:
             if not "attribute" in category_item:
                 logger.error(
                     "Category item -> %s is missing the attribute field!",
@@ -13813,36 +14956,72 @@ class Payload:
 
             # if we don't have a value now, then there's an issue:
             if value is None:
-                logger.error(
+                value = ""
+                logger.warning(
                     "Category item needs either a value or value_field! Skipping attribute -> '%s'",
                     category_item["attribute"],
                 )
+
+            # We have an empty string value (this is different from None!)
+            if value == "":
+                category_item["value"] = value
+                # We can continue as any further processing (below) does not make sense for an empty string value:
                 continue
 
-            # Handle this special case where we get a string that actually represents a list.
-            # Convert it back to a real list:
-            is_list = False
-            if category_item.get("value_type", "string") == "list":
-                # if it is explicitly declared
-                logger.debug(
-                    "Value -> %s is declared in payload to be a list (items separated by comma or semicolon)",
-                    value,
-                )
-                is_list = True
-            # also values not declared as lists may include lists indicated by [...]
-            # also if value_type == "list" we double-check that no [...] are around the values:
+            # This variable should only be true if we don't have
+            # a native python string but a delimiter separated
+            # value list in a string, e.g. "a, b, c" or "a | b | c" or "x;y;z":
+            is_list_in_string = False
+
+            # The datasource loader may have written a real python list into the value
+            # In this case the value includes square brackets [...]
             if value.startswith("[") and value.endswith("]"):
                 # Remove the square brackets and declare it is a list!
+                try:
+                    value = literal_eval(value)
+                except (SyntaxError, ValueError) as e:
+                    logger.warning(
+                        "Cannot directly parse list-type attribute; value field -> %s; error -> %s. Try string processing...",
+                        value_field,
+                        str(e),
+                    )
+                    logger.warning(
+                        "Value string -> %s has [...] - remove brackets and interpret as delimiter separated values in a string...",
+                        value,
+                    )
+                    # In this failure case we try to remove the square brackets and hope the inner part
+                    # can be treated as a string of values delimited with a delimiter (e.g. comma or semicolon)
+                    value = value.strip("[]")
+                    is_list_in_string = True
+
+            # Handle this special case where we get a string that actually represents a date time format and convert it.
+            if category_item.get("value_type", "string") == "datetime":
+                # if it is explicitly declared
+                old_value = value
+                date_obj = parse(value)
+                value = datetime.strftime(date_obj, "%Y-%m-%dT%H:%M:%SZ")
+
                 logger.debug(
-                    "Value string -> %s has [...] - remove brackets...",
+                    "Attribute -> %s is declared in payload to be a datetime (convert format). Converting from -> %s to -> %s",
+                    category_item.get("attribute"),
+                    old_value,
                     value,
                 )
-                value = value.strip("[]")
-                is_list = True
-            if is_list:
+
+            # Handle special case where we get a string that actually represents a list but is
+            # not yet a python list.
+            # This requires that value_type == "list" we double-check that no [...] are around the values:
+            # Convert it back to a real list:
+            if (
+                category_item.get("value_type", "string") == "list" or is_list_in_string
+            ) and isinstance(value, str):
+                logger.info(
+                    "Value -> %s is declared in payload to be a list (items separated by comma or semicolon) or the python list evaluation failed.",
+                    value,
+                )
                 # we split the string at commas or semicolons:
                 list_splitter = category_item.get("list_splitter", ";,")
-                logger.debug(
+                logger.info(
                     "Split value string -> %s after these characters -> '%s'",
                     value,
                     list_splitter,
@@ -13860,7 +15039,7 @@ class Payload:
                 # Remove the quotes around each element
                 elements = [element.strip("'") for element in elements]
                 value = elements
-                logger.debug(
+                logger.info(
                     "Found list for a multi-value category attribute -> '%s' from field -> '%s' in data row -> %s. Value -> %s",
                     category_item["attribute"],
                     value_field,
@@ -13869,6 +15048,9 @@ class Payload:
                 )
             # now we check if there's a data lookup configured in the payload:
             lookup_data_source = category_item.get("lookup_data_source", None)
+            # Do we want to drop / clear values that fail to lookup?
+            drop_value = category_item.get("lookup_data_failure_drop", False)
+
             if lookup_data_source:
                 logger.info(
                     "Found lookup data source -> '%s' for attribute -> '%s'. Processing...",
@@ -13891,18 +15073,31 @@ class Payload:
                         )
                         value = synonym
                     else:
-                        logger.warning(
-                            "Cannot lookup the value for attribute -> '%s' and value -> '%s' in data source -> '%s'. Keep existing value.",
-                            category_item["attribute"],
-                            value,
-                            lookup_data_source,
-                        )
+                        if drop_value:
+                            logger.warning(
+                                "Cannot lookup the value for attribute -> '%s' and value -> '%s' in data source -> '%s'. Clear existing value.",
+                                category_item["attribute"],
+                                value,
+                                lookup_data_source,
+                            )
+                            # Clear the value:
+                            value = ""
+                        else:
+                            logger.warning(
+                                "Cannot lookup the value for attribute -> '%s' and value -> '%s' in data source -> '%s'. Keep existing value.",
+                                category_item["attribute"],
+                                value,
+                                lookup_data_source,
+                            )
                 else:
                     # value is a list - so we apply the lookup to each item:
-                    for i, s in enumerate(value):
+                    # Iterate backwards to avoid index issues while popping items:
+                    for i in range(len(value) - 1, -1, -1):
+                        # Make sure the value does not have leading or trailing spaces:
+                        value[i] = value[i].strip()
                         (_, synonym) = self.process_bulk_workspaces_synonym_lookup(
                             data_source_name=lookup_data_source,
-                            workspace_name_synonym=s,
+                            workspace_name_synonym=value[i],
                             workspace_type=None,  # we don't need the workspace ID, just the workspace name
                         )
                         if synonym:
@@ -13915,12 +15110,22 @@ class Payload:
                             )
                             value[i] = synonym
                         else:
-                            logger.warning(
-                                "Cannot lookup the value for attribute -> '%s' and value -> '%s' in data source -> '%s'. Keep existing value.",
-                                category_item["attribute"],
-                                value[i],
-                                lookup_data_source,
-                            )
+                            if drop_value:
+                                logger.warning(
+                                    "Cannot lookup the value -> '%s' for attribute -> '%s' in data source -> '%s'. Drop existing value from list.",
+                                    value[i],
+                                    category_item["attribute"],
+                                    lookup_data_source,
+                                )
+                                # Remove the list item we couldn't lookup as drop_value is True:
+                                value.pop(i)
+                            else:
+                                logger.warning(
+                                    "Cannot lookup the value -> '%s' for attribute -> '%s' in data source -> '%s'. Keep existing value.",
+                                    value[i],
+                                    category_item["attribute"],
+                                    lookup_data_source,
+                                )
             if value_field:
                 logger.debug(
                     "Reading category attribute -> '%s' from field -> '%s' in data row -> %s. Value -> %s",
@@ -13940,23 +15145,26 @@ class Payload:
 
         # cleanup categories_payload to remove empty rows of sets:
         rows_to_remove = {}
-        for attribute in worker_categories:
+        for attribute in worker_categories_expanded:
             if attribute.get("row") is not None:
                 set_name = attribute["set"]
                 row_number = attribute["row"]
                 value = attribute["value"]
 
                 # If value is empty, track it for removal
-                if not value:  # Treat empty strings or None as empty
+                if (
+                    not value or value == [""] or value == ""
+                ):  # Treat empty strings or None as empty
                     if (set_name, row_number) not in rows_to_remove:
                         rows_to_remove[(set_name, row_number)] = True
                 else:
                     # If any value in the row is not empty, mark the row as not removable
                     rows_to_remove[(set_name, row_number)] = False
+
         logger.debug("Empty Rows to remove from sets: %s", rows_to_remove)
         cleaned_categories = [
             item
-            for item in worker_categories
+            for item in worker_categories_expanded
             if "set" not in item
             or "row" not in item
             or not rows_to_remove.get((item["set"], item["row"]), False)
@@ -13970,12 +15178,12 @@ class Payload:
         self,
         bulk_workspace: dict,
         partition: pd.DataFrame,
-        template_id: int,
-        workspace_type_id: int,
+        workspace_type: dict,
+        template_name_field: str | None,
         workspace_name_field: str,
         workspace_description_field: str,
         categories: list | None = None,
-        enforce_updates: bool = False,
+        operations: list | None = None,
         results: list | None = None,
     ):
         """This is the thread worker to create workspaces in bulk.
@@ -13989,7 +15197,7 @@ class Payload:
             workspace_name_field (str): Field where the workspace name is stored
             workspace_description_field (str): Field where the workspace description is stored
             categories (list): list of category dictionieres
-            enforce_updates (bool): should existing workspaces be updated with new metadata?
+            operations (list): which operations should be applyed on workspaces: "create", "update", "delete", "recreate"
             results (list): mutable list of thread results
         """
 
@@ -14000,18 +15208,30 @@ class Payload:
             str(len(partition)),
         )
 
+        # Avoid linter warnings - so make parameter default None while we
+        # actually want ["create"] to be the default:
+        if operations is None:
+            operations = ["create"]
+
         result = {}
         result["thread_id"] = thread_id
         result["success_counter"] = 0
         result["failure_counter"] = 0
         result["skipped_counter"] = 0
+        result["create_counter"] = 0
+        result["update_counter"] = 0
+        result["delete_counter"] = 0
         result["workspaces"] = {}
         result["success"] = True
 
         # Check if workspaces have been processed before, e.i. testing
         # if a "workspaces" key exists and if it is pointing to a non-empty list.
         # Additionally we check that workspace updates are not enforced:
-        if bulk_workspace.get("workspaces", None) and not enforce_updates:
+        if (
+            bulk_workspace.get("workspaces", None)
+            and "update" not in operations
+            and "delete" not in operations
+        ):
             existing_workspaces = bulk_workspace["workspaces"]
             logger.info(
                 "Found %s already processed workspaces. Try to complete the job...",
@@ -14049,13 +15269,55 @@ class Payload:
         # Process all datasets in the partion that was given to the thread:
         for index, row in partition.iterrows():
 
-            # clear variables to esure clean state
-            workspace_id = None
-
             logger.info(
                 "Processing data row -> %s for bulk workspace creation...",
                 str(index),
             )
+
+            workspace_template = None
+            if template_name_field is None:
+                workspace_template = workspace_type["templates"][0]
+
+            else:
+                workspace_template_name = self.replace_bulk_placeholders(
+                    input_string=template_name_field,
+                    row=row,
+                    replacements=replacements,
+                )
+
+                workspace_template = next(
+                    (
+                        item
+                        for item in workspace_type["templates"]
+                        if item["name"] == workspace_template_name
+                    ),
+                    None,
+                )
+
+            if workspace_template is None:
+                logger.error(
+                    "Workspace Template -> '%s' has been specified in payload but it doesn't exist!",
+                    workspace_template_name,
+                )
+                logger.error(
+                    "Workspace Type -> '%s' has only these templates -> %s",
+                    workspace_type["name"],
+                    workspace_type["templates"],
+                )
+                result["success"] = False
+                result["failure_counter"] += 1
+                continue
+
+            template_id = workspace_template["id"]
+            template_name = workspace_template["name"]
+            workspace_type_id = workspace_type["id"]
+
+            # clear variables to esure clean state
+            workspace_id = None
+
+            # Create a copy of the mutable operations list as we may
+            # want to modify it:
+            row_operations = list(operations)
 
             # Determine the workspace name:
             workspace_name = self.replace_bulk_placeholders(
@@ -14073,6 +15335,8 @@ class Payload:
                 continue
             # Workspace names for sure are not allowed to have ":":
             workspace_name = workspace_name.replace(":", "")
+            # Workspace names for sure should not have leading or trailing spaces:
+            workspace_name = workspace_name.strip()
             # Truncate the workspace name to 254 characters which is the maximum allowed length in Extended ECM
             if len(workspace_name) > 254:
                 workspace_name = workspace_name[:254]
@@ -14109,11 +15373,53 @@ class Payload:
                 )
                 if not evaluated_condition:
                     logger.info(
-                        "Condition for row -> %s not met. Skipping row for workspace creation",
+                        "Condition for bulk workspace row -> %s not met. Skipping row for workspace creation",
                         str(index),
                     )
                     result["skipped_counter"] += 1
                     continue
+
+            # Check if all data conditions to create or recreate the workspace are met:
+            if "create" in row_operations or "recreate" in row_operations:
+                conditions_create = bulk_workspace.get("conditions_create", None)
+                if conditions_create:
+                    evaluated_conditions_create = self.evaluate_conditions(
+                        conditions=conditions_create, row=row, replacements=replacements
+                    )
+                    if not evaluated_conditions_create:
+                        logger.info(
+                            "Create condition for bulk workspace row -> %s not met. Excluding create operation for current row...",
+                            str(index),
+                        )
+                        if "create" in row_operations:
+                            row_operations.remove("create")
+                        if "recreate" in row_operations:
+                            row_operations.remove("recreate")
+                elif (
+                    "recreate" in row_operations
+                ):  # we still create and recreate without conditions_create. But give a warning for 'recreate' without condition.
+                    logger.warning(
+                        "No create condition provided but 'recreate' operation requested. This will recreate all existing workspaces!"
+                    )
+
+            # Check if all data conditions to delete the workspace are met:
+            if "delete" in row_operations:
+                conditions_delete = bulk_workspace.get("conditions_delete", None)
+                if conditions_delete:
+                    evaluated_conditions_delete = self.evaluate_conditions(
+                        conditions=conditions_delete, row=row, replacements=replacements
+                    )
+                    if not evaluated_conditions_delete:
+                        logger.info(
+                            "Delete condition for bulk workspace row -> %s not met. Excluding delete operation for current row...",
+                            str(index),
+                        )
+                        row_operations.remove("delete")
+                else:  # without delete_conditions we don't delete!!
+                    logger.warning(
+                        "Delete operation requested for bulk workspaces but conditions for deletion are missing! (specify 'conditions_delete')!"
+                    )
+                    row_operations.remove("delete")
 
             # Determine the external modification field (if any):
             if external_modify_date_field:
@@ -14146,6 +15452,8 @@ class Payload:
                     replacements=replacements,
                     additional_regex_list=nickname_additional_regex_list,
                 )
+                # Nicknames for sure should not have leading or trailing spaces:
+                nickname = nickname.strip()
                 # Nicknames for sure are not allowed to include spaces:
                 nickname = nickname.replace(" ", "_")
                 # We also want to replace hyphens with underscores
@@ -14167,10 +15475,13 @@ class Payload:
                             found_workspace_name,
                         )
                     else:
-                        # Only skip if workspace update is not enforced:
-                        if not enforce_updates:
+                        # Only skip if workspace update or delete is not requested:
+                        if (
+                            "update" not in row_operations
+                            and "delete" not in row_operations
+                        ):
                             logger.info(
-                                "Workspace -> '%s' with nickname -> '%s' does already exist (found -> %s). Skipping...",
+                                "Workspace -> '%s' with nickname -> '%s' does already exist (found -> %s). No update or delete operations requested or allowed. Skipping...",
                                 workspace_name,
                                 nickname,
                                 found_workspace_name,
@@ -14228,15 +15539,35 @@ class Payload:
                         key,
                     )
 
-            # We try to get the external modify date of the existing workspace.
-            # The REST API may not return these field if it was never set before.
-            # So we set show_error = False for this call to avoid error messages.
-            workspace_external_modify_date = self._otcs_frontend.get_result_value(
-                response, "external_modify_date", show_error=False
+            # We get the modify date of the existing workspace.
+            workspace_modify_date = self._otcs_frontend.get_result_value(
+                response,
+                "modify_date",
             )
 
-            # Workspace does not exists - we create a new workspace:
-            if not workspace_id:
+            # Check if we want to recreate an existing workspace:
+            if workspace_id and "recreate" in row_operations:
+                response = self._otcs_frontend.delete_node(
+                    node_id=workspace_id, purge=True
+                )
+                if not response:
+                    logger.error(
+                        "Failed to bulk recreate existing workspace -> '%s' (%s) with type ID -> %s! Delete failed.",
+                        workspace_name,
+                        workspace_id,
+                        workspace_type_id,
+                    )
+                    result["success"] = False
+                    result["failure_counter"] += 1
+                    continue
+                result["delete_counter"] += 1
+                workspace_id = None
+
+            # Check if workspace does not exists - then we create a new workspace
+            # if this is requested ("create" or "recreate" value in operations list in payload)
+            if not workspace_id and (
+                "create" in row_operations or "recreate" in row_operations
+            ):
                 # If category data is in payload we substitute
                 # the values with data from the current data row:
                 if categories:
@@ -14290,19 +15621,24 @@ class Payload:
                 workspace_id = self._otcs_frontend.get_result_value(response, "id")
                 if not workspace_id:
                     logger.error(
-                        "Failed to bulk create workspace -> '%s' with type ID -> %s!",
+                        "Failed to bulk create workspace -> '%s' with type ID -> %s from template -> %s (%s)!",
                         workspace_name,
                         workspace_type_id,
+                        template_name,
+                        template_id,
                     )
                     result["success"] = False
                     result["failure_counter"] += 1
                     continue
                 else:
                     logger.info(
-                        "Successfully created bulk workspace -> '%s' with ID -> %s",
+                        "Successfully created bulk workspace -> '%s' with ID -> %s from template -> %s (%s)!",
                         workspace_name,
                         workspace_id,
+                        template_name,
+                        template_id,
                     )
+                    result["create_counter"] += 1
                     if self._aviator_enabled:
                         if (
                             "enable_aviator" in bulk_workspace
@@ -14317,14 +15653,38 @@ class Payload:
                                     workspace_name,
                                     workspace_id,
                                 )
-            # end if not workspace_id
 
-            # If updates are enforced we update the existing workspace with
+                    # Check if metadata embeddings need to be updated
+                    if bulk_workspace.get("aviator_metadata", False):
+                        logger.info(
+                            "Trigger external metadata embeding via FEME for Workspace -> %s (%s)",
+                            workspace_name,
+                            workspace_id,
+                        )
+                        self._otcs.feme_embedd_metadata(
+                            node_id=workspace_id,
+                            node_type=848,
+                            wait_for_completion=True,
+                            timeout=1.0,
+                        )
+
+            # end if not workspace_id and "create" in row_operations
+
+            # If updates are an requested row opera dtion we update the existing workspace with
             # fresh metadata from the payload. Additionally we check the external
             # modify date to support incremental load for content that has really
             # changed.
-            elif enforce_updates and OTCS.date_is_newer(
-                date_old=workspace_external_modify_date, date_new=external_modify_date
+            # In addition we check that "delete" is not requested as otherwise it will
+            # never go in elif "delete" ... below (and it does not make sense to update a workspace
+            # that is deleted in the next step...)
+            elif (
+                workspace_id
+                and "update" in row_operations
+                and "delete" not in row_operations  # note the NOT !
+                and OTCS.date_is_newer(
+                    date_old=workspace_modify_date,
+                    date_new=external_modify_date,
+                )
             ):
                 # If category data is in payload we substitute
                 # the values with data from the current data row:
@@ -14378,23 +15738,58 @@ class Payload:
                     result["success"] = False
                     result["failure_counter"] += 1
                     continue
+                result["update_counter"] += 1
 
-            # nickname has been calculated for existence test above
-            # we now assign it to the new workspace
-            if nickname:
-                response = self._otcs_frontend.set_node_nickname(
-                    node_id=workspace_id, nickname=nickname, show_error=True
+                # Check if metadata embeddings need to be updated
+                if bulk_workspace.get("aviator_metadata", False):
+                    logger.info(
+                        "Trigger external metadata embeding via FEME for Workspace -> %s (%s)",
+                        workspace_name,
+                        workspace_id,
+                    )
+                    self._otcs.feme_embedd_metadata(
+                        node_id=workspace_id, node_type=848, wait_for_completion=False
+                    )
+
+            # end elif "update" in row_operations...
+            elif workspace_id and "delete" in row_operations:
+                response = self._otcs_frontend.delete_node(
+                    node_id=workspace_id, purge=True
                 )
                 if not response:
                     logger.error(
-                        "Failed to assign nickname -> '%s' to workspace -> '%s'",
-                        nickname,
+                        "Failed to bulk delete existing workspace -> '%s' with type ID -> %s!",
                         workspace_name,
+                        workspace_type_id,
                     )
-            result["success_counter"] += 1
-            # Record the workspace name and ID to allow to read it from failure file
-            # and speedup the process.
-            result["workspaces"][workspace_name] = workspace_id
+                    result["success"] = False
+                    result["failure_counter"] += 1
+                    continue
+                result["delete_counter"] += 1
+                workspace_id = None
+            # end elif  workspace_id and "delete" in row_operations
+
+            # Depending on the bulk operations (create, update, delete)
+            # and the related conditions it may well be that workspace_id is None.
+            # In this case we also don't want to set the nickname nor record this
+            # as success:
+            if workspace_id:
+                if nickname:
+                    response = self._otcs_frontend.set_node_nickname(
+                        node_id=workspace_id, nickname=nickname, show_error=True
+                    )
+                    if not response:
+                        logger.error(
+                            "Failed to assign nickname -> '%s' to workspace -> '%s'",
+                            nickname,
+                            workspace_name,
+                        )
+                result["success_counter"] += 1
+                # Record the workspace name and ID to allow to read it from failure file
+                # and speedup the process.
+                result["workspaces"][workspace_name] = workspace_id
+            else:
+                result["skipped_counter"] += 1
 
         logger.info("End working...")
 
@@ -14409,6 +15804,9 @@ class Payload:
     ) -> pd.Series | None:
         """Lookup a value in a given data source (specified by payload dict).
            If the data source has not been loaded before then load the data source.
+           As this runs in a multi-threading environment we need to protect
+           the data source update from multiple threads doing it at the same time.
+           A global data_load_lock variable acts as a mutex.
 
         Args:
             data_source (dict): Payload dictionary of the data source definition.
@@ -14424,27 +15822,27 @@ class Payload:
             logger.error("Data source has no name!")
             return None
 
-        # First we check if the data source has been loaded already.
-        # If not, we load the data source on the fly:
-        data_source_data: Data = data_source.get("data", None)
-        if not data_source_data:
-            logger.warning(
-                "Data source -> '%s' has no data. Trying to reload...",
-                data_source_name,
-            )
-            # We don't want multiple threads to trigger a datasource load at the same time,
-            # so we use a lock (mutex) to avoid this:
-            data_load_lock.acquire()
-            try:
+        # We don't want multiple threads to trigger a datasource load at the same time,
+        # so we use a lock (mutex) to avoid this:
+        data_load_lock.acquire()
+        try:
+            # First we check if the data source has been loaded already.
+            # If not, we load the data source on the fly:
+            data_source_data: Data = data_source.get("data", None)
+            if not data_source_data:
+                logger.warning(
+                    "Data source -> '%s' has no data. Trying to reload...",
+                    data_source_name,
+                )
                 data_source_data = self.process_bulk_datasource(
                     data_source_name=data_source_name,
                     force_reload=True,
                 )
-            finally:
-                # Ensure the lock is released even if an error occurs
-                data_load_lock.release()
+        finally:
+            # Ensure the lock is released even if an error occurs
+            data_load_lock.release()
 
-        # iIf we still don't have data from this data source we bail out:
+        # If we still don't have data from this data source we bail out:
         if not data_source_data:
             logger.error(
                 "Data source -> '%s' has no data and reload did not work. Cannot lookup value -> '%s' in column -> '%s'!",
@@ -14531,6 +15929,15 @@ class Payload:
             lookup_value=workspace_name_synonym,
         )
 
+        if lookup_row is None:
+            # Handle an edge case where the actual workspace name
+            # is already correct:
+            lookup_row = self.lookup_data_source_value(
+                data_source=workspace_data_source,
+                lookup_column=workspace_data_source_name_column,
+                lookup_value=workspace_name_synonym,
+            )
+
         if lookup_row is not None:
             # Now we determine the real workspace name be taking it from
             # the name column in the result row:
@@ -14567,16 +15974,18 @@ class Payload:
         workspace_nickname: str | None = None,
         workspace_name: str | None = None,
         workspace_type: str | None = None,
+        parent_id: int | None = None,
         data_source_name: str | None = None,
     ) -> tuple[int | None, str | None]:
         """Use a combination of workspace name, workspace type, and workspace datasource (using synonyms)
            to lookup the workspace name and ID
 
         Args:
-            workspace_nickname (str): the nickname of the workspace
-            workspace_name (str): The name as input for lookup. This must be one of the synonyms.
-            workspace_type (str): Name of the workspace type
-            data_source_name (str): Workspace data source name
+            workspace_nickname (str, optional): the nickname of the workspace
+            workspace_name (str, optional): The name as input for lookup. This must be one of the synonyms.
+            workspace_type (str, optional): Name of the workspace type
+            parent_id (int, optional): ID of parent workspace (if it is a sub-workspace) or parent folder
+            data_source_name (str, optional): Workspace data source name
 
         Returns:
             tuple[int | None, str | None]: returns the workspace ID and the looked up workspace name
@@ -14607,10 +16016,20 @@ class Payload:
             workspace_name = workspace_name.strip()
         else:
             logger.error(
-                "No workspace name specified. Cannot find the workspace by type and name or synonym.",
+                "No workspace name specified. Cannot find the workspace by nickname, nor by type and name, nor by parent ID and name, nor by synonym.",
             )
             return (None, None)
 
+        # If we have workspace name and workspace parent ID then we try this:
+        if workspace_name and parent_id is not None:
+            response = self._otcs_frontend.get_node_by_parent_and_name(
+                parent_id=parent_id, name=workspace_name
+            )
+            workspace_id = self._otcs_frontend.get_result_value(response, "id")
+            if workspace_id:
+                return (workspace_id, workspace_name)
+
+        # If we have workspace name and workspace type then we try this:
         if workspace_name and workspace_type:
             response = self._otcs_frontend.get_workspace_by_type_and_name(
                 type_name=workspace_type, name=workspace_name
@@ -14620,8 +16039,8 @@ class Payload:
                 return (workspace_id, workspace_name)
 
         # if the code gets to here we dont have a nickname and the workspace with given name
-        # and type was not found either. Now we see if we can find the workspace name
-        # as a synonym in the workspace data source to find the real/correct name:
+        # type, or parent ID was not found either. Now we see if we can find the workspace name
+        # as a synonym in the workspace data source to find the real/correct workspace name:
         if data_source_name:
             logger.info(
                 "Try to find the workspace with the synonym -> '%s' using data source -> '%s'...",
@@ -14648,6 +16067,9 @@ class Payload:
             concat_string = ", nor "
         if workspace_name:
             message += "{}by name -> '{}'".format(concat_string, workspace_name)
+            concat_string = ", nor "
+        if parent_id:
+            message += "{}by parent ID -> {}".format(concat_string, parent_id)
             concat_string = ", nor "
         if data_source_name:
             message += "{}as synonym in data source -> {}".format(
@@ -14727,6 +16149,9 @@ class Payload:
                 success = False
                 continue
             from_workspace = bulk_workspace_relationship["from_workspace"]
+            from_sub_workspace = bulk_workspace_relationship.get(
+                "from_sub_workspace_name", None
+            )
 
             # Read Pattern for "To" Workspace from payload:
             if not "to_workspace" in bulk_workspace_relationship:
@@ -14736,6 +16161,9 @@ class Payload:
                 success = False
                 continue
             to_workspace = bulk_workspace_relationship["to_workspace"]
+            to_sub_workspace = bulk_workspace_relationship.get(
+                "to_sub_workspace_name", None
+            )
 
             # The payload element must have a "data_source" key:
             if not "data_source" in bulk_workspace_relationship:
@@ -14746,7 +16174,8 @@ class Payload:
 
             self._log_header_callback(
                 text="Process Bulk Workspace Relationships from -> '{}' to -> '{}'".format(
-                    from_workspace, to_workspace
+                    from_workspace if not from_sub_workspace else from_sub_workspace,
+                    to_workspace if not to_sub_workspace else to_sub_workspace,
                 ),
                 char="-",
             )
@@ -14779,8 +16208,8 @@ class Payload:
             if not data:
                 logger.error(
                     "Failed to load data source for bulk workspace relationships from -> '%s' to -> '%s'",
-                    from_workspace,
-                    to_workspace,
+                    from_workspace if not from_sub_workspace else from_sub_workspace,
+                    to_workspace if not to_sub_workspace else to_sub_workspace,
                 )
                 continue
 
@@ -14794,23 +16223,34 @@ class Payload:
                 # exploding multiple fields at once avoids
                 # combinatorial explosions - this is VERY
                 # different from exploding columns one after the other!
-                if not "explode_field" in explosion:
+                if (
+                    not "explode_field" in explosion
+                    and not "explode_fields" in explosion
+                ):
                     logger.error("Missing explosion field(s)!")
                     continue
-                explode_field = explosion["explode_field"]
+                # we want to be backwards compatible...
+                if "explode_field" in explosion:
+                    explode_fields = explosion["explode_field"]
+                else:
+                    explode_fields = explosion["explode_fields"]
                 flatten_fields = explosion.get("flatten_fields", [])
                 split_string_to_list = explosion.get("split_string_to_list", False)
+                list_splitter = explosion.get(
+                    "list_splitter", ","
+                )  # don't have None as default!
                 logger.info(
                     "Starting explosion of bulk relationships by field(s) -> %s (type -> %s). Size of data set before explosion -> %s",
-                    explode_field,
-                    type(explode_field),
+                    explode_fields,
+                    type(explode_fields),
                     str(len(data)),
                 )
                 data.explode_and_flatten(
-                    explode_field=explode_field,
+                    explode_field=explode_fields,
                     flatten_fields=flatten_fields,
                     make_unique=False,
                     split_string_to_list=split_string_to_list,
+                    separator=list_splitter,
                     reset_index=True,
                 )
                 logger.info("Size of data set after explosion -> %s", str(len(data)))
@@ -14852,8 +16292,8 @@ class Payload:
 
             logger.info(
                 "Bulk create Workspace Relationships (from workspace -> '%s' to workspace -> '%s')",
-                from_workspace,
-                to_workspace,
+                from_workspace if not from_sub_workspace else from_sub_workspace,
+                to_workspace if not to_sub_workspace else to_sub_workspace,
             )
 
             bulk_thread_number = int(
@@ -14875,8 +16315,6 @@ class Payload:
                         self.process_bulk_workspace_relationships_worker,
                         bulk_workspace_relationship,
                         partition,
-                        from_workspace,
-                        to_workspace,
                         results,
                     ),
                 )
@@ -14925,12 +16363,209 @@ class Payload:
 
     # end method definition
 
+    def get_bulk_workspace_relationship_endpoint(
+        self,
+        bulk_workspace_relationship: dict,
+        row: pd.Series,
+        index: int,
+        endpoint: str,
+        replacements: dict | None = None,
+        nickname_additional_regex_list: list | None = None,
+    ) -> tuple[int | None, str | None]:
+        """Determine the node ID of the workspace that is one of the endpoints
+           of the workspace relationship (either 'from' or 'to')
+
+        Args:
+            bulk_workspace_relationship (dict): The payload element of the bulk workspace relationship
+            row (pd.Series): the data frame row
+            index (int): the index of the data frame row
+            endpoint (str): name of the endpoint - either "from" or "to"
+            replacements (dict | None, optional): Replacements for placeholders. Defaults to None.
+            nickname_additional_regex_list (list | None, optional): Additional regex replacements for nicknames. Defaults to None.
+
+        Returns:
+            tuple[int | None, str | None]: returns the workspace ID and the looked up workspace name
+        """
+
+        if endpoint not in ["from", "to"]:
+            logger.error("The endpoint must be either 'from' or 'to'!")
+            return (None, None)
+
+        # Determine the workspace nickname field:
+        workspace_nickname_field = bulk_workspace_relationship.get(
+            "{}_workspace".format(endpoint), None
+        )
+        workspace_nickname = self.replace_bulk_placeholders(
+            input_string=workspace_nickname_field,
+            row=row,
+            replacements=replacements,
+            additional_regex_list=nickname_additional_regex_list,
+        )
+        if not workspace_nickname:
+            logger.warning(
+                "Row -> %s does not have the required data to resolve -> %s for the workspace nickname (endpoint -> '%s')!",
+                str(index),
+                workspace_nickname_field,
+                endpoint,
+            )
+            return (None, None)
+
+        # Get the workspace type if specified:
+        workspace_type = bulk_workspace_relationship.get(
+            "{}_workspace_type".format(endpoint), None
+        )
+
+        # Get the workspace name if specified:
+        workspace_name_field = bulk_workspace_relationship.get(
+            "{}_workspace_name".format(endpoint), None
+        )
+        if workspace_name_field:
+            workspace_name = self.replace_bulk_placeholders(
+                input_string=workspace_name_field,
+                row=row,
+                replacements=replacements,
+            )
+            if not workspace_name:
+                logger.warning(
+                    "Row -> %s does not have the required data to resolve -> %s for the workspace name (endpoint -> '%s')!",
+                    str(index),
+                    workspace_name_field,
+                    endpoint,
+                )
+                return (None, None)
+        else:
+            workspace_name = None
+
+        # Get the workspace datasource if specified:
+        workspace_data_source = bulk_workspace_relationship.get(
+            "{}_workspace_data_source".format(endpoint), None
+        )
+
+        # Based on the given information, we now try to dtermine
+        # the name and the ID of the workspace that is the endpoint
+        # for the workspace relationship:
+        (workspace_id, workspace_name) = self.process_bulk_workspaces_lookup(
+            workspace_nickname=workspace_nickname,
+            workspace_name=workspace_name,
+            workspace_type=workspace_type,
+            data_source_name=workspace_data_source,
+        )
+
+        if not workspace_id:
+            logger.warning(
+                "Cannot find Workspace to establish relationship (endpoint -> '%s')%s%s%s%s",
+                endpoint,
+                (
+                    ", Nickname -> '{}'".format(workspace_nickname)
+                    if workspace_nickname
+                    else ""
+                ),
+                (
+                    ", Workspace Name -> '{}'".format(workspace_name)
+                    if workspace_name
+                    else ""
+                ),
+                (
+                    ", Workspace Type -> '{}'".format(workspace_type)
+                    if workspace_type
+                    else ""
+                ),
+                (
+                    ", Data Source -> '{}'".format(workspace_data_source)
+                    if workspace_data_source
+                    else ""
+                ),
+            )
+            return (None, None)
+
+        # See if a sub-workspace is configured:
+        sub_workspace_name_field = bulk_workspace_relationship.get(
+            "{}_sub_workspace_name".format(endpoint), None
+        )
+        # If no sub-workspace is configured we can already
+        # return the resulting workspace ID:
+        if not sub_workspace_name_field:
+            return (workspace_id, workspace_name)
+
+        # Otherwise we are no processing the sub-workspaces to return
+        # its ID instead:
+        sub_workspace_name = self.replace_bulk_placeholders(
+            input_string=sub_workspace_name_field,
+            row=row,
+            replacements=replacements,
+        )
+        if not sub_workspace_name:
+            logger.warning(
+                "Row -> %s does not have the required data to resolve -> %s for the sub-workspace name (endpoint -> '%s')!",
+                str(index),
+                sub_workspace_name_field,
+                endpoint,
+            )
+            return (None, None)
+
+        # See if a sub-workspace is in a sub-path of the main workspace:
+        sub_workspace_path = bulk_workspace_relationship.get(
+            "{}_sub_workspace_path".format(endpoint), None
+        )
+        if sub_workspace_path:
+            # sub_workspace_path is a mutable that is changed in place!
+            result = self.replace_bulk_placeholders_list(
+                input_list=sub_workspace_path,
+                row=row,
+                replacements=replacements,
+            )
+            if not result:
+                logger.warning(
+                    "Row -> %s does not have the required data to resolve -> %s for the sub-workspace path (endpoint -> '%s')!",
+                    str(index),
+                    sub_workspace_path,
+                    endpoint,
+                )
+                return None
+
+            logger.info(
+                "Endpoint has a sub-workspace -> '%s' configured. Try to find the sub-workspace in workspace path -> %s",
+                sub_workspace_name,
+                sub_workspace_path,
+            )
+
+            # We now want to retrieve the folder in the main workspace that
+            # includes the sub-workspace:
+            response = self._otcs_frontend.get_node_by_workspace_and_path(
+                workspace_id=workspace_id,
+                path=sub_workspace_path,
+                create_path=False,  # we want the path to be created if it doesn't exist
+                show_error=True,
+            )
+            parent_id = self._otcs_frontend.get_result_value(response, "id")
+            if not parent_id:
+                logger.error(
+                    "Failed to find path -> %s in workspace -> '%s' (%s)...",
+                    str(sub_workspace_path),
+                    workspace_name,
+                    workspace_id,
+                )
+                return (None, None)
+        # end if sub_workspace_path_field
+        else:
+            # the sub-workspace is immediately under the main workspace:
+            parent_id = workspace_id
+
+        response = self._otcs_frontend.get_node_by_parent_and_name(
+            parent_id=parent_id, name=sub_workspace_name, show_error=True
+        )
+        sub_workspace_id = self._otcs_frontend.get_result_value(
+            response=response, key="id"
+        )
+
+        return (sub_workspace_id, sub_workspace_name)
+
+    # end method definition
+
     def process_bulk_workspace_relationships_worker(
         self,
         bulk_workspace_relationship: dict,
         partition: pd.DataFrame,
-        from_workspace: str,
-        to_workspace: str,
         results: list | None = None,
     ):
         """This is the thread worker to create workspaces relationships in bulk.
@@ -15001,10 +16636,6 @@ class Payload:
         # Process all datasets in the partion that was given to the thread:
         for index, row in partition.iterrows():
 
-            # ensure clean variables by reset
-            from_workspace_id = None
-            to_workspace_id = None
-
             logger.info(
                 "Processing data row -> %s for bulk workspace relationship creation...",
                 str(index),
@@ -15023,157 +16654,57 @@ class Payload:
                     result["skipped_counter"] += 1
                     continue
 
-            # Determine the workspace "from" nickname:
-            from_workspace_nickname = self.replace_bulk_placeholders(
-                input_string=from_workspace,
-                row=row,
-                replacements=replacements,
-                additional_regex_list=nickname_additional_regex_list,
-            )
-            if not from_workspace_nickname:
-                logger.warning(
-                    "Row -> %s does not have the required data to resolve -> %s for the workspace nickname (from)!",
-                    str(index),
-                    from_workspace,
-                )
-                result["skipped_counter"] += 1
-                continue
-            from_workspace_type = bulk_workspace_relationship.get(
-                "from_workspace_type", None
-            )
-            from_workspace_name = bulk_workspace_relationship.get(
-                "from_workspace_name", None
-            )
-            if from_workspace_name:
-                from_workspace_name = self.replace_bulk_placeholders(
-                    input_string=from_workspace_name,
-                    row=row,
-                    replacements=replacements,
-                )
-                if not from_workspace_name:
-                    logger.warning(
-                        "Row -> %s does not have the required data to resolve -> %s for the workspace name (from)!",
-                        str(index),
-                        from_workspace,
-                    )
-                    result["skipped_counter"] += 1
-                    continue
-            from_workspace_data_source = bulk_workspace_relationship.get(
-                "from_workspace_data_source", None
-            )
-
             (from_workspace_id, from_workspace_name) = (
-                self.process_bulk_workspaces_lookup(
-                    workspace_nickname=from_workspace_nickname,
-                    workspace_name=from_workspace_name,
-                    workspace_type=from_workspace_type,
-                    data_source_name=from_workspace_data_source,
-                )
-            )
-
-            if not from_workspace_id:
-                logger.warning(
-                    "Cannot find Workspace to establish relationship (from)%s%s%s%s",
-                    (
-                        ", Nickname -> '{}'".format(from_workspace_nickname)
-                        if from_workspace_nickname
-                        else ""
-                    ),
-                    (
-                        ", Workspace Name -> '{}'".format(from_workspace_name)
-                        if from_workspace_name
-                        else ""
-                    ),
-                    (
-                        ", Workspace Type -> '{}'".format(from_workspace_type)
-                        if from_workspace_type
-                        else ""
-                    ),
-                    (
-                        ", Data Source -> '{}'".format(from_workspace_data_source)
-                        if from_workspace_data_source
-                        else ""
-                    ),
-                )
-                # Lower severity of this issue
-                # result["failure_counter"] += 1
-                # result["success"] = False
-                result["skipped_counter"] += 1
-                continue
-
-            # Determine the workspace "to" nickname:
-            to_workspace_nickname = self.replace_bulk_placeholders(
-                input_string=to_workspace,
-                row=row,
-                replacements=replacements,
-                additional_regex_list=nickname_additional_regex_list,
-            )
-            if not to_workspace_nickname:
-                logger.warning(
-                    "Row -> %s does not have the required data to resolve -> %s for the workspace nickname (to)!",
-                    str(index),
-                    to_workspace,
-                )
-                result["failure_counter"] += 1
-                continue
-            to_workspace_type = bulk_workspace_relationship.get(
-                "to_workspace_type", None
-            )
-            to_workspace_name = bulk_workspace_relationship.get(
-                "to_workspace_name", None
-            )
-            if to_workspace_name:
-                to_workspace_name = self.replace_bulk_placeholders(
-                    input_string=to_workspace_name,
+                self.get_bulk_workspace_relationship_endpoint(
+                    bulk_workspace_relationship=bulk_workspace_relationship,
                     row=row,
+                    index=index,
+                    endpoint="from",
                     replacements=replacements,
+                    nickname_additional_regex_list=nickname_additional_regex_list,
                 )
-                if not to_workspace_name:
-                    logger.warning(
-                        "Row -> %s does not have the required data to resolve -> %s for the workspace nickname (to)!",
-                        str(index),
-                        from_workspace,
-                    )
-                    result["skipped_counter"] += 1
-                    continue
-            to_workspace_data_source = bulk_workspace_relationship.get(
-                "to_workspace_data_source", None
             )
 
-            (to_workspace_id, to_workspace_name) = self.process_bulk_workspaces_lookup(
-                workspace_nickname=to_workspace_nickname,
-                workspace_name=to_workspace_name,
-                workspace_type=to_workspace_type,
-                data_source_name=to_workspace_data_source,
+            (to_workspace_id, to_workspace_name) = (
+                self.get_bulk_workspace_relationship_endpoint(
+                    bulk_workspace_relationship=bulk_workspace_relationship,
+                    row=row,
+                    index=index,
+                    endpoint="to",
+                    replacements=replacements,
+                    nickname_additional_regex_list=nickname_additional_regex_list,
+                )
             )
 
-            if not to_workspace_id:
+            # Check we have both endpoints:
+            if not from_workspace_id or not to_workspace_id:
                 logger.warning(
-                    "Cannot find Workspace to establish relationship (to)%s%s%s%s",
+                    "%s%s%s%s",
                     (
-                        ", Nickname -> '{}'".format(to_workspace_nickname)
-                        if to_workspace_nickname
+                        "Failed to retrieve 'from' endpoint for bulk workspace relationship! "
+                        if not from_workspace_id and not from_workspace_name
                         else ""
                     ),
                     (
-                        ", Workspace Name -> '{}'".format(to_workspace_name)
-                        if to_workspace_name
+                        "Failed to retrieve 'from' endpoint (workspace name -> {}) for bulk workspace relationship! ".format(
+                            from_workspace_name
+                        )
+                        if not from_workspace_id and from_workspace_name
                         else ""
                     ),
                     (
-                        ", Workspace Type -> '{}'".format(to_workspace_type)
-                        if to_workspace_type
+                        "Failed to retrieve 'to' endpoint for bulk workspace relationship!"
+                        if not to_workspace_id and not to_workspace_name
                         else ""
                     ),
                     (
-                        ", Data Source -> '{}'".format(to_workspace_data_source)
-                        if to_workspace_data_source
+                        "Failed to retrieve 'to' endpoint (workspace name -> {}) for bulk workspace relationship!".format(
+                            to_workspace_name
+                        )
+                        if not to_workspace_id and to_workspace_name
                         else ""
                     ),
                 )
-                # Lower severity of this issue
-                # result["failure_counter"] += 1
-                # result["success"] = False
                 result["skipped_counter"] += 1
                 continue
 
@@ -15488,9 +17019,6 @@ class Payload:
                 logger.info("Payload for Bulk Document is disabled. Skipping...")
                 continue
 
-            copy_data_source = bulk_document.get("copy_data_source", False)
-            force_reload = bulk_document.get("force_reload", True)
-
             # The payload element must have a "data_source" key:
             if not "data_source" in bulk_document:
                 logger.error("No data source specified in Bulk Document!")
@@ -15498,11 +17026,14 @@ class Payload:
                 continue
             data_source_name = bulk_document["data_source"]
 
+            copy_data_source = bulk_document.get("copy_data_source", False)
+            force_reload = bulk_document.get("force_reload", True)
+
             # Load and prepare the data source for the bulk processing:
             if copy_data_source:
                 logger.info(
-                    "Take a copy of data source -> %s to avoid sideeffects for repeative usage of the data source...",
-                    bulk_document["data_source"],
+                    "Take a copy of data source -> %s to avoid side-effects for repeative usage of the data source...",
+                    data_source_name,
                 )
                 data = Data(
                     self.process_bulk_datasource(
@@ -15529,23 +17060,33 @@ class Payload:
                 # exploding multiple fields at once avoids
                 # combinatorial explosions - this is VERY
                 # different from exploding columns one after the other!
-                if not "explode_field" in explosion:
+                if (
+                    not "explode_field" in explosion
+                    and not "explode_fields" in explosion
+                ):
                     logger.error("Missing explosion field(s)!")
                     continue
-                explode_field = explosion["explode_field"]
+                # we want to be backwards compatible...
+                if "explode_field" in explosion:
+                    explode_fields = explosion["explode_field"]
+                else:
+                    explode_fields = explosion["explode_fields"]
                 flatten_fields = explosion.get("flatten_fields", [])
                 split_string_to_list = explosion.get("split_string_to_list", False)
+                list_splitter = explosion.get("list_splitter", None)
                 logger.info(
                     "Starting explosion of bulk documents by field(s) -> %s (type -> %s). Size of data set before explosion -> %s",
-                    explode_field,
-                    str(type(explode_field)),
+                    explode_fields,
+                    str(type(explode_fields)),
                     str(len(data)),
                 )
                 data.explode_and_flatten(
-                    explode_field=explode_field,
+                    explode_field=explode_fields,
                     flatten_fields=flatten_fields,
                     make_unique=False,
                     split_string_to_list=split_string_to_list,
+                    separator=list_splitter,
+                    reset_index=True,
                 )
                 logger.info("Size of data set after explosion -> %s", str(len(data)))
 
@@ -15607,12 +17148,12 @@ class Payload:
                 categories = bulk_document["categories"]
 
             # Should existing documents be updated? False (= no) is the default.
-            enforce_updates = bulk_document.get("enforce_updates", False)
+            operations = bulk_document.get("operations", ["create"])
 
             logger.info(
-                "Bulk create Documents (name field -> %s. Enforce Updates -> %s.)",
+                "Bulk create Documents (name field -> %s. Operations -> %s.)",
                 name_field,
-                str(enforce_updates),
+                str(operations),
             )
 
             bulk_thread_number = int(
@@ -15678,7 +17219,7 @@ class Payload:
                         name_field,
                         description_field,
                         categories,
-                        enforce_updates,
+                        operations,
                         results,
                         source_otcs,
                     ),
@@ -15699,19 +17240,23 @@ class Payload:
             for result in results:
                 if not result["success"]:
                     logger.info(
-                        "Thread -> %s completed with %s failed, %s skipped, and %s created documents.",
+                        "Thread -> %s completed with %s failed, %s skipped, %s created, %s updated, and %s deleted documents.",
                         str(result["thread_id"]),
                         str(result["failure_counter"]),
                         str(result["skipped_counter"]),
-                        str(result["success_counter"]),
+                        str(result["create_counter"]),
+                        str(result["update_counter"]),
+                        str(result["delete_counter"]),
                     )
                     success = False
                 else:
                     logger.info(
-                        "Thread -> %s completed successful with %s skipped, and %s created documents.",
+                        "Thread -> %s completed successful with %s skipped, %s created, %s updated, and %s deleted documents.",
                         str(result["thread_id"]),
                         str(result["skipped_counter"]),
-                        str(result["success_counter"]),
+                        str(result["create_counter"]),
+                        str(result["update_counter"]),
+                        str(result["delete_counter"]),
                     )
                 # Record all generated documents. If this should allow us
                 # to restart in case of failures and avoid trying to
@@ -15731,7 +17276,7 @@ class Payload:
         name_field: str,
         description_field: str,
         categories: list | None = None,
-        enforce_updates: bool = False,
+        operations: list | None = None,
         results: list | None = None,
         source_otcs: OTCS | None = None,
     ):
@@ -15745,7 +17290,7 @@ class Payload:
             name_field (str): Field where the workspace name is stored
             description_field (str): Field where the workspace description is stored
             categories (list): list of category dictionieres
-            enforce_updates (bool): should existing documents be updated with new version and metadata?
+            operations (list): which operations should be applyed on workspaces: "create", "update", "delete"
             results (list): mutable list of thread results
         """
 
@@ -15756,18 +17301,30 @@ class Payload:
             str(len(partition)),
         )
 
+        # Avoid linter warnings - so make parameter default None while we
+        # actually want ["create"] to be the default:
+        if operations is None:
+            operations = ["create"]
+
         result = {}
         result["thread_id"] = thread_id
         result["success_counter"] = 0
         result["failure_counter"] = 0
         result["skipped_counter"] = 0
+        result["create_counter"] = 0
+        result["update_counter"] = 0
+        result["delete_counter"] = 0
         result["documents"] = {}
         result["success"] = True
 
         # Check if documents have been processed before, e.i. testing
         # if a "documents" key exists and if it is pointing to a non-empty list:
         # Additionally we check that workspace updates are not enforced:
-        if bulk_document.get("documents", None) and not enforce_updates:
+        if (
+            bulk_document.get("documents", None)
+            and "update" not in operations
+            and "delete" not in operations
+        ):
             existing_documents = bulk_document["documents"]
             logger.info(
                 "Found %s already processed documents. Try to complete the job...",
@@ -15829,7 +17386,13 @@ class Payload:
                 str(index),
             )
 
+            # clear variables to esure clean state
             parent_id = None
+            document_id = None
+
+            # Create a copy of the mutable operations list as we may
+            # want to modify it:
+            row_operations = list(operations)
 
             # Check if all data conditions to create the document are met
             conditions = bulk_document.get("conditions", None)
@@ -15837,11 +17400,53 @@ class Payload:
                 evaluated_condition = self.evaluate_conditions(conditions, row)
                 if not evaluated_condition:
                     logger.info(
-                        "Document condition for row -> %s not met. Skipping row for document creation...",
+                        "Document condition for bulk document row -> %s not met. Skipping row for document creation...",
                         str(index),
                     )
                     result["skipped_counter"] += 1
                     continue
+
+            # Check if all data conditions to create the document are met:
+            if "create" in row_operations or "recreate" in row_operations:
+                conditions_create = bulk_document.get("conditions_create", None)
+                if conditions_create:
+                    evaluated_conditions_create = self.evaluate_conditions(
+                        conditions=conditions_create, row=row, replacements=replacements
+                    )
+                    if not evaluated_conditions_create:
+                        logger.info(
+                            "Create condition for bulk document row -> %s not met. Excluding create operation for current row...",
+                            str(index),
+                        )
+                        if "create" in row_operations:
+                            row_operations.remove("create")
+                        if "recreate" in row_operations:
+                            row_operations.remove("recreate")
+                elif (
+                    "recreate" in row_operations
+                ):  # we still create and recreate without conditions_create. But give a warning for 'recreate' without condition.
+                    logger.warning(
+                        "No create condition provided but 'recreate' operation requested. This will recreate all existing documents!"
+                    )
+
+            # Check if all data conditions to delete the document are met:
+            if "delete" in row_operations:
+                conditions_delete = bulk_document.get("conditions_delete", None)
+                if conditions_delete:
+                    evaluated_conditions_delete = self.evaluate_conditions(
+                        conditions=conditions_delete, row=row, replacements=replacements
+                    )
+                    if not evaluated_conditions_delete:
+                        logger.info(
+                            "Delete condition for bulk document row -> %s not met. Excluding delete operation for current row...",
+                            str(index),
+                        )
+                        row_operations.remove("delete")
+                else:  # without delete_conditions we don't delete!!
+                    logger.warning(
+                        "Delete operation requested for bulk documents but conditions for deletion are missing! (specify 'conditions_delete'!)"
+                    )
+                    row_operations.remove("delete")
 
             document_name = self.replace_bulk_placeholders(
                 input_string=name_field,
@@ -15870,7 +17475,7 @@ class Payload:
                     str(index),
                     name_field,
                     (
-                        "nor in alternative name field -> " + name_field_alt
+                        " nor in alternative name field -> " + name_field_alt
                         if name_field_alt
                         else ""
                     ),
@@ -15900,7 +17505,7 @@ class Payload:
                 document_name = document_name[:254]
 
             # This is an optimization. We check if the document was created
-            # in a former run. This helps if the customizer gets re-run:
+            # in a former run. This helps if the customizer is re-run:
             if document_name and document_name in existing_documents:
                 logger.info(
                     "Document -> '%s' does already exist and has ID -> %s. Skipping...",
@@ -16149,9 +17754,10 @@ class Payload:
             for workspace in workspaces:
                 if not "workspace_name" in workspace:
                     logger.error(
-                        "No workspace name field specified for document upload! Skipping document upload to this workspace...",
+                        "No workspace name field specified for document upload! Cannot upload document to this workspace...",
                     )
                     success = False
+                    result["failure_counter"] += 1
                     continue
                 workspace_name_field = workspace["workspace_name"]
 
@@ -16172,7 +17778,9 @@ class Payload:
                     )
                     # success = False - NO, DON'T DO THIS!!!
                     document_id = None  # do this to avoid fatal error after the main loop where the success counters are set
+                    result["skipped_counter"] += 1
                     continue  # for workspace in workspaces
+
                 # Workspace names for sure are not allowed to have ":":
                 workspace_name = workspace_name.replace(":", "")
                 # Truncate the workspace name to 254 characters which is the maximum allowed length in Extended ECM
@@ -16185,9 +17793,11 @@ class Payload:
                     evaluated_condition = self.evaluate_conditions(conditions, row)
                     if not evaluated_condition:
                         logger.info(
-                            "Workspace condition for row -> %s not met. Skipping row for document upload to workspace...",
+                            "Workspace condition for row -> %s not met. Skipping row for document upload to workspace -> '%s'...",
                             str(index),
+                            workspace_name,
                         )
+                        result["skipped_counter"] += 1
                         continue  # for workspace in workspaces
 
                 if not "workspace_type" in workspace:
@@ -16196,6 +17806,7 @@ class Payload:
                         workspace_name,
                     )
                     success = False
+                    result["failure_counter"] += 1
                     continue  # for workspace in workspaces
                 workspace_type = workspace["workspace_type"]
                 workspace_type = self.replace_bulk_placeholders(
@@ -16217,6 +17828,7 @@ class Payload:
                         workspace_type,
                     )
                     success = False
+                    result["failure_counter"] += 1
                     continue  # for workspace in workspaces
 
                 # If the workspace payload element has a "data_source" key,
@@ -16264,9 +17876,7 @@ class Payload:
                 # "workspace_folder" can be used if the payload contains
                 # the path as a comma-separated string (top down)
                 workspace_folder = workspace.get("workspace_folder", "")
-
-                # we need to do a copy as the path list is a mutable data type that we modify below!
-                workspace_path = list(workspace.get("workspace_path", []))
+                workspace_path = workspace.get("workspace_path", None)
 
                 if workspace_folder and not workspace_path:
                     workspace_folder = self.replace_bulk_placeholders(
@@ -16282,26 +17892,56 @@ class Payload:
                         workspace_path = [workspace_folder]
 
                 if workspace_path:
-                    # Replace placeholders in payload for the path elements:
-                    # Note: workspace_path is a mutable data type that is changed in place!
-                    result_placeholders = self.replace_bulk_placeholders_list(
-                        input_list=workspace_path,
-                        row=row,
-                        replacements=replacements,
-                    )
-                    if not result_placeholders:
+                    if isinstance(workspace_path, str):
+                        # if the path is actually a list in a string
+                        # we need to convert it to a python list in a safe way:
+                        try:
+                            workspace_path = self.replace_bulk_placeholders(
+                                input_string=workspace_path,
+                                index=None,  # None is VERY important as otherwise index=0 is the dfault and we only get the first element
+                                row=row,
+                                replacements=replacements,
+                            )
+                            if workspace_path:
+                                workspace_path = literal_eval(workspace_path)
+                            else:
+                                workspace_path = None
+                        except (SyntaxError, ValueError) as e:
+                            logger.error(
+                                "Cannot parse list-type folder path wrapped in string -> '%s'; error -> %s",
+                                workspace_path,
+                                str(e),
+                            )
+                            workspace_path = None
+                    elif isinstance(workspace_path, list):
+                        # We create a copy list to not modify original payload
+                        workspace_path = list(workspace_path)
+                        # Replace placeholders in payload for the path elements:
+                        # Note: workspace_path is a mutable data type that is changed in place!
+                        result_placeholders = self.replace_bulk_placeholders_list(
+                            input_list=workspace_path,
+                            row=row,
+                            replacements=replacements,
+                        )
+                        if not result_placeholders:
+                            workspace_path = None
+                    else:
+                        logger.warning("Unsupported data type for workspace path!")
+                        workspace_path = None
+
+                    if not workspace_path:
+                        # we put the document into the root of the workspace
+                        # if we couldn't determine a path inside the workspace:
                         logger.warning(
                             "Workspace folder path for workspace -> '%s' of workspace type -> '%s' cannot be resolved (placeholder issue). Using workspace root for document upload.",
                             workspace_name,
                             workspace_type,
                         )
-                        # we put the document into the root of the workspace:
                         parent_id = workspace_id
-                        workspace_path = None
                     else:
                         # Check if the folder path does already exist and get the target folder at the end of the path:
                         logger.info(
-                            "Check if path -> %s does already exist in workspace -> '%s' (%s)... (otherwise create it)",
+                            "Check if path -> %s does already exist in workspace -> '%s' (%s) or otherwise create it...",
                             str(workspace_path),
                             workspace_name,
                             workspace_id,
@@ -16321,6 +17961,7 @@ class Payload:
                                 workspace_id,
                             )
                             success = False
+                            result["failure_counter"] += 1
                             continue  # for workspace in workspaces
                         else:
                             logger.info(
@@ -16394,6 +18035,7 @@ class Payload:
                                 "Coudn't dertermine workspace template ID and workspace type ID of sub-workspace!",
                             )
                             success = False
+                            result["failure_counter"] += 1
                             continue  # for workspace in workspaces
 
                         # Check if we have categories for the sub-workspace:
@@ -16430,6 +18072,7 @@ class Payload:
                                     sub_workspace_name,
                                 )
                                 success = False
+                                result["failure_counter"] += 1
                                 continue  # for workspace in workspaces
                         # Now we create the sub-workspace:
                         response = self._otcs_frontend.create_workspace(
@@ -16458,6 +18101,8 @@ class Payload:
                                 sub_workspace_type_id,
                             )
                             success = False
+                            parent_id = None
+                            result["failure_counter"] += 1
                             continue  # for workspace in workspaces
                         else:
                             logger.info(
@@ -16593,6 +18238,7 @@ class Payload:
                                     sub_workspace_id,
                                 )
                                 success = False
+                                result["failure_counter"] += 1
                                 continue  # for workspace in workspaces
                             else:
                                 logger.info(
@@ -16693,11 +18339,32 @@ class Payload:
                             key,
                         )
 
-                document_external_modify_date = self._otcs_frontend.get_result_value(
-                    response, "external_modify_date"
+                document_modify_date = self._otcs_frontend.get_result_value(
+                    response, "modify_date"
                 )
 
-                if not document_id:
+                # Check if we want to recreate an existing document:
+                if document_id and "recreate" in row_operations:
+                    response = self._otcs_frontend.delete_node(
+                        node_id=document_id, purge=True
+                    )
+                    if not response:
+                        logger.error(
+                            "Failed to bulk recreate existing document -> '%s' (%s)! Delete failed.",
+                            document_name,
+                            document_id,
+                        )
+                        success = False
+                        result["failure_counter"] += 1
+                        continue
+                    result["delete_counter"] += 1
+                    document_id = None
+
+                # Check if document does not exists - then we create a new document
+                # if this is requested ("create" value in operations list in payload)
+                if not document_id and (
+                    "create" in row_operations or "recreate" in row_operations
+                ):
                     # The document does not exist in Extended ECM - so we
                     # upload it now:
 
@@ -16770,14 +18437,28 @@ class Payload:
                                 parent_id,
                             )
                         success = False
+                        result["failure_counter"] += 1
                         continue
-                # end if not workspace_id
+                    else:
+                        result["create_counter"] += 1
 
-                # If updates are enforced we update the existing document with
-                # a new document version and with fresh metadata from the payload:
-                elif enforce_updates and OTCS.date_is_newer(
-                    date_old=document_external_modify_date,
-                    date_new=external_modify_date,
+                # end if not workspace_id and "create" in row_operations
+
+                # If updates are requested we update the existing document with
+                # a new document version and with fresh metadata from the payload.
+                # Additionally we check the external modify date to support
+                # incremental load for content that has really changed.
+                # In addition we check that "delete" is not requested as otherwise it will
+                # never go in elif "delete" ... below (and it does not make sense to update a document
+                # that is deleted in the next step...)
+                elif (
+                    document_id
+                    and "update" in row_operations
+                    and "delete" not in row_operations  # note the NOT !
+                    and OTCS.date_is_newer(
+                        date_old=document_modify_date,
+                        date_new=external_modify_date,
+                    )
                 ):
                     # If category data is in payload we substitute
                     # the values with data from the current data row:
@@ -16817,11 +18498,12 @@ class Payload:
                     )
                     if not response:
                         logger.error(
-                            "Failed to add new version to document -> '%s' (%s)",
+                            "Failed to add new version to existing document -> '%s' (%s)",
                             document_name,
                             document_id,
                         )
                         success = False
+                        result["failure_counter"] += 1
                         continue
                     response = self._otcs_frontend.update_item(
                         node_id=document_id,
@@ -16834,16 +18516,38 @@ class Payload:
                     )
                     if not response:
                         logger.error(
-                            "Failed to update metadata of document -> '%s' (%s) with metadata -> %s",
+                            "Failed to update metadata of existing document -> '%s' (%s) with metadata -> %s",
                             document_name,
                             document_id,
                             str(document_category_data),
                         )
                         success = False
+                        result["failure_counter"] += 1
                         continue
+                    else:
+                        result["update_counter"] += 1
+                # end if workspace_id and "update" in row_operations
+                elif document_id and "delete" in row_operations:
+                    # We delete with immediate purging to keep recycle bin clean
+                    # and to not run into issues with nicknames used in deleted items:
+                    response = self._otcs_frontend.delete_node(
+                        node_id=document_id, purge=True
+                    )
+                    if not response:
+                        logger.error(
+                            "Failed to bulk delete existing document -> '%s' (%s)!",
+                            document_name,
+                            document_id,
+                        )
+                        success = False
+                        result["failure_counter"] += 1
+                        continue
+                    result["delete_counter"] += 1
+                    document_id = None
+
                 # nickname has been calculated for existence test above
                 # we now assign it to the new document
-                if nickname:
+                if nickname and document_id:
                     response = self._otcs_frontend.set_node_nickname(
                         node_id=document_id, nickname=nickname, show_error=True
                     )
@@ -16853,43 +18557,25 @@ class Payload:
                             nickname,
                             document_name,
                         )
+                if document_id is not None:
+                    result["success_counter"] += 1
+                    result["documents"][document_name] = document_id
 
             # end for workspaces
 
             if not success:
-                # check if the parent_id is set.
-                if parent_id is None:
-                    parent_id = "could not get id"
-
-                logger.error(
-                    "Failed to bulk upload document -> '%s' to parent folder with ID -> %s!",
-                    document_name,
-                    parent_id,
-                )
                 result["success"] = False
-                result["failure_counter"] += 1
-            elif (
-                document_id is not None
-            ):  # it can be None if the workspace name failed to resolve
-                logger.info(
-                    "Successfully uploaded bulk document -> '%s' with ID -> %s",
-                    document_name,
-                    document_id,
-                )
-                result["success_counter"] += 1
-                # Record the workspace name and ID to allow to read it from failure file
-                # and speedup the process.
-                result["documents"][document_name] = document_id
-            else:
-                logger.info(
-                    "Bulk document -> '%s' was not uploaded to any workspace.",
-                    document_name,
-                )
+                if not document_name in result["documents"]:
+                    logger.info(
+                        "Bulk document -> '%s' was not uploaded to any workspace.",
+                        document_name,
+                    )
 
             # Make sure no temp documents are piling up except
             # we want it (e.g. if using cloud document storage):
             if os.path.exists(file_name) and delete_download:
                 os.remove(file_name)
+        # end for index, row in partition.iterrows()
 
         logger.info("End working...")
 
@@ -16906,7 +18592,7 @@ class Payload:
         index: int = 0,
         replacements: dict | None = None,
         additional_regex_list: list | None = None,
-    ):
+    ) -> bool:
         """Wrapper method to process list of payload strings and replace placeholders (see next method)
 
         Args:
@@ -16941,7 +18627,7 @@ class Payload:
         self,
         input_string: str,
         row: pd.Series,
-        index: int | None = 0,
+        index: int | None = 0,  # don't use None here!
         replacements: dict | None = None,
         additional_regex_list: list | None = None,
     ) -> str:
@@ -16951,7 +18637,8 @@ class Payload:
             input_string (str): the string to replace placeholders in
             row (pd.Series): curent row (DataFrame series / row)
             index (int): Index for use if we encounter a list value.
-                         If index is "None" then we return the complete list as value
+                         If index is "None" then we return the complete list as value.
+                         Otherwise we return the list item with the given index (0 = first element is the default).
             replacements (dict): Replacements to apply to given fields (dictionary key = field name)
             additional_regex_list (list, optional): These are not coming from the payload but dynamically
                                                     added for special needs like determining the nicknames.
@@ -16986,11 +18673,11 @@ class Payload:
                 # first we access the field in the row and handle the
                 # exception that key may not be a valid column (KeyError):
                 try:
-                    # read the value of the column defined by key
+                    # read the value of the data frame column defined by key
                     value = value[key]
                 except KeyError as e:
                     logger.warning(
-                        "KeyError: Cannot replace field -> '%s'%s as the row does not have a column called '%s': %s",
+                        "KeyError: Cannot replace field -> '%s'%s as the data frame row does not have a column called '%s': %s",
                         field_name,
                         " (sub-key -> '{}')".format(key) if key != field_name else "",
                         field_name,
@@ -17063,7 +18750,7 @@ class Payload:
                         upper=upper,
                         lower=lower,
                     )
-                else:
+                else:  # we have a list, so we need to iterate
                     for v in value:
                         v = self.cleanup_value(
                             cleanup_value=v,
@@ -17226,5 +18913,139 @@ class Payload:
                     evaluated_condition = False
 
         return evaluated_condition
+
+    # end method definition
+
+    def process_avts_repositories(self, section_name: str = "avtsRepositories") -> bool:
+        """Process Aviator Search repositories.
+
+        Args:
+            section_name (str, optional): name of the section. It can be overridden
+                                          for cases where multiple sections of same type
+                                          are used (e.g. the "Post" sections). This
+                                          name is also used for the "success" status
+                                          files written to the Admin Personal Workspace
+        Returns:
+            bool: True if payload has been processed without errors, False otherwise
+        """
+
+        if not self._avts_repositories:
+            logger.info("Payload section -> '%s' is empty. Skipping...", section_name)
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(section_name):
+            return True
+
+        success: bool = True
+
+        self._avts.authenticate()
+
+        for payload_repo in self._avts_repositories:
+
+            if not payload_repo.get("enabled", True):
+                continue
+
+            repository = self._avts.get_repo_by_name(name=payload_repo["name"])
+
+            if repository is None:
+                logger.info(
+                    "Repository -> '%s' does not exist, creating it...",
+                    payload_repo["name"],
+                )
+
+                if payload_repo.get("type", "Extended ECM") == "Extended ECM":
+                    repository = self._avts.repo_create_extended_ecm(
+                        name=payload_repo["name"],
+                        username=payload_repo["username"],
+                        password=payload_repo["password"],
+                        otcs_url=payload_repo["otcs_url"],
+                        otcs_api_url=payload_repo["otcs_api_url"],
+                        node_id=int(payload_repo["node_id"]),
+                    )
+
+                elif payload_repo["type"] == "Documentum":
+                    logger.warning("Not yet implemented")
+                elif payload_repo["type"] == "MSTeams":
+                    repository = self._avts.repo_create_msteams(
+                        name=payload_repo["name"],
+                        client_id=payload_repo["client_id"],
+                        tenant_id=payload_repo["tenant_id"],
+                        certificate_file=payload_repo["certificate_file"],
+                        certificate_password=payload_repo["certificate_password"],
+                        index_attachments=payload_repo.get("index_attachments", True),
+                        index_call_recordings=payload_repo.get(
+                            "index_call_recordings", True
+                        ),
+                        index_message_replies=payload_repo.get(
+                            "index_message_replies", True
+                        ),
+                        index_user_chats=payload_repo.get("index_user_chats", True),
+                    )
+                elif payload_repo["type"] == "SharePoint":
+                    repository = self._avts.repo_create_sharepoint(
+                        name=payload_repo["name"],
+                        client_id=payload_repo["client_id"],
+                        tenant_id=payload_repo["tenant_id"],
+                        certificate_file=payload_repo["certificate_file"],
+                        certificate_password=payload_repo["certificate_password"],
+                        sharepoint_url=payload_repo["sharepoint_url"],
+                        sharepoint_url_type=payload_repo["sharepoint_url_type"],
+                        sharepoint_mysite_url=payload_repo["sharepoint_mysite_url"],
+                        sharepoint_admin_url=payload_repo["sharepoint_admin_url"],
+                        index_user_profiles=payload_repo.get(
+                            "index_message_replies", False
+                        ),
+                    )
+                else:
+                    logger.error(
+                        "Invalid repository type -> '%s' specified. Valid values are: Extended ECM, Documentum, MSTeams, SharePoint",
+                        payload_repo["type"],
+                    )
+                    success = False
+                    break
+
+                if repository is None:
+                    logger.error(
+                        "Creation of Search Aviator repository -> '%s' failed!",
+                        payload_repo["name"],
+                    )
+                    success = False
+                else:
+                    logger.info(
+                        "Successfully created Search Aviator repository -> %s",
+                        payload_repo["name"],
+                    )
+                    logger.debug("%s", repository)
+
+            else:
+                logger.info(
+                    "Search Aviator Repository -> '%s' already exists.",
+                    payload_repo["name"],
+                )
+
+            # Start Crawling
+            start_crawling = True if payload_repo.get("start", False) is True else False
+
+            if repository is not None and start_crawling:
+                response = self._avts.start_crawling(repo_name=payload_repo["name"])
+
+                if response is None:
+                    logger.error(
+                        "Aviator Search start crawling on repository failed -> %s",
+                        payload_repo["name"],
+                    )
+                    success = False
+                else:
+                    logger.info(
+                        "Aviator Search crawling started on repository -> %s",
+                        payload_repo["name"],
+                    )
+                    logger.debug("%s", response)
+
+        self.write_status_file(success, section_name, self._partitions)
+
+        return success
 
     # end method definition

@@ -4,6 +4,7 @@ pyxecm.egg-info/
 __pycache__/
 .venv/
 debug/
+/site
 __pycache__
 build/
 .env

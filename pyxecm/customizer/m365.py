@@ -12,8 +12,10 @@ credentials_user: In some cases MS Graph APIs cannot be called via
                   application permissions (client_id, client_secret)
                   but requires a token of a user authenticated
                   with username + password
+
 request_header: Returns the request header for MS Graph API calls
 request_header_user: Returns the request header used for user specific calls
+do_request: Call an M365 Graph API in a safe way
 parse_request_response: Parse the REST API responses and convert
                         them to Python dict in a safe way
 exist_result_item: Check if an dict item is in the response
@@ -102,9 +104,10 @@ import re
 import time
 import urllib.parse
 import zipfile
-from urllib.parse import quote
 from datetime import datetime
 
+from urllib.parse import quote
+from http import HTTPStatus
 import requests
 
 from pyxecm.helper.web import HTTP
@@ -118,6 +121,8 @@ request_login_headers = {
 }
 
 REQUEST_TIMEOUT = 60
+REQUEST_RETRY_DELAY = 20
+REQUEST_MAX_RETRIES = 3
 
 class M365(object):
     """Used to automate stettings in Microsoft 365 via the Graph API."""
@@ -265,6 +270,183 @@ class M365(object):
             "Content-Type": content_type,
         }
         return request_header
+
+    # end method definition
+
+    def do_request(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: dict | None = None,
+        data: dict | None = None,
+        json_data: dict | None = None,
+        files: dict | None = None,
+        params: dict | None = None,
+        timeout: int | None = REQUEST_TIMEOUT,
+        show_error: bool = True,
+        show_warning: bool = False,
+        warning_message: str = "",
+        failure_message: str = "",
+        success_message: str = "",
+        max_retries: int = REQUEST_MAX_RETRIES,
+        retry_forever: bool = False,
+        parse_request_response: bool = True,
+        stream: bool = False,
+    ) -> dict | None:
+        """Call an M365 Graph API in a safe way
+
+        Args:
+            url (str): URL to send the request to.
+            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional): Request Headers. Defaults to None.
+            data (dict | None, optional): Request payload. Defaults to None
+            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
+                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            params (dict | None, optional): Add key-value pairs to the query string of the URL.
+                                            When you use the params parameter, requests automatically appends
+                                            the key-value pairs to the URL as part of the query string
+            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
+                                         If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional): Specific error message. Defaults to "".
+            success_message (str, optional): Specific success message. Defaults to "".
+            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
+            stream (bool, optional): parameter is used to control whether the response content should be immediately downloaded or streamed incrementally
+
+        Returns:
+            dict | None: Response of OTDS REST API or None in case of an error.
+        """
+
+        if headers is None:
+            logger.error("Missing request header. Cannot send request to Core Share!")
+            return None
+
+        # In case of an expired session we reauthenticate and
+        # try 1 more time. Session expiration should not happen
+        # twice in a row:
+        retries = 0
+
+        while True:
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    data=data,
+                    json=json_data,
+                    files=files,
+                    params=params,
+                    headers=headers,
+                    timeout=timeout,
+                    stream=stream,
+                )
+
+                if response.ok:
+                    if success_message:
+                        logger.info(success_message)
+                    if parse_request_response:
+                        return self.parse_request_response(response)
+                    else:
+                        return response
+                # Check if Session has expired - then re-authenticate and try once more
+                elif response.status_code == 401 and retries == 0:
+                    logger.debug("Session has expired - try to re-authenticate...")
+                    self.authenticate(revalidate=True)
+                    headers = self.request_header()
+                    retries += 1
+                elif (
+                    response.status_code in [502, 503, 504]
+                    and retries < REQUEST_MAX_RETRIES
+                ):
+                    logger.warning(
+                        "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                        response.status_code,
+                        (retries + 1) * 60,
+                    )
+                    time.sleep((retries + 1) * 60)
+                    retries += 1
+                else:
+                    # Handle plain HTML responses to not pollute the logs
+                    content_type = response.headers.get("content-type", None)
+                    if content_type == "text/html":
+                        response_text = "HTML content (only printed in debug log)"
+                    else:
+                        response_text = response.text
+
+                    if show_error:
+                        logger.error(
+                            "%s; status -> %s/%s; error -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    elif show_warning:
+                        logger.warning(
+                            "%s; status -> %s/%s; warning -> %s",
+                            warning_message if warning_message else failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    if content_type == "text/html":
+                        logger.debug(
+                            "%s; status -> %s/%s; warning -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response.text,
+                        )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; timeout error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                    else:
+                        return None
+            except requests.exceptions.ConnectionError:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Connection error. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; connection error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                        time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                    else:
+                        return None
+            # end try
+            logger.debug(
+                "Retrying REST API %s call -> %s... (retry = %s)",
+                method,
+                url,
+                str(retries),
+            )
+        # end while True
 
     # end method definition
 
@@ -518,7 +700,7 @@ class M365(object):
             logger.debug("User Access Token -> %s", access_token)
         else:
             logger.error(
-                "Failed to request an M365 Access Token for user -> %s; error -> %s",
+                "Failed to request an M365 Access Token for user -> '%s'; error -> %s",
                 username,
                 authenticate_response.text,
             )
@@ -535,42 +717,21 @@ class M365(object):
         """Get list all all users in M365 tenant
 
         Returns:
-            dict: Dictionary of all users.
+            dict: Dictionary of all M365 users.
         """
 
         request_url = self.config()["usersUrl"]
         request_header = self.request_header()
 
-        logger.debug("Get list of all users; calling -> %s", request_url)
+        logger.debug("Get list of all M365 users; calling -> %s", request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of users; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get list of M365 users!",
+        )
 
     # end method definition
 
@@ -631,38 +792,14 @@ class M365(object):
 
         logger.debug("Get M365 user -> %s; calling -> %s", user_email, request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to get M365 user -> %s; status -> %s; error -> %s",
-                        user_email,
-                        response.status_code,
-                        response.text,
-                    )
-                else:
-                    logger.debug("M365 User -> %s not found.", user_email)
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get M365 user -> '{}'".format(user_email),
+            show_error=show_error,
+        )
 
     # end method definition
 
@@ -714,38 +851,14 @@ class M365(object):
 
         logger.debug("Adding M365 user -> %s; calling -> %s", email, request_url)
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                data=json.dumps(user_post_body),
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add M365 user -> %s; status -> %s; error -> %s",
-                    email,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=json.dumps(user_post_body),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add M365 user -> '{}'".format(email),
+        )
 
     # end method definition
 
@@ -770,39 +883,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.patch(
-                request_url,
-                json=updated_settings,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update M365 user -> %s with -> %s; status -> %s; error -> %s",
-                    user_id,
-                    str(updated_settings),
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=updated_settings,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update M365 user -> '{}' with -> {}".format(
+                user_id, updated_settings
+            ),
+        )
 
     # end method definition
 
@@ -831,35 +921,13 @@ class M365(object):
         request_url = self.config()["usersUrl"] + "/" + user_id + "/licenseDetails"
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get M365 licenses of user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get M365 licenses of user -> {}".format(user_id),
+        )
 
     # end method definition
 
@@ -897,39 +965,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                json=license_post_body,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add M365 license -> %s to M365 user -> %s; status -> %s; error -> %s",
-                    sku_id,
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=license_post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add M365 license -> {} to M365 user -> {}".format(
+                sku_id, user_id
+            ),
+        )
 
     # end method definition
 
@@ -950,42 +995,27 @@ class M365(object):
 
         logger.debug("Get photo of user -> %s; calling -> %s", user_id, request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return response.content  # this is the actual image - not json!
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to get photo of user -> %s; status -> %s; error -> %s",
-                        user_id,
-                        response.status_code,
-                        response.text,
-                    )
-                else:
-                    logger.debug("M365 User -> %s does not yet have a photo.", user_id)
-                return None
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get photo of M365 user -> {}".format(user_id),
+            warning_message="M365 User -> {} does not yet have a photo.".format(
+                user_id
+            ),
+            show_error=show_error,
+            parse_request_response=False,  # the response is NOT JSON!
+        )
+
+        if response and response.ok and response.content:
+            return response.content  # this is the actual image - not json!
+
+        return None
 
     # end method definition
 
-    def download_user_photo(self, user_id: str, photo_path: str) -> str:
+    def download_user_photo(self, user_id: str, photo_path: str) -> str | None:
         """Download the M365 user photo and save it to the local file system
 
         Args:
@@ -1005,64 +1035,48 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-                stream=True,
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to download photo for user with ID -> {}".format(
+                user_id
+            ),
+            stream=True,
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            content_type = response.headers.get("Content-Type", "image/png")
+            if content_type == "image/jpeg":
+                file_extension = "jpg"
+            elif content_type == "image/png":
+                file_extension = "png"
+            else:
+                file_extension = "img"  # Default extension if type is unknown
+            file_path = os.path.join(
+                photo_path, "{}.{}".format(user_id, file_extension)
             )
-            if response.ok:
-                content_type = response.headers.get("Content-Type", "image/png")
-                if content_type == "image/jpeg":
-                    file_extension = "jpg"
-                elif content_type == "image/png":
-                    file_extension = "png"
-                else:
-                    file_extension = "img"  # Default extension if type is unknown
-                file_path = os.path.join(
-                    photo_path, "{}.{}".format(user_id, file_extension)
+
+            try:
+                with open(file_path, "wb") as file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        file.write(chunk)
+                logger.info(
+                    "Photo for M365 user with ID -> %s saved to -> '%s'",
+                    user_id,
+                    file_path,
+                )
+                return file_path
+            except OSError as exception:
+                logger.error(
+                    "Error saving photo for user with ID -> %s; error -> %s",
+                    user_id,
+                    exception,
                 )
 
-                try:
-                    with open(file_path, "wb") as file:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            file.write(chunk)
-                    logger.info(
-                        "Photo for M365 user with ID -> %s saved to %s",
-                        user_id,
-                        file_path,
-                    )
-                    return file_path
-                except OSError as exception:
-                    logger.error(
-                        "Error saving photo for user with ID -> %s; error -> %s",
-                        user_id,
-                        exception,
-                    )
-                    return None
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header("application/json")
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to download photo for user with ID -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return None
 
     # end method definition
 
@@ -1105,36 +1119,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url, headers=request_header, data=data, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update user with ID -> %s with photo -> %s; status -> %s; error -> %s",
-                    user_id,
-                    photo_path,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data=data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update M365 user with ID -> {} with photo -> '{}'".format(
+                user_id, photo_path
+            ),
+        )
 
     # end method definition
 
@@ -1152,37 +1146,14 @@ class M365(object):
 
         logger.debug("Get list of all M365 groups; calling -> %s", request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url,
-                headers=request_header,
-                params={"$top": str(max_number)},
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of M365 groups; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            params={"$top": str(max_number)},
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get list of M365 groups",
+        )
 
     # end method definition
 
@@ -1247,40 +1218,16 @@ class M365(object):
         request_url = self.config()["groupsUrl"] + "?" + encoded_query
         request_header = self.request_header()
 
-        logger.debug("Get M365 group -> %s; calling -> %s", group_name, request_url)
+        logger.debug("Get M365 group -> '%s'; calling -> %s", group_name, request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to get M365 group -> %s; status -> %s; error -> %s",
-                        group_name,
-                        response.status_code,
-                        response.text,
-                    )
-                else:
-                    logger.debug("M365 Group -> %s not found.", group_name)
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get M365 group -> '{}'".format(group_name),
+            show_error=show_error,
+        )
 
     # end method definition
 
@@ -1345,41 +1292,17 @@ class M365(object):
         request_url = self.config()["groupsUrl"]
         request_header = self.request_header()
 
-        logger.debug("Adding M365 group -> %s; calling -> %s", name, request_url)
-        logger.debug("M365 group attributes -> %s", group_post_body)
+        logger.debug("Adding M365 group -> '%s'; calling -> %s", name, request_url)
+        logger.debug("M365 group attributes -> %s", str(group_post_body))
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                data=json.dumps(group_post_body),
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add M365 group -> %s; status -> %s; error -> %s",
-                    name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=json.dumps(group_post_body),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add M365 group -> '{}'".format(name),
+        )
 
     # end method definition
 
@@ -1416,36 +1339,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get members of M365 group -> %s (%s); status -> %s; error -> %s",
-                    group_name,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get members of M365 group -> '{}' ({})".format(
+                group_name, group_id
+            ),
+        )
 
     # end method definition
 
@@ -1473,40 +1375,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(group_member_post_body),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-
-            # Check if Session has expired - then re-authenticate and try once more
-            if response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add member -> %s to M365 group -> %s; status -> %s; error -> %s",
-                    member_id,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=json.dumps(group_member_post_body),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add member -> {} to M365 group -> {}".format(
+                member_id, group_id
+            ),
+        )
 
     # end method definition
 
@@ -1536,42 +1414,21 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                response = self.parse_request_response(response)
-                if not "value" in response or len(response["value"]) == 0:
-                    return False
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                # MS Graph API returns an error if the member is not in the
-                # group. This is typically not what we want. We just return False.
-                if show_error:
-                    logger.error(
-                        "Failed to check if user -> %s is in group -> %s; status -> %s; error -> %s",
-                        member_id,
-                        group_id,
-                        response.status_code,
-                        response.text,
-                    )
-                return False
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to check if user -> {} is in group -> {}".format(
+                member_id, group_id
+            ),
+            show_error=show_error,
+        )
+
+        if not response or not "value" in response or len(response["value"]) == 0:
+            return False
+
+        return True
 
     # end method definition
 
@@ -1608,36 +1465,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get owners of M365 group -> %s (%s); status -> %s; error -> %s",
-                    group_name,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get owners of M365 group -> '{}' ({})".format(
+                group_name, group_id
+            ),
+        )
 
     # end method definition
 
@@ -1665,39 +1501,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(group_member_post_body),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add owner -> %s to M365 group -> %s; status -> %s; error -> %s",
-                    owner_id,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=json.dumps(group_member_post_body),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add owner -> {} to M365 group -> {}".format(
+                owner_id, group_id
+            ),
+        )
 
     # end method definition
 
@@ -1751,35 +1564,13 @@ class M365(object):
 
         logger.debug("Purging deleted item -> %s; calling -> %s", item_id, request_url)
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to purge deleted item -> %s; status -> %s; error -> %s",
-                    item_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to purge deleted item -> {}".format(item_id),
+        )
 
     # end method definition
 
@@ -1810,39 +1601,27 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to check if M365 Group -> '{}' has a M365 Team connected".format(
+                group_name
+            ),
+            parse_request_response=False,
+        )
 
-            if response.status_code == 200:  # Group has a Team assigned!
-                logger.debug("Group -> %s has a M365 Team connected.", group_name)
-                return True
-            elif response.status_code == 404:  # Group does not have a Team assigned!
-                logger.debug("Group -> %s has no M365 Team connected.", group_name)
-                return False
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to check if M365 Group -> %s has a M365 Team connected; status -> %s; error -> %s",
-                    group_name,
-                    response.status_code,
-                    response.text,
-                )
-                return False
+        if response and response.status_code == 200:  # Group has a Team assigned!
+            logger.debug("Group -> %s has a M365 Team connected.", group_name)
+            return True
+        elif (
+            not response or response.status_code == 404
+        ):  # Group does not have a Team assigned!
+            logger.debug("Group -> %s has no M365 Team connected.", group_name)
+            return False
+
+        return False
 
     # end method definition
 
@@ -1902,35 +1681,13 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get M365 Team -> %s; status -> %s; error -> %s",
-                    name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get M365 Team -> '{}'".format(name),
+        )
 
     # end method definition
 
@@ -1972,41 +1729,17 @@ class M365(object):
         request_url = self.config()["teamsUrl"]
         request_header = self.request_header()
 
-        logger.debug("Adding M365 Team -> %s; calling -> %s", name, request_url)
-        logger.debug("M365 Team attributes -> %s", team_post_body)
+        logger.debug("Adding M365 Team -> '%s'; calling -> %s", name, request_url)
+        logger.debug("M365 Team attributes -> %s", str(team_post_body))
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                data=json.dumps(team_post_body),
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add M365 Team -> '%s'; status -> %s; error -> %s",
-                    name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            data=json.dumps(team_post_body),
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add M365 Team -> '{}'".format(name),
+        )
 
     # end method definition
 
@@ -2029,30 +1762,13 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error("Failed to delete M365 Team with ID -> %s", team_id)
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete M365 Team with ID -> {}".format(team_id),
+        )
 
     # end method definition
 
@@ -2083,36 +1799,13 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                existing_teams = self.parse_request_response(response)
-                break
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of M365 Teams to delete; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                existing_teams = None
-                break
+        existing_teams = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get list of M365 Teams to delete",
+        )
 
         if existing_teams:
             data = existing_teams.get("value")
@@ -2124,7 +1817,7 @@ class M365(object):
 
                     if not response:
                         logger.error(
-                            "Failed to delete M365 Team -> %s (%s)", name, team_id
+                            "Failed to delete M365 Team -> '%s' (%s)", name, team_id
                         )
                         continue
                     counter += 1
@@ -2243,35 +1936,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Channels for M365 Team -> %s; status -> %s; error -> %s",
-                    name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Channels for M365 Team -> '{}' ({})".format(
+                name, team_id
+            ),
+        )
 
     # end method definition
 
@@ -2346,38 +2019,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Tabs for M365 Team -> %s (%s) and Channel -> %s (%s); status -> %s; error -> %s",
-                    team_name,
-                    team_id,
-                    channel_name,
-                    channel_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Tabs for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
+                team_name, team_id, channel_name, channel_id
+            ),
+        )
 
     # end method definition
 
@@ -2435,39 +2085,24 @@ class M365(object):
                 filter_expression,
                 request_url,
             )
+            failure_message = (
+                "Failed to get list of M365 Teams apps using filter -> {}".format(
+                    filter_expression
+                )
+            )
         else:
             logger.debug("Get list of all MS Teams Apps; calling -> %s", request_url)
+            failure_message = "Failed to get list of M365 Teams apps"
 
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of M365 Teams apps; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message=failure_message,
+        )
 
     # end method definition
 
@@ -2514,34 +2149,13 @@ class M365(object):
 
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of M365 Teams apps; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get M365 Teams app with ID -> {}".format(app_id),
+        )
 
     # end method definition
 
@@ -2579,35 +2193,15 @@ class M365(object):
 
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of M365 Teams Apps for user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get M365 Teams apps for user -> {}".format(
+                user_id
+            ),
+        )
 
     # end method definition
 
@@ -2645,35 +2239,15 @@ class M365(object):
 
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get list of M365 Teams Apps for M365 Team -> %s; status -> %s; error -> %s",
-                    team_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get list of M365 Teams apps for M365 Team -> {}".format(
+                team_id
+            ),
+        )
 
     # end method definition
 
@@ -2770,7 +2344,7 @@ class M365(object):
 
         # Here we need the credentials of an authenticated user!
         # (not the application credentials (client_id, client_secret))
-        request_header = self.request_header_user("application/zip")
+        request_header = self.request_header_user(content_type="application/zip")
 
         with open(app_path, "rb") as f:
             app_data = f.read()
@@ -2790,48 +2364,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=app_data,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-
-            # Check if Session has expired - then re-authenticate and try once more
-            if response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                if update_existing_app:
-                    logger.warning(
-                        "Failed to update existing M365 Teams app -> '%s' (may be because it is not a new version); status -> %s; error -> %s",
-                        app_path,
-                        response.status_code,
-                        response.text,
-                    )
-
-                else:
-                    logger.error(
-                        "Failed to upload new M365 Teams app -> '%s'; status -> %s; error -> %s",
-                        app_path,
-                        response.status_code,
-                        response.text,
-                    )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=app_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update existing M365 Teams app -> '{}' (may be because it is not a new version)".format(
+                app_path
+            ),
+        )
 
     # end method definition
 
@@ -2926,50 +2468,20 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                json=post_body,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to assign M365 Teams app -> '%s' (%s) to M365 user -> %s; status -> %s; error -> %s",
-                        app_name,
-                        app_internal_id,
-                        user_id,
-                        response.status_code,
-                        response.text,
-                    )
-                else:
-                    logger.warning(
-                        "Failed to assign M365 Teams app -> '%s' (%s) to M365 user -> %s (could be because the app is assigned organization-wide); status -> %s; warning -> %s",
-                        app_name,
-                        app_internal_id,
-                        user_id,
-                        response.status_code,
-                        response.text,
-                    )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 user -> {}".format(
+                app_name, app_internal_id, user_id
+            ),
+            warning_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 user -> {} (could be because the app is assigned organization-wide)".format(
+                app_name, app_internal_id, user_id
+            ),
+            show_error=show_error,
+        )
 
     # end method definition
 
@@ -3025,37 +2537,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to upgrade M365 Teams app -> '%s' (%s) of M365 user -> %s; status -> %s; error -> %s",
-                    app_name,
-                    app_installation_id,
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to upgrade M365 Teams app -> '{}' ({}) of M365 user -> {}".format(
+                app_name, app_installation_id, user_id
+            ),
+        )
 
     # end method definition
 
@@ -3107,37 +2597,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to remove M365 Teams app -> '%s' (%s) from M365 user -> %s; status -> %s; error -> %s",
-                    app_name,
-                    app_installation_id,
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to remove M365 Teams app -> '{}' ({}) from M365 user -> {}".format(
+                app_name, app_installation_id, user_id
+            ),
+        )
 
     # end method definition
 
@@ -3168,40 +2636,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                json=post_body,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to assign M365 Teams app -> '%s' (%s) to M365 Team -> %s; status -> %s; error -> %s",
-                    self.config()["teamsAppName"],
-                    app_id,
-                    team_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 Team -> {}".format(
+                self.config()["teamsAppName"], app_id, team_id
+            ),
+        )
 
     # end method definition
 
@@ -3249,37 +2693,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to upgrade M365 Teams app -> '%s' (%s) of M365 team with ID -> %s; status -> %s; error -> %s",
-                    app_name,
-                    app_installation_id,
-                    team_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to upgrade M365 Teams app -> '{}' ({}) of M365 team with ID -> {}".format(
+                app_name, app_installation_id, team_id
+            ),
+        )
 
     # end method definition
 
@@ -3364,42 +2786,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                json=tab_config,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Tab for M365 Team -> '%s' (%s) and Channel -> '%s' (%s); status -> %s; error -> %s; tab config -> %s",
-                    team_name,
-                    team_id,
-                    channel_name,
-                    channel_id,
-                    response.status_code,
-                    response.text,
-                    str(tab_config),
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=tab_config,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Tab for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
+                team_name, team_id, channel_name, channel_id
+            ),
+        )
 
     # end method definition
 
@@ -3506,43 +2902,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.patch(
-                request_url,
-                headers=request_header,
-                json=tab_config,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update Tab -> '%s' (%s) for M365 Team -> '%s' (%s) and Channel -> '%s' (%s); status -> %s; error -> %s",
-                    tab_name,
-                    tab_id,
-                    team_name,
-                    team_id,
-                    channel_name,
-                    channel_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=tab_config,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update Tab -> '{}' ({}) for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
+                tab_name, tab_id, team_name, team_id, channel_name, channel_id
+            ),
+        )
 
     # end method definition
 
@@ -3633,49 +3002,23 @@ class M365(object):
                 request_url,
             )
 
-            retries = 0
-            while True:
-                response = requests.delete(
-                    request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-                )
-                if response.ok:
-                    logger.debug(
-                        "Tab -> '%s' (%s) has been deleted from Channel -> '%s' (%s) of Microsoft 365 Teams -> '%s' (%s)",
-                        tab_name,
-                        tab_id,
-                        channel_name,
-                        channel_id,
-                        team_name,
-                        team_id,
-                    )
-                    break
-                # Check if Session has expired - then re-authenticate and try once more
-                elif response.status_code == 401 and retries == 0:
-                    logger.debug("Session has expired - try to re-authenticate...")
-                    self.authenticate(revalidate=True)
-                    request_header = self.request_header()
-                    retries += 1
-                elif response.status_code in [502, 503, 504] and retries < 3:
-                    logger.warning(
-                        "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                        response.status_code,
-                        (retries + 1) * 60,
-                    )
-                    time.sleep((retries + 1) * 60)
-                    retries += 1
-                else:
-                    logger.error(
-                        "Failed to delete Tab -> '%s' (%s) for M365 Team -> '%s' (%s) and Channel -> '%s' (%s); status -> %s; error -> %s",
-                        tab_name,
-                        tab_id,
-                        team_name,
-                        team_id,
-                        channel_name,
-                        channel_id,
-                        response.status_code,
-                        response.text,
-                    )
-                    return False
+            response = self.do_request(
+                url=request_url,
+                method="DELETE",
+                headers=request_header,
+                timeout=REQUEST_TIMEOUT,
+                failure_message="Failed to delete Tab -> '{}' ({}) for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
+                    tab_name, tab_id, team_name, team_id, channel_name, channel_id
+                ),
+                parse_request_response=False,
+            )
+
+            if response and response.ok:
+                break
+            else:
+                return False
+        # end for tab in tab_list
+
         return True
 
     # end method definition
@@ -3778,36 +3121,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url, headers=request_header, json=body, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to assign label -> '%s' to M365 user -> '%s'; status -> %s; error -> %s",
-                    label_name,
-                    user_email,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to assign label -> '{}' to M365 user -> '{}'".format(
+                label_name, user_email
+            ),
+        )
 
     # end method definition
 
@@ -3832,7 +3155,7 @@ class M365(object):
 
         #        request_header = self.request_header()
 
-        logger.debug("Install Outlook Add-in from '%s' (NOT IMPLEMENTED)", app_path)
+        logger.debug("Install Outlook Add-in from -> '%s' (NOT IMPLEMENTED)", app_path)
 
         response = None
 
@@ -3864,35 +3187,15 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Cannot find Azure App Registration -> '%s'; status -> %s; error -> %s",
-                    app_registration_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot find Azure App Registration -> '{}'".format(
+                app_registration_name
+            ),
+        )
 
     # end method definition
 
@@ -3963,38 +3266,16 @@ class M365(object):
         request_url = self.config()["applicationsUrl"]
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                json=app_registration_data,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Cannot add App Registration -> '%s'; status -> %s; error -> %s",
-                    app_registration_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=app_registration_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot add App Registration -> '{}'".format(
+                app_registration_name
+            ),
+        )
 
     # end method definition
 
@@ -4035,39 +3316,16 @@ class M365(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.patch(
-                request_url,
-                headers=request_header,
-                json=app_registration_data,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Cannot update App Registration -> '%s' (%s); status -> %s; error -> %s",
-                    app_registration_name,
-                    app_registration_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=app_registration_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot update App Registration -> '{}' ({})".format(
+                app_registration_name, app_registration_id
+            ),
+        )
 
     # end method definition
 
@@ -4109,67 +3367,40 @@ class M365(object):
         request_header = self.request_header()
 
         logger.debug(
-            "Retrieve mails for user -> %s from -> '%s' with subject -> '%s'; calling -> %s",
+            "Get mails for user -> %s from -> '%s' with subject -> '%s'; calling -> %s",
             user_id,
             sender,
             subject,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                response = self.parse_request_response(response)
-                messages = response["value"] if response else []
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot retrieve emails for user -> {}".format(user_id),
+            show_error=show_error,
+        )
 
-                # Filter the messages by sender and subject in code
-                filtered_messages = [
-                    msg
-                    for msg in messages
-                    if msg.get("from", {}).get("emailAddress", {}).get("address")
-                    == sender
-                    and subject in msg.get("subject", "")
-                ]
-                response["value"] = filtered_messages
-                return response
+        if response and "value" in response:
+            messages = response["value"]
 
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Cannot retrieve emails for user -> %s; status -> %s; error -> %s",
-                        user_id,
-                        response.status_code,
-                        response.text,
-                    )
-                else:
-                    logger.warning(
-                        "Cannot retrieve emails for user -> %s; status -> %s; warning -> %s",
-                        user_id,
-                        response.status_code,
-                        response.text,
-                    )
-                return None
+            # Filter the messages by sender and subject in code
+            filtered_messages = [
+                msg
+                for msg in messages
+                if msg.get("from", {}).get("emailAddress", {}).get("address") == sender
+                and subject in msg.get("subject", "")
+            ]
+            response["value"] = filtered_messages
+            return response
+
+        return None
 
     # end method definition
 
-    def get_mail_body(self, user_id: str, email_id: str) -> str:
+    def get_mail_body(self, user_id: str, email_id: str) -> str | None:
         """Get full email body for a given email ID
            This requires Mail.Read Application permissions for the Azure App being used.
 
@@ -4177,7 +3408,7 @@ class M365(object):
             user_id (str): M365 ID of the user
             email_id (str): M365 ID of the email
         Returns:
-            str: Email body or None of the request fails.
+            str | None: Email body or None of the request fails.
         """
 
         request_url = (
@@ -4191,36 +3422,22 @@ class M365(object):
 
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return response.content.decode("utf-8")
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Cannot retrieve emails body for user -> %s and email -> %s; status -> %s; error -> %s",
-                    user_id,
-                    email_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get email body for user -> {} and email with ID -> {}".format(
+                user_id,
+                email_id,
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok and response.content:
+            return response.content.decode("utf-8")
+
+        return None
 
     # end method definition
 
@@ -4310,36 +3527,15 @@ class M365(object):
 
         request_header = self.request_header()
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            elif response.status_code in [502, 503, 504] and retries < 3:
-                logger.warning(
-                    "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
-                    response.status_code,
-                    (retries + 1) * 60,
-                )
-                time.sleep((retries + 1) * 60)
-                retries += 1
-            else:
-                logger.error(
-                    "Cannot delete email -> %s from inbox of user -> %s; status -> %s; error -> %s",
-                    email_id,
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot delete email with ID -> {} from inbox of user -> {}".format(
+                email_id, user_id
+            ),
+        )
 
     # end method definition
 
@@ -4521,8 +3717,8 @@ class M365(object):
                                         password_submit_xpath,
                                     )
                                     success = False
-                            # TODO is this sleep required? The Terms of service dialog has some weird animation
-                            # which may require this. It seems it is rtequired!
+                            # The Terms of service dialog has some weird animation
+                            # which require a short wait time. It seems it is required!
                             time.sleep(1)
                             terms_accept_button = browser_automation_object.find_elem(
                                 find_elem=terms_of_service_xpath,

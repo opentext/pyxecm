@@ -1,6 +1,7 @@
 """
 CoreShare Module to interact with the Core Share API
 See: https://confluence.opentext.com/pages/viewpage.action?spaceKey=OTC&title=APIs+Consumption+based+on+roles
+See also: https://swagger.otxlab.net/ui/?branch=master&yaml=application-specific/core/core-api.yaml
 
 Authentication - get Client Secrets:
 1. Login to Core Share as a Tenant Admin User .
@@ -16,7 +17,12 @@ __init__ : class initializer
 config : Returns config data set
 credentials: Get credentials (username + password)
 set_credentials: Set the credentials for Core Share based on username and password.
-request_header: Returns the request header for Core Share API calls
+
+request_header_admin: Returns the request header used for Application calls
+                      that require administrator credentials
+request_header_user: Returns the request header used for Application calls
+                     that require user (non-admin) credentials.
+do_request: call an Core Share REST API in a safe way.
 parse_request_response: Parse the REST API responses and convert
                         them to Python dict in a safe way
 lookup_result_value: Lookup a property value based on a provided key / value pair in the response
@@ -71,8 +77,10 @@ __email__ = "mdiefenb@opentext.com"
 import os
 import json
 import logging
-import urllib.parse
+import time
 
+import urllib.parse
+from http import HTTPStatus
 import requests
 
 logger = logging.getLogger("pyxecm.customizer.coreshare")
@@ -83,6 +91,8 @@ REQUEST_LOGIN_HEADERS = {
 }
 
 REQUEST_TIMEOUT = 60
+REQUEST_RETRY_DELAY = 20
+REQUEST_MAX_RETRIES = 2
 
 
 class CoreShare(object):
@@ -248,7 +258,8 @@ class CoreShare(object):
     # end method definition
 
     def request_header_admin(self, content_type: str = "application/json") -> dict:
-        """Returns the request header used for Application calls.
+        """Returns the request header used for Application calls
+           that require administrator credentials.
            Consists of Bearer access token and Content Type
 
         Args:
@@ -268,7 +279,8 @@ class CoreShare(object):
     # end method definition
 
     def request_header_user(self, content_type: str = "application/json") -> dict:
-        """Returns the request header used for Application calls.
+        """Returns the request header used for Application calls
+           that require user (non-admin) credentials.
            Consists of Bearer access token and Content Type
 
         Args:
@@ -284,6 +296,186 @@ class CoreShare(object):
             request_header["Content-Type"] = content_type
 
         return request_header
+
+    # end method definition
+
+    def do_request(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: dict | None = None,
+        data: dict | None = None,
+        json_data: dict | None = None,
+        files: dict | None = None,
+        timeout: int | None = REQUEST_TIMEOUT,
+        show_error: bool = True,
+        show_warning: bool = False,
+        warning_message: str = "",
+        failure_message: str = "",
+        success_message: str = "",
+        max_retries: int = REQUEST_MAX_RETRIES,
+        retry_forever: bool = False,
+        parse_request_response: bool = True,
+        user_credentials: bool = False,
+        verify: bool = True,
+    ) -> dict | None:
+        """Call an OTDS REST API in a safe way
+
+        Args:
+            url (str): URL to send the request to.
+            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional): Request Headers. Defaults to None.
+            data (dict | None, optional): Request payload. Defaults to None
+            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
+                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
+                                         If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional): Specific error message. Defaults to "".
+            success_message (str, optional): Specific success message. Defaults to "".
+            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
+            user_credentials (bool, optional): defines if admin or user credentials are used for the REST API call. Default = False = admin credentials
+            verify (bool, optional): specify whether or not SSL certificates should be verified when making an HTTPS request. Default = True
+
+        Returns:
+            dict | None: Response of OTDS REST API or None in case of an error.
+        """
+
+        if headers is None:
+            logger.error("Missing request header. Cannot send request to Core Share!")
+            return None
+
+        # In case of an expired session we reauthenticate and
+        # try 1 more time. Session expiration should not happen
+        # twice in a row:
+        retries = 0
+
+        while True:
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    data=data,
+                    json=json_data,
+                    files=files,
+                    headers=headers,
+                    timeout=timeout,
+                    verify=verify,
+                )
+
+                if response.ok:
+                    if success_message:
+                        logger.info(success_message)
+                    if parse_request_response:
+                        return self.parse_request_response(response)
+                    else:
+                        return response
+                # Check if Session has expired - then re-authenticate and try once more
+                elif response.status_code == 401 and retries == 0:
+                    if user_credentials:
+                        logger.debug(
+                            "User session has expired - try to re-authenticate..."
+                        )
+                        self.authenticate_user(revalidate=True)
+                        # Make sure to not change the content type:
+                        headers = self.request_header_user(
+                            content_type=headers.get("Content-Type", None)
+                        )
+                    else:
+                        logger.warning(
+                            "Admin session has expired - try to re-authenticate..."
+                        )
+                        self.authenticate_admin(revalidate=True)
+                        # Make sure to not change the content type:
+                        headers = self.request_header_admin(
+                            content_type=headers.get("Content-Type", None)
+                        )
+                    retries += 1
+                else:
+                    # Handle plain HTML responses to not pollute the logs
+                    content_type = response.headers.get("content-type", None)
+                    if content_type == "text/html":
+                        response_text = "HTML content (only printed in debug log)"
+                    elif "image" in content_type:
+                        response_text = "Image content (not printed)"
+                    else:
+                        response_text = response.text
+
+                    if show_error:
+                        logger.error(
+                            "%s; status -> %s/%s; error -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    elif show_warning:
+                        logger.warning(
+                            "%s; status -> %s/%s; warning -> %s",
+                            warning_message if warning_message else failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    if content_type == "text/html":
+                        logger.debug(
+                            "%s; status -> %s/%s; warning -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response.text,
+                        )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; timeout error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                    else:
+                        return None
+            except requests.exceptions.ConnectionError:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Connection error. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; connection error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                        time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                    else:
+                        return None
+            # end try
+            logger.debug(
+                "Retrying REST API %s call -> %s... (retry = %s)",
+                method,
+                url,
+                str(retries),
+            )
+        # end while True
 
     # end method definition
 
@@ -652,25 +844,14 @@ class CoreShare(object):
 
         logger.debug("Get Core Share groups; calling -> %s", request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Core Share groups; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Core Share groups",
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -720,29 +901,15 @@ class CoreShare(object):
             "Adding Core Share group -> %s; calling -> %s", group_name, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Core Share group -> %s; status -> %s; error -> %s",
-                    group_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Core Share group -> '{}'".format(group_name),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -787,35 +954,25 @@ class CoreShare(object):
         if not self._access_token_admin:
             self.authenticate_admin()
 
-        request_header = self.request_header_user()
+        request_header = self.request_header_admin()
         request_url = self.config()["groupsUrl"] + "/{}".format(group_id) + "/members"
 
         logger.debug(
-            "Get members for Core Share group -> %s; calling -> %s",
+            "Get members for Core Share group with ID -> %s; calling -> %s",
             group_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get members of Core Share group -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get members of Core Share group -> '{}'".format(
+                group_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -868,7 +1025,7 @@ class CoreShare(object):
         if not self._access_token_admin:
             self.authenticate_admin()
 
-        request_header = self.request_header_user()
+        request_header = self.request_header_admin()
         request_url = self.config()["groupsUrl"] + "/{}".format(group_id) + "/members"
 
         user = self.get_user_by_id(user_id=user_id)
@@ -877,7 +1034,7 @@ class CoreShare(object):
         payload = {"members": [user_email], "specificGroupRole": is_group_admin}
 
         logger.debug(
-            "Add Core Share user -> %s (%s) as %s to Core Share group -> %s; calling -> %s",
+            "Add Core Share user -> '%s' (%s) as %s to Core Share group with ID -> %s; calling -> %s",
             user_email,
             user_id,
             "group member" if not is_group_admin else "group admin",
@@ -885,30 +1042,17 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                json=payload,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Core Share user -> %s to Core Share group -> %s; status -> %s; error -> %s",
-                    user_id,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Core Share user -> '{}' to Core Share group with ID -> {}".format(
+                user_email, group_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -939,10 +1083,10 @@ class CoreShare(object):
             ]
         """
 
-        if not self._access_token_user:
-            self.authenticate_user()
+        if not self._access_token_admin:
+            self.authenticate_admin()
 
-        request_header = self.request_header_user()
+        request_header = self.request_header_admin()
         request_url = self.config()["groupsUrl"] + "/{}".format(group_id) + "/members"
 
         user = self.get_user_by_id(user_id=user_id)
@@ -951,7 +1095,7 @@ class CoreShare(object):
         payload = {"members": [user_email], "specificGroupRole": is_group_admin}
 
         logger.debug(
-            "Remove Core Share user -> %s (%s) as %s from Core Share group -> %s; calling -> %s",
+            "Remove Core Share user -> '%s' (%s) as %s from Core Share group with ID -> %s; calling -> %s",
             user_email,
             user_id,
             "group member" if not is_group_admin else "group admin",
@@ -959,30 +1103,17 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url,
-                headers=request_header,
-                json=payload,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to remove Core Share user -> %s from Core Share group -> %s; status -> %s; error -> %s",
-                    user_id,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to remove Core Share user -> '{}' ({}) from Core Share group with ID -> {}".format(
+                user_email, user_id, group_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -998,36 +1129,26 @@ class CoreShare(object):
             Response example:
         """
 
-        if not self._access_token_user:
-            self.authenticate_user()
+        if not self._access_token_admin:
+            self.authenticate_admin()
 
-        request_header = self.request_header_user()
+        request_header = self.request_header_admin()
         request_url = self.config()["groupsUrl"] + "/" + group_id
 
         logger.debug(
             "Get Core Share group with ID -> %s; calling -> %s", group_id, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Core Share group with ID -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Core Share group with ID -> {}".format(
+                group_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1092,26 +1213,16 @@ class CoreShare(object):
             "Search Core Share group by -> %s; calling -> %s", query_string, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Cannot find Core Share group with name / property -> %s; status -> %s; error -> %s",
-                    query_string,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot find Core Share group with name / property -> {}".format(
+                query_string
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1197,25 +1308,14 @@ class CoreShare(object):
 
         logger.debug("Get Core Share users; calling -> %s", request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Core Share users; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Core Share users",
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1299,26 +1399,16 @@ class CoreShare(object):
             "Get Core Share user with ID -> %s; calling -> %s", user_id, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Core Share user with ID -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Core Share user with ID -> {}".format(
+                user_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -1453,26 +1543,16 @@ class CoreShare(object):
             "Search Core Share user by -> %s; calling -> %s", query_string, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to search Core Share user with name / property -> %s; status -> %s; error -> %s",
-                    query_string,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to search Core Share user with name / property -> {}".format(
+                query_string
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1564,31 +1644,17 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                json=payload,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Core Share user -> %s %s (%s); status -> %s; error -> %s",
-                    first_name,
-                    last_name,
-                    email,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Core Share user -> '{} {}' ({})".format(
+                first_name, last_name, email
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1617,29 +1683,17 @@ class CoreShare(object):
 
         update_data = {"resend": True}
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url,
-                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Admin Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to resend invite for Core Share user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            json_data=update_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to resend invite for Core Share user with ID -> {}".format(
+                user_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1671,29 +1725,17 @@ class CoreShare(object):
                 "Trying to update the email without providing the password. This is likely to fail..."
             )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url,
-                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Admin Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update Core Share user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            json_data=update_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update Core Share user with ID -> {}".format(
+                user_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1729,30 +1771,16 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url,
-                #                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Admin Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add access role -> %s to Core Share user -> %s; status -> %s; error -> %s",
-                    str(role_id),
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add access role with ID -> {} to Core Share user with ID -> {}".format(
+                role_id, user_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1782,36 +1810,22 @@ class CoreShare(object):
         )
 
         logger.debug(
-            "Remove access role -> %s from Core Share user with ID -> %s; calling -> %s",
+            "Remove access role with ID -> %s from Core Share user with ID -> %s; calling -> %s",
             str(role_id),
             user_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url,
-                #                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Admin Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to remove access role -> %s from Core Share user -> %s; status -> %s; error -> %s",
-                    str(role_id),
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to remove access role with ID -> {} from Core Share user with ID -> {}".format(
+                role_id, user_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -1908,36 +1922,22 @@ class CoreShare(object):
 
         update_data = {"password": password, "newpassword": new_password}
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url,
-                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Admin Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update password of Core Share user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            json_data=update_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update password of Core Share user with ID -> {}".format(
+                user_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
     def update_user_photo(
-        self,
-        user_id: str,
-        photo_path: str,
+        self, user_id: str, photo_path: str, mime_type: str = "image/jpeg"
     ) -> dict | None:
         """Update the Core Share user photo.
 
@@ -1969,7 +1969,7 @@ class CoreShare(object):
 
         request_url = self.config()["usersUrlv3"] + "/{}".format(user_id) + "/photo"
         files = {
-            "file": (photo_path, photo_data, "image/jpeg"),
+            "file": (photo_path, photo_data, mime_type),
         }
 
         logger.debug(
@@ -1978,29 +1978,18 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                files=files,
-                headers=self.request_header_user(content_type=""),
-                verify=False,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update profile photo of Core Share user with ID -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=self.request_header_user(content_type=""),
+            files=files,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update profile photo of Core Share user with ID -> {}".format(
+                user_id
+            ),
+            user_credentials=True,
+            verify=False,
+        )
 
     # end method definition
 
@@ -2084,26 +2073,16 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Core Share folders under parent -> %s; status -> %s; error -> %s",
-                    parent_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Core Share folders under parent -> {}".format(
+                parent_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -2133,26 +2112,16 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to unshare Core Share folder -> %s; status -> %s; error -> %s",
-                    resource_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to unshare Core Share folder with ID -> {}".format(
+                resource_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -2182,29 +2151,17 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to delete Core Share folder -> %s; status -> %s; error -> %s",
-                    resource_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete Core Share folder -> {}".format(
+                resource_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -2234,29 +2191,17 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to delete Core Share document -> %s; status -> %s; error -> %s",
-                    resource_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete Core Share document -> {}".format(
+                resource_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -2286,35 +2231,23 @@ class CoreShare(object):
         payload = {"action": "LEAVE_SHARE"}
 
         logger.debug(
-            "User -> %s leaves Core Share shared folder -> %s; calling -> %s",
+            "User with ID -> %s leaves Core Share shared folder with ID -> %s; calling -> %s",
             user_id,
             resource_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to leave Core Share folder -> %s; status -> %s; error -> %s",
-                    resource_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="User with ID -> {} failed to leave Core Share folder with ID -> {}".format(
+                user_id, resource_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -2345,28 +2278,16 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_user(revalidate=True)
-                request_header = self.request_header_user()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to stop sharing Core Share folder -> %s; status -> %s; error -> %s",
-                    resource_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="User with ID -> {} failed to stop sharing Core Share folder with ID -> {}".format(
+                user_id, resource_id
+            ),
+            user_credentials=True,
+        )
 
     # end method definition
 
@@ -2517,28 +2438,16 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get shares of Core Share group -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get shares of Core Share group -> {}".format(
+                group_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 
@@ -2572,29 +2481,16 @@ class CoreShare(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                request_url,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate_admin(revalidate=True)
-                request_header = self.request_header_admin()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to revoke sharing Core Share folder -> %s with group -> %s; status -> %s; error -> %s",
-                    resource_id,
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to revoke sharing Core Share folder with ID -> {} with group with ID -> {}".format(
+                resource_id, group_id
+            ),
+            user_credentials=False,
+        )
 
     # end method definition
 

@@ -107,7 +107,7 @@ class OTMM:
             target(*args, **kwargs)
         except Exception as e:
             thread_name = threading.current_thread().name
-            logger.error("Thread %s: failed with exception %s", thread_name, e)
+            logger.error("Thread '%s': failed with exception -> %s", thread_name, e)
             logger.error(traceback.format_exc())
 
     # end method definition
@@ -258,6 +258,48 @@ class OTMM:
         )
 
         return response
+
+    # end method definition
+
+    def get_asset(self, asset_id: str) -> dict:
+        """Get an asset based on its ID
+
+        Args:
+            asset_id (str): Asset ID
+
+        Returns:
+            dict: dictionary with asset data
+        """
+
+        request_url = self.config()["assetsUrl"] + "/" + asset_id
+
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        try:
+            response = self._session.get(
+                request_url,
+                headers=headers,
+            )
+
+            response.raise_for_status()
+
+        except requests.exceptions.HTTPError as http_err:
+            logger.error("HTTP error occurred: %s", http_err)
+            return None
+        except requests.exceptions.ConnectionError as conn_err:
+            logger.error("Connection error occurred: %s", conn_err)
+            return None
+        except requests.exceptions.Timeout as timeout_err:
+            logger.error("Timeout error occurred: %s", timeout_err)
+            return None
+        except requests.exceptions.RequestException as req_err:
+            logger.error("Request error occurred: %s", req_err)
+            return None
+        except Exception as e:
+            logger.error("An unexpected error occurred: %s", e)
+            return None
+
+        return response.json()
 
     # end method definition
 
@@ -418,7 +460,7 @@ class OTMM:
         if download_url:
             request_url = download_url
         else:
-            request_url = self.config()["assetsUrl"] + "/" + asset_id + "/contens"
+            request_url = self.config()["assetsUrl"] + "/" + asset_id + "/contents"
 
         file_name = os.path.join(self._download_dir, asset_id)
 
@@ -623,8 +665,81 @@ class OTMM:
     ) -> bool:
         """Load all Media Assets for Products and Business Units
 
+        Args:
+            load_products (bool, optional): If true load assets on Business Unit level. Defaults to True.
+            load_business_units (bool, optional): If true load assets on Product level. Defaults to True.
+            download_assets (bool, optional): Should assets been downloaded. Defaults to True.
+
         Returns:
             bool: True = Success, False = Failure
+
+        Example Asset:
+        {
+            'access_control_descriptor': {
+                'permissions_map': {...}
+            },
+            'asset_content_info': {
+                'master_content': {...}
+            },
+            'asset_id': '68fe5a6423fd317fdf87e83bc8cde736d4df27bf',
+            'asset_lock_state_last_update_date': '2024-09-09T22:02:53Z',
+            'asset_lock_state_user_id': '202',
+            'asset_state': 'NORMAL',
+            'asset_state_last_update_date': '2024-09-09T22:02:53Z',
+            'asset_state_user_id': '202',
+            'checked_out': False,
+            'content_editable': True,
+            'content_lock_state_last_update_date': '2024-08-14T00:33:27Z',
+            'content_lock_state_user_id': '202',
+            'content_lock_state_user_name': 'ajohnson3',
+            'content_size': 18474085,
+            'content_state': 'NORMAL',
+            'content_state_last_update_date': '2024-08-14T00:33:27Z',
+            'content_state_user_id': '202',
+            'content_state_user_name': 'Amanda Johnson',
+            'content_type': 'ACROBAT',
+            'creator_id': '202',
+            'date_imported': '2024-08-14T00:33:26Z',
+            'date_last_updated': '2024-09-09T22:02:53Z',
+            'deleted': False,
+            'delivery_service_url': 'https://assets.opentext.com/adaptivemedia/rendition?id=68fe5a6423fd317fdf87e83bc8cde736d4df27bf',
+            'expired': False,
+            'import_job_id': 7764,
+            'import_user_name': 'ajohnson3',
+            'latest_version': True,
+            'legacy_model_id': 104,
+            'locked': False,
+            'master_content_info': {
+                'content_checksum': '45f42d19542af5b6146cbb3927a5490f',
+                'content_data': {...},
+                'content_kind': 'MASTER',
+                'content_manager_id': 'ARTESIA.CONTENT.GOOGLE.CLOUD',
+                'content_path': 'data/repository/original/generative-ai-governance-essentials-wp-en_56cbbfe270593ba1a5ab6551d2c8b373469cc1a9.pdf',
+                'content_size': 18474085,
+                'height': -1,
+                'id': '56cbbfe270593ba1a5ab6551d2c8b373469cc1a9',
+                'mime_type': 'application/pdf',
+                'name': 'generative-ai-governance-essentials-wp-en.pdf',
+                'unit_of_size': 'BYTES',
+                'url': '/otmmapi/v6/renditions/56cbbfe270593ba1a5ab6551d2c8b373469cc1a9',
+                'width': -1
+            },
+            'metadata_lock_state_user_name': 'ajohnson3',
+            'metadata_model_id': 'OTM.MARKETING.MODEL',
+            'metadata_state_user_name': 'Amanda Johnson',
+            'mime_type': 'application/pdf',
+            'name': 'generative-ai-governance-essentials-wp-en.pdf',
+            'original_asset_id': '68fe5a6423fd317fdf87e83bc8cde736d4df27bf',
+            'product_associations': False,
+            'rendition_content': {
+                'thumbnail_content': {...},
+                'preview_content': {...},
+                'pdf_preview_content': {...}
+            },
+            'subscribed_to': False,
+            'thumbnail_content_id': '70aef1a5b5e480337bc115e47443884432c355ff',
+            'version': 1
+        }
         """
 
         asset_list = []
@@ -656,7 +771,7 @@ class OTMM:
                     asset["workspace_type"] = "Product"
                     asset["workspace_name"] = product_name
 
-                asset_list += assets
+                asset_list += [asset for asset in assets if "content_size" in asset]
 
         if load_business_units:
 
@@ -684,15 +799,20 @@ class OTMM:
                     asset["workspace_type"] = "Business Unit"
                     asset["workspace_name"] = bu_name
 
-                asset_list += assets
+                asset_list += [asset for asset in assets if "content_size" in asset]
+            # end for bu_name...
+        # end if load_business_units
+
+        # WE DON'T WANT TO DO THIS HERE ANY MORE!
+        # This is now done in the bulk document processing
+        # using conditions_delete and conditions_create
+        # asset_list = [
+        #     item
+        #     for item in asset_list
+        #     if not item.get("deleted", False) and not item.get("expired", False)
+        # ]
 
         total_count = len(asset_list)
-
-        asset_list = [
-            item
-            for item in asset_list
-            if not item.get("deleted", False) and not item.get("expired", False)
-        ]
 
         number = self._thread_number
 
@@ -779,7 +899,7 @@ class OTMM:
                 )
                 continue
 
-            if download_assets:
+            if download_assets and asset.get("content_size", 0) > 0:
                 success = self.download_asset(
                     asset_id=asset_id,
                     asset_name=asset_name,

@@ -52,6 +52,10 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+import uuid
+import xml.etree.ElementTree as ET
+import json
+import re
 
 # from packaging.version import Version
 
@@ -59,7 +63,8 @@ import requests
 
 # OpenText specific modules:
 import yaml
-from pyxecm import OTAC, OTCS, OTDS, OTIV, OTPD, OTMM, CoreShare
+from pyxecm import OTAC, OTCS, OTDS, OTIV, OTPD, OTMM, CoreShare, OTAWP
+from pyxecm.avts import AVTS
 from pyxecm.customizer.k8s import K8s
 from pyxecm.customizer.m365 import M365
 from pyxecm.customizer.payload import Payload
@@ -105,6 +110,7 @@ class CustomizerSettingsOTDS:
     admin_partition: str = "otds.admin"
     public_url: str = os.environ.get("OTDS_PUBLIC_URL")
     password: str = os.environ.get("OTDS_PASSWORD")
+    bindPassword: str = os.environ.get("BINB_PASSWORD")
     disable_password_policy: bool = True
     enable_audit: bool = True
 
@@ -124,6 +130,7 @@ class CustomizerSettingsOTCS:
     port_backend: int = os.environ.get("OTCS_SERVICE_PORT_OTCS", 8080)
     port_frontend: int = 80
     base_path: str = "/cs/cs"
+    feme_uri: str = os.environ.get("FEME_URI", "ws://feme:4242")
     admin: str = os.environ.get("OTCS_ADMIN", "admin")
     password: str = os.environ.get("OTCS_PASSWORD")
     partition: str = os.environ.get("OTCS_PARTITION", "Content Server Members")
@@ -217,11 +224,13 @@ class CustomizerSettingsOTAWP:
     resource_name: str = "awp"
     access_role_name: str = "Access to " + resource_name
     admin: str = os.environ.get("OTAWP_ADMIN", "sysadmin")
-    password: str = os.environ.get("OTAWP_PASSWORD")
+    password: str = os.environ.get("OTCS_PASSWORD")
     public_protocol: str = os.environ.get("OTAWP_PROTOCOL", "https")
     public_url: str = os.environ.get("OTAWP_PUBLIC_URL")
     k8s_statefulset: str = "appworks"
     k8s_configmap: str = "appworks-config-ymls"
+    port: int = os.environ.get("OTAWP_SERVICE_PORT", 8080)
+    protocol: str = os.environ.get("OTPD_PROTOCOL", "http")
 
 
 @dataclass
@@ -262,6 +271,19 @@ class CustomizerSettingsAviator:
     enabled: bool = os.environ.get("AVIATOR_ENABLED", "false").lower() == "true"
 
 
+@dataclass
+class CustomizerSettingsAVTS:
+    """Class for Aviator Search (AVTS) related settings"""
+
+    enabled: bool = os.environ.get("AVTS_ENABLED", "false").lower() == "true"
+    otds_url = os.environ.get("AVTS_OTDS_URL", "")
+    client_id = os.environ.get("AVTS_CLIENT_ID", "")
+    client_secret = os.environ.get("AVTS_CLIENT_SECRET", "")
+    base_url = os.environ.get("AVTS_BASE_URL", "")
+    username = os.environ.get("AVTS_USERNAME", "")
+    password = os.environ.get("AVTS_PASSWORD", "")
+
+
 class Customizer:
     """Customizer Class to control the cusomization automation
 
@@ -281,6 +303,7 @@ class Customizer:
         m365: CustomizerSettingsM365 = CustomizerSettingsM365(),
         core_share: CustomizerSettingsCoreShare = CustomizerSettingsCoreShare(),
         aviator: CustomizerSettingsAviator = CustomizerSettingsAviator(),
+        avts: CustomizerSettingsAVTS = CustomizerSettingsAVTS(),
     ):
         self.settings = settings
 
@@ -314,6 +337,9 @@ class Customizer:
         # Aviator variables:
         self.aviator_settings = aviator
 
+        # Aviator Search variables:
+        self.avts_settings = avts
+
         # Initialize Objects for later assignment
         self.otds_object: OTDS | None = None
         self.otcs_object: OTCS | None = None
@@ -326,6 +352,7 @@ class Customizer:
         self.m365_object: M365 | None = None
         self.core_share_object: CoreShare | None = None
         self.browser_automation_object: BrowserAutomation | None = None
+        self.otawp_object: OTAWP | None = None
 
     # end initializer
 
@@ -613,7 +640,51 @@ class Customizer:
 
     # end method definition
 
-    def init_coreshare(self) -> M365:
+    def init_avts(self) -> AVTS:
+        """Initialize the Core Share object we use to talk to the Core Share API.
+
+        Args:
+            None
+        Returns:
+            object: CoreShare object or None if the object couldn't be created or
+                    the authentication fails.
+        """
+
+        logger.info(
+            "Aviator Search Base URL             = %s", self.avts_settings.base_url
+        )
+        logger.info(
+            "Aviator Search OTDS URL             = %s", self.avts_settings.otds_url
+        )
+        logger.info(
+            "Aviator Search Client ID            = %s", self.avts_settings.client_id
+        )
+        logger.debug(
+            "Aviator Search Client Secret        = %s",
+            self.avts_settings.client_secret,
+        )
+        logger.info(
+            "Aviator Search User ID              = %s", self.avts_settings.username
+        )
+        logger.debug(
+            "Aviator Search User Password        = %s",
+            self.avts_settings.password,
+        )
+
+        avts_object = AVTS(
+            otds_url=self.avts_settings.otds_url,
+            base_url=self.avts_settings.base_url,
+            client_id=self.avts_settings.client_id,
+            client_secret=self.avts_settings.client_secret,
+            username=self.avts_settings.username,
+            password=self.avts_settings.password,
+        )
+
+        return avts_object
+
+    # end method definition
+
+    def init_coreshare(self) -> CoreShare:
         """Initialize the Core Share object we use to talk to the Core Share API.
 
         Args:
@@ -772,6 +843,7 @@ class Customizer:
             username=self.otds_settings.username,
             password=self.otds_settings.password,
             otds_ticket=self.otds_settings.otds_ticket,
+            bindPassword=self.otds_settings.bindPassword
         )
 
         logger.info("Authenticating to OTDS...")
@@ -921,6 +993,10 @@ class Customizer:
             "OTCS K8s Backend Pods      = %s",
             self.otcs_settings.k8s_statefulset_backend,
         )
+        logger.info(
+            "FEME URI                   = %s",
+            self.otcs_settings.feme_uri,
+        )
 
         logger.debug("Checking if OTCS object has already been initialized")
 
@@ -938,6 +1014,7 @@ class Customizer:
             resource_name,
             otds_ticket=otds_ticket,
             base_path=self.otcs_settings.base_path,
+            feme_uri=self.otcs_settings.feme_uri,
         )
 
         # It is important to wait for OTCS to be configured - otherwise we
@@ -1164,7 +1241,7 @@ class Customizer:
         awp_resource = self.otds_object.get_resource(self.otawp_settings.resource_name)
         if not awp_resource:
             logger.info(
-                "OTDS resource -> %s for AppWorks Platform does not yet exist. Creating...",
+                "OTDS resource -> '%s' for AppWorks Platform does not yet exist. Creating...",
                 self.otawp_settings.resource_name,
             )
             # Create a Python dict with the special payload we need for AppWorks:
@@ -1377,10 +1454,10 @@ class Customizer:
             ]
 
             awp_resource = self.otds_object.add_resource(
-                self.otawp_settings.resource_name,
-                "AppWorks Platform",
-                "AppWorks Platform",
-                additional_payload,
+                name=self.otawp_settings.resource_name,
+                description="AppWorks Platform",
+                display_name="AppWorks Platform",
+                additional_payload=additional_payload,
             )
         else:
             logger.info(
@@ -1559,6 +1636,15 @@ class Customizer:
                             self.otawp_settings.product_name,
                             "USERS",
                         )
+        otawp_object = OTAWP(
+            self.otawp_settings.protocol,
+            self.otawp_settings.k8s_statefulset,
+            str(self.otawp_settings.port),
+            "sysadmin",
+            self.otawp_settings.password,
+            "",
+        )
+        return otawp_object
 
     # end method definition
 
@@ -1585,14 +1671,20 @@ class Customizer:
 
             logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "touch /tmp/keepalive"]
+                pod_name,
+                ["/bin/sh", "-c", "touch /tmp/keepalive"],
+                container="otcs-frontend-container",
             )
             logger.info("Restarting pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"]
+                pod_name,
+                ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
+                container="otcs-frontend-container",
             )
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"]
+                pod_name,
+                ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"],
+                container="otcs-frontend-container",
             )
 
         # Restart all backends:
@@ -1601,14 +1693,20 @@ class Customizer:
 
             logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "touch /tmp/keepalive"]
+                pod_name,
+                ["/bin/sh", "-c", "touch /tmp/keepalive"],
+                container="otcs-admin-container",
             )
             logger.info("Restarting pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"]
+                pod_name,
+                ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
+                container="otcs-admin-container",
             )
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"]
+                pod_name,
+                ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"],
+                container="otcs-admin-container",
             )
 
         logger.info("Re-Authenticating to OTCS after restart of pods...")
@@ -1625,7 +1723,9 @@ class Customizer:
 
             logger.info("Reactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "rm /tmp/keepalive"]
+                pod_name,
+                ["/bin/sh", "-c", "rm /tmp/keepalive"],
+                container="otcs-frontend-container",
             )
 
         for x in range(0, self.otcs_settings.replicas_backend):
@@ -1633,7 +1733,9 @@ class Customizer:
 
             logger.info("Reactivate Liveness probe for pod -> '%s'", pod_name)
             self.k8s_object.exec_pod_command(
-                pod_name, ["/bin/sh", "-c", "rm /tmp/keepalive"]
+                pod_name,
+                ["/bin/sh", "-c", "rm /tmp/keepalive"],
+                container="otcs-admin-container",
             )
 
         logger.info("Restart OTCS frontend and backend pods has been completed.")
@@ -1822,7 +1924,7 @@ class Customizer:
             self.log_header("Initialize OTAWP")
 
             # Configure required OTDS resources as AppWorks doesn't do this on its own:
-            self.init_otawp()
+            self.otawp_object = self.init_otawp()
         else:
             self.settings.placeholder_values["OTAWP_RESOURCE_ID"] = ""
 
@@ -1898,6 +2000,15 @@ class Customizer:
                 logger.error("Failed to initialize Microsoft 365!")
                 sys.exit()
 
+        if self.avts_settings.enabled:
+            self.log_header("Initialize Aviator Search")
+            self.avts_object = self.init_avts()
+            if not self.avts_object:
+                logger.error("Failed to initialize Aviator Search")
+                sys.exit()
+        else:
+            self.avts_object = None
+
         self.log_header("Processing Payload")
 
         cust_payload_list = []
@@ -1914,7 +2025,9 @@ class Customizer:
 
         # do we have additional payload as an external file?
         if os.path.exists(self.settings.cust_payload_external):
-            for filename in os.scandir(self.settings.cust_payload_external):
+            for filename in sorted(
+                os.scandir(self.settings.cust_payload_external), key=lambda e: e.name
+            ):
                 if filename.is_file() and os.path.getsize(filename) > 0:
                     logger.info("Found external payload file -> '%s'", filename.path)
                     cust_payload_list.append(filename.path)
@@ -1948,6 +2061,8 @@ class Customizer:
                 stop_on_error=self.settings.stop_on_error,
                 aviator_enabled=self.aviator_settings.enabled,
                 upload_status_files=self.otcs_settings.upload_status_files,
+                otawp_object=self.otawp_object,
+                avts_object=self.avts_object,
             )
             # Load the payload file and initialize the payload sections:
             if not payload_object.init_payload():
@@ -2101,4 +2216,30 @@ class Customizer:
             )
         )
 
-    # end method definition
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%d-%b-%Y %H:%M:%S",
+        level=logging.INFO,
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+    my_customizer = Customizer(
+        otcs=CustomizerSettingsOTCS(
+            hostname="otcs.local.xecm.cloud",
+            hostname_backend="otcs-admin-0",
+            hostname_frontend="otcs-frontend",
+            protocol="http",
+            port_backend=8080,
+        ),
+        otds=CustomizerSettingsOTDS(hostname="otds"),
+        otpd=CustomizerSettingsOTPD(enabled=False),
+        otac=CustomizerSettingsOTAC(enabled=False),
+        k8s=CustomizerSettingsK8S(enabled=True),
+        otiv=CustomizerSettingsOTIV(enabled=False),
+    )
+
+    my_customizer.customization_run()

@@ -8,7 +8,9 @@ Methods:
 __init__ : class initializer
 config : Returns config data set
 credentials: Returns the token data
+
 request_header: Returns the request header for Salesforce API calls
+do_request: Call an Salesforce REST API in a safe way
 parse_request_response: Parse the REST API responses and convert
                         them to Python dict in a safe way
 exist_result_item: Check if an dict item is in the response
@@ -56,8 +58,11 @@ __email__ = "mdiefenb@opentext.com"
 import os
 import json
 import logging
+import time
 
 from typing import Optional, Union, Any
+
+from http import HTTPStatus
 import requests
 
 logger = logging.getLogger("pyxecm.customizer.salesforce")
@@ -68,6 +73,9 @@ REQUEST_LOGIN_HEADERS = {
 }
 
 REQUEST_TIMEOUT = 60
+REQUEST_RETRY_DELAY = 20
+REQUEST_MAX_RETRIES = 3
+
 SALESFORCE_API_VERSION = "v60.0"
 
 class Salesforce(object):
@@ -202,6 +210,179 @@ class Salesforce(object):
             request_header["Content-Type"] = content_type
 
         return request_header
+
+    # end method definition
+
+    def do_request(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: dict | None = None,
+        data: dict | None = None,
+        json_data: dict | None = None,
+        files: dict | None = None,
+        params: dict | None = None,
+        timeout: int | None = REQUEST_TIMEOUT,
+        show_error: bool = True,
+        show_warning: bool = False,
+        warning_message: str = "",
+        failure_message: str = "",
+        success_message: str = "",
+        max_retries: int = REQUEST_MAX_RETRIES,
+        retry_forever: bool = False,
+        parse_request_response: bool = True,
+        stream: bool = False,
+        verify: bool = True,
+    ) -> dict | None:
+        """Call an Salesforce REST API in a safe way
+
+        Args:
+            url (str): URL to send the request to.
+            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional): Request Headers. Defaults to None.
+            data (dict | None, optional): Request payload. Defaults to None
+            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
+                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            params (dict | None, optional): Add key-value pairs to the query string of the URL.
+                                            When you use the params parameter, requests automatically appends
+                                            the key-value pairs to the URL as part of the query string
+            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
+                                         If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional): Specific error message. Defaults to "".
+            success_message (str, optional): Specific success message. Defaults to "".
+            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
+            stream (bool, optional): parameter is used to control whether the response content should be immediately downloaded or streamed incrementally
+            verify (bool, optional): specify whether or not SSL certificates should be verified when making an HTTPS request. Default = True
+
+        Returns:
+            dict | None: Response of OTDS REST API or None in case of an error.
+        """
+
+        if headers is None:
+            logger.error("Missing request header. Cannot send request to Core Share!")
+            return None
+
+        # In case of an expired session we reauthenticate and
+        # try 1 more time. Session expiration should not happen
+        # twice in a row:
+        retries = 0
+
+        while True:
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    data=data,
+                    json=json_data,
+                    files=files,
+                    params=params,
+                    headers=headers,
+                    timeout=timeout,
+                    stream=stream,
+                    verify=verify,
+                )
+
+                if response.ok:
+                    if success_message:
+                        logger.info(success_message)
+                    if parse_request_response:
+                        return self.parse_request_response(response)
+                    else:
+                        return response
+                # Check if Session has expired - then re-authenticate and try once more
+                elif response.status_code == 401 and retries == 0:
+                    logger.debug("Session has expired - try to re-authenticate...")
+                    self.authenticate(revalidate=True)
+                    # Make sure to not change an existing content type
+                    # the do_request() method is called with:
+                    headers = self.request_header(
+                        content_type=headers.get("Content-Type", None)
+                    )
+                    retries += 1
+                else:
+                    # Handle plain HTML responses to not pollute the logs
+                    content_type = response.headers.get("content-type", None)
+                    if content_type == "text/html":
+                        response_text = "HTML content (only printed in debug log)"
+                    else:
+                        response_text = response.text
+
+                    if show_error:
+                        logger.error(
+                            "%s; status -> %s/%s; error -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    elif show_warning:
+                        logger.warning(
+                            "%s; status -> %s/%s; warning -> %s",
+                            warning_message if warning_message else failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    if content_type == "text/html":
+                        logger.debug(
+                            "%s; status -> %s/%s; warning -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response.text,
+                        )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; timeout error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                    else:
+                        return None
+            except requests.exceptions.ConnectionError:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Connection error. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; connection error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                        time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                    else:
+                        return None
+            # end try
+            logger.debug(
+                "Retrying REST API %s call -> %s... (retry = %s)",
+                method,
+                url,
+                str(retries),
+            )
+        # end while True
 
     # end method definition
 
@@ -409,32 +590,20 @@ class Salesforce(object):
 
         query = f"SELECT Id FROM {object_type} WHERE {name_field} = '{name}'"
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=request_header,
-                params={"q": query},
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                response = self.parse_request_response(response)
-                object_id = self.get_result_value(response, "Id")
-                return object_id
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Salesforce object ID for object type -> '%s' and object name -> '%s'; status -> %s; error -> %s",
-                    object_type,
-                    name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        response = self.do_request(
+            method="GET",
+            url=request_url,
+            headers=request_header,
+            params={"q": query},
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Salesforce object ID for object type -> '{}' and object name -> '{}'".format(
+                object_type, name
+            ),
+        )
+        if not response:
+            return None
+
+        return self.get_result_value(response, "Id")
 
     # end method definition
 
@@ -509,28 +678,15 @@ class Salesforce(object):
             "Sending query -> %s to Salesforce; calling -> %s", query, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve Salesforce object -> %s with %s = %s; status -> %s; error -> %s",
-                    object_type,
-                    search_field,
-                    search_value,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="GET",
+            url=request_url,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve Salesforce object type -> '{}' with {} = {}".format(
+                object_type, search_field, search_value
+            ),
+        )
 
     # end method definition
 
@@ -654,26 +810,15 @@ class Salesforce(object):
             "Get Salesforce group with ID -> %s; calling -> %s", group_id, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Salesforce group -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="GET",
+            url=request_url,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Salesforce group with ID -> {}".format(
+                group_id
+            ),
+        )
 
     # end method definition
 
@@ -710,29 +855,14 @@ class Salesforce(object):
             "Adding Salesforce group -> %s; calling -> %s", group_name, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce group -> %s; status -> %s; error -> %s",
-                    group_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce group -> '{}'".format(group_name),
+        )
 
     # end method definition
 
@@ -740,7 +870,7 @@ class Salesforce(object):
         self,
         group_id: str,
         update_data: dict,
-    ) -> dict:
+    ) -> dict | None:
         """Update a Salesforce group.
 
         Args:
@@ -764,29 +894,16 @@ class Salesforce(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.patch(
-                request_url,
-                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update Salesforce group -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="PATCH",
+            url=request_url,
+            headers=request_header,
+            json_data=update_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update Salesforce group with ID -> {}".format(
+                group_id
+            ),
+        )
 
     # end method definition
 
@@ -831,29 +948,16 @@ class Salesforce(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url,
-                headers=request_header,
-                params=params,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve members of Salesforce group with ID -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="GET",
+            url=request_url,
+            headers=request_header,
+            params=params,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get members of Salesforce group with ID -> {}".format(
+                group_id
+            ),
+        )
 
     # end method definition
 
@@ -891,29 +995,16 @@ class Salesforce(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                json=payload,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve members of Salesforce group with ID -> %s; status -> %s; error -> %s",
-                    group_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add member with ID -> {} to Salesforce group with ID -> {}".format(
+                member_id, group_id
+            ),
+        )
 
     # end method definition
 
@@ -935,8 +1026,7 @@ class Salesforce(object):
                             'url': '/services/data/v52.0/sobjects/Profile/00eDn000001msL8IAI'},
                             'Id': '00eDn000001msL8IAI',
                             'Name': 'Standard User',
-                            'CreatedById':
-                            '005Dn000001rRodIAE',
+                            'CreatedById': '005Dn000001rRodIAE',
                             'CreatedDate': '2022-11-30T15:30:54.000+0000',
                             'Description': None,
                             'LastModifiedById': '005Dn000001rUacIAE',
@@ -958,28 +1048,14 @@ class Salesforce(object):
 
         query = "SELECT Id, Name, CreatedById, CreatedDate, Description, LastModifiedById, LastModifiedDate, PermissionsCustomizeApplication, PermissionsEditTask, PermissionsImportLeads FROM Profile"
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url,
-                headers=request_header,
-                params={"q": query},
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Salesforce user profiles; status -> %s; error -> %s",
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="GET",
+            url=request_url,
+            headers=request_header,
+            params={"q": query},
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Salesforce user profiles",
+        )
 
     # end method definition
 
@@ -1033,26 +1109,15 @@ class Salesforce(object):
             "Get Salesforce user with ID -> %s; calling -> %s", user_id, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                request_url, headers=request_header, timeout=REQUEST_TIMEOUT
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get Salesforce user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="GET",
+            url=request_url,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get Salesforce user with ID -> {}".format(
+                user_id
+            ),
+        )
 
     # end method definition
 
@@ -1125,29 +1190,14 @@ class Salesforce(object):
             "Adding Salesforce user -> %s; calling -> %s", username, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce user -> %s; status -> %s; error -> %s",
-                    username,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce user -> {}".format(username),
+        )
 
     # end method definition
 
@@ -1177,29 +1227,16 @@ class Salesforce(object):
             "Update Salesforce user with ID -> %s; calling -> %s", user_id, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.patch(
-                request_url,
-                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update Salesforce user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="PATCH",
+            url=request_url,
+            headers=request_header,
+            json_data=update_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update Salesforce user with ID -> {}".format(
+                user_id
+            ),
+        )
 
     # end method definition
 
@@ -1233,29 +1270,16 @@ class Salesforce(object):
 
         update_data = {"NewPassword": password}
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                json=update_data,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update password of Salesforce user -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            json_data=update_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update password of Salesforce user with ID -> {}".format(
+                user_id
+            ),
+        )
 
     # end method definition
 
@@ -1292,6 +1316,8 @@ class Salesforce(object):
             )
             return None
 
+        # Content Type = None is important as upload calls need
+        # a multipart header that is automatically selected if None is used:
         request_header = self.request_header(content_type=None)
 
         data = {"json": json.dumps({"cropX": 0, "cropY": 0, "cropSize": 200})}
@@ -1310,31 +1336,18 @@ class Salesforce(object):
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                files=files,
-                data=data,
-                headers=request_header,
-                verify=False,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update profile photo of Salesforce user with ID -> %s; status -> %s; error -> %s",
-                    user_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            files=files,
+            data=data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update profile photo of Salesforce user with ID -> {}".format(
+                user_id
+            ),
+            verify=False,
+        )
 
     # end method definition
 
@@ -1383,32 +1396,22 @@ class Salesforce(object):
         payload.update(kwargs)  # Add additional fields from kwargs
 
         logger.debug(
-            "Adding Salesforce account -> %s; calling -> %s", account_name, request_url
+            "Adding Salesforce account -> '%s' (%s); calling -> %s",
+            account_name,
+            account_number,
+            request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce account -> %s; status -> %s; error -> %s",
-                    account_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce account -> '{}' ({})".format(
+                account_name, account_number
+            ),
+        )
 
     # end method definition
 
@@ -1447,32 +1450,22 @@ class Salesforce(object):
         payload.update(kwargs)  # Add additional fields from kwargs
 
         logger.debug(
-            "Add Salesforce product -> %s; calling -> %s", product_name, request_url
+            "Add Salesforce product -> '%s' (%s); calling -> %s",
+            product_name,
+            product_code,
+            request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce product -> %s; status -> %s; error -> %s",
-                    product_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce product -> '{}' ({})".format(
+                product_name, product_code
+            ),
+        )
 
     # end method definition
 
@@ -1520,32 +1513,17 @@ class Salesforce(object):
         payload.update(kwargs)  # Add additional fields from kwargs
 
         logger.debug(
-            "Add Salesforce opportunity -> %s; calling -> %s", name, request_url
+            "Add Salesforce opportunity -> '%s'; calling -> %s", name, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce opportunity -> %s; status -> %s; error -> %s",
-                    name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce opportunity -> '{}'".format(name),
+        )
 
     # end method definition
 
@@ -1603,31 +1581,16 @@ class Salesforce(object):
             payload["ProductId"] = product_id
         payload.update(kwargs)  # Add additional fields from kwargs
 
-        logger.debug("Add Salesforce case -> %s; calling -> %s", subject, request_url)
+        logger.debug("Add Salesforce case -> '%s'; calling -> %s", subject, request_url)
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce case -> %s; status -> %s; error -> %s",
-                    subject,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce case -> '{}'".format(subject),
+        )
 
     # end method definition
 
@@ -1677,32 +1640,17 @@ class Salesforce(object):
         payload.update(kwargs)  # Add additional fields from kwargs
 
         logger.debug(
-            "Add Salesforce asset -> %s; calling -> %s", asset_name, request_url
+            "Add Salesforce asset -> '%s'; calling -> %s", asset_name, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce user -> %s; status -> %s; error -> %s",
-                    asset_name,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce asset -> '{}'".format(asset_name),
+        )
 
     # end method definition
 
@@ -1750,33 +1698,20 @@ class Salesforce(object):
         payload.update(kwargs)  # Add additional fields from kwargs
 
         logger.debug(
-            "Adding Salesforce contract for account ID -> %s; calling -> %s",
+            "Adding Salesforce contract for account with ID -> %s; calling -> %s",
             account_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                request_url,
-                headers=request_header,
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                request_header = self.request_header()
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add Salesforce contract for account ID -> %s; status -> %s; error -> %s",
-                    account_id,
-                    response.status_code,
-                    response.text,
-                )
-                return None
+        return self.do_request(
+            method="POST",
+            url=request_url,
+            headers=request_header,
+            data=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add Salesforce contract for account with ID -> {}".format(
+                account_id
+            ),
+        )
 
     # end method definition

@@ -154,7 +154,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to get Pod -> %s; error -> %s", pod_name, str(exception)
+                "Failed to get Pod -> '%s'; error -> %s", pod_name, str(exception)
             )
             return None
 
@@ -189,7 +189,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to list Pods with field_selector -> %s and label_selector -> %s; error -> %s",
+                "Failed to list Pods with field_selector -> '%s' and label_selector -> '%s'; error -> %s",
                 field_selector,
                 label_selector,
                 str(exception),
@@ -223,13 +223,13 @@ class K8s:
                 for cond in pod_status.status.conditions:
                     if cond.type == condition_name and cond.status == "True":
                         logger.info(
-                            "Pod -> %s is in state -> %s!", pod_name, condition_name
+                            "Pod -> '%s' is in state -> '%s'!", pod_name, condition_name
                         )
                         ready = True
                         break
                 else:
                     logger.info(
-                        "Pod -> %s is not yet in state -> %s. Waiting...",
+                        "Pod -> '%s' is not yet in state -> '%s'. Waiting...",
                         pod_name,
                         condition_name,
                     )
@@ -238,7 +238,7 @@ class K8s:
 
             except ApiException as exception:
                 logger.error(
-                    "Failed to wait for pod -> %s; error -> %s",
+                    "Failed to wait for pod -> '%s'; error -> %s",
                     pod_name,
                     str(exception),
                 )
@@ -246,7 +246,12 @@ class K8s:
     # end method definition
 
     def exec_pod_command(
-        self, pod_name: str, command: list, max_retry: int = 3, time_retry: int = 10
+        self,
+        pod_name: str,
+        command: list,
+        max_retry: int = 3,
+        time_retry: int = 10,
+        container: str | None = None,
     ):
         """Execute a command inside a Kubernetes Pod (similar to kubectl exec on command line).
             See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#connect_get_namespaced_pod_exec
@@ -261,9 +266,9 @@ class K8s:
 
         pod = self.get_pod(pod_name)
         if not pod:
-            logger.error("Pod -> %s does not exist", pod_name)
+            logger.error("Pod -> '%s' does not exist", pod_name)
 
-        logger.debug("Execute command -> %s in pod -> %s", command, pod_name)
+        logger.debug("Execute command -> %s in pod -> '%s'", command, pod_name)
 
         retry_counter = 1
 
@@ -274,6 +279,7 @@ class K8s:
                     pod_name,
                     self.get_namespace(),
                     command=command,
+                    container=container,
                     stderr=True,
                     stdin=False,
                     stdout=True,
@@ -283,7 +289,7 @@ class K8s:
                 return response
             except ApiException as exc:
                 logger.warning(
-                    "Failed to execute command, retry (%s/%s) -> %s in pod -> %s; error -> %s",
+                    "Failed to execute command, retry (%s/%s) -> %s in pod -> '%s'; error -> %s",
                     retry_counter,
                     max_retry,
                     command,
@@ -297,7 +303,7 @@ class K8s:
                 continue
 
         logger.error(
-            "Failed to execute command with %s retries -> %s in pod -> %s; error -> %s",
+            "Failed to execute command with %s retries -> %s in pod -> '%s'; error -> %s",
             max_retry,
             command,
             pod_name,
@@ -360,7 +366,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to execute command -> %s in pod -> %s; error -> %s",
+                "Failed to execute command -> %s in pod -> '%s'; error -> %s",
                 command,
                 pod_name,
                 str(exception),
@@ -381,7 +387,7 @@ class K8s:
                 got_response = True
             if commands:
                 command = commands.pop(0)
-                logger.debug("Execute command -> %s in pod -> %s", command, pod_name)
+                logger.debug("Execute command -> %s in pod -> '%s'", command, pod_name)
                 response.write_stdin(command + "\n")
             else:
                 # We continue as long as we get some response during timeout period
@@ -422,7 +428,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to delete Pod -> %s; error -> %s", pod_name, str(exception)
+                "Failed to delete Pod -> '%s'; error -> %s", pod_name, str(exception)
             )
             return None
 
@@ -456,7 +462,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to get Config Map -> %s; error -> %s",
+                "Failed to get Config Map -> '%s'; error -> %s",
                 config_map_name,
                 str(exception),
             )
@@ -493,7 +499,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to list Config Maps with field_selector -> %s and label_selector -> %s; error -> %s",
+                "Failed to list Config Maps with field_selector -> '%s' and label_selector -> '%s'; error -> %s",
                 field_selector,
                 label_selector,
                 str(exception),
@@ -521,7 +527,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to find Config Map -> %s; error -> %s",
+                "Failed to find Config Map -> '%s'; error -> %s",
                 config_map_name,
                 str(exception),
             )
@@ -556,7 +562,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to replace Config Map -> %s; error -> %s",
+                "Failed to replace Config Map -> '%s'; error -> %s",
                 config_map_name,
                 str(exception),
             )
@@ -583,7 +589,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to get Stateful Set -> %s; error -> %s",
+                "Failed to get Stateful Set -> '%s'; error -> %s",
                 sts_name,
                 str(exception),
             )
@@ -610,7 +616,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to get scaling (replicas) of Stateful Set -> %s; error -> %s",
+                "Failed to get scaling (replicas) of Stateful Set -> '%s'; error -> %s",
                 sts_name,
                 str(exception),
             )
@@ -638,7 +644,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to patch Stateful Set -> %s with -> %s; error -> %s",
+                "Failed to patch Stateful Set -> '%s' with -> %s; error -> %s",
                 sts_name,
                 sts_body,
                 str(exception),
@@ -667,7 +673,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to scale Stateful Set -> %s to -> %s replicas; error -> %s",
+                "Failed to scale Stateful Set -> '%s' to -> %s replicas; error -> %s",
                 sts_name,
                 scale,
                 str(exception),
@@ -695,7 +701,9 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to get Service -> %s; error -> %s", service_name, str(exception)
+                "Failed to get Service -> '%s'; error -> %s",
+                service_name,
+                str(exception),
             )
             return None
 
@@ -731,7 +739,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to list Services with field_selector -> %s and label_selector -> %s; error -> %s",
+                "Failed to list Services with field_selector -> '%s' and label_selector -> '%s'; error -> %s",
                 field_selector,
                 label_selector,
                 str(exception),
@@ -762,7 +770,7 @@ class K8s:
             )
         except ApiException as exception:
             logger.error(
-                "Failed to patch Service -> %s with -> %s; error -> %s",
+                "Failed to patch Service -> '%s' with -> %s; error -> %s",
                 service_name,
                 service_body,
                 str(exception),
@@ -925,4 +933,110 @@ class K8s:
 
         return self.patch_ingress(ingress_name, body)
 
-    # end method definition
+    def verify_pod_status(
+        self,
+        pod_name: str,
+        timeout: int = 1200,
+        total_containers: int = 1,
+        ready_containers: int = 1,
+        retry_interval: int = 30,
+    ) -> bool:
+        """
+        Verifies if a pod is in a 'Ready' state by checking the status of its containers.
+
+        This function waits for a Kubernetes pod to reach the 'Ready' state, where a specified number
+        of containers are ready. It checks the pod status at regular intervals and reports the status
+        using logs. If the pod does not reach the 'Ready' state within the specified timeout,
+        it returns `False`.
+
+        Args:
+            pod_name (str): The name of the pod to check the status for.
+            timeout (int, optional): The maximum time (in seconds) to wait for the pod to become ready. Defaults to 1200.
+            total_containers (int, optional): The total number of containers expected to be running in the pod. Defaults to 1.
+            ready_containers (int, optional): The minimum number of containers that need to be in a ready state. Defaults to 1.
+            retry_interval (int, optional): Time interval (in seconds) between each retry to check pod readiness. Defaults to 30.
+
+        Returns:
+            bool: Returns `True` if the pod reaches the 'Ready' state with the specified number of containers ready
+            within the timeout. Otherwise, returns `False`.
+        """
+
+        def wait_for_pod_ready(pod_name: str, timeout: int) -> bool:
+            """
+            Waits until the pod is in the 'Ready' state with the specified number of containers ready.
+
+            This internal function repeatedly checks the readiness of the pod, logging the
+            status of the containers. If the pod does not exist, it retries after waiting
+            and logs detailed information at each step.
+
+            Args:
+                pod_name (str): The name of the pod to check the status for.
+                timeout (int): The maximum time (in seconds) to wait for the pod to become ready.
+
+            Returns:
+                bool: Returns `True` if the pod is ready with the specified number of containers in a 'Ready' state.
+                Otherwise, returns `False`.
+            """
+            elapsed_time = 0  # Initialize elapsed time
+
+            while elapsed_time < timeout:
+                pod = self.get_pod(pod_name)
+
+                if not pod:
+                    logger.error(
+                        "Pod -> %s does not exist, waiting 300 seconds to retry.",
+                        pod_name,
+                    )
+                    time.sleep(300)
+                    pod = self.get_pod(pod_name)
+
+                if not pod:
+                    logger.error(
+                        "Pod -> %s still does not exist after retry!", pod_name
+                    )
+                    return False
+
+                # Get the ready status of containers
+                container_statuses = pod.status.container_statuses
+                if container_statuses and all(
+                    container.ready for container in container_statuses
+                ):
+                    current_ready_containers = sum(
+                        1 for c in container_statuses if c.ready
+                    )
+                    total_containers_in_pod = len(container_statuses)
+
+                    if (
+                        current_ready_containers >= ready_containers
+                        and total_containers_in_pod == total_containers
+                    ):
+                        logger.info(
+                            "Pod -> %s is ready with %d/%d containers.",
+                            pod_name,
+                            current_ready_containers,
+                            total_containers_in_pod,
+                        )
+                        return True
+                    else:
+                        logger.debug(
+                            "Pod -> %s is not yet ready (%d/%d).",
+                            pod_name,
+                            current_ready_containers,
+                            total_containers_in_pod,
+                        )
+                else:
+                    logger.debug("Pod -> %s is not yet ready.", pod_name)
+
+                logger.info(
+                    f"Waiting {retry_interval} seconds before next pod status check."
+                )
+                time.sleep(
+                    retry_interval
+                )  # Sleep for the retry interval before checking again
+                elapsed_time += retry_interval
+
+            logger.error("Pod -> %s is not ready after %d seconds.", pod_name, timeout)
+            return False
+
+        # Wait until the pod is ready
+        return wait_for_pod_ready(pod_name, timeout)

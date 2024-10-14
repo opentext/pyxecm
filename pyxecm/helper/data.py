@@ -121,6 +121,20 @@ class Data:
 
     # end method definition
 
+    def __getitem__(self, column: str) -> pd.Series:
+        """Return the column corresponding to the key from the DataFrame
+
+        Args:
+            column (str): name of the Data Frame column
+
+        Returns:
+            pd.Series: column of the Data Frame with the given name
+        """
+
+        return self._df[column]
+
+    # end method definition
+
     def lock(self):
         """Return the threading lock object.
 
@@ -317,11 +331,13 @@ class Data:
                 )
             except FileNotFoundError:
                 logger.error(
-                    "File -> %s not found. Please check the file path.", json_path
+                    "JSON file -> %s not found. Please check the file path.", json_path
                 )
                 return False
             except PermissionError:
-                logger.error("Permission denied to access the file -> %s.", json_path)
+                logger.error(
+                    "Permission denied to access the JSON file -> %s.", json_path
+                )
                 return False
             except IOError as e:
                 logger.error("An I/O error occurred -> %s", str(e))
@@ -333,10 +349,10 @@ class Data:
                 logger.error("Invalid JSON input -> %s", str(e))
                 return False
             except AttributeError as e:
-                logger.error("Unexpected data structure -> %s", str(e))
+                logger.error("Unexpected JSON data structure -> %s", str(e))
                 return False
             except TypeError as e:
-                logger.error("Unexpected data type -> %s", str(e))
+                logger.error("Unexpected JSON data type -> %s", str(e))
                 return False
             except KeyError as e:
                 logger.error("Missing key in JSON data -> %s", str(e))
@@ -475,17 +491,26 @@ class Data:
                     self._df = pd.concat([self._df, df], ignore_index=True)
             except FileNotFoundError:
                 logger.error(
-                    "File -> '%s' not found. Please check the file path.", xlsx_path
+                    "Excel file -> '%s' not found. Please check the file path.",
+                    xlsx_path,
                 )
                 return False
             except PermissionError:
-                logger.error("Permission denied to access the file -> '%s'.", xlsx_path)
+                logger.error(
+                    "Permission denied to access the Excel file -> '%s'.", xlsx_path
+                )
                 return False
             except IOError as e:
-                logger.error("An I/O error occurred -> %s", str(e))
+                logger.error(
+                    "An I/O error occurred -> %s while reading the Excel file -> %s",
+                    str(e),
+                    xlsx_path,
+                )
                 return False
             except ValueError as e:
-                logger.error("Invalid Excel input -> %s", str(e))
+                logger.error(
+                    "Invalid Excel input -> %s in Excel file -> %s", str(e), xlsx_path
+                )
                 return False
             except AttributeError as e:
                 logger.error("Unexpected data structure -> %s", str(e))
@@ -554,11 +579,15 @@ class Data:
 
     # end method definition
 
-    def load_csv_data(self, csv_path: str) -> bool:
+    def load_csv_data(
+        self, csv_path: str, delimiter: str = ",", encoding: str = "utf-8"
+    ) -> bool:
         """Load CSV (Comma separated values) data into DataFrame
 
         Args:
             csv_path (str): Path to the CSV file.
+            delimiter (str, optional, length = 1): chracter to delimit values. Default ="," (comma)
+            encoding (str, optional): encoding of the file. Default = "utf-8".
         Returns:
             bool: False in case an error occured, True otherwise.
         """
@@ -566,18 +595,22 @@ class Data:
         if csv_path is not None and os.path.exists(csv_path):
             # Load data from CSV file
             try:
-                df = pd.read_csv(csv_path)
+                df = pd.read_csv(
+                    filepath_or_buffer=csv_path, delimiter=delimiter, encoding=encoding
+                )
                 if self._df is None:
                     self._df = df
                 else:
                     self._df = pd.concat([self._df, df])
             except FileNotFoundError:
                 logger.error(
-                    "File -> '%s' not found. Please check the file path.", csv_path
+                    "CSV file -> '%s' not found. Please check the file path.", csv_path
                 )
                 return False
             except PermissionError:
-                logger.error("Permission denied to access the file -> %s.", csv_path)
+                logger.error(
+                    "Permission denied to access the CSV file -> %s.", csv_path
+                )
                 return False
             except IOError as e:
                 logger.error("An I/O error occurred -> %s", str(e))
@@ -819,7 +852,7 @@ class Data:
             column_name (str): The column name to partition by
 
         Returns:
-            list: List of partitions
+            list | None: List of partitions or None in case of an error (e.g. column name does not exist).
         """
 
         if column_name not in self._df.columns:
@@ -958,6 +991,7 @@ class Data:
         make_unique: bool = False,
         reset_index: bool = False,
         split_string_to_list: bool = False,
+        separator: str = ";,",
     ) -> pd.DataFrame:
         """Explode a substructure in the Data Frame
 
@@ -969,7 +1003,9 @@ class Data:
             flatten_fields (list): Fields in the exploded substructure to include
                                    in the main dictionaries for easier processing.
             make_unique (bool, optional): if True deduplicate the exploded data frame.
-            flatten (bool, optional): if True flatten the exploded data frame.
+            reset_index (bool, False): True = index is reset, False = Index is not reset
+            split_string_to_list (bool, optional): if True flatten the exploded data frame.
+            separator (str, optional): characters used to split the string values in the given column into a list
         Returns:
             pd.DataFrame: Pointer to the Pandas DataFrame
         """
@@ -983,10 +1019,16 @@ class Data:
 
         # Define a function to split a string into a list
         def string_to_list(string: str | None) -> list:
-            if not string or pd.isna(string):
-                return []
-            # Use regular expression to split by comma, semicolon, or comma followed by space
-            return re.split(r"[;,]\s*", str(string))
+            # Do nothing if the string is already a list
+            if isinstance(string, list):
+                return_list = string
+            elif not string or pd.isna(string):
+                return_list = []
+            else:
+                # Use regular expression to split by comma, semicolon, or comma followed by space
+                return_list = re.split(rf"[{separator}]\s*", str(string))
+
+            return return_list
 
         if isinstance(explode_field, list):
             logger.info("Explode multiple columns -> %s", str(explode_field))
@@ -998,18 +1040,27 @@ class Data:
             )
             return self._df
 
-        if split_string_to_list:
-            # Apply the function to convert the 'string_column' values to lists
-            self._df[explode_field] = self._df[explode_field].apply(string_to_list)
-
         try:
             # remove the sub dictionary that sometimes is introduced by
-            # XML loading
+            # XML loading. We just want the main part.
             if "." in explode_field:
                 main = explode_field.split(".")[0]
                 sub = explode_field.split(".")[1]
                 self._df[main] = self._df[main].apply(update_column)
                 explode_field = main
+
+            # Now that we have the right explode column
+            # we need to convert it to a list if it is inside a string (with delimiters)
+            if split_string_to_list:
+                logger.info(
+                    "Split the string values of column -> '%s' into a list using separator -> '%s'",
+                    explode_field,
+                    separator,
+                )
+                # Apply the function to convert the string values in the column (give by the name in explode_field) to lists
+                # The string_to_list() sub-method above also considers the separator parameter.
+                self._df[explode_field] = self._df[explode_field].apply(string_to_list)
+
             # Explode the field that has list values
             self._df = self._df.explode(column=explode_field)
         except KeyError:
@@ -1165,19 +1216,29 @@ class Data:
                 if cleansing.get("lower", False) and self._df[column].dtype == "object":
                     self._df[column] = self._df[column].str.lower()
 
-                # Handle regular columns
+                # Handle regular columns. regexp_pattern is on the left side
+                # of the colon, and replacement the string on the right side of
+                # the colon:
                 for regex_pattern, replacement in cleansing.get(
                     "replacements", {}
                 ).items():
-                    #                    if replacement:
+                    if not regex_pattern:
+                        logger.error("Empty search / regexp pattern!")
+                        continue
                     # \b is a word boundary anchor in regular expressions.
                     # It matches a position where one side is a word character
                     # (like a letter or digit) and the other side is a non-word character
-                    # (like whitespace or punctuation). It's often used to match whole words.
-                    #                        regex_pattern = rf"\b{regex_pattern}\b"
-                    # self._df[column] = self._df[column].replace(
-                    #     regex=regex_pattern, value=replacement
-                    # )
+                    # (like whitespace or punctuation). It's used to match whole words.
+                    # We want to have this to e.g. not replace "INT" with "INTERNATIONAL"
+                    # if the word is already "INTERNATIONAL". It is important
+                    # that the \b ... \b enclosure is ONLY used if regex_pattern is NOT
+                    # a regular expression but just a normal string.
+                    # Check if the pattern does NOT contain any regex special characters
+                    # (excluding dot and ampersand) and ONLY then use \b ... \b
+                    # Special regexp characters include: ^ $ * + ? ( ) [ ] { } | \
+                    if not re.search(r"[\\^$*+?()|[\]{}]", regex_pattern):
+                        # Wrap with word boundaries for whole-word matching
+                        regex_pattern = rf"\b{regex_pattern}\b"
                     self._df[column] = self._df[column].str.replace(
                         pat=regex_pattern, repl=replacement, regex=True
                     )
@@ -1294,11 +1355,11 @@ class Data:
         for condition in conditions:
             field = condition.get("field", None)
             if not field:
-                logger.error("Missing value for filter condition field in payload!")
+                logger.error("Missing value for filter condition 'field' in payload!")
                 continue
             if field not in self._df.columns:
                 logger.warning(
-                    "Filter condition field -> %s does not exist as column in data frame! Data frame has these columns -> %s",
+                    "Filter condition field -> '%s' does not exist as column in data frame! Data frame has these columns -> %s",
                     field,
                     str(self._df.columns),
                 )
@@ -1433,6 +1494,9 @@ class Data:
             Returns:
                 bool: True if lookup_value is equal to one of the delimiter-separated terms
             """
+            # Ensure that the string is a string
+            string_list = str(string_list)
+
             return lookup_value in [
                 item.strip() for item in string_list.split(separator)
             ]
@@ -1484,8 +1548,9 @@ class Data:
             new_column (str): name of the column to add
             prefix (str, optional): Prefix to add in front of the value. Defaults to "".
             suffix (str, optional): Suffix to add at the end of the value. Defaults to "".
-            length (int | None, optional): Length to reduce to. Defaults to None.
+            length (int | None, optional): Length to reduce to. Defaults to None (= unlimited).
             group_chars (int | None, optional): group the resulting string in characters of group_chars. Defaults to None.
+                                                Usable e.g. for thousand seperator "."
             group_separator (str, optional): Separator string for the grouping. Defaults to ".".
             group_remove_leading_zero (bool, optional): Remove leading zeros from the groups. Defaults to True.
 
@@ -1497,6 +1562,7 @@ class Data:
             return False
 
         # Use str.extract to apply the regular expression to the source column
+        # and then assign this modified colum to the variable extracted:
         extracted = self._df[source_column].str.extract(pat=reg_exp, expand=False)
 
         # Limit the result to the specified length
@@ -1525,3 +1591,141 @@ class Data:
         self._df[new_column] = extracted
 
         return True
+
+    # end method definition
+
+    def convert_to_lists(self, columns: list, delimiter: str = ","):
+        """Method to intelligently convert strings to lists, with a configurable delimiter,
+           ignoring delimiters inside quotes
+
+        Args:
+            columns (list): name of the columns whose values should be converted to lists.
+                            It is expected that
+            delimiter (str, optional): Character that delimits list items. Defaults to ",".
+
+        Returns:
+            None. self._df is modified in place.
+        """
+
+        # Regex to split by the delimiter, ignoring those inside quotes or double quotes
+        def split_string_ignoring_quotes(s, delimiter):
+            # Escaping the delimiter in case it's a special regex character
+            delimiter = re.escape(delimiter)
+            # Match quoted strings and unquoted delimiters separately
+            pattern = rf'(?:"[^"]*"|\'[^\']*\'|[^{delimiter}]+)'
+            return re.findall(pattern, s)
+
+        for col in columns:
+            self._df[col] = self._df[col].apply(
+                lambda x: (
+                    split_string_ignoring_quotes(x, delimiter)
+                    if isinstance(x, str) and delimiter in x
+                    else x
+                )
+            )
+
+    # end method definition
+
+    def add_column_list(self, source_columns: list, new_column: str):
+        """Add a column with list objects. The list items are taken from a list of
+           source columns (row by row).
+
+        Args:
+            source_columns (list): column names the list values are taken from
+            new_column (str): name of the new column
+        Returns:
+            None. self._df is modified in place.
+        """
+
+        def create_list(row):
+            return [row[col] for col in source_columns]
+
+        self._df[new_column] = self._df.apply(create_list, axis=1)
+
+    # end method definition
+
+    def add_column_table(
+        self, source_columns: list, new_column: str, delimiter: str = ","
+    ):
+        """Add a column with tabular objects (list of dictionaris). The
+           source columns should include lists. The resulting dictionary
+           keys are the column names for the source columns.
+
+           Example:
+           X[1] = 1, 2, 3
+           Y[1] = A, B, C
+           X[2] = 4, 5, 6
+           Y[2] = D, E, F
+
+           Table[1] = [
+                {
+                    "X": "1"
+                    "Y": "A"
+                },
+                {
+                    "X": "2"
+                    "Y": "B"
+                }
+                {
+                    "X": "3"
+                    "Y": "C"
+                }
+           ]
+           Table[2] = [
+                {
+                    "X": "4"
+                    "Y": "D"
+                },
+                {
+                    "X": "5"
+                    "Y": "E"
+                }
+                {
+                    "X": "6"
+                    "Y": "F"
+                }
+           ]
+
+        Args:
+            source_columns (list): column names the list values are taken from
+            new_column (str): name of the new column
+            delimiter (str, optional): Character that delimits list items. Defaults to ",".
+
+        Returns:
+            None. self._df is modified in place.
+        """
+
+        # Call the convert_to_lists method to ensure the columns are converted
+        self.convert_to_lists(columns=source_columns, delimiter=delimiter)
+
+        # Sub-method to pad lists to the same length
+        def pad_list(lst: list, max_len: int):
+            return lst + [None] * (max_len - len(lst))
+
+        def create_table(row) -> list:
+            max_len = max(
+                len(row[col]) if isinstance(row[col], list) else 1
+                for col in source_columns
+            )
+
+            # Pad lists to the maximum length, leave scalars as they are
+            for col in source_columns:
+                if isinstance(row[col], list):
+                    row[col] = pad_list(row[col], max_len)
+                else:
+                    if not pd.isna(row[col]):
+                        row[col] = [
+                            row[col]
+                        ] * max_len  # Repeat scalar to match the max length
+                    else:
+                        row[col] = [None] * max_len
+            # Create a list of dictionaries for each row
+            table = []
+            for i in range(max_len):
+                table.append({col: row[col][i] for col in source_columns})
+            return table
+
+        # Apply the function to create a new column with a table
+        self._df[new_column] = self._df.apply(create_table, axis=1)
+
+    # end method definition

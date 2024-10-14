@@ -27,30 +27,22 @@ groups_url : returns OTDS Groups REST URL
 system_config_url : returns OTDS System Config REST URL
 consolidation_url: returns OTDS consolidation URL
 
+do_request: call an OTDS REST API in a safe way.
+parse_request_response: Converts the request response to a Python dict in a safe way
+
 authenticate : authenticates at OTDS server
 
-add_license_to_resource : Add (or update) a product license to OTDS
-get_license_for_resource : Get list of licenses for a resource
-delete_license_from_resource : Delete a license from a resource
-assign_user_to_license : Assign an OTDS user to a product license (feature) in OTDS.
-assign_partition_to_license: Assign an OTDS user partition to a license (feature) in OTDS.
-get_licensed_objects: Return the licensed objects (users, groups, partitions) an OTDS for a
-                      license + license feature associated with an OTDS resource (like "cs").
-is_user_licensed: Check if a user is licensed for a license and license feature associated
-                  with a particular OTDS resource.
-is_group_licensed: Check if a group is licensed for a license and license feature associated
-                   with a particular OTDS resource.
-is_partition_licensed: Check if a user partition is licensed for a license and license feature
-                       associated with a particular OTDS resource.
-
+add_synchronized_partition: Add a Synchronized partition to OTDS 
 add_partition : Add an OTDS partition
 get_partition : Get a partition with a specific name
+
 add_user : Add a user to a partion
 get_user : Get a user with a specific user ID (= login name @ partition)
 get_users: get all users (with option to filter)
 update_user : Update attributes of on OTDS user
 delete_user : Delete a user with a specific ID in a specific partition
 reset_user_password : Reset a password of a specific user ID
+
 add_group: Add an OTDS group
 get_group: Get a OTDS group by its name
 add_user_to_group : Add an OTDS user to a OTDS group
@@ -67,6 +59,20 @@ add_partition_to_access_role : Add an OTDS Partition to to an OTDS Access Role
 add_user_to_access_role : Add an OTDS user to to an OTDS Access Role
 add_group_to_access_role : Add an OTDS group to to an OTDS Access Role
 update_access_role_attributes: Update attributes of an existing access role
+
+add_license_to_resource : Add (or update) a product license to OTDS
+get_license_for_resource : Get list of licenses for a resource
+delete_license_from_resource : Delete a license from a resource
+assign_user_to_license : Assign an OTDS user to a product license (feature) in OTDS.
+assign_partition_to_license: Assign an OTDS user partition to a license (feature) in OTDS.
+get_licensed_objects: Return the licensed objects (users, groups, partitions) an OTDS for a
+                      license + license feature associated with an OTDS resource (like "cs").
+is_user_licensed: Check if a user is licensed for a license and license feature associated
+                  with a particular OTDS resource.
+is_group_licensed: Check if a group is licensed for a license and license feature associated
+                   with a particular OTDS resource.
+is_partition_licensed: Check if a user partition is licensed for a license and license feature
+                       associated with a particular OTDS resource.
 
 add_system_attribute : Add an OTDS System Attribute
 
@@ -106,6 +112,9 @@ import logging
 import json
 import urllib.parse
 import base64
+import time
+
+from http import HTTPStatus
 import requests
 
 logger = logging.getLogger("pyxecm.otds")
@@ -121,6 +130,8 @@ REQUEST_FORM_HEADERS = {
 }
 
 REQUEST_TIMEOUT = 60
+REQUEST_RETRY_DELAY = 20
+REQUEST_MAX_RETRIES = 2
 
 
 class OTDS:
@@ -138,6 +149,7 @@ class OTDS:
         username: str | None = None,
         password: str | None = None,
         otds_ticket: str | None = None,
+        bindPassword:str | None = None,
     ):
         """Initialize the OTDS object
 
@@ -177,6 +189,11 @@ class OTDS:
             otds_config["password"] = password
         else:
             otds_config["password"] = ""
+        
+        if bindPassword:
+            otds_config["bindPassword"] = bindPassword
+        else:
+            otds_config["bindPassword"] = ""
 
         if otds_ticket:
             self._cookie = {"OTDSTicket": otds_ticket}
@@ -191,6 +208,7 @@ class OTDS:
         otds_config["restUrl"] = otdsRestUrl
 
         otds_config["partitionUrl"] = otdsRestUrl + "/partitions"
+        otds_config["identityproviderprofiles"] = otdsRestUrl + "/identityproviderprofiles"
         otds_config["accessRoleUrl"] = otdsRestUrl + "/accessroles"
         otds_config["credentialUrl"] = otdsRestUrl + "/authentication/credentials"
         otds_config["oauthClientUrl"] = otdsRestUrl + "/oauthclients"
@@ -278,6 +296,14 @@ class OTDS:
         return self.config()["authHandlerUrl"]
 
     # end method definition
+    def synchronized_partition_url(self) -> str:
+        """Returns the Partition URL of OTDS
+
+        Returns:
+            str: synchronized partition url
+        """
+        return self.config()["identityproviderprofiles"]
+    # end of method definition   
 
     def partition_url(self) -> str:
         """Returns the Partition URL of OTDS
@@ -379,6 +405,164 @@ class OTDS:
 
     # end method definition
 
+    def do_request(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: dict | None = None,
+        data: dict | None = None,
+        json_data: dict | None = None,
+        files: dict | None = None,
+        timeout: int | None = REQUEST_TIMEOUT,
+        show_error: bool = True,
+        show_warning: bool = False,
+        warning_message: str = "",
+        failure_message: str = "",
+        success_message: str = "",
+        max_retries: int = REQUEST_MAX_RETRIES,
+        retry_forever: bool = False,
+        parse_request_response: bool = True,
+    ) -> dict | None:
+        """Call an OTDS REST API in a safe way
+
+        Args:
+            url (str): URL to send the request to.
+            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional): Request Headers. Defaults to None.
+            data (dict | None, optional): Request payload. Defaults to None
+            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
+                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
+                                         If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional): Specific error message. Defaults to "".
+            success_message (str, optional): Specific success message. Defaults to "".
+            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
+
+        Returns:
+            dict | None: Response of OTDS REST API or None in case of an error.
+        """
+
+        if headers is None:
+            headers = REQUEST_HEADERS
+
+        # In case of an expired session we reauthenticate and
+        # try 1 more time. Session expiration should not happen
+        # twice in a row:
+        retries = 0
+
+        while True:
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    data=data,
+                    json=json_data,
+                    files=files,
+                    headers=headers,
+                    cookies=self.cookie(),
+                    timeout=timeout,
+                )
+
+                if response.ok:
+                    if success_message:
+                        logger.info(success_message)
+                    if parse_request_response:
+                        return self.parse_request_response(response)
+                    else:
+                        return response
+                # Check if Session has expired - then re-authenticate and try once more
+                elif response.status_code == 401 and retries == 0:
+                    logger.debug("Session has expired - try to re-authenticate...")
+                    self.authenticate(revalidate=True)
+                    retries += 1
+                else:
+                    # Handle plain HTML responses to not pollute the logs
+                    content_type = response.headers.get("content-type", None)
+                    if content_type == "text/html":
+                        response_text = "HTML content (only printed in debug log)"
+                    else:
+                        response_text = response.text
+
+                    if show_error:
+                        logger.error(
+                            "%s; status -> %s/%s; error -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    elif show_warning:
+                        logger.warning(
+                            "%s; status -> %s/%s; warning -> %s",
+                            warning_message if warning_message else failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    if content_type == "text/html":
+                        logger.debug(
+                            "%s; status -> %s/%s; warning -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response.text,
+                        )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; timeout error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                    else:
+                        return None
+            except requests.exceptions.ConnectionError:
+                if retries <= max_retries:
+                    logger.warning(
+                        "Connection error. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    logger.error(
+                        "%s; connection error",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                        time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                    else:
+                        return None
+            # end try
+            logger.debug(
+                "Retrying REST API %s call -> %s... (retry = %s, cookie -> %s)",
+                method,
+                url,
+                str(retries),
+                str(self.cookie()),
+            )
+        # end while True
+
+    # end method definition
+
     def parse_request_response(
         self,
         response_object: object,
@@ -397,6 +581,10 @@ class OTDS:
         """
 
         if not response_object:
+            return None
+
+        if not response_object.text:
+            logger.warning("Response text is empty. Cannot decode response.")
             return None
 
         try:
@@ -476,6 +664,913 @@ class OTDS:
 
     # end method definition
 
+    def add_partition(self, name: str, description: str) -> dict | None:
+        """Add a new user partition to OTDS
+
+        Args:
+            name (str): name of the new partition
+            description (str): description of the new partition
+        Returns:
+            dict: Request response or None if the creation fails.
+        """
+
+        partition_post_body_json = {"name": name, "description": description}
+
+        request_url = self.partition_url()
+
+        logger.debug(
+            "Adding user partition -> '%s' (%s); calling -> %s",
+            name,
+            description,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=partition_post_body_json,
+            timeout=None,
+            failure_message="Failed to add user partition -> '{}'".format(name),
+        )
+
+    # end method definition
+
+    def get_partition(self, name: str, show_error: bool = True) -> dict | None:
+        """Get an existing user partition from OTDS
+
+        Args:
+            name (str): name of the partition to retrieve
+            show_error (bool, optional): whether or not we want to log an error
+                                         if partion is not found
+        Returns:
+            dict: Request response or None if the REST call fails.
+        """
+
+        request_url = "{}/{}".format(self.config()["partitionUrl"], name)
+
+        logger.debug("Get user partition -> '%s'; calling -> %s", name, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get user partition -> '{}'".format(name),
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    def add_user(
+        self,
+        partition: str,
+        name: str,
+        description: str = "",
+        first_name: str = "",
+        last_name: str = "",
+        email: str = "",
+    ) -> dict | None:
+        """Add a new user to a user partition in OTDS
+
+        Args:
+            partition (str): name of the OTDS user partition (needs to exist)
+            name (str): login name of the new user
+            description (str, optional): description of the new user
+            first_name (str, optional): first name of the new user
+            last_name (str, optional): last name of the new user
+            email (str, optional): email address of the new user
+        Returns:
+            dict: Request response or None if the creation fails.
+        """
+
+        user_post_body_json = {
+            "userPartitionID": partition,
+            "values": [
+                {"name": "sn", "values": [last_name]},
+                {"name": "givenName", "values": [first_name]},
+                {"name": "mail", "values": [email]},
+            ],
+            "name": name,
+            "description": description,
+        }
+
+        request_url = self.users_url()
+
+        logger.debug(
+            "Adding user -> '%s' to partition -> '%s'; calling -> %s",
+            name,
+            partition,
+            request_url,
+        )
+        logger.debug("User Attributes -> %s", str(user_post_body_json))
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=user_post_body_json,
+            timeout=None,
+            failure_message="Failed to add user -> '{}'".format(name),
+        )
+
+    # end method definition
+
+    def get_user(self, partition: str, user_id: str) -> dict | None:
+        """Get a user by its partition and user ID
+
+        Args:
+            partition (str): name of the partition
+            user_id (str): ID of the user (= login name)
+        Returns:
+            dict: Request response or None if the user was not found.
+        """
+
+        request_url = self.users_url() + "/" + user_id + "@" + partition
+
+        logger.debug(
+            "Get user -> '%s' in partition -> '%s'; calling -> %s",
+            user_id,
+            partition,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get user -> '{}'".format(user_id),
+        )
+
+    # end method definition
+
+    def get_users(self, partition: str = "", limit: int | None = None) -> dict | None:
+        """Get all users in a partition partition
+
+        Args:
+            partition (str, optional): name of the partition
+            limit (int): maximum number of users to return
+        Returns:
+            dict: Request response or None if the user was not found.
+        """
+
+        # Add query parameters (these are NOT passed via JSon body!)
+        query = {}
+        if limit:
+            query["limit"] = limit
+        if partition:
+            query["where_partition_name"] = partition
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.users_url()
+        if query:
+            request_url += "?{}".format(encoded_query)
+
+        if partition:
+            logger.debug(
+                "Get all users in partition -> '%s' (limit -> %s); calling -> %s",
+                partition,
+                limit,
+                request_url,
+            )
+            failure_message = "Failed to get all users in partition -> '{}'".format(
+                partition
+            )
+        else:
+            logger.debug(
+                "Get all users (limit -> %s); calling -> %s",
+                limit,
+                request_url,
+            )
+            failure_message = "Failed to get all users"
+
+        return self.do_request(
+            url=request_url, method="GET", timeout=None, failure_message=failure_message
+        )
+
+    # end method definition
+
+    def update_user(
+        self, partition: str, user_id: str, attribute_name: str, attribute_value: str
+    ) -> dict | None:
+        """Update a user attribute with a new value
+
+        Args:
+            partition (str): name of the partition
+            user_id (str): ID of the user (= login name)
+            attribute_name (str): name of the attribute
+            attribute_value (str): new value of the attribute
+        Return:
+            dict: Request response or None if the update fails.
+        """
+
+        if attribute_name in ["description"]:
+            user_patch_body_json = {
+                "userPartitionID": partition,
+                attribute_name: attribute_value,
+            }
+        else:
+            user_patch_body_json = {
+                "userPartitionID": partition,
+                "values": [{"name": attribute_name, "values": [attribute_value]}],
+            }
+
+        request_url = self.users_url() + "/" + user_id
+
+        logger.debug(
+            "Update user -> '%s' attribute -> '%s' to value -> '%s'; calling -> %s",
+            user_id,
+            attribute_name,
+            attribute_value,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            json_data=user_patch_body_json,
+            timeout=None,
+            failure_message="Failed to update user -> '{}'".format(user_id),
+        )
+
+    # end method definition
+
+    def delete_user(self, partition: str, user_id: str) -> bool:
+        """Delete an existing user
+
+        Args:
+            partition (str): name of the partition
+            user_id (str): Id (= login name) of the user
+        Returns:
+            bool: True = success, False = error
+        """
+
+        request_url = self.users_url() + "/" + user_id + "@" + partition
+
+        logger.debug(
+            "Delete user -> '%s' in partition -> '%s'; calling -> %s",
+            user_id,
+            partition,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="DELETE",
+            timeout=None,
+            failure_message="Failed to delete user -> '{}'".format(user_id),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def reset_user_password(self, user_id: str, password: str) -> bool:
+        """Reset a password of an existing user
+
+        Args:
+            user_id (str): Id (= login name) of the user
+            password (str): new password of the user
+        Returns:
+            bool: True = success, False = error.
+        """
+
+        user_post_body_json = {"newPassword": password}
+
+        request_url = "{}/{}/password".format(self.users_url(), user_id)
+
+        logger.debug(
+            "Resetting password for user -> '%s'; calling -> %s", user_id, request_url
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=user_post_body_json,
+            timeout=None,
+            failure_message="Failed to reset password for user -> '{}'".format(user_id),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def add_group(self, partition: str, name: str, description: str) -> dict | None:
+        """Add a new user group to a user partition in OTDS
+
+        Args:
+            partition (str): name of the OTDS user partition (needs to exist)
+            name (str): name of the new group
+            description (str): description of the new group
+        Returns:
+            dict: Request response (json) or None if the creation fails.
+        """
+
+        group_post_body_json = {
+            "userPartitionID": partition,
+            "name": name,
+            "description": description,
+        }
+
+        request_url = self.groups_url()
+
+        logger.debug(
+            "Adding group -> '%s' to partition -> '%s'; calling -> %s",
+            name,
+            partition,
+            request_url,
+        )
+        logger.debug("Group Attributes -> %s", str(group_post_body_json))
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=group_post_body_json,
+            timeout=None,
+            failure_message="Failed to reset password for user -> '{}'".format(name),
+        )
+
+    # end method definition
+
+    def get_group(self, group: str, show_error: bool = True) -> dict | None:
+        """Get a OTDS group by its group name
+
+        Args:
+            group (str): ID of the group (= group name)
+            show_error (bool, optional): treat as error if resource is not found
+        Return:
+            dict: Request response or None if the group was not found.
+            Example values:
+            {
+                'numMembers': 7,
+                'userPartitionID': 'Content Server Members',
+                'name': 'Sales',
+                'location': 'oTGroup=3f921294-b92a-4c9e-bf7c-b50df16bb937,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net',
+                'id': 'Sales@Content Server Members',
+                'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...],
+                'description': None,
+                'uuid': '3f921294-b92a-4c9e-bf7c-b50df16bb937',
+                'objectClass': 'oTGroup',
+                'customAttributes': None,
+                'originUUID': None,
+                'urlId': 'Sales@Content Server Members',
+                'urlLocation': 'oTGroup=3f921294-b92a-4c9e-bf7c-b50df16bb937,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net'
+            }
+        """
+
+        request_url = self.groups_url() + "/" + group
+
+        logger.debug("Get group -> '%s'; calling -> %s", group, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get group -> '{}'".format(group),
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    def add_user_to_group(self, user: str, group: str) -> bool:
+        """Add an existing user to an existing group in OTDS
+
+        Args:
+            user (str): name of the OTDS user (needs to exist)
+            group (str): name of the OTDS group (needs to exist)
+        Returns:
+            bool: True, if request is successful, False otherwise.
+        """
+
+        user_to_group_post_body_json = {"stringList": [group]}
+
+        request_url = self.users_url() + "/" + user + "/memberof"
+
+        logger.debug(
+            "Adding user -> '%s' to group -> '%s'; calling -> %s",
+            user,
+            group,
+            request_url,
+        )
+
+        # OTDS delivers an empty response.text for the API, so we don't parse it here:
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=user_to_group_post_body_json,
+            timeout=None,
+            failure_message="Failed to add user -> '{}' to group -> '{}'".format(
+                user, group
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def add_group_to_parent_group(self, group: str, parent_group: str) -> bool:
+        """Add an existing group to an existing parent group in OTDS
+
+        Args:
+            group (str): name of the OTDS group (needs to exist)
+            parent_group (str): name of the OTDS parent group (needs to exist)
+        Returns:
+            bool: True, if request is successful, False otherwise.
+        """
+
+        group_to_parent_group_post_body_json = {"stringList": [parent_group]}
+
+        request_url = self.groups_url() + "/" + group + "/memberof"
+
+        logger.debug(
+            "Adding group -> '%s' to parent group -> '%s'; calling -> %s",
+            group,
+            parent_group,
+            request_url,
+        )
+
+        # OTDS delivers an empty response.text for the API, so we don't parse it here:
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=group_to_parent_group_post_body_json,
+            timeout=None,
+            failure_message="Failed to add group -> '{}' to parent group -> '{}'".format(
+                group, parent_group
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def add_resource(
+        self,
+        name: str,
+        description: str = "",
+        display_name: str = "",
+        allow_impersonation: bool = True,
+        resource_id: str | None = None,
+        secret: str | None = None,  # needs to be 16 bytes!
+        additional_payload: dict | None = None,
+    ) -> dict | None:
+        """Add an OTDS resource
+
+        Args:
+            name (str): name of the new OTDS resource
+            description (str): description of the new OTDS resource
+            display_name (str): display name of the OTDS resource
+            additional_payload (dict, optional): additional values for the json payload
+        Returns:
+            dict: Request response (dictionary) or None if the REST call fails.
+        """
+
+        resource_post_body = {
+            "resourceName": name,
+            "description": description,
+            "displayName": display_name,
+            "allowImpersonation": allow_impersonation,
+        }
+
+        if resource_id and not secret:
+            logger.error(
+                "A resource ID can only be specified if a secret value is also provided!"
+            )
+            return None
+
+        if resource_id:
+            resource_post_body["resourceID"] = resource_id
+        if secret:
+            if len(secret) != 24 or not secret.endswith("=="):
+                logger.warning(
+                    "The secret should by 24 characters long and should end with '=='"
+                )
+            resource_post_body["secretKey"] = secret
+
+        # Check if there's additional payload for the body provided to handle special cases:
+        if additional_payload:
+            # Merge additional payload:
+            resource_post_body.update(additional_payload)
+
+        request_url = self.config()["resourceUrl"]
+
+        logger.debug(
+            "Adding resource -> '%s' ('%s'); calling -> %s",
+            name,
+            description,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=resource_post_body,
+            timeout=None,
+            failure_message="Failed to add resource -> '{}'".format(name),
+        )
+
+    # end method definition
+
+    def get_resource(self, name: str, show_error: bool = False) -> dict | None:
+        """Get an existing OTDS resource
+
+        Args:
+            name (str): name of the new OTDS resource
+            show_error (bool, optional): treat as error if resource is not found
+        Returns:
+            dict: Request response or None if the REST call fails.
+
+            Example:
+            {
+                'resourceName': 'cs',
+                'id': 'cs',
+                'description': 'Content Server',
+                'displayName': 'IDEA-TE DEV - Extended ECM 24.4.0',
+                'resourceID': 'd441e5cb-68ef-4cb7-a8a0-037ba6b35522',
+                'resourceState': 1,
+                'userSynchronizationState': True,
+                'resourceDN': 'oTResource=d441e5cb-68ef-4cb7-a8a0-037ba6b35522,dc=identity,dc=opentext,dc=net',
+                'resourceType': 'cs',
+                'accessRoleList': [{...}],
+                'impersonateList': None,
+                'impersonateAnonymousList': None,
+                'pcCreatePermissionAllowed': True,
+                'pcModifyPermissionAllowed': True,
+                'pcDeletePermissionAllowed': True,
+                'logoutURL': 'https://otawp.dev.idea-te.eimdemo.com/home/system/wcp/sso/sso_logout.htm',
+                'logoutMethod': 'GET',
+                'allowImpersonation': True,
+                'connectionHealthy': True,
+                'connectorName': 'Content Server',
+                'connectorid': 'cs',
+                'userAttributeMapping': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}],
+                'groupAttributeMapping': [{...}, {...}],
+                'connectionParamInfo': [{...}, {...}, {...}, {...}, {...}, {...}, {...}],
+                'logonStyle': None,
+                'logonUXVersion': 0
+            }
+        """
+
+        request_url = "{}/{}".format(self.config()["resourceUrl"], name)
+
+        logger.debug("Get resource -> '%s'; calling -> %s", name, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get resource -> '{}'".format(name),
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    def update_resource(
+        self, name: str, resource: object, show_error: bool = True
+    ) -> dict | None:
+        """Update an existing OTDS resource
+
+        Args:
+            name (str): name of the new OTDS resource
+            resource (object): updated resource object of get_resource called before
+            show_error (bool, optional): treat as error if resource is not found
+        Returns:
+            dict: Request response (json) or None if the REST call fails.
+        """
+
+        request_url = "{}/{}".format(self.config()["resourceUrl"], name)
+
+        logger.debug("Updating resource -> '%s'; calling -> %s", name, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=resource,
+            timeout=None,
+            failure_message="Failed to update resource -> '{}'".format(name),
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    def activate_resource(self, resource_id: str) -> dict | None:
+        """Activate an OTDS resource
+
+        Args:
+            resource_id (str): ID of the OTDS resource
+        Returns:
+            dict: Request response (json) or None if the REST call fails.
+        """
+
+        resource_post_body_json = {}
+
+        request_url = "{}/{}/activate".format(self.config()["resourceUrl"], resource_id)
+
+        logger.debug(
+            "Activating resource -> '%s'; calling -> %s", resource_id, request_url
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=resource_post_body_json,
+            timeout=None,
+            failure_message="Failed to activate resource -> '{}'".format(resource_id),
+        )
+
+    # end method definition
+
+    def get_access_roles(self) -> dict | None:
+        """Get a list of all OTDS access roles
+
+        Args:
+            None
+        Returns:
+            dict: Request response or None if the REST call fails.
+        """
+
+        request_url = self.config()["accessRoleUrl"]
+
+        logger.debug("Retrieving access roles; calling -> %s", request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get access roles",
+        )
+
+    # end method definition
+
+    def get_access_role(self, access_role: str) -> dict | None:
+        """Get an OTDS access role
+
+        Args:
+            name (str): name of the access role
+        Returns:
+            dict: Request response (json) or None if the REST call fails.
+        """
+
+        request_url = self.config()["accessRoleUrl"] + "/" + access_role
+
+        logger.debug("Get access role -> '%s'; calling -> %s", access_role, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get access role -> '{}'".format(access_role),
+        )
+
+    # end method definition
+
+    def add_partition_to_access_role(
+        self, access_role: str, partition: str, location: str = ""
+    ) -> bool:
+        """Add an OTDS partition to an OTDS access role
+
+        Args:
+            access_role (str): name of the OTDS access role
+            partition (str): name of the partition
+            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
+                                      most of the times you will want to keep it to empty string ("")
+        Returns:
+            bool: True if partition is in access role or has been successfully added.
+                  False if partition has been not been added (error)
+        """
+
+        access_role_post_body_json = {
+            "userPartitions": [{"name": partition, "location": location}]
+        }
+
+        request_url = "{}/{}/members".format(
+            self.config()["accessRoleUrl"], access_role
+        )
+
+        logger.debug(
+            "Add user partition -> '%s' to access role -> '%s'; calling -> %s",
+            partition,
+            access_role,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=access_role_post_body_json,
+            timeout=None,
+            failure_message="Failed to add partition -> '{}' to access role -> '{}'".format(
+                partition, access_role
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def add_user_to_access_role(
+        self, access_role: str, user_id: str, location: str = ""
+    ) -> bool:
+        """Add an OTDS user to an OTDS access role
+
+        Args:
+            access_role (str): name of the OTDS access role
+            user_id (str): ID of the user (= login name)
+            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
+                                      most of the times you will want to keep it to empty string ("")
+        Returns:
+            bool: True if user is in access role or has been successfully added.
+                  False if user has not been added (error)
+        """
+
+        # get existing members to check if user is already a member:
+        access_roles_get_response = self.get_access_role(access_role)
+        if not access_roles_get_response:
+            return False
+
+        # Checking if user already added to access role
+        accessRoleUsers = access_roles_get_response["accessRoleMembers"]["users"]
+        for user in accessRoleUsers:
+            if user["displayName"] == user_id:
+                logger.debug(
+                    "User -> '%s' already added to access role -> '%s'",
+                    user_id,
+                    access_role,
+                )
+                return True
+
+        logger.debug(
+            "User -> '%s' is not yet in access role -> '%s' - adding...",
+            user_id,
+            access_role,
+        )
+
+        # create payload for REST call:
+        access_role_post_body_json = {
+            "users": [{"name": user_id, "location": location}]
+        }
+
+        request_url = "{}/{}/members".format(
+            self.config()["accessRoleUrl"], access_role
+        )
+
+        logger.debug(
+            "Add user -> %s to access role -> %s; calling -> %s",
+            user_id,
+            access_role,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=access_role_post_body_json,
+            timeout=None,
+            failure_message="Failed to add user -> '{}' to access role -> '{}'".format(
+                user_id, access_role
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def add_group_to_access_role(
+        self, access_role: str, group: str, location: str = ""
+    ) -> bool:
+        """Add an OTDS group to an OTDS access role
+
+        Args:
+            access_role (str): name of the OTDS access role
+            group (str): name of the group
+            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
+                                      most of the times you will want to keep it to empty string ("")
+        Returns:
+            bool: True if group is in access role or has been successfully added.
+                  False if group has been not been added (error)
+        """
+
+        # get existing members to check if user is already a member:
+        access_roles_get_response = self.get_access_role(access_role)
+        if not access_roles_get_response:
+            return False
+
+        # Checking if group already added to access role
+        access_role_groups = access_roles_get_response["accessRoleMembers"]["groups"]
+        for access_role_group in access_role_groups:
+            if access_role_group["name"] == group:
+                logger.debug(
+                    "Group -> '%s' already added to access role -> '%s'",
+                    group,
+                    access_role,
+                )
+                return True
+
+        logger.debug(
+            "Group -> '%s' is not yet in access role -> '%s' - adding...",
+            group,
+            access_role,
+        )
+
+        # create payload for REST call:
+        access_role_post_body_json = {"groups": [{"name": group, "location": location}]}
+
+        request_url = "{}/{}/members".format(
+            self.config()["accessRoleUrl"], access_role
+        )
+
+        logger.debug(
+            "Add group -> '%s' to access role -> '%s'; calling -> %s",
+            group,
+            access_role,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=access_role_post_body_json,
+            timeout=None,
+            failure_message="Failed to add group -> '{}' to access role -> '{}'".format(
+                group, access_role
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
+
+    # end method definition
+
+    def update_access_role_attributes(
+        self, name: str, attribute_list: list
+    ) -> dict | None:
+        """Update some attributes of an existing OTDS Access Role
+
+        Args:
+            name (str): name of the existing access role
+            attribute_list (list): list of attribute name and attribute value pairs
+                                   The values need to be a list as well. Example:
+                                   [{name: "pushAllGroups", values: ["True"]}]
+        Returns:
+            dict: Request response (json) or None if the REST call fails.
+        """
+
+        # Return if list is empty:
+        if not attribute_list:
+            return None
+
+        # create payload for REST call:
+        access_role = self.get_access_role(name)
+        if not access_role:
+            logger.error("Failed to get access role -> '%s'", name)
+            return None
+
+        access_role_put_body_json = {"attributes": attribute_list}
+
+        request_url = "{}/{}/attributes".format(self.config()["accessRoleUrl"], name)
+
+        logger.debug(
+            "Update access role -> '%s' with attributes -> %s; calling -> %s",
+            name,
+            str(access_role_put_body_json),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=access_role_put_body_json,
+            timeout=None,
+            failure_message="Failed to update access role -> '{}'".format(access_role),
+        )
+
+    # end method definition
+
     def add_license_to_resource(
         self,
         path_to_license_file: str,
@@ -496,19 +1591,19 @@ class OTDS:
             dict: Request response (dictionary) or None if the REST call fails
         """
 
-        logger.debug("Reading license file -> %s...", path_to_license_file)
+        logger.debug("Reading license file -> '%s'...", path_to_license_file)
         try:
             with open(path_to_license_file, "rt", encoding="UTF-8") as license_file:
                 license_content = license_file.read()
         except IOError as exception:
             logger.error(
-                "Error opening license file -> %s; error -> %s",
+                "Error opening license file -> '%s'; error -> %s",
                 path_to_license_file,
                 exception.strerror,
             )
             return None
 
-        licensePostBodyJson = {
+        license_post_body_json = {
             "description": product_description,
             "name": product_name,
             "values": [
@@ -526,56 +1621,42 @@ class OTDS:
                 request_url += "/" + existing_license[0]["id"]
             else:
                 logger.debug(
-                    "No existing license for resource -> %s found - adding a new license...",
+                    "No existing license found for resource -> '%s' - adding a new license...",
                     resource_id,
                 )
                 # change strategy to create a new license:
                 update = False
 
         logger.debug(
-            "Adding product license -> %s for product -> %s to resource -> %s; calling -> %s",
+            "Adding product license -> '%s' for product -> '%s' to resource ->'%s'; calling -> %s",
             path_to_license_file,
             product_description,
             resource_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            if update:
-                # Do a REST PUT call for update an existing license:
-                response = requests.put(
-                    url=request_url,
-                    json=licensePostBodyJson,
-                    headers=REQUEST_HEADERS,
-                    cookies=self.cookie(),
-                    timeout=None,
-                )
-            else:
-                # Do a REST POST call for creation of a new license:
-                response = requests.post(
-                    url=request_url,
-                    json=licensePostBodyJson,
-                    headers=REQUEST_HEADERS,
-                    cookies=self.cookie(),
-                    timeout=None,
-                )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add product license -> %s for product -> %s; error -> %s (%s)",
-                    path_to_license_file,
-                    product_description,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        if update:
+            # Do a REST PUT call for update an existing license:
+            return self.do_request(
+                url=request_url,
+                method="PUT",
+                json_data=license_post_body_json,
+                timeout=None,
+                failure_message="Failed to update product license -> '{}' for product -> '{}'".format(
+                    path_to_license_file, product_description
+                ),
+            )
+        else:
+            # Do a REST POST call for creation of a new license:
+            return self.do_request(
+                url=request_url,
+                method="POST",
+                json_data=license_post_body_json,
+                timeout=None,
+                failure_message="Failed to add product license -> '{}' for product -> '{}'".format(
+                    path_to_license_file, product_description
+                ),
+            )
 
     # end method definition
 
@@ -612,32 +1693,19 @@ class OTDS:
             "Get license for resource -> %s; calling -> %s", resource_id, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                response_dict = self.parse_request_response(response)
-                if not response_dict:
-                    return None
-                return response_dict["licenseObjects"]["_licenses"]
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get license for resource -> %s; error -> %s (%s)",
-                    resource_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get license for resource -> '{}'".format(
+                resource_id
+            ),
+        )
+
+        if not response:
+            return None
+
+        return response["licenseObjects"]["_licenses"]
 
     # end method definition
 
@@ -654,36 +1722,26 @@ class OTDS:
         request_url = "{}/{}".format(self.license_url(), license_id)
 
         logger.debug(
-            "Deleting product license -> %s from resource -> %s; calling -> %s",
+            "Deleting product license -> '%s' from resource -> '%s'; calling -> %s",
             license_id,
             resource_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.delete(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to delete license -> %s for resource -> %s; error -> %s (%s)",
-                    license_id,
-                    resource_id,
-                    response.text,
-                    response.status_code,
-                )
-                return False
+        response = self.do_request(
+            url=request_url,
+            method="DELETE",
+            timeout=None,
+            failure_message="Failed to delete license -> '{}' for resource -> '{}'".format(
+                license_id, resource_id
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
 
     # end method definition
 
@@ -719,7 +1777,7 @@ class OTDS:
             license_location
         except UnboundLocalError:
             logger.error(
-                "Cannot find license -> %s for resource -> %s",
+                "Cannot find license -> '%s' for resource -> %s",
                 license_name,
                 resource_id,
             )
@@ -729,10 +1787,10 @@ class OTDS:
         if user:
             user_location = user["location"]
         else:
-            logger.error("Cannot find location for user -> %s", user_id)
+            logger.error("Cannot find location for user -> '%s'", user_id)
             return False
 
-        licensePostBodyJson = {
+        license_post_body_json = {
             "_oTLicenseType": license_type,
             "_oTLicenseProduct": "users",
             "name": user_location,
@@ -742,7 +1800,7 @@ class OTDS:
         request_url = self.license_url() + "/object/" + license_location
 
         logger.debug(
-            "Assign license feature -> %s of license -> %s associated with resource -> %s to user -> %s; calling -> %s",
+            "Assign license feature -> '%s' of license -> '%s' associated with resource -> '%s' to user -> '%s'; calling -> %s",
             license_feature,
             license_location,
             resource_id,
@@ -750,37 +1808,26 @@ class OTDS:
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=licensePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=license_post_body_json,
+            timeout=None,
+            failure_message="Failed to add license feature -> '{}' associated with resource -> '{}' to user -> '{}'".format(
+                license_feature, resource_id, user_id
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            logger.debug(
+                "Added license feature -> '%s' to user -> '%s'",
+                license_feature,
+                user_id,
             )
-            if response.ok:
-                logger.debug(
-                    "Added license feature -> %s for user -> %s",
-                    license_feature,
-                    user_id,
-                )
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add license feature -> %s associated with resource -> %s to user -> %s; error -> %s (%s)",
-                    license_feature,
-                    resource_id,
-                    user_id,
-                    response.text,
-                    response.status_code,
-                )
-                return False
+            return True
+
+        return False
 
     # end method definition
 
@@ -807,7 +1854,8 @@ class OTDS:
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
             logger.error(
-                "Resource with ID -> %s does not exist or has no licenses", resource_id
+                "Resource with ID -> '%s' does not exist or has no licenses",
+                resource_id,
             )
             return False
 
@@ -837,7 +1885,7 @@ class OTDS:
             )
             return False
 
-        licensePostBodyJson = {
+        license_post_body_json = {
             "_oTLicenseType": license_type,
             "_oTLicenseProduct": "partitions",
             "name": partition_name,
@@ -847,7 +1895,7 @@ class OTDS:
         request_url = self.license_url() + "/object/" + license_location
 
         logger.debug(
-            "Assign license feature -> %s of license -> %s associated with resource -> %s to partition -> %s; calling -> %s",
+            "Assign license feature -> '%s' of license -> '%s' associated with resource -> '%s' to partition -> '%s'; calling -> %s",
             license_feature,
             license_location,
             resource_id,
@@ -855,37 +1903,26 @@ class OTDS:
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=licensePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=license_post_body_json,
+            timeout=None,
+            failure_message="Failed to add license feature -> '{}' associated with resource -> '{}' to partition -> '{}'".format(
+                license_feature, resource_id, partition_name
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            logger.debug(
+                "Added license feature -> '%s' to partition -> '%s'",
+                license_feature,
+                partition_name,
             )
-            if response.ok:
-                logger.debug(
-                    "Added license feature -> %s for partition -> %s",
-                    license_feature,
-                    partition_name,
-                )
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add license feature -> %s associated with resource -> %s to partition -> %s; error -> %s (%s)",
-                    license_feature,
-                    resource_id,
-                    partition_name,
-                    response.text,
-                    response.status_code,
-                )
-                return False
+            return True
+
+        return False
 
     # end method definition
 
@@ -921,7 +1958,8 @@ class OTDS:
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
             logger.error(
-                "Resource with ID -> %s does not exist or has no licenses", resource_id
+                "Resource with ID -> '%s' does not exist or has no licenses",
+                resource_id,
             )
             return False
 
@@ -967,31 +2005,14 @@ class OTDS:
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get licensed objects for license -> %s and license feature -> %s associated with resource -> %s; error -> %s (%s)",
-                    license_name,
-                    license_feature,
-                    resource_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get licensed objects for license -> '{}' and license feature -> '{}' associated with resource -> '{}'".format(
+                license_name, license_feature, resource_id
+            ),
+        )
 
     # end method definition
 
@@ -1121,33 +2142,85 @@ class OTDS:
         return False
 
     # end method definition
+    
+    def import_synchronized_partition_members(self, name: str) -> dict:
+        """Import users and groups to partition
 
-    def add_partition(self, name: str, description: str) -> dict | None:
-        """Add a new user partition to OTDS
+        Args:
+            name (str): name of the partition in which users need to be imported
+        Returns:
+            dict: Request response or None if the creation fails.
+        """
+        command = {"command": "import"}
+        request_url = self.synchronized_partition_url() + f'/{name}/command'
+        logger.debug(
+            "Importing users and groups in to partition -> %s; calling -> %s",
+            name,
+            request_url,
+        )
+        retries = 0
+        while True:
+            response = requests.post(
+                url=request_url,
+                json=command,
+                headers=REQUEST_HEADERS,
+                cookies=self.cookie(),
+                timeout=None,
+            )
+            if response.status_code == 204:
+                return True
+            # Check if Session has expired - then re-authenticate and try once more
+            elif response.status_code == 401 and retries == 0:
+                logger.debug("Session has expired - try to re-authenticate...")
+                self.authenticate(revalidate=True)
+                retries += 1
+            else:
+                logger.error(
+                    "Failed to Import users and groups to synchronized partition -> %s; error -> %s (%s)",
+                    name,
+                    response.text,
+                    response.status_code,
+                )
+                return None
+        
+    # end of method definition
+    
+    def add_synchronized_partition(self, name: str, description: str, data: str) -> dict:
+        """Add a new synchronized partition to OTDS
 
         Args:
             name (str): name of the new partition
             description (str): description of the new partition
+            data (dict): data for creating synchronized partition
         Returns:
             dict: Request response or None if the creation fails.
         """
-
-        partitionPostBodyJson = {"name": name, "description": description}
-
-        request_url = self.partition_url()
-
+        synchronizedPartitionPostBodyJson = {
+                "ipConnectionParameter": [
+                ],
+                "ipAuthentication": {
+                },
+                "objectClassNameMapping": [
+                    
+                ],
+                "basicInfo": {
+                },
+                "basicAttributes": []
+        }
+        synchronizedPartitionPostBodyJson.update(data)
+        request_url = self.synchronized_partition_url()
         logger.debug(
-            "Adding user partition -> %s (%s); calling -> %s",
+            "Adding synchronized partition -> %s (%s); calling -> %s",
             name,
             description,
             request_url,
         )
-
+        synchronizedPartitionPostBodyJson["ipAuthentication"]["bindPassword"] = self.config()["bindPassword"]
         retries = 0
         while True:
             response = requests.post(
                 url=request_url,
-                json=partitionPostBodyJson,
+                json=synchronizedPartitionPostBodyJson,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
                 timeout=None,
@@ -1161,1152 +2234,14 @@ class OTDS:
                 retries += 1
             else:
                 logger.error(
-                    "Failed to add user partition -> %s; error -> %s (%s)",
+                    "Failed to add synchronized partition -> %s; error -> %s (%s)",
                     name,
                     response.text,
                     response.status_code,
                 )
                 return None
-
-    # end method definition
-
-    def get_partition(self, name: str, show_error: bool = True) -> dict | None:
-        """Get an existing user partition from OTDS
-
-        Args:
-            name (str): name of the partition to retrieve
-            show_error (bool, optional): whether or not we want to log an error
-                                         if partion is not found
-        Returns:
-            dict: Request response or None if the REST call fails.
-        """
-
-        request_url = "{}/{}".format(self.config()["partitionUrl"], name)
-
-        logger.debug("Getting user partition -> %s; calling -> %s", name, request_url)
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to get partition -> %s; warning -> %s (%s)",
-                        name,
-                        response.text,
-                        response.status_code,
-                    )
-                return None
-
-    # end method definition
-
-    def add_user(
-        self,
-        partition: str,
-        name: str,
-        description: str = "",
-        first_name: str = "",
-        last_name: str = "",
-        email: str = "",
-    ) -> dict | None:
-        """Add a new user to a user partition in OTDS
-
-        Args:
-            partition (str): name of the OTDS user partition (needs to exist)
-            name (str): login name of the new user
-            description (str, optional): description of the new user
-            first_name (str, optional): first name of the new user
-            last_name (str, optional): last name of the new user
-            email (str, optional): email address of the new user
-        Returns:
-            dict: Request response or None if the creation fails.
-        """
-
-        userPostBodyJson = {
-            "userPartitionID": partition,
-            "values": [
-                {"name": "sn", "values": [last_name]},
-                {"name": "givenName", "values": [first_name]},
-                {"name": "mail", "values": [email]},
-            ],
-            "name": name,
-            "description": description,
-        }
-
-        request_url = self.users_url()
-
-        logger.debug(
-            "Adding user -> %s to partition -> %s; calling -> %s",
-            name,
-            partition,
-            request_url,
-        )
-        logger.debug("User Attributes -> %s", str(userPostBodyJson))
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=userPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add user -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def get_user(self, partition: str, user_id: str) -> dict | None:
-        """Get a user by its partition and user ID
-
-        Args:
-            partition (str): name of the partition
-            user_id (str): ID of the user (= login name)
-        Returns:
-            dict: Request response or None if the user was not found.
-        """
-
-        request_url = self.users_url() + "/" + user_id + "@" + partition
-
-        logger.debug(
-            "Get user -> %s in partition -> %s; calling -> %s",
-            user_id,
-            partition,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get user -> %s; error -> %s (%s)",
-                    user_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def get_users(self, partition: str = "", limit: int | None = None) -> dict | None:
-        """Get all users in a partition partition
-
-        Args:
-            partition (str, optional): name of the partition
-            limit (int): maximum number of users to return
-        Returns:
-            dict: Request response or None if the user was not found.
-        """
-
-        # Add query parameters (these are NOT passed via JSon body!)
-        query = {}
-        if limit:
-            query["limit"] = limit
-        if partition:
-            query["where_partition_name"] = partition
-
-        encodedQuery = urllib.parse.urlencode(query, doseq=True)
-
-        request_url = self.users_url()
-        if query:
-            request_url += "?{}".format(encodedQuery)
-
-        if partition:
-            logger.debug(
-                "Get all users in partition -> %s (limit -> %s); calling -> %s",
-                partition,
-                limit,
-                request_url,
-            )
-        else:
-            logger.debug(
-                "Get all users (limit -> %s); calling -> %s",
-                limit,
-                request_url,
-            )
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                if partition:
-                    logger.error(
-                        "Failed to get users in partition -> %s; error -> %s (%s)",
-                        partition,
-                        response.text,
-                        response.status_code,
-                    )
-                else:
-                    logger.error(
-                        "Failed to get users; error -> %s (%s)",
-                        response.text,
-                        response.status_code,
-                    )
-                return None
-
-    # end method definition
-
-    def update_user(
-        self, partition: str, user_id: str, attribute_name: str, attribute_value: str
-    ) -> dict | None:
-        """Update a user attribute with a new value
-
-        Args:
-            partition (str): name of the partition
-            user_id (str): ID of the user (= login name)
-            attribute_name (str): name of the attribute
-            attribute_value (str): new value of the attribute
-        Return:
-            dict: Request response or None if the update fails.
-        """
-
-        if attribute_name in ["description"]:
-            userPatchBodyJson = {
-                "userPartitionID": partition,
-                attribute_name: attribute_value,
-            }
-        else:
-            userPatchBodyJson = {
-                "userPartitionID": partition,
-                "values": [{"name": attribute_name, "values": [attribute_value]}],
-            }
-
-        request_url = self.users_url() + "/" + user_id
-
-        logger.debug(
-            "Update user -> %s attribute -> %s to value -> %s; calling -> %s",
-            user_id,
-            attribute_name,
-            attribute_value,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.patch(
-                url=request_url,
-                json=userPatchBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            elif response.status_code == 404:
-                logger.warning("User does not exist -> %s", user_id)
-                return None
-            else:
-                logger.error(
-                    "Failed to update user -> %s; error -> %s (%s)",
-                    user_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def delete_user(self, partition: str, user_id: str) -> bool:
-        """Delete an existing user
-
-        Args:
-            partition (str): name of the partition
-            user_id (str): Id (= login name) of the user
-        Returns:
-            bool: True = success, False = error
-        """
-
-        request_url = self.users_url() + "/" + user_id + "@" + partition
-
-        logger.debug(
-            "Delete user -> %s in partition -> %s; calling -> %s",
-            user_id,
-            partition,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.delete(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to delete user -> %s; error -> %s (%s)",
-                    user_id,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def reset_user_password(self, user_id: str, password: str) -> bool:
-        """Reset a password of an existing user
-
-        Args:
-            user_id (str): Id (= login name) of the user
-            password (str): new password of the user
-        Returns:
-            bool: True = success, False = error.
-        """
-
-        userPostBodyJson = {"newPassword": password}
-
-        request_url = "{}/{}/password".format(self.users_url(), user_id)
-
-        logger.debug(
-            "Resetting password for user -> %s; calling -> %s", user_id, request_url
-        )
-
-        retries = 0
-        while True:
-            response = requests.put(
-                url=request_url,
-                json=userPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to reset password for user -> %s; error -> %s (%s)",
-                    user_id,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def add_group(self, partition: str, name: str, description: str) -> dict | None:
-        """Add a new user group to a user partition in OTDS
-
-        Args:
-            partition (str): name of the OTDS user partition (needs to exist)
-            name (str): name of the new group
-            description (str): description of the new group
-        Returns:
-            dict: Request response (json) or None if the creation fails.
-        """
-
-        groupPostBodyJson = {
-            "userPartitionID": partition,
-            "name": name,
-            "description": description,
-        }
-
-        request_url = self.groups_url()
-
-        logger.debug(
-            "Adding group -> %s to partition -> %s; calling -> %s",
-            name,
-            partition,
-            request_url,
-        )
-        logger.debug("Group Attributes -> %s", str(groupPostBodyJson))
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=groupPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add group -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def get_group(self, group: str) -> dict | None:
-        """Get a OTDS group by its group name
-
-        Args:
-            group (str): ID of the group (= group name)
-        Return:
-            dict: Request response or None if the group was not found.
-            Example values:
-            {
-                'numMembers': 7,
-                'userPartitionID': 'Content Server Members',
-                'name': 'Sales',
-                'location': 'oTGroup=3f921294-b92a-4c9e-bf7c-b50df16bb937,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net',
-                'id': 'Sales@Content Server Members',
-                'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...],
-                'description': None,
-                'uuid': '3f921294-b92a-4c9e-bf7c-b50df16bb937',
-                'objectClass': 'oTGroup',
-                'customAttributes': None,
-                'originUUID': None,
-                'urlId': 'Sales@Content Server Members',
-                'urlLocation': 'oTGroup=3f921294-b92a-4c9e-bf7c-b50df16bb937,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net'
-            }
-        """
-
-        request_url = self.groups_url() + "/" + group
-
-        logger.debug("Get group -> %s; calling -> %s", group, request_url)
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get group -> %s; error -> %s (%s)",
-                    group,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def add_user_to_group(self, user: str, group: str) -> bool:
-        """Add an existing user to an existing group in OTDS
-
-        Args:
-            user (str): name of the OTDS user (needs to exist)
-            group (str): name of the OTDS group (needs to exist)
-        Returns:
-            bool: True, if request is successful, False otherwise.
-        """
-
-        userToGroupPostBodyJson = {"stringList": [group]}
-
-        request_url = self.users_url() + "/" + user + "/memberof"
-
-        logger.debug(
-            "Adding user -> %s to group -> %s; calling -> %s", user, group, request_url
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=userToGroupPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add user -> %s to group -> %s; error -> %s (%s)",
-                    user,
-                    group,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def add_group_to_parent_group(self, group: str, parent_group: str) -> bool:
-        """Add an existing group to an existing parent group in OTDS
-
-        Args:
-            group (str): name of the OTDS group (needs to exist)
-            parent_group (str): name of the OTDS parent group (needs to exist)
-        Returns:
-            bool: True, if request is successful, False otherwise.
-        """
-
-        groupToParentGroupPostBodyJson = {"stringList": [parent_group]}
-
-        request_url = self.groups_url() + "/" + group + "/memberof"
-
-        logger.debug(
-            "Adding group -> %s to parent group -> %s; calling -> %s",
-            group,
-            parent_group,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=groupToParentGroupPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add group -> %s to parent group -> %s; error -> %s (%s)",
-                    group,
-                    parent_group,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def add_resource(
-        self,
-        name: str,
-        description: str,
-        display_name: str,
-        additional_payload: dict | None = None,
-    ) -> dict | None:
-        """Add an OTDS resource
-
-        Args:
-            name (str): name of the new OTDS resource
-            description (str): description of the new OTDS resource
-            display_name (str): display name of the OTDS resource
-            additional_payload (dict, optional): additional values for the json payload
-        Returns:
-            dict: Request response (dictionary) or None if the REST call fails.
-        """
-
-        resourcePostBodyJson = {
-            "resourceName": name,
-            "description": description,
-            "displayName": display_name,
-        }
-
-        # Check if there's additional payload for the body provided to handle special cases:
-        if additional_payload:
-            # Merge additional payload:
-            resourcePostBodyJson.update(additional_payload)
-
-        request_url = self.config()["resourceUrl"]
-
-        logger.debug(
-            "Adding resource -> %s (%s); calling -> %s", name, description, request_url
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=resourcePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add resource -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def get_resource(self, name: str, show_error: bool = False) -> dict | None:
-        """Get an existing OTDS resource
-
-        Args:
-            name (str): name of the new OTDS resource
-            show_error (bool, optional): treat as error if resource is not found
-        Returns:
-            dict: Request response or None if the REST call fails.
-        """
-
-        request_url = "{}/{}".format(self.config()["resourceUrl"], name)
-
-        logger.debug("Retrieving resource -> %s; calling -> %s", name, request_url)
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                # We don't necessarily want to log an error as this function
-                # is also used in wait loops:
-                if show_error:
-                    logger.warning(
-                        "Failed to retrieve resource -> %s; warning -> %s",
-                        name,
-                        response.text,
-                    )
-                else:
-                    logger.debug("Resource -> %s not found.", name)
-                return None
-
-    # end method definition
-
-    def update_resource(
-        self, name: str, resource: object, show_error: bool = True
-    ) -> dict | None:
-        """Update an existing OTDS resource
-
-        Args:
-            name (str): name of the new OTDS resource
-            resource (object): updated resource object of get_resource called before
-            show_error (bool, optional): treat as error if resource is not found
-        Returns:
-            dict: Request response (json) or None if the REST call fails.
-        """
-
-        request_url = "{}/{}".format(self.config()["resourceUrl"], name)
-
-        logger.debug("Updating resource -> %s; calling -> %s", name, request_url)
-
-        retries = 0
-        while True:
-            response = requests.put(
-                url=request_url,
-                json=resource,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                # We don't necessarily want to log an error as this function
-                # is also used in wait loops:
-                if show_error:
-                    logger.warning(
-                        "Failed to retrieve resource -> %s; warning -> %s",
-                        name,
-                        response.text,
-                    )
-                else:
-                    logger.debug("Resource -> %s not found.", name)
-                return None
-
-    # end method definition
-
-    def activate_resource(self, resource_id: str) -> dict | None:
-        """Activate an OTDS resource
-
-        Args:
-            resource_id (str): ID of the OTDS resource
-        Returns:
-            dict: Request response (json) or None if the REST call fails.
-        """
-
-        resourcePostBodyJson = {}
-
-        request_url = "{}/{}/activate".format(self.config()["resourceUrl"], resource_id)
-
-        logger.debug(
-            "Activating resource -> %s; calling -> %s", resource_id, request_url
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=resourcePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to activate resource -> %s; error -> %s (%s)",
-                    resource_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def get_access_roles(self) -> dict | None:
-        """Get a list of all OTDS access roles
-
-        Args:
-            None
-        Returns:
-            dict: Request response or None if the REST call fails.
-        """
-
-        request_url = self.config()["accessRoleUrl"]
-
-        logger.debug("Retrieving access roles; calling -> %s", request_url)
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve access roles; error -> %s (%s)",
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def get_access_role(self, access_role: str) -> dict | None:
-        """Get an OTDS access role
-
-        Args:
-            name (str): name of the access role
-        Returns:
-            dict: Request response (json) or None if the REST call fails.
-        """
-
-        request_url = self.config()["accessRoleUrl"] + "/" + access_role
-
-        logger.debug(
-            "Retrieving access role -> %s; calling -> %s", access_role, request_url
-        )
-
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve access role -> %s; error -> %s (%s)",
-                    access_role,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
-
-    def add_partition_to_access_role(
-        self, access_role: str, partition: str, location: str = ""
-    ) -> bool:
-        """Add an OTDS partition to an OTDS access role
-
-        Args:
-            access_role (str): name of the OTDS access role
-            partition (str): name of the partition
-            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
-                                      most of the times you will want to keep it to empty string ("")
-        Returns:
-            bool: True if partition is in access role or has been successfully added.
-                  False if partition has been not been added (error)
-        """
-
-        accessRolePostBodyJson = {
-            "userPartitions": [{"name": partition, "location": location}]
-        }
-
-        request_url = "{}/{}/members".format(
-            self.config()["accessRoleUrl"], access_role
-        )
-
-        logger.debug(
-            "Add user partition -> %s to access role -> %s; calling -> %s",
-            partition,
-            access_role,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=accessRolePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add partition -> %s to access role -> %s; error -> %s (%s)",
-                    partition,
-                    access_role,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def add_user_to_access_role(
-        self, access_role: str, user_id: str, location: str = ""
-    ) -> bool:
-        """Add an OTDS user to an OTDS access role
-
-        Args:
-            access_role (str): name of the OTDS access role
-            user_id (str): ID of the user (= login name)
-            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
-                                      most of the times you will want to keep it to empty string ("")
-        Returns:
-            bool: True if user is in access role or has been successfully added.
-                  False if user has not been added (error)
-        """
-
-        # get existing members to check if user is already a member:
-        accessRolesGetResponse = self.get_access_role(access_role)
-
-        if not accessRolesGetResponse:
-            return False
-
-        # Checking if user already added to access role
-        accessRoleUsers = accessRolesGetResponse["accessRoleMembers"]["users"]
-        for user in accessRoleUsers:
-            if user["displayName"] == user_id:
-                logger.debug(
-                    "User -> %s already added to access role -> %s",
-                    user_id,
-                    access_role,
-                )
-                return True
-
-        logger.debug(
-            "User -> %s is not yet in access role -> %s - adding...",
-            user_id,
-            access_role,
-        )
-
-        # create payload for REST call:
-        accessRolePostBodyJson = {"users": [{"name": user_id, "location": location}]}
-
-        request_url = "{}/{}/members".format(
-            self.config()["accessRoleUrl"], access_role
-        )
-
-        logger.debug(
-            "Add user -> %s to access role -> %s; calling -> %s",
-            user_id,
-            access_role,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=accessRolePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add user -> %s to access role -> %s; error -> %s (%s)",
-                    user_id,
-                    access_role,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def add_group_to_access_role(
-        self, access_role: str, group: str, location: str = ""
-    ) -> bool:
-        """Add an OTDS group to an OTDS access role
-
-        Args:
-            access_role (str): name of the OTDS access role
-            group (str): name of the group
-            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
-                                      most of the times you will want to keep it to empty string ("")
-        Returns:
-            bool: True if group is in access role or has been successfully added.
-                  False if group has been not been added (error)
-        """
-
-        # get existing members to check if user is already a member:
-        accessRolesGetResponse = self.get_access_role(access_role)
-        if not accessRolesGetResponse:
-            return False
-
-        # Checking if group already added to access role
-        accessRoleGroups = accessRolesGetResponse["accessRoleMembers"]["groups"]
-        for accessRoleGroup in accessRoleGroups:
-            if accessRoleGroup["name"] == group:
-                logger.debug(
-                    "Group -> %s already added to access role -> %s", group, access_role
-                )
-                return True
-
-        logger.debug(
-            "Group -> %s is not yet in access role -> %s - adding...",
-            group,
-            access_role,
-        )
-
-        # create payload for REST call:
-        accessRolePostBodyJson = {"groups": [{"name": group, "location": location}]}
-
-        request_url = "{}/{}/members".format(
-            self.config()["accessRoleUrl"], access_role
-        )
-
-        logger.debug(
-            "Add group -> %s to access role -> %s; calling -> %s",
-            group,
-            access_role,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=accessRolePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add group -> %s to access role -> %s; error -> %s (%s)",
-                    group,
-                    access_role,
-                    response.text,
-                    response.status_code,
-                )
-                return False
-
-    # end method definition
-
-    def update_access_role_attributes(
-        self, name: str, attribute_list: list
-    ) -> dict | None:
-        """Update some attributes of an existing OTDS Access Role
-
-        Args:
-            name (str): name of the existing access role
-            attribute_list (list): list of attribute name and attribute value pairs
-                                   The values need to be a list as well. Example:
-                                   [{name: "pushAllGroups", values: ["True"]}]
-        Returns:
-            dict: Request response (json) or None if the REST call fails.
-        """
-
-        # Return if list is empty:
-        if not attribute_list:
-            return None
-
-        # create payload for REST call:
-        access_role = self.get_access_role(name)
-        if not access_role:
-            logger.error("Failed to get access role -> %s", name)
-            return None
-
-        accessRolePutBodyJson = {"attributes": attribute_list}
-
-        request_url = "{}/{}/attributes".format(self.config()["accessRoleUrl"], name)
-
-        logger.debug(
-            "Update access role -> %s with attributes -> %s; calling -> %s",
-            name,
-            accessRolePutBodyJson,
-            request_url,
-        )
-
-        retries = 0
-        while True:
-            response = requests.put(
-                url=request_url,
-                json=accessRolePutBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update access role -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-
-    # end method definition
+        
+    # end of method definition
 
     def add_system_attribute(
         self, name: str, value: str, description: str = ""
@@ -2321,7 +2256,7 @@ class OTDS:
             dict: Request response (dictionary) or None if the REST call fails.
         """
 
-        systemAttributePostBodyJson = {
+        system_attribute_post_body_json = {
             "name": name,
             "value": value,
             "friendlyName": description,
@@ -2331,7 +2266,7 @@ class OTDS:
 
         if description:
             logger.debug(
-                "Add system attribute -> %s (%s) with value -> %s; calling -> %s",
+                "Add system attribute -> '%s' ('%s') with value -> %s; calling -> %s",
                 name,
                 description,
                 value,
@@ -2339,37 +2274,21 @@ class OTDS:
             )
         else:
             logger.debug(
-                "Add system attribute -> %s with value -> %s; calling -> %s",
+                "Add system attribute -> '%s' with value -> %s; calling -> %s",
                 name,
                 value,
                 request_url,
             )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=systemAttributePostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add system attribute -> %s with value -> %s; error -> %s (%s)",
-                    name,
-                    value,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=system_attribute_post_body_json,
+            timeout=None,
+            failure_message="Failed to add system attribute -> '{}' with value -> '{}'".format(
+                name, value
+            ),
+        )
 
     # end method definition
 
@@ -2384,30 +2303,14 @@ class OTDS:
 
         request_url = "{}/whitelist".format(self.config()["systemConfigUrl"])
 
-        logger.debug("Retrieving trusted sites; calling -> %s", request_url)
+        logger.debug("Get trusted sites; calling -> %s", request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve trusted sites; error -> %s (%s)",
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get trusted sites",
+        )
 
     # end method definition
 
@@ -2420,38 +2323,36 @@ class OTDS:
             dict: Request response or None if the REST call fails.
         """
 
-        trustedSitePostBodyJson = {"stringList": [trusted_site]}
+        trusted_site_post_body_json = {"stringList": [trusted_site]}
 
         # we need to first retrieve the existing sites and then
         # append the new one:
-        existingTrustedSites = self.get_trusted_sites()
+        existing_trusted_sites = self.get_trusted_sites()
 
-        if existingTrustedSites:
-            trustedSitePostBodyJson["stringList"].extend(
-                existingTrustedSites["stringList"]
+        if existing_trusted_sites:
+            trusted_site_post_body_json["stringList"].extend(
+                existing_trusted_sites["stringList"]
             )
 
         request_url = "{}/whitelist".format(self.config()["systemConfigUrl"])
 
-        logger.debug("Add trusted site -> %s; calling -> %s", trusted_site, request_url)
-
-        response = requests.put(
-            url=request_url,
-            json=trustedSitePostBodyJson,
-            headers=REQUEST_HEADERS,
-            cookies=self.cookie(),
-            timeout=None,
+        logger.debug(
+            "Add trusted site -> '%s'; calling -> %s", trusted_site, request_url
         )
+
+        response = self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=trusted_site_post_body_json,
+            timeout=None,
+            failure_message="Failed to add trusted site -> '{}'".format(trusted_site),
+            parse_request_response=False,  # don't parse it!
+        )
+
         if not response.ok:
-            logger.error(
-                "Failed to add trusted site -> %s; error -> %s (%s)",
-                trusted_site,
-                response.text,
-                response.status_code,
-            )
             return None
 
-        return response  # don't parse it!
+        return response
 
     # end method definition
 
@@ -2464,7 +2365,7 @@ class OTDS:
             Request response (json) or None if the REST call fails.
         """
 
-        auditPutBodyJson = {
+        audit_put_body_json = {
             "daysToKeep": "7",
             "enabled": "true",
             "auditTo": "DATABASE",
@@ -2523,20 +2424,14 @@ class OTDS:
 
         logger.debug("Enable audit; calling -> %s", request_url)
 
-        response = requests.put(
+        return self.do_request(
             url=request_url,
-            json=auditPutBodyJson,
-            headers=REQUEST_HEADERS,
-            cookies=self.cookie(),
+            method="PUT",
+            json_data=audit_put_body_json,
             timeout=None,
+            failure_message="Failed to enable audit",
+            parse_request_response=False,
         )
-        if not response.ok:
-            logger.error(
-                "Failed to enable audit; error -> %s (%s)",
-                response.text,
-                response.status_code,
-            )
-        return response
 
     # end method definition
 
@@ -2620,7 +2515,7 @@ class OTDS:
         if default_scopes is None:
             default_scopes = []
 
-        oauthClientPostBodyJson = {
+        oauth_client_post_body_json = {
             "id": client_id,
             "description": description,
             "redirectURLs": redirect_urls,
@@ -2638,41 +2533,24 @@ class OTDS:
 
         # Do we have a predefined client secret?
         if secret:
-            oauthClientPostBodyJson["secret"] = secret
+            oauth_client_post_body_json["secret"] = secret
 
         request_url = self.oauth_client_url()
 
         logger.debug(
-            "Adding oauth client -> %s (%s); calling -> %s",
+            "Adding oauth client -> '%s' (%s); calling -> %s",
             description,
             client_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=oauthClientPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add OAuth client -> %s; error -> %s (%s)",
-                    client_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=oauth_client_post_body_json,
+            timeout=None,
+            failure_message="Failed to add OAuth client -> {}".format(client_id),
+        )
 
     # end method definition
 
@@ -2688,32 +2566,15 @@ class OTDS:
 
         request_url = "{}/{}".format(self.oauth_client_url(), client_id)
 
-        logger.debug("Get oauth client -> %s; calling -> %s", client_id, request_url)
+        logger.debug("Get oauth client -> '%s'; calling -> %s", client_id, request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to get oauth client -> %s; error -> %s (%s)",
-                        client_id,
-                        response.text,
-                        response.status_code,
-                    )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get oauth client -> '{}'".format(client_id),
+            show_error=show_error,
+        )
 
     # end method definition
 
@@ -2729,41 +2590,24 @@ class OTDS:
             dict: Request response (json) or None if the REST call fails.
         """
 
-        oauthClientPatchBodyJson = updates
+        oauth_client_patch_body_json = updates
 
         request_url = "{}/{}".format(self.oauth_client_url(), client_id)
 
         logger.debug(
-            "Update OAuth client -> %s with -> %s; calling -> %s",
+            "Update OAuth client -> '%s' with -> %s; calling -> %s",
             client_id,
-            updates,
+            str(updates),
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.patch(
-                url=request_url,
-                json=oauthClientPatchBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update OAuth client -> %s; error -> %s (%s)",
-                    client_id,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            json_data=oauth_client_patch_body_json,
+            timeout=None,
+            failure_message="Failed to update OAuth client -> '{}'".format(client_id),
+        )
 
     # end method definition
 
@@ -2779,39 +2623,24 @@ class OTDS:
         request_url = self.config()["accessRoleUrl"] + "/" + access_role_name
 
         logger.debug(
-            "Get access role -> %s; calling -> %s", access_role_name, request_url
+            "Get access role -> '%s'; calling -> %s", access_role_name, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                accessRolesJson = self.parse_request_response(response)
-                break
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to retrieve role -> %s; url -> %s : error -> %s (%s)",
-                    access_role_name,
-                    request_url,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        access_role = self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to retrieve access role -> '{}'".format(
+                access_role_name
+            ),
+        )
+        if not access_role:
+            return None
 
         # Checking if OAuthClients partition already added to access role
-        userPartitions = accessRolesJson["accessRoleMembers"]["userPartitions"]
-        for userPartition in userPartitions:
-            if userPartition["userPartition"] == "OAuthClients":
+        user_partitions = access_role["accessRoleMembers"]["userPartitions"]
+        for user_partition in user_partitions:
+            if user_partition["userPartition"] == "OAuthClients":
                 logger.error(
                     "OAuthClients partition already added to role -> %s",
                     access_role_name,
@@ -2821,57 +2650,41 @@ class OTDS:
         # Getting location info for the OAuthClients partition
         # so it can be added to access roles json
         request_url = self.config()["partitionsUrl"] + "/OAuthClients"
-        partitionsResponse = requests.get(
+
+        response = self.do_request(
             url=request_url,
-            headers=REQUEST_HEADERS,
-            cookies=self.cookie(),
+            method="GET",
             timeout=None,
+            failure_message="Failed to get partition info for OAuthClients for role -> '{}'".format(
+                access_role_name
+            ),
         )
-        if partitionsResponse.ok:
-            response_dict = self.parse_request_response(partitionsResponse)
-            if not response_dict:
-                return None
-            oauthClientLocation = response_dict["location"]
-        else:
-            logger.error(
-                "Failed to get partition info for OAuthClients; url -> %s : error -> %s (%s)",
-                request_url,
-                partitionsResponse.text,
-                response.status_code,
-            )
+        if not response:
             return None
 
+        oauth_client_location = response["location"]
+
         # adding OAuthClients info to acess roles organizational units
-        oauthClientsOuBlock = {
-            "location": oauthClientLocation,
-            "name": oauthClientLocation,
+        oauth_clients_ou_block = {
+            "location": oauth_client_location,
+            "name": oauth_client_location,
             "userPartition": None,
         }
-        accessRolesJson["accessRoleMembers"]["organizationalUnits"].append(
-            oauthClientsOuBlock
+        access_role["accessRoleMembers"]["organizationalUnits"].append(
+            oauth_clients_ou_block
         )
 
-        response = requests.put(
+        return self.do_request(
             url=request_url,
-            json=accessRolesJson,
-            headers=REQUEST_HEADERS,
-            cookies=self.cookie(),
+            method="PUT",
             timeout=None,
+            warning_message="Failed to add OAuthClients to access role -> '{}'".format(
+                access_role_name
+            ),
+            show_error=False,
+            show_warning=True,
+            parse_request_response=False,
         )
-
-        if response.ok:
-            logger.debug(
-                "OauthClients partition successfully added to access role -> %s",
-                access_role_name,
-            )
-        else:
-            logger.warning(
-                "Status code of -> %s returned attempting to add OAuthClients to access role -> %s: error -> %s",
-                response.status_code,
-                access_role_name,
-                response.text,
-            )
-        return response
 
     # end method definition
 
@@ -2963,33 +2776,16 @@ class OTDS:
         request_url = "{}/{}".format(self.auth_handler_url(), name)
 
         logger.debug(
-            "Getting authentication handler -> %s; calling -> %s", name, request_url
+            "Getting authentication handler -> '%s'; calling -> %s", name, request_url
         )
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                if show_error:
-                    logger.error(
-                        "Failed to get authentication handler -> %s; warning -> %s (%s)",
-                        name,
-                        response.text,
-                        response.status_code,
-                    )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get authentication handler -> '{}'".format(name),
+            show_error=show_error,
+        )
 
     # end method definition
 
@@ -3032,7 +2828,7 @@ class OTDS:
         if auth_principal_attributes is None:
             auth_principal_attributes = ["oTExternalID1", "oTUserID1"]
 
-        authHandlerPostBodyJson = {
+        auth_handler_post_body_json = {
             "_name": name,
             "_description": description,
             "_class": "com.opentext.otds.as.drivers.saml.SAML2Handler",
@@ -3315,36 +3111,19 @@ class OTDS:
         request_url = self.auth_handler_url()
 
         logger.debug(
-            "Adding SAML auth handler -> %s (%s); calling -> %s",
+            "Adding SAML auth handler -> '%s' ('%s'); calling -> %s",
             name,
             description,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=authHandlerPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add SAML auth handler -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=auth_handler_post_body_json,
+            timeout=None,
+            failure_message="Failed to add SAML auth handler -> '{}'".format(name),
+        )
 
     # end method definition
 
@@ -3379,7 +3158,7 @@ class OTDS:
             auth_principal_attributes = ["oTExternalID1"]
 
         # 1. Prepare the body for the AuthHandler REST call:
-        authHandlerPostBodyJson = {
+        auth_handler_post_body_json = {
             "_name": name,
             "_description": description,
             "_class": "com.opentext.otds.as.drivers.sapssoext.SAPSSOEXTAuthHandler",
@@ -3436,42 +3215,39 @@ class OTDS:
         request_url = self.auth_handler_url()
 
         logger.debug(
-            "Adding SAP auth handler -> %s (%s); calling -> %s",
+            "Adding SAP auth handler -> '%s' ('%s'); calling -> %s",
             name,
             description,
             request_url,
         )
 
-        response = requests.post(
+        response = self.do_request(
             url=request_url,
-            json=authHandlerPostBodyJson,
-            headers=REQUEST_HEADERS,
-            cookies=self.cookie(),
+            method="POST",
+            json_data=auth_handler_post_body_json,
             timeout=None,
+            failure_message="Failed to add SAP auth handler -> '{}'".format(name),
+            parse_request_response=False,
         )
-        if not response.ok:
-            logger.error(
-                "Failed to add SAP auth handler -> %s; error -> %s (%s)",
-                name,
-                response.text,
-                response.status_code,
-            )
+        if not response or not response.ok:
             return None
 
         # 3. Upload the certificate file:
 
         # Check that the certificate (PSE) file is readable:
-        logger.debug("Reading certificate file -> %s...", certificate_file)
+        logger.debug("Reading certificate file -> '%s'...", certificate_file)
         try:
             # PSE files are binary - so we need to open with "rb":
-            with open(certificate_file, "rb") as certFile:
-                certContent = certFile.read()
-                if not certContent:
-                    logger.error("No data in certificate file -> %s", certificate_file)
+            with open(certificate_file, "rb") as cert_file:
+                cert_content = cert_file.read()
+                if not cert_content:
+                    logger.error(
+                        "No data in certificate file -> '%s'", certificate_file
+                    )
                     return None
         except IOError as exception:
             logger.error(
-                "Unable to open certificate file -> %s; error -> %s",
+                "Unable to open certificate file -> '%s'; error -> %s",
                 certificate_file,
                 exception.strerror,
             )
@@ -3482,18 +3258,20 @@ class OTDS:
         try:
             # If file is not base64 encoded the next statement will throw an exception
             # (this is good)
-            certContentDecoded = base64.b64decode(certContent, validate=True)
-            certContentEncoded = base64.b64encode(certContentDecoded).decode("utf-8")
-            if certContentEncoded == certContent.decode("utf-8"):
+            cert_content_decoded = base64.b64decode(cert_content, validate=True)
+            cert_content_encoded = base64.b64encode(cert_content_decoded).decode(
+                "utf-8"
+            )
+            if cert_content_encoded == cert_content.decode("utf-8"):
                 logger.debug(
-                    "Certificate file -> %s is base64 encoded", certificate_file
+                    "Certificate file -> '%s' is base64 encoded", certificate_file
                 )
                 cert_file_encoded = True
             else:
                 cert_file_encoded = False
         except TypeError:
             logger.debug(
-                "Certificate file -> %s is not base64 encoded", certificate_file
+                "Certificate file -> '%s' is not base64 encoded", certificate_file
             )
             cert_file_encoded = False
 
@@ -3502,23 +3280,23 @@ class OTDS:
             logger.debug("Writing decoded certificate file -> %s...", certificate_file)
             try:
                 # PSE files need to be binary - so we need to open with "wb":
-                with open(certificate_file, "wb") as certFile:
-                    certFile.write(base64.b64decode(certContent))
+                with open(certificate_file, "wb") as cert_file:
+                    cert_file.write(base64.b64decode(cert_content))
             except IOError as exception:
                 logger.error(
-                    "Failed writing to file -> %s; error -> %s",
+                    "Failed writing to file -> '%s'; error -> %s",
                     certificate_file,
                     exception.strerror,
                 )
                 return None
 
-        authHandlerPostData = {
+        auth_handler_post_data = {
             "file1_property": "com.opentext.otds.as.drivers.sapssoext.certificate1"
         }
 
         # It is important to send the file pointer and not the actual file content
         # otherwise the file is send base64 encoded which we don't want:
-        authHandlerPostFiles = {
+        auth_handler_post_files = {
             "file1": (
                 os.path.basename(certificate_file),
                 open(certificate_file, "rb"),
@@ -3529,7 +3307,7 @@ class OTDS:
         request_url = self.auth_handler_url() + "/" + name + "/files"
 
         logger.debug(
-            "Uploading certificate file -> %s for SAP auth handler -> %s (%s); calling -> %s",
+            "Uploading certificate file -> '%s' for SAP auth handler -> '%s' ('%s'); calling -> %s",
             certificate_file,
             name,
             description,
@@ -3541,14 +3319,14 @@ class OTDS:
         # then requests will send a multipart/form-data POST automatically:
         response = requests.post(
             url=request_url,
-            data=authHandlerPostData,
-            files=authHandlerPostFiles,
+            data=auth_handler_post_data,
+            files=auth_handler_post_files,
             cookies=self.cookie(),
             timeout=None,
         )
         if not response.ok:
             logger.error(
-                "Failed to upload certificate file -> %s for SAP auth handler -> %s; error -> %s (%s)",
+                "Failed to upload certificate file -> '%s' for SAP auth handler -> '%s'; error -> %s (%s)",
                 certificate_file,
                 name,
                 response.text,
@@ -3605,7 +3383,7 @@ class OTDS:
             auth_principal_attributes = ["oTExtraAttr0"]
 
         # 1. Prepare the body for the AuthHandler REST call:
-        authHandlerPostBodyJson = {
+        auth_handler_post_body_json = {
             "_name": name,
             "_description": description,
             "_class": "com.opentext.otds.as.drivers.http.OAuth2Handler",
@@ -3945,36 +3723,19 @@ class OTDS:
         request_url = self.auth_handler_url()
 
         logger.debug(
-            "Adding OAuth auth handler -> %s (%s); calling -> %s",
+            "Adding OAuth auth handler -> '%s' ('%s'); calling -> %s",
             name,
             description,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=authHandlerPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add OAuth auth handler -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=auth_handler_post_body_json,
+            timeout=None,
+            failure_message="Failed to add OAuth auth handler -> '{}'".format(name),
+        )
 
         # end method definition
 
@@ -3989,7 +3750,9 @@ class OTDS:
 
         resource = self.get_resource(resource_name)
         if not resource:
-            logger.error("Resource -> %s not found - cannot consolidate", resource_name)
+            logger.error(
+                "Resource -> '%s' not found - cannot consolidate", resource_name
+            )
             return False
 
         resource_dn = resource["resourceDN"]
@@ -3997,7 +3760,7 @@ class OTDS:
             logger.error("Resource DN is empty - cannot consolidate")
             return False
 
-        consolidationPostBodyJson = {
+        consolidation_post_body_json = {
             "cleanupUsersInResource": False,
             "cleanupGroupsInResource": False,
             "resourceList": [resource_dn],
@@ -4007,32 +3770,27 @@ class OTDS:
         request_url = "{}".format(self.consolidation_url())
 
         logger.debug(
-            "Consolidation of resource -> %s; calling -> %s", resource_dn, request_url
+            "Consolidation of resource -> %s (%s); calling -> %s",
+            resource_name,
+            resource_dn,
+            request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=consolidationPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to consolidate; error -> %s (%s)",
-                    response.text,
-                    response.status_code,
-                )
-                return False
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=consolidation_post_body_json,
+            timeout=None,
+            failure_message="Failed to consolidate resource -> '{}'".format(
+                resource_name
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
 
     # end method definition
 
@@ -4057,7 +3815,7 @@ class OTDS:
         if impersonation_list is None:
             impersonation_list = []
 
-        impersonationPutBodyJson = {
+        impersonation_put_body_json = {
             "allowImpersonation": allow_impersonation,
             "impersonateList": impersonation_list,
         }
@@ -4065,34 +3823,26 @@ class OTDS:
         request_url = "{}/{}/impersonation".format(self.resource_url(), resource_name)
 
         logger.debug(
-            "Impersonation settings for resource -> %s; calling -> %s",
+            "Impersonation settings for resource -> '%s'; calling -> %s",
             resource_name,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                url=request_url,
-                json=impersonationPutBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to set impersonation for resource -> %s; error -> %s",
-                    resource_name,
-                    response.text,
-                )
-                return False
+        response = self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=impersonation_put_body_json,
+            timeout=None,
+            failure_message="Failed to set impersonation for resource -> '{}'".format(
+                resource_name
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
 
     # end method definition
 
@@ -4116,7 +3866,7 @@ class OTDS:
         if impersonation_list is None:
             impersonation_list = []
 
-        impersonationPutBodyJson = {
+        impersonation_put_body_json = {
             "allowImpersonation": allow_impersonation,
             "impersonateList": impersonation_list,
         }
@@ -4124,35 +3874,26 @@ class OTDS:
         request_url = "{}/{}/impersonation".format(self.oauth_client_url(), client_id)
 
         logger.debug(
-            "Impersonation settings for OAuth Client -> %s; calling -> %s",
+            "Impersonation settings for OAuth Client -> '%s'; calling -> %s",
             client_id,
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                url=request_url,
-                json=impersonationPutBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to set impersonation for OAuth Client -> %s; error -> %s (%s)",
-                    client_id,
-                    response.text,
-                    response.status_code,
-                )
-                return False
+        response = self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=impersonation_put_body_json,
+            timeout=None,
+            failure_message="Failed to set impersonation for OAuth Client -> '{}'".format(
+                client_id
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
 
     # end method definition
 
@@ -4189,28 +3930,12 @@ class OTDS:
 
         logger.debug("Getting password policy; calling -> %s", request_url)
 
-        retries = 0
-        while True:
-            response = requests.get(
-                url=request_url,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to get password policy; error -> %s (%s)",
-                    response.text,
-                    response.status_code,
-                )
-                return None
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get password policy",
+        )
 
     # end method definition
 
@@ -4250,33 +3975,24 @@ class OTDS:
 
         logger.debug(
             "Update password policy with these new values -> %s; calling -> %s",
-            update_values,
+            str(update_values),
             request_url,
         )
 
-        retries = 0
-        while True:
-            response = requests.put(
-                url=request_url,
-                json=update_values,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to update password policy with values -> %s; error -> %s (%s)",
-                    update_values,
-                    response.text,
-                    response.status_code,
-                )
-                return False
+        response = self.do_request(
+            url=request_url,
+            method="PUT",
+            json_data=update_values,
+            timeout=None,
+            failure_message="Failed to update password policy with values -> {}".format(
+                update_values
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            return True
+
+        return False
 
     # end method definition

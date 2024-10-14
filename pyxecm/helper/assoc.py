@@ -73,11 +73,31 @@ class Assoc:
 
     @classmethod
     def is_html_escaped(cls, assoc_string: str) -> bool:
+        """Class method to check if an Extended ECM Assoc String
+           is HTML escaped.
+
+        Args:
+            assoc_string (str): the string to test for HTML escaping
+
+        Returns:
+            bool: True = string is HTML escaped, False if now
+        """
+
         decoded_string = html.unescape(assoc_string)
+
         return assoc_string != decoded_string
 
     @classmethod
     def unescape_html(cls, assoc_string: str) -> str:
+        """HTML unescape a a string
+
+        Args:
+            assoc_string (str): the string to unescape.
+
+        Returns:
+            str: unescaped string
+        """
+
         decoded_string = html.unescape(assoc_string)
         return decoded_string
 

@@ -26,11 +26,11 @@ import logging
 import os
 import re
 import fnmatch
+import zipfile
 
 # we need lxml instead of stadard xml.etree to have xpath capabilities!
 from lxml import etree
 import xmltodict
-import zipfile
 
 # import xml.etree.ElementTree as etree
 from pyxecm.helper.assoc import Assoc

@@ -7363,7 +7363,7 @@ class OTCS:
 
         categories = self.get_node_categories(node_id)
         if not categories or not categories["results"]:
-            return None
+            return [] #if None returned, assign_category function fails due to "TypeError: argument of type 'NoneType' is not iterable"
 
         category_id_list = []
 

@@ -2,90 +2,106 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://opentext.github.io/pyxecm/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
+    </url>
+    <url>
+         <loc>https://opentext.github.io/pyxecm/customizerapisettings/</loc>
+         <lastmod>2025-03-31</lastmod>
+    </url>
+    <url>
+         <loc>https://opentext.github.io/pyxecm/customizersettings/</loc>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/payload-syntax/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
+    </url>
+    <url>
+         <loc>https://opentext.github.io/pyxecm/pyxecm/api/</loc>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/assoc/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/avts/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/browser/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/coreshare/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/customizer/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
+    </url>
+    <url>
+         <loc>https://opentext.github.io/pyxecm/pyxecm/data/</loc>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/k8s/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/m365/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/otac/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/otcs/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/otds/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/otiv/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/otmm/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/otpd/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/payload/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/salesforce/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/sap/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/successfactors/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/translate/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/web/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
     <url>
          <loc>https://opentext.github.io/pyxecm/pyxecm/xml/</loc>
-         <lastmod>2024-10-14</lastmod>
+         <lastmod>2025-03-31</lastmod>
     </url>
 </urlset>

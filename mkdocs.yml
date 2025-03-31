@@ -14,6 +14,7 @@ theme:
     - content.action.edit
     - content.code.copy
     - content.tabs.link
+    - content.tooltips
 
 plugins:
   - search
@@ -43,30 +44,40 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
 
 nav:
   - Index: index.md
   - Payload Syntax: payload-syntax.md
   - Extended ECM Python Classes:
-      - Content Server (OTCS): pyxecm/otcs.md
-      - Directory Services (OTDS): pyxecm/otds.md
       - Archive Center (OTAC): pyxecm/otac.md
+      - Aviator Search: pyxecm/avts.md
+      - Content Server (OTCS): pyxecm/otcs.md
+      - Core Share: pyxecm/coreshare.md
+      - Directory Services (OTDS): pyxecm/otds.md
       - Intelligent Viewing (OTIV): pyxecm/otiv.md
-      - PowerDocs (OTPD): pyxecm/otpd.md
       - Media Management (OTMM): pyxecm/otmm.md
-      - Core Share: pyxecm/coreshare.md           
-      - Aviator Search: pyxecm/avts.md         
+      - PowerDocs (OTPD): pyxecm/otpd.md
   - Customizer Python Classes:
-      - Payload: pyxecm/payload.md
-      - Customizer: pyxecm/customizer.md
+      - API: pyxecm/api.md
+      - API Settings: customizerapisettings.md
       - Browser Automation: pyxecm/browser.md
+      - Customizer: pyxecm/customizer.md
+      - Customizer Settings: customizersettings.md
       - K8s: pyxecm/k8s.md
+      - Payload: pyxecm/payload.md
       - Microsoft 365: pyxecm/m365.md
-      - SuccessFactors: pyxecm/successfactors.md
       - Salesforce: pyxecm/salesforce.md
       - SAP: pyxecm/sap.md
+      - SuccessFactors: pyxecm/successfactors.md
       - Translate: pyxecm/translate.md
   - Helper Python Classes:
       - Assoc: pyxecm/assoc.md
+      - Data: pyxecm/data.md
       - Web: pyxecm/web.md
       - XML: pyxecm/xml.md

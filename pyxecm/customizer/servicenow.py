@@ -1,84 +1,54 @@
-"""
-ServiceNow Module to interact with the ServiceNow API
-See: 
+"""ServiceNow Module to interact with the ServiceNow API.
 
-Class: ServiceNow
-Methods:
-
-__init__ : class initializer
-thread_wrapper: Function to wrap around threads to catch exceptions during exection
-config : Returns the configuration dictionary
-get_data: Get the Data object that holds all processed Knowledge base Articles (Pandas Data Frame)
-request_header: Returns the request header for ServiceNow API calls
-parse_request_response: Parse the REST API responses and convert
-                        them to Python dict in a safe way
-exist_result_item: Check if an dict item is in the response
-                   of the ServiceNow API call
-get_result_value: Check if a defined value (based on a key) is in the ServiceNow API response
-
-authenticate : Authenticates at ServiceNow API
-get_oauth_token: Returns the OAuth access token.
-
-get_object: Get an ServiceNow object based on table name and ID
-get_summary: Get summary object for an article.
-get_table: Retrieve a specified ServiceNow table data (row or values)
-get_table_count: Get number of table rows (e.g. Knowledge Base Articles) matching the query
-                 (or if query = "" it should be the total number)
-get_knowledge_bases: Get the configured knowledge bases in ServiceNow
-get_knowledge_base_articles: Get selected / filtered Knowledge Base articles
-make_file_names_unique: Make file names unique if required. The mutable
-                        list is changed "in-place".
-download_attachments: Download the attachments of a Knowledge Base Article (KBA) in ServiceNow.
-load_articles: Main method to load ServiceNow articles in a Data Frame and
-               download the attchments.
-load_articles_worker: Worker Method for multi-threading.
-load_article: Process a single KBA: download attachments (if any)
-              and add the KBA to the Data Frame.
+See: https://developer.servicenow.com
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
-import os
 import json
 import logging
-import urllib.parse
+import os
+import tempfile
 import threading
-import traceback
-from functools import cache
 import time
+import urllib.parse
+from collections.abc import Callable
+from functools import cache
+from typing import Any
 
 import requests
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import HTTPError, RequestException
-from pyxecm.helper.data import Data
 
-logger = logging.getLogger("pyxecm.customizer.servicenow")
+from pyxecm.helper import Data
+
+default_logger = logging.getLogger("pyxecm.customizer.servicenow")
 
 REQUEST_HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 REQUEST_TIMEOUT = 60
 
-KNOWLEDGE_BASE_PATH = "/tmp/attachments"
+KNOWLEDGE_BASE_PATH = os.path.join(tempfile.gettempdir(), "attachments")
 
 # ServiceNow database tables. Table names starting with "u_" are custom OpenText tables:
 SN_TABLE_CATEGORIES = "kb_category"
 SN_TABLE_KNOWLEDGE_BASES = "kb_knowledge_base"
 SN_TABLE_KNOWLEDGE_BASE_ARTICLES = "u_kb_template_technical_article_public"
-SN_TABLE_KNOWLEDGE_BASE_ARTICLES_PRODUCT = (
-    "u_kb_template_product_documentation_standard"
-)
+SN_TABLE_KNOWLEDGE_BASE_ARTICLES_PRODUCT = "u_kb_template_product_documentation_standard"
 SN_TABLE_RELATED_PRODUCTS = "cmdb_model"
 SN_TABLE_PRODUCT_LINES = "u_ot_product_model"
 SN_TABLE_PRODUCT_VERSIONS = "u_ot_product_model_version"
 SN_TABLE_ATTACHMENTS = "sys_attachment"
 
 
-class ServiceNow(object):
-    """Used to retrieve and automate stettings in ServiceNow."""
+class ServiceNow:
+    """Class used to retrieve and automate stettings in ServiceNow."""
+
+    logger: logging.Logger = default_logger
 
     _config: dict
     _access_token = None
@@ -86,6 +56,7 @@ class ServiceNow(object):
     _data: Data = None
     _thread_number = 3
     _download_dir = ""
+    _product_exclusions = None
 
     def __init__(
         self,
@@ -98,20 +69,41 @@ class ServiceNow(object):
         token_url: str = "",
         thread_number: int = 3,
         download_dir: str = KNOWLEDGE_BASE_PATH,
-    ):
-        """Initialize the Service Now object
+        product_exclusions: list | None = None,
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the Service Now object.
 
         Args:
-            base_url (str): base URL of the ServiceNow tenant
-            auth_type (str): authorization type, either "oauth" or "basic"
-            client_id (str): ServiceNow Client ID
-            client_secret (str): ServiceNow Client Secret
-            username (str): user name in Saleforce
-            password (str): password of the user
-            token_url (str, optional): Token URL for ServiceNow login via OAuth.
-            thread_number (int, optional): number of threads for parallel processing. Default is 3.
-            download_path (str): path to stored downloaded files from ServiceNow
+            base_url (str):
+                The base URL of the ServiceNow tenant.
+            auth_type (str):
+                Athe authorization type, either "oauth" or "basic".
+            client_id (str):
+                ServiceNow Client ID.
+            client_secret (str):
+                The ServiceNow client secret.
+            username (str):
+                The user name in ServiceNow.
+            password (str):
+                The password of the ServiceNow user.
+            token_url (str, optional):
+                Token URL for ServiceNow login via OAuth.
+            thread_number (int, optional):
+                The number of threads for parallel processing. Default is 3.
+            download_dir (str, optional):
+                The path to stored downloaded files from ServiceNow.
+            product_exclusions (list | None, optional):
+                List of products that should NOT be loaded from ServiceNow.
+            logger:
+                The logging object used for all log messages. Default is default_logger.
+
         """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("servicenow")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         servicenow_config = {}
 
@@ -129,61 +121,68 @@ class ServiceNow(object):
 
         servicenow_config["restUrl"] = servicenow_config["baseUrl"] + "/api/now/"
         servicenow_config["tableUrl"] = servicenow_config["restUrl"] + "table"
-        servicenow_config["knowledgeUrl"] = (
-            servicenow_config["restUrl"] + "table/kb_knowledge"
-        )
-        servicenow_config["knowledgeBaseUrl"] = (
-            servicenow_config["restUrl"] + "table/" + SN_TABLE_KNOWLEDGE_BASES
-        )
-        servicenow_config["attachmentsUrl"] = (
-            servicenow_config["restUrl"] + "table/" + SN_TABLE_ATTACHMENTS
-        )
-        servicenow_config["attachmentDownloadUrl"] = (
-            servicenow_config["restUrl"] + "attachment"
-        )
+        servicenow_config["knowledgeUrl"] = servicenow_config["restUrl"] + "table/kb_knowledge"
+        servicenow_config["knowledgeBaseUrl"] = servicenow_config["restUrl"] + "table/" + SN_TABLE_KNOWLEDGE_BASES
+        servicenow_config["attachmentsUrl"] = servicenow_config["restUrl"] + "table/" + SN_TABLE_ATTACHMENTS
+        servicenow_config["attachmentDownloadUrl"] = servicenow_config["restUrl"] + "attachment"
         servicenow_config["statsUrl"] = servicenow_config["restUrl"] + "stats"
 
         self._config = servicenow_config
 
         self._session = requests.Session()
 
-        self._data = Data()
+        self._data = Data(logger=self.logger)
 
         self._thread_number = thread_number
-
         self._download_dir = download_dir
+        self._product_exclusions = product_exclusions
 
     # end method definition
 
-    def thread_wrapper(self, target, *args, **kwargs):
-        """Function to wrap around threads to catch exceptions during exection"""
+    def thread_wrapper(self, target: Callable, *args: tuple, **kwargs: dict[str, Any]) -> None:
+        """Wrap around threads to catch exceptions during exection.
+
+        Args:
+            target (Callable):
+                The method (callable) the Thread should run.
+            args (tuple):
+                The arguments for the method.
+            kwargs (dict):
+                Keyword arguments for the method.
+
+        """
 
         try:
             target(*args, **kwargs)
-        except Exception as e:
+        except Exception:
             thread_name = threading.current_thread().name
-            logger.error(
-                "Thread '%s': failed with exception -> %s", thread_name, str(e)
+            self.logger.error(
+                "Thread '%s': failed!",
+                thread_name,
             )
-            logger.error(traceback.format_exc())
 
     # end method definition
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
-            dict: Configuration dictionary
+            dict:
+                The configuration dictionary.
+
         """
+
         return self._config
 
     # end method definition
 
     def get_data(self) -> Data:
-        """Get the Data object that holds all processed Knowledge base Articles
+        """Get the Data object that holds all processed Knowledge base Articles.
 
         Returns:
-            Data: Datastructure with all processed articles.
+            Data:
+                Data object (with embedded data frame) holding all processed articles.
+
         """
 
         return self._data
@@ -191,17 +190,22 @@ class ServiceNow(object):
     # end method definition
 
     def request_header(self, content_type: str = "") -> dict:
-        """Returns the request header used for Application calls.
-           Consists of Bearer access token and Content Type
+        """Return the request header used for Application calls.
+
+        Consists of Bearer access token and Content Type.
 
         Args:
-            content_type (str, optional): custom content type for the request.
-                                          Typical values:
-                                          * application/json - Used for sending JSON-encoded data
-                                          * application/x-www-form-urlencoded - The default for HTML forms. Data is sent as key-value pairs in the body of the request, similar to query parameters
-                                          * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
+            content_type (str, optional):
+                Custom content type for the request.
+                Typical values:
+                * application/json - Used for sending JSON-encoded data
+                * application/x-www-form-urlencoded - The default for HTML forms.
+                  Data is sent as key-value pairs in the body of the request, similar to query parameters.
+                * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
         Return:
-            dict: request header values
+            dict:
+                The request header values.
+
         """
 
         request_header = {}
@@ -224,43 +228,48 @@ class ServiceNow(object):
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Converts the request response (JSon) to a Python dict in a safe way
-           that also handles exceptions. It first tries to load the response.text
-           via json.loads() that produces a dict output. Only if response.text is
-           not set or is empty it just converts the response_object to a dict using
-           the vars() built-in method.
+        """Convert the request response (JSon) to a Python dict in a safe way.
+
+        It handles exceptions and first tries to load the response.text
+        via json.loads() that produces a dict output. Only if response.text is
+        not set or is empty it just converts the response_object to a dict using
+        the vars() built-in method.
 
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str, optional): use a more specific error message
-                                                      in case of an error
-            show_error (bool): True: write an error to the log file
-                               False: write a warning to the log file
+            response_object (object):
+                This is reponse object delivered by the request call.
+            additional_error_message (str, optional):
+                If provided, use a more specific error message
+                in case of an error.
+            show_error (bool, optional):
+                True: write an error to the log file.
+                False: write a warning to the log file.
+
         Returns:
-            dict: response information or None in case of an error
+            dict | None:
+                Response information or None in case of an error.
+
         """
 
         if not response_object:
             return None
 
         try:
-            if response_object.text:
-                dict_object = json.loads(response_object.text)
-            else:
-                dict_object = vars(response_object)
+            dict_object = json.loads(response_object.text) if response_object.text else vars(response_object)
         except json.JSONDecodeError as exception:
             if additional_error_message:
                 message = "Cannot decode response as JSON. {}; error -> {}".format(
-                    additional_error_message, exception
+                    additional_error_message,
+                    exception,
                 )
             else:
                 message = "Cannot decode response as JSON; error -> {}".format(
-                    exception
+                    exception,
                 )
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.warning(message)
+                self.logger.warning(message)
             return None
         else:
             return dict_object
@@ -271,11 +280,17 @@ class ServiceNow(object):
         """Check existence of key / value pair in the response properties of an ServiceNow API call.
 
         Args:
-            response (dict): REST response from an Salesforce API call
-            key (str): property name (key)
-            value (str): value to find in the item with the matching key
+            response (dict):
+                REST response from an ServiceNow API call.
+            key (str):
+                The property name (key) to check the value of.
+            value (str):
+                Value to find in the item with the matching key.
+
         Returns:
-            bool: True if the value was found, False otherwise
+            bool:
+                True if the value was found, False otherwise.
+
         """
 
         if not response:
@@ -290,7 +305,7 @@ class ServiceNow(object):
                 if value == record[key]:
                     return True
         else:
-            if not key in response:
+            if key not in response:
                 return False
             if value == response[key]:
                 return True
@@ -308,16 +323,22 @@ class ServiceNow(object):
         """Get value of a result property with a given key of an ServiceNow API call.
 
         Args:
-            response (dict): REST response from an Salesforce REST Call
-            key (str): property name (key)
-            index (int, optional): Index to use (1st element has index 0).
-                                   Defaults to 0.
+            response (dict):
+                REST response from an ServiceNow REST call.
+            key (str):
+                The property name (key) to get the value of.
+            index (int, optional):
+                Index to use (1st element has index 0).
+                Defaults to 0.
+
         Returns:
-            str: value for the key, None otherwise
+            str:
+                The value for the key, None otherwise.
+
         """
 
         # ServiceNow responses should always have a "result":
-        if not response or not "result" in response:
+        if not response or "result" not in response:
             return None
 
         values = response["result"]
@@ -331,7 +352,7 @@ class ServiceNow(object):
         elif isinstance(values, dict) and key in values:
             value = values[key]
         else:
-            logger.error("Illegal data type in ServiceNow response!")
+            self.logger.error("Illegal data type in ServiceNow response!")
             return None
 
         return value
@@ -342,9 +363,12 @@ class ServiceNow(object):
         """Authenticate at ServiceNow with client ID and client secret or with basic authentication.
 
         Args:
-            auth_type (str): this can be "basic" or "oauth"
+            auth_type (str):
+                The Authorization type. This can be "basic" or "oauth".
+
         Returns:
-            str: session token or None in case of an error
+            str:
+                The session token or None in case of an error.
 
         """
 
@@ -363,16 +387,18 @@ class ServiceNow(object):
 
             return token
         else:
-            logger.error("Unsupported authentication type")
+            self.logger.error("Unsupported authentication type")
             return None
 
     # end method definition
 
     def get_oauth_token(self) -> str:
-        """Returns the OAuth access token.
+        """Return the OAuth access token.
 
         Returns:
-            str: Access token
+            str:
+                The access token.
+
         """
 
         token_post_body = {
@@ -394,9 +420,9 @@ class ServiceNow(object):
             else:
                 # Store authentication access_token:
                 self._access_token = authenticate_dict["access_token"]
-                logger.debug("Access Token -> %s", self._access_token)
+                self.logger.debug("Access Token -> %s", self._access_token)
         else:
-            logger.error(
+            self.logger.error(
                 "Failed to request an Service Now Access Token; error -> %s",
                 response.text,
             )
@@ -408,57 +434,59 @@ class ServiceNow(object):
 
     @cache
     def get_object(self, table_name: str, sys_id: str) -> dict | None:
-        """Get an ServiceNow object based on table name and ID
+        """Get an ServiceNow object based on table name and ID.
 
         Args:
-            table_name (str): Name of the ServiceNow table.
-            sys_id (str): ID of the data set to resolve.
+            table_name (str):
+                The name of the ServiceNow table.
+            sys_id (str):
+                The ID of the data set to resolve.
 
         Returns:
-            dict | None: dictionary of fields of resulting table row or None
-                         in case an error occured.
+            dict | None:
+                The dictionary of fields of resulting table row or None
+                in case an error occured.
+
         """
 
         if not table_name:
-            logger.error("Table name is missing!")
+            self.logger.error("Table name is missing!")
             return None
 
         if not sys_id:
-            logger.error("System ID of item to lookup is missing!")
+            self.logger.error("System ID of item to lookup is missing!")
             return None
 
         request_header = self.request_header()
 
         request_url = self.config()["restUrl"] + "table/{}/{}".format(
-            table_name, sys_id
+            table_name,
+            sys_id,
         )
 
         try:
             response = self._session.get(url=request_url, headers=request_header)
             data = self.parse_request_response(response)
-
+        except HTTPError:
+            self.logger.error(
+                "HTTP error occurred while resolving -> '%s' in table -> '%s'!",
+                sys_id,
+                table_name,
+            )
+        except RequestException:
+            self.logger.error(
+                "Request error occurred while resolving -> '%s' in table -> '%s'!",
+                sys_id,
+                table_name,
+            )
+        except Exception:
+            self.logger.error(
+                "An error occurred while resolving -> '%s' in table -> '%s'!",
+                sys_id,
+                table_name,
+            )
+        else:
             return data
-        except HTTPError as http_err:
-            logger.error(
-                "HTTP error occurred while resolving -> %s in table -> '%s': %s",
-                sys_id,
-                table_name,
-                str(http_err),
-            )
-        except RequestException as req_err:
-            logger.error(
-                "Request error occurred while resolving -> %s in table -> '%s': %s",
-                sys_id,
-                table_name,
-                str(req_err),
-            )
-        except Exception as err:
-            logger.error(
-                "An error occurred while resolving -> %s in table -> '%s': %s",
-                sys_id,
-                table_name,
-                str(err),
-            )
 
         return None
 
@@ -468,10 +496,13 @@ class ServiceNow(object):
         """Get summary object for an article.
 
         Args:
-            summary_sys_id (str): System ID of the article
+            summary_sys_id (str):
+                The system ID of the article.
 
         Returns:
-            dict | None: dictionary with the summary
+            dict | None:
+                The dictionary with the summary.
+
         """
 
         return self.get_object(table_name="kb_knowledge_summary", sys_id=summary_sys_id)
@@ -490,17 +521,24 @@ class ServiceNow(object):
         """Retrieve a specified ServiceNow table data (row or values).
 
         Args:
-            table_name (str): Name of the ServiceNow table
-            query (str, optional): Query to filter the table rows (e.g. articles).
-            fields (list, optional): Just return the fileds in this list.
-                                     Defaults to None which means to deliver
-                                     all fields.
-            limit (int, optional): Number of results to return. None = unlimited.
-            offset (int, optional): first item to return (for chunking)
-            error_string (str, optional): custom error string
+            table_name (str):
+                The name of the ServiceNow table to retrieve.
+            query (str, optional):
+                Query to filter the table rows (e.g. articles).
+            fields (list, optional):
+                Just return the fileds in this list.
+                Defaults to None which means to deliver all fields.
+            limit (int, optional):
+                Number of results to return. None = unlimited.
+            offset (int, optional):
+                First item to return (for chunking).
+            error_string (str, optional):
+                A custom error string can be provided by this parameter.
 
         Returns:
-            list | None: List or articles or None if the request fails.
+            list | None:
+                List or articles or None if the request fails.
+
         """
 
         request_header = self.request_header()
@@ -519,32 +557,34 @@ class ServiceNow(object):
         encoded_query = urllib.parse.urlencode(params, doseq=True)
 
         request_url = self.config()["tableUrl"] + "/{}?{}".format(
-            table_name, encoded_query
+            table_name,
+            encoded_query,
         )
 
         try:
             while True:
                 response = self._session.get(
-                    url=request_url, headers=request_header  # , params=params
+                    url=request_url,
+                    headers=request_header,  # , params=params
                 )
                 data = self.parse_request_response(response)
 
                 if response.status_code == 200:
                     return data.get("result", [])
                 elif response.status_code == 202:
-                    logger.warning(
-                        "Service Now returned <202 Accepted> -> throtteling, retrying ..."
+                    self.logger.warning(
+                        "Service Now returned <202 Accepted> -> throtteling, retrying ...",
                     )
                     time.sleep(1000)
                 else:
                     return None
 
-        except HTTPError as http_err:
-            logger.error("%sHTTP error -> %s!", error_string, str(http_err))
-        except RequestException as req_err:
-            logger.error("%sRequest error -> %s!", error_string, str(req_err))
-        except Exception as err:
-            logger.error("%sError -> %s!", error_string, str(err))
+        except HTTPError:
+            self.logger.error("%sHTTP error!", error_string)
+        except RequestException:
+            self.logger.error("%sRequest error!", error_string)
+        except Exception:
+            self.logger.error("%s", error_string)
 
         return None
 
@@ -555,15 +595,20 @@ class ServiceNow(object):
         table_name: str,
         query: str | None = None,
     ) -> int:
-        """Get number of table rows (e.g. Knowledge Base Articles) matching the query
-           (or if query = "" it should be the total number)
+        """Get number of table rows (e.g. Knowledge Base Articles) matching the query.
+
+        (or if query = "" it should be the total number).
 
         Args:
-            table_name (str): name of the ServiceNow table
-            query (str, optional): Query string to filter the results. Defaults to "".
+            table_name (str):
+                The name of the ServiceNow table.
+            query (str, optional):
+                A query string to filter the results. Defaults to "".
 
         Returns:
-            int: Number of table rows.
+            int:
+                Number of table rows.
+
         """
 
         request_header = self.request_header()
@@ -576,21 +621,24 @@ class ServiceNow(object):
         encoded_query = urllib.parse.urlencode(params, doseq=True)
 
         request_url = self.config()["statsUrl"] + "/{}?{}".format(
-            table_name, encoded_query
+            table_name,
+            encoded_query,
         )
 
         try:
             response = self._session.get(
-                url=request_url, headers=request_header, timeout=600
+                url=request_url,
+                headers=request_header,
+                timeout=600,
             )
             data = self.parse_request_response(response)
             return int(data["result"]["stats"]["count"])
-        except HTTPError as http_err:
-            logger.error("HTTP error occurred -> %s!", str(http_err))
-        except RequestException as req_err:
-            logger.error("Request error occurred -> %s!", str(req_err))
-        except Exception as err:
-            logger.error("An error occurred -> %s!", str(err))
+        except HTTPError:
+            self.logger.error("HTTP error occurred!")
+        except RequestException:
+            self.logger.error("Request error occurred!")
+        except Exception:
+            self.logger.error("An error occurred!")
 
         return None
 
@@ -600,9 +648,11 @@ class ServiceNow(object):
         """Get the configured knowledge base categories in ServiceNow.
 
         Returns:
-            list | None: list of configured knowledge base categories or None in case of an error.
+            list | None:
+                A list of configured knowledge base categories
+                or None in case of an error.
 
-            Example:
+        Example:
             [
                 {
                     'sys_mod_count': '2',
@@ -628,6 +678,7 @@ class ServiceNow(object):
                     'sys_created_by': 'tiychowdhury@opentext.com'
                 }
             ]
+
         """
 
         return self.get_table(
@@ -642,9 +693,10 @@ class ServiceNow(object):
         """Get the configured knowledge bases in ServiceNow.
 
         Returns:
-            list | None: list of configured knowledge bases or None in case of an error.
+            list | None:
+                The list of configured knowledge bases or None in case of an error.
 
-            Example:
+        Example:
             [
                 {
                     'mandatory_fields': '',
@@ -694,10 +746,11 @@ class ServiceNow(object):
                     'card_color': '',
                     'disable_rating': 'false',
                     'create_translation_task': 'false',
-                    'kb_managers': 'acab67001b6b811461a7a8e22a4bcbbe,7ab0b6801ba205d061a7a8e22a4bcbec,2a685f4c1be7811461a7a8e22a4bcbfd,6cc3c3d2db21781068cfd6c4e2961962,053429e31b5f0114fea2ec20604bcb95,5454eb441b6b0514fea2ec20604bcbfc,3a17970c1be7811461a7a8e22a4bcb23'
+                    'kb_managers': 'acab67001b6b811461a7a8e22a4bcbbe,7ab0b6801ba205d061a7a8e22a4bcbec'
                 },
                 ...
             ]
+
         """
 
         return self.get_table(
@@ -715,20 +768,26 @@ class ServiceNow(object):
         limit: int | None = 10,
         offset: int = 0,
     ) -> list | None:
-        """Get selected / filtered Knowledge Base articles
+        """Get selected / filtered Knowledge Base articles.
 
         Args:
-            query (str, optional): Query to filter the the articles.
-            fields (list, optional): Just return the fileds in this list.
-                                     Defaults to None which means to deliver
-                                     all fields.
-            limit (int, optional): Number of results to return. None = unlimited.
-            offset (int, optional): first item to return (for chunking)
+            table_name (str, optional):
+                The name of the ServiceNow table.
+            query (str, optional):
+                Query to filter the articles.
+            fields (list, optional):
+                Just return the fields in this list.
+                Defaults to None which means to deliver all fields.
+            limit (int, optional):
+                Number of results to return. None = unlimited.
+            offset (int, optional):
+                The first item to return (for chunking).
 
         Returns:
-            list | None: List or articles or None if the request fails.
+            list | None:
+                List or articles or None if the request fails.
 
-            Example:
+        Example:
             [
                 {
                     'parent': '',
@@ -832,6 +891,7 @@ class ServiceNow(object):
                 },
                 ...
             ]
+
         """
 
         return self.get_table(
@@ -845,13 +905,16 @@ class ServiceNow(object):
 
     # end method definition
 
-    def make_file_names_unique(self, file_list: list):
-        """Make file names unique if required. The mutable
-           list is changed "in-place".
+    def make_file_names_unique(self, file_list: list) -> None:
+        """Make file names unique if required.
+
+        The mutable list is changed "in-place".
 
         Args:
-            file_list (list): list of attachments as dictionaries
-                              with "sys_id" and "file_name" keys.
+            file_list (list):
+                List of attachments as dictionaries
+                with "sys_id" and "file_name" keys.
+
         """
 
         # Dictionary to keep track of how many times each file name has been encountered
@@ -882,13 +945,16 @@ class ServiceNow(object):
     # end method definition
 
     def get_article_attachments(self, article: dict) -> list | None:
-        """Get a list of attachments for an article
+        """Get a list of attachments for an article.
 
         Args:
-            article (dict): Article information
+            article (dict):
+                Article information.
 
         Returns:
-            list | None: list of attachments
+            list | None:
+                List of attachments for the article.
+
         """
 
         article_sys_id = article["sys_id"]
@@ -904,30 +970,32 @@ class ServiceNow(object):
 
         try:
             response = self._session.get(
-                url=request_url, headers=request_header, params=params
+                url=request_url,
+                headers=request_header,
+                params=params,
             )
             data = self.parse_request_response(response)
             attachments = data.get("result", [])
             if not attachments:
-                logger.debug(
+                self.logger.debug(
                     "Knowledge base article -> %s does not have attachments!",
                     article_number,
                 )
                 return []
             else:
-                logger.info(
+                self.logger.debug(
                     "Knowledge base article -> %s has %s attachments.",
                     article_number,
                     len(attachments),
                 )
                 return attachments
 
-        except HTTPError as http_err:
-            logger.error("HTTP error occurred -> %s!", str(http_err))
-        except RequestException as req_err:
-            logger.error("Request error occurred -> %s!", str(req_err))
-        except Exception as err:
-            logger.error("An error occurred -> %s!", str(err))
+        except HTTPError:
+            self.logger.error("HTTP error occurred!")
+        except RequestException:
+            self.logger.error("Request error occurred!")
+        except Exception:
+            self.logger.error("An error occurred!")
 
         return None
 
@@ -941,26 +1009,30 @@ class ServiceNow(object):
         """Download the attachments of a Knowledge Base Article (KBA) in ServiceNow.
 
         Args:
-            article (dict): dictionary holding the Service Now article data
-            skip_existing (bool, optional): skip download if file has been downloaded before
+            article (dict):
+                The dictionary holding the ServiceNow article data.
+            skip_existing (bool, optional):
+                If True, skip download if file has been downloaded before.
 
         Returns:
-            bool: True = success, False = failure
+            bool:
+                True = success, False = failure.
+
         """
 
         article_number = article["number"]
 
-        attachments = self.get_article_attachments(article)
+        attachments = self.get_article_attachments(article=article)
 
         if not attachments:
-            logger.debug(
+            self.logger.debug(
                 "Knowledge base article -> %s does not have attachments to download!",
                 article_number,
             )
             article["has_attachments"] = False
             return False
         else:
-            logger.info(
+            self.logger.info(
                 "Knowledge base article -> %s has %s attachments to download...",
                 article_number,
                 len(attachments),
@@ -980,79 +1052,108 @@ class ServiceNow(object):
         article["download_files_ids"] = []
 
         if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
+            try:
+                os.makedirs(base_dir)
+            except FileExistsError:
+                self.logger.error(
+                    "Directory -> '%s' already exists. Race condition occurred.",
+                    base_dir,
+                )
+            except PermissionError:
+                self.logger.error("Permission error with directory -> %s", base_dir)
+                return False
+            except OSError:
+                self.logger.error("OS error with directory -> %s", base_dir)
+                return False
+            except TypeError:
+                self.logger.error("Invalid path type -> %s", base_dir)
+                return False
 
         for attachment in attachments:
             file_path = os.path.join(base_dir, attachment["file_name"])
 
             if os.path.exists(file_path) and skip_existing:
-                logger.info(
-                    "File -> %s has been downloaded before. Skipping download...",
+                self.logger.info(
+                    "File -> '%s' has been downloaded before. Skipping download...",
                     file_path,
                 )
 
-                # we need to add file_name and sys_id in the list of files and for later use in bulkDocument processing...
+                # We need to add file_name and sys_id in the list of files and and file IDs
+                # for later use in bulkDocument processing...
+                # This creates two new columns "download_files" and "download_files_ids"
+                # in the data frame:
                 article["download_files"].append(attachment["file_name"])
                 article["download_files_ids"].append(attachment["sys_id"])
                 continue
-            attachment_download_url = (
-                self.config()["attachmentDownloadUrl"]
-                + "/"
-                + attachment["sys_id"]
-                + "/file"
-            )
+            attachment_download_url = self.config()["attachmentDownloadUrl"] + "/" + attachment["sys_id"] + "/file"
             try:
-                logger.info(
-                    "Downloading attachment file -> '%s' for article -> %s from ServiceNow...",
+                self.logger.info(
+                    "Downloading attachment file -> '%s' for article -> '%s' from ServiceNow...",
                     file_path,
                     article_number,
                 )
 
+                # Request the attachment as a stream from ServiceNow.
+                # This initiates the download process...
                 attachment_response = self._session.get(
-                    attachment_download_url, stream=True
+                    attachment_download_url,
+                    stream=True,
                 )
                 attachment_response.raise_for_status()
 
-                with open(file_path, "wb") as file:
+                # Read and write the attachment file in chunks:
+                with open(file_path, "wb") as attachment_file:
                     for chunk in attachment_response.iter_content(chunk_size=8192):
-                        file.write(chunk)
+                        attachment_file.write(chunk)
 
-                # we build a list of filenames and ids.
-                # the ids we want to use as nicknames later on
+                # We build a list of filenames and IDs.
+                # The IDs we want to use as nicknames later on.
                 article["download_files"].append(attachment["file_name"])
                 article["download_files_ids"].append(attachment["sys_id"])
 
-            except HTTPError as e:
-                logger.error(
-                    "Failed to download -> '%s' using url -> %s; error -> %s",
+            except HTTPError:
+                self.logger.error(
+                    "Failed to download -> '%s' using url -> %s",
                     attachment["file_name"],
                     attachment_download_url,
-                    str(e),
                 )
 
         return True
 
     # end method definition
 
-    def load_articles(self, table_name: str, query: str | None) -> bool:
-        """Main method to load ServiceNow articles in a Data Frame and
-           download the attchments.
+    def load_articles(
+        self,
+        table_name: str,
+        query: str | None,
+        skip_existing_downloads: bool = True,
+    ) -> bool:
+        """Load ServiceNow articles in a data frame and download the attchments.
 
         Args:
-            query (str): Filter criteria for the articles.
+            table_name (str):
+                The name of the ServiceNow table.
+            query (str | None):
+                Filter criteria for the articles.
+            skip_existing_downloads (bool, optional):
+                If True, it tries to optimize the processing by reusing
+                existing downloads of attachments in the file system.
 
         Returns:
-            bool: True = Success, False = Failure
+            bool:
+                True = Success, False = Failure.
+
         """
 
         total_count = self.get_table_count(table_name=table_name, query=query)
 
-        logger.info(
-            "Total number of Knowledge Base Articles (KBA) -> %s", str(total_count)
+        self.logger.info(
+            "Total number of Knowledge Base Articles (KBA) -> %s",
+            str(total_count),
         )
 
         if total_count == 0:
-            logger.info(
+            self.logger.info(
                 "Query does not return any value from ServiceNow table -> '%s'. Finishing.",
                 table_name,
             )
@@ -1068,7 +1169,7 @@ class ServiceNow(object):
             remainder = 0
             number = 1
 
-        logger.info(
+        self.logger.info(
             "Processing -> %s Knowledge Base Articles (KBA), table name -> '%s', thread number -> %s, partition size -> %s",
             str(total_count),
             table_name,
@@ -1082,7 +1183,7 @@ class ServiceNow(object):
         for i in range(number):
             current_partition_size = partition_size + (1 if i < remainder else 0)
             thread = threading.Thread(
-                name=f"load_articles_{i+1:02}",
+                name=f"load_articles_{i + 1:02}",
                 target=self.thread_wrapper,
                 args=(
                     self.load_articles_worker,
@@ -1090,6 +1191,7 @@ class ServiceNow(object):
                     query,
                     current_partition_size,
                     current_offset,
+                    skip_existing_downloads,
                 ),
             )
             thread.start()
@@ -1104,17 +1206,31 @@ class ServiceNow(object):
     # end method definition
 
     def load_articles_worker(
-        self, table_name: str, query: str, partition_size: int, partition_offset: int
+        self,
+        table_name: str,
+        query: str,
+        partition_size: int,
+        partition_offset: int,
+        skip_existing_downloads: bool = True,
     ) -> None:
-        """Worker Method for multi-threading.
+        """Worker method for multi-threading.
 
         Args:
-            query (str): Query to select the relevant KBA.
-            partition_size (int): Total size of the partition assigned to this thread.
-            partition_offset (int): Starting offset for the KBAs this thread is processing.
+            table_name (str):
+                Name of the ServiceNow table.
+            query (str):
+                Query to select the relevant KBA.
+            partition_size (int):
+                Total size of the partition assigned to this thread.
+            partition_offset (int):
+                Starting offset for the KBAs this thread is processing.
+            skip_existing_downloads (bool, optional):
+                If True, it tries to optimize the processing by reusing
+                existing downloads of attachments in the file system.
+
         """
 
-        logger.info(
+        self.logger.info(
             "Start processing KBAs in range from -> %s to -> %s from table -> '%s'...",
             partition_offset,
             partition_offset + partition_size,
@@ -1125,23 +1241,29 @@ class ServiceNow(object):
         # So we define "limit" as the maximum number of KBAs we want to retrieve for one REST call.
         # This should be a reasonable number to avoid timeouts. We also need to make sure
         # the limit is not bigger than the the partition size:
-        limit = 100 if partition_size > 100 else partition_size
+        limit = min(partition_size, 100)
 
         for offset in range(partition_offset, partition_offset + partition_size, limit):
             articles = self.get_table(
-                table_name=table_name, query=query, limit=limit, offset=offset
+                table_name=table_name,
+                query=query,
+                limit=limit,
+                offset=offset,
             )
-            logger.info(
+            self.logger.info(
                 "Retrieved a list of %s KBAs starting at offset -> %s to process.",
                 str(len(articles)),
                 offset,
             )
             for article in articles:
-                logger.info("Processing KBA -> %s...", article["number"])
+                self.logger.info("Processing KBA -> %s...", article["number"])
                 article["source_table"] = table_name
-                self.load_article(article)
+                self.load_article(
+                    article=article,
+                    skip_existing_downloads=skip_existing_downloads,
+                )
 
-        logger.info(
+        self.logger.info(
             "Finished processing KBAs in range from -> %s to -> %s from table -> '%s'.",
             partition_offset,
             partition_offset + partition_size,
@@ -1150,15 +1272,19 @@ class ServiceNow(object):
 
     # end method definition
 
-    def load_article(self, article: dict, skip_existing_downloads: bool = True):
-        """Process a single KBA: download attachments (if any), add additional
-           keys / values to the article from other ServiceNow tables,
-           and finally add the KBA to the Data Frame.
+    def load_article(self, article: dict, skip_existing_downloads: bool = True) -> None:
+        """Process a single KBA.
+
+        Download attachments (if any), add additional keys / values to the article from
+        other ServiceNow tables, and finally add the KBA to the data frame.
 
         Args:
-            article (dict): Dictionary inclusing all fields of
-                            a single KBA. This is a mutable variable
-                            that gets modified by this method!
+            article (dict):
+                Dictionary inclusing all fields of a single KBA.
+                This is a mutable variable that gets modified by this method!
+            skip_existing_downloads (bool, optional):
+                If True it tries to optimize the processing by reusing
+                existing downloads of attachments.
 
         Side effect:
             The article dict is modified with by adding additional key / value
@@ -1177,209 +1303,272 @@ class ServiceNow(object):
 
         """
 
+        #
+        # Download the attachments of the KBA:
+        #
+
         _ = self.download_attachments(
-            article=article, skip_existing=skip_existing_downloads
+            article=article,
+            skip_existing=skip_existing_downloads,
         )
 
         #
         # Add additional columns from related ServiceNow tables:
         #
 
-        if "kb_category" in article and article["kb_category"]:
+        if article.get("kb_category"):
             category_key = article.get("kb_category")["value"]
             category_table_name = SN_TABLE_CATEGORIES
             category = self.get_object(
-                table_name=category_table_name, sys_id=category_key
+                table_name=category_table_name,
+                sys_id=category_key,
             )
             if category:
                 article["kb_category_name"] = self.get_result_value(
-                    response=category, key="full_category"
+                    response=category,
+                    key="full_category",
                 )
             else:
-                logger.warning(
-                    "Article -> %s has no category value!", article["number"]
+                self.logger.warning(
+                    "Article -> %s has no category value!",
+                    article["number"],
                 )
                 article["kb_category_name"] = ""
         else:
-            logger.warning(
-                "Article -> %s has no value for category!", article["number"]
+            self.logger.warning(
+                "Article -> %s has no value for category!",
+                article["number"],
             )
             article["kb_category_name"] = ""
 
         knowledge_base_key = article.get("kb_knowledge_base")["value"]
         knowledge_base_table_name = SN_TABLE_KNOWLEDGE_BASES
         knowledge_base = self.get_object(
-            table_name=knowledge_base_table_name, sys_id=knowledge_base_key
+            table_name=knowledge_base_table_name,
+            sys_id=knowledge_base_key,
         )
         if knowledge_base:
             article["kb_knowledge_base_name"] = self.get_result_value(
-                response=knowledge_base, key="title"
+                response=knowledge_base,
+                key="title",
             )
         else:
-            logger.warning(
-                "Article -> %s has no value for Knowledge Base!",
+            self.logger.warning(
+                "Article -> %s has no value for knowledge base!",
                 article["number"],
             )
             article["kb_knowledge_base_name"] = ""
 
-        related_product_names = []
-        if article.get("related_products", None):
+        # We use a set to make sure the resulting related items are unique:
+        related_product_names: set = set()
+        if article.get("related_products"):
             related_product_keys = article.get("related_products").split(",")
             for related_product_key in related_product_keys:
                 related_product = self.get_object(
-                    table_name=SN_TABLE_RELATED_PRODUCTS, sys_id=related_product_key
+                    table_name=SN_TABLE_RELATED_PRODUCTS,
+                    sys_id=related_product_key,
                 )
                 if related_product:
                     related_product_name = self.get_result_value(
-                        response=related_product, key="name"
+                        response=related_product,
+                        key="name",
                     )
-                    logger.debug(
-                        "Found related Product -> '%s' (%s)",
+                    # Remove leading or trailing spaces (simple cleansing effort):
+                    related_product_name = related_product_name.strip() if related_product_name else ""
+                    if self._product_exclusions and related_product_name in self._product_exclusions:
+                        self.logger.info(
+                            "Found related product -> '%s' (%s) but it is on the product exclusion list. Skipping...",
+                            related_product_name,
+                            related_product_key,
+                        )
+                        continue
+                    self.logger.debug(
+                        "Found related product -> '%s' (%s)",
                         related_product_name,
                         related_product_key,
                     )
-                    related_product_names.append(related_product_name)
+                    # Add the related item to the resulting set
+                    # (duplicates will not be added as it is a set):
+                    related_product_names.add(related_product_name)
                     # Extended ECM can only handle a maxiumum of 50 line items:
                     if len(related_product_names) == 49:
-                        logger.info(
-                            "Reached maximum of 50 multi-value items for related Products of article -> %s",
+                        self.logger.info(
+                            "Reached maximum of 50 multi-value items for related products of article -> %s",
                             article["number"],
                         )
                         break
                 else:
-                    logger.warning(
-                        "Article -> %s: Cannot lookup related Product name in table -> '%s' with ID -> %s",
+                    self.logger.warning(
+                        "Article -> %s: Cannot lookup related product name in table -> '%s' with key -> '%s'",
                         article["number"],
                         SN_TABLE_RELATED_PRODUCTS,
                         related_product_key,
                     )
         else:
-            logger.warning(
-                "Article -> %s has no value related Products!",
+            self.logger.debug(
+                "Article -> %s has no related products!",
                 article["number"],
             )
-        article["related_product_names"] = related_product_names
+        # This adds a column to the data frame with the name "related_product_names"
+        # (we convert the set to a list):
+        article["related_product_names"] = list(related_product_names)
 
-        product_line_names = []
-        if article.get("u_product_line", None):
+        # We use a set to make sure the resulting related items are unique:
+        product_line_names: set = set()
+        if article.get("u_product_line"):
             product_line_keys = article.get("u_product_line").split(",")
             product_line_table = SN_TABLE_PRODUCT_LINES
             for product_line_key in product_line_keys:
                 product_line = self.get_object(
-                    table_name=product_line_table, sys_id=product_line_key
+                    table_name=product_line_table,
+                    sys_id=product_line_key,
                 )
                 if product_line:
                     product_line_name = self.get_result_value(
-                        response=product_line, key="name"
+                        response=product_line,
+                        key="name",
                     )
-                    logger.debug(
-                        "Found related Product Line -> '%s' (%s)",
+                    # Remove leading or trailing spaces (simple cleansing effort):
+                    product_line_name = product_line_name.strip() if product_line_name else ""
+                    self.logger.debug(
+                        "Found related product line -> '%s' (%s)",
                         product_line_name,
                         product_line_key,
                     )
-                    product_line_names.append(product_line_name)
+                    # Add the related item to the resulting set
+                    # (duplicates will not be added as it is a set):
+                    product_line_names.add(product_line_name)
                     # Extended ECM can only handle a maxiumum of 50 line items:
                     if len(product_line_names) == 49:
-                        logger.info(
-                            "Reached maximum of 50 multi-value items for related Product Lines of article -> %s",
+                        self.logger.info(
+                            "Reached maximum of 50 multi-value items for related product lines of article -> %s",
                             article["number"],
                         )
                         break
+                # end if product_line:
                 else:
-                    logger.warning(
-                        "Article -> %s: Cannot lookup related Product Line name in table -> '%s' with ID -> %s",
+                    self.logger.warning(
+                        "Article -> %s: Cannot lookup related product line name in table -> '%s' with key -> '%s'",
                         article["number"],
                         product_line_table,
                         product_line_key,
                     )
         else:
-            logger.warning(
-                "Article -> %s has no value for related Product Lines!",
+            self.logger.debug(
+                "Article -> %s has no related product lines!",
                 article["number"],
             )
-        article["u_product_line_names"] = product_line_names
+        # This adds a column to the data frame with the name "u_product_line_names"
+        # (we convert the set to a list):
+        article["u_product_line_names"] = list(product_line_names)
 
-        sub_product_line_names = []
-        if article.get("u_sub_product_line", None):
+        # We use a set to make sure the resulting related items are unique:
+        sub_product_line_names: set = set()
+        if article.get("u_sub_product_line"):
             sub_product_line_keys = article.get("u_sub_product_line").split(",")
             sub_product_line_table = SN_TABLE_PRODUCT_LINES
             for sub_product_line_key in sub_product_line_keys:
                 sub_product_line = self.get_object(
-                    table_name=sub_product_line_table, sys_id=sub_product_line_key
+                    table_name=sub_product_line_table,
+                    sys_id=sub_product_line_key,
                 )
                 if sub_product_line:
                     sub_product_line_name = self.get_result_value(
-                        response=sub_product_line, key="name"
+                        response=sub_product_line,
+                        key="name",
                     )
-                    logger.debug(
-                        "Found related Sub Product Line -> '%s' (%s)",
+                    # Remove leading or trailing spaces (simple cleansing effort):
+                    sub_product_line_name = sub_product_line_name.strip() if sub_product_line_name else ""
+                    self.logger.debug(
+                        "Found related sub product line -> '%s' (%s)",
                         sub_product_line_name,
                         sub_product_line_key,
                     )
-                    sub_product_line_names.append(sub_product_line_name)
+                    # Add the related item to the resulting set
+                    # (duplicates will not be added as it is a set):
+                    sub_product_line_names.add(sub_product_line_name)
                     # Extended ECM can only handle a maxiumum of 50 line items:
                     if len(sub_product_line_names) == 49:
-                        logger.info(
-                            "Reached maximum of 50 multi-value items for related Sub Product Lines of article -> %s",
+                        self.logger.info(
+                            "Reached maximum of 50 multi-value items for related sub product lines of article -> %s",
                             article["number"],
                         )
                         break
                 else:
-                    logger.warning(
-                        "Article -> %s: Cannot lookup related Sub Product Line name in table -> '%s' with ID -> %s",
+                    self.logger.warning(
+                        "Article -> %s: Cannot lookup related sub product line name in table -> '%s' with key -> '%s'",
                         article["number"],
                         sub_product_line_table,
                         sub_product_line_key,
                     )
         else:
-            logger.warning(
-                "Article -> %s has no value for related Sub Product Lines!",
+            self.logger.debug(
+                "Article -> %s has no related sub product lines!",
                 article["number"],
             )
-        article["u_sub_product_line_names"] = sub_product_line_names
+        # This adds a column to the data frame with the name "u_sub_product_line_names"
+        # (we convert the set to a list):
+        article["u_sub_product_line_names"] = list(sub_product_line_names)
 
-        application_names = []
-        if article.get("u_application", None):
+        # We use a set to make sure the resulting related items are unique:
+        application_names: set = set()
+        if article.get("u_application"):
             application_keys = article.get("u_application").split(",")
             application_table_name = SN_TABLE_PRODUCT_LINES
             for application_key in application_keys:
                 application = self.get_object(
-                    table_name=application_table_name, sys_id=application_key
+                    table_name=application_table_name,
+                    sys_id=application_key,
                 )
                 if application:
                     application_name = self.get_result_value(
-                        response=application, key="name"
+                        response=application,
+                        key="name",
                     )
-                    logger.debug(
-                        "Found related Application -> '%s' (%s)",
+                    # Remove leading or trailing spaces (simple cleansing effort):
+                    application_name = application_name.strip() if application_name else ""
+                    if self._product_exclusions and application_name in self._product_exclusions:
+                        self.logger.info(
+                            "Found related application -> '%s' (%s) but it is on the product exclusion list. Skipping...",
+                            application_name,
+                            application_key,
+                        )
+                        continue
+                    self.logger.debug(
+                        "Found related application -> '%s' (%s)",
                         application_name,
                         application_key,
                     )
-                    application_names.append(application_name)
+                    # Add the related item to the resulting set
+                    # (duplicates will not be added as it is a set):
+                    application_names.add(application_name)
                     # Extended ECM can only handle a maxiumum of 50 line items:
                     if len(application_names) == 49:
-                        logger.info(
-                            "Reached maximum of 50 multi-value items for related Applications of article -> %s",
+                        self.logger.info(
+                            "Reached maximum of 50 multi-value items for related applications of article -> %s",
                             article["number"],
                         )
                         break
+                # end if application
                 else:
-                    logger.warning(
-                        "Article -> %s: Cannot lookup related Application name in table -> '%s' with ID -> %s",
+                    self.logger.warning(
+                        "Article -> %s: Cannot lookup related application name in table -> '%s' with key -> %s",
                         article["number"],
                         application_table_name,
                         application_key,
                     )
         else:
-            logger.warning(
-                "Article -> %s has no value for related Applications!",
+            self.logger.debug(
+                "Article -> %s has no related applications!",
                 article["number"],
             )
-        article["u_application_names"] = application_names
+        # This adds a column to the data frame with the name "u_application_names"
+        # (we convert the set to a list):
+        article["u_application_names"] = list(application_names)
 
-        application_versions = []
+        application_versions: set = set()
         application_version_sets = []
-        if article.get("u_application_version", None):
+        if article.get("u_application_version"):
             application_version_keys = article.get("u_application_version").split(",")
             for application_version_key in application_version_keys:
                 # Get the version object from ServiceNow. It includes both,
@@ -1390,74 +1579,107 @@ class ServiceNow(object):
                 )
                 if application_version:
                     application_version_name = self.get_result_value(
-                        response=application_version, key="u_version_name"
+                        response=application_version,
+                        key="u_version_name",
                     )
-                    logger.debug(
-                        "Found related Application Version -> '%s' (%s)",
+                    self.logger.debug(
+                        "Found related application version -> '%s' in table -> '%s' with key -> '%s'",
+                        application_version_name,
                         SN_TABLE_PRODUCT_LINES,
                         application_version_key,
                     )
 
-                    application_versions.append(application_version_name)
+                    # Add the related version to the resulting set
+                    # (duplicates will not be added as it is a set):
+                    application_versions.add(application_version_name)
 
-                    # Lookup application name of version and fill the set
-
+                    # Use the application key to lookup application name
+                    # for the version and fill a set
                     application_key = self.get_result_value(
-                        response=application_version, key="u_product_model"
+                        response=application_version,
+                        key="u_product_model",
                     )
 
                     if application_key:
-                        # u_applicatio_model has a substructure like this:
-                        # {
-                        #   'link': 'https://support.opentext.com/api/now/table/u_ot_product_model/9b2dcea747f6d910ab0a9ed7536d4364',
-                        #   'value': '9b2dcea747f6d910ab0a9ed7536d4364'
-                        # }
-                        # We want the value:
+                        """
+                        u_application_model has a substructure like this:
+                        {
+                          'link': 'https://support.opentext.com/api/now/table/u_ot_product_model/9b2dcea747f6d910ab0a9ed7536d4364',
+                          'value': '9b2dcea747f6d910ab0a9ed7536d4364'
+                        }
+                        """
+                        # We want the value which represents the key to lookup the application name:
                         application_key = application_key.get("value")
 
                     if application_key:
+                        # Retrieve the application with the application key from ServiceNBow:
                         application = self.get_object(
                             table_name=SN_TABLE_PRODUCT_LINES,
                             sys_id=application_key,
                         )
-
                         application_name = self.get_result_value(
-                            response=application, key="name"
+                            response=application,
+                            key="name",
+                        )
+                        # Remove leading or trailing spaces (simple cleansing effort):
+                        application_name = application_name.strip() if application_name else ""
+
+                        # We check if the application name is in the product exclusions list.
+                        # If this is the case we skip it from being added to the Application Version Set
+                        # as we don't want to create a workspace relationship.
+                        if (
+                            self._product_exclusions
+                            and application_name
+                            and application_name in self._product_exclusions
+                        ):
+                            self.logger.info(
+                                "Found related application -> '%s' (%s) but it is on the product exclusion list. Skipping...",
+                                application_name,
+                                application_key,
+                            )
+                            continue
+                        self.logger.debug(
+                            "Found related application -> '%s' for version -> '%s' in table -> '%s' with key -> '%s'",
+                            application_name,
+                            application_version_name,
+                            SN_TABLE_PRODUCT_LINES,
+                            application_key,
                         )
 
                         if application_name:
                             application_version_sets.append(
                                 {
-                                    # "Application": application_name,
-                                    # "Version": application_version_name,
                                     "u_product_model": application_name,
                                     "u_version_name": application_version_name,
-                                }
+                                },
                             )
+                    # end if application_key
 
                     # Extended ECM can only handle a maxiumum of 50 line items:
-                    if len(application_versions) == 49:
-                        logger.info(
-                            "Reached maximum of 50 multi-value items for related Application Version of article -> %s",
+                    if len(application_version_sets) == 49:
+                        self.logger.info(
+                            "Reached maximum of 50 multi-value items for related application versions of article -> %s",
                             article["number"],
                         )
                         break
+                # end if application_version
                 else:
-                    logger.warning(
-                        "Article -> %s: Cannot lookup related Application Version in table -> '%s' with ID -> %s",
+                    self.logger.warning(
+                        "Article -> %s: Cannot lookup related application version in table -> '%s' with key -> '%s'",
                         article["number"],
                         SN_TABLE_PRODUCT_VERSIONS,
                         application_version_key,
                     )
         else:
-            logger.warning(
-                "Article -> %s has no value for related Application Version!",
+            self.logger.debug(
+                "Article -> %s has no related application version!",
                 article["number"],
             )
-        # Convert to list and set to remove duplicates:
-        article["u_application_versions"] = list(set(application_versions))
+        # This adds a column to the data frame with the name "u_application_versions"
+        # (we convert the set to a list):
+        article["u_application_versions"] = list(application_versions)
 
-        # This set maps the applications and the versions (table-like structure)
+        # This list of dictionaries maps the applications and the versions (table-like structure)
         article["u_application_version_sets"] = application_version_sets
 
         # Now we add the article to the Pandas Data Frame in the Data class:

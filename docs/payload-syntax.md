@@ -1,6 +1,6 @@
 # Payload Syntax
 
-## Customizing
+## Customizing General
 
 The customizing payload can be defined in either of the following standards:
 
@@ -48,6 +48,38 @@ The customizing payload can be defined in either of the following standards:
 
     Most of the customizing settings may have an optional field called `enabled` that allows to dynamically turn on / off customization settings based on a boolean value. If `enabled` is not specified then `enabled = True` is assumed (this is the default).
 
+## payloadOptions
+
+This sections defines options that are used to manage the payload. This is only required when using the Customizer as a Service (API)
+
+=== "Terraform / HCL"
+
+    ```terraform
+    payloadOptions = {
+        enabled = true
+        name = "Name of the Payload Object"
+        dependencies = ["Name of Payload item #1 it depends on","Name of Payload item #2 it depends on"]
+        loglevel = "INFO" # DEBUG, INFO, WARNING, ERROR
+    }
+    ```
+
+## payloadSections
+
+This section defines the payload sections that are used and defines the order in which they are processed.
+
+=== "Terraform / HCL"
+
+    ```terraform
+    payloadSections = [
+      { name = "adminSettings", enabled = true },
+      { name = "groups", enabled = true },
+      { name = "users", enabled = true },
+      { name = "webReports", enabled = true },
+      { name = "transportPackages", enabled = true },
+      { name = "permissions", enabled = true },
+    ]
+    ```
+
 ### OTDS Customizing Syntax
 
 The payload syntax for OTDS customizing uses the following lists (the list elements are maps):
@@ -58,7 +90,7 @@ The payload syntax for OTDS customizing uses the following lists (the list eleme
 
 Each list element includes a switch `enabled` to turn them on or off. This switch can be controlled by a Terraform variable.
 
-In addition, each resource definition has a `name`, an optional `description`, and an optional `display_name`. It is also possible to activate the new resource via the `activate = true`. With `resource_id` and `secret` pre-defined values can be provided for the resource ID and the secret. The `secret`should be 24 characters long and end with `==`. If a secret and a resource ID are provided, then the resource is automatically activated. Otherwise you can enforce activation with `activate = true`. With `additional_payload` a dictionary of key value pairs can be provided:
+In addition, each resource definition has a `name`, an optional `description`, and an optional `display_name`. It is also possible to activate the new resource via the `activate = true`. With `resource_id` and `secret` pre-defined values can be provided for the resource ID and the secret. The `secret` should be 24 characters long and end with `==`. If a secret and a resource ID are provided, then the resource is automatically activated. Otherwise you can enforce activation with `activate = true`. With `additional_payload` a dictionary of key value pairs can be provided:
 
 === "Terraform / HCL"
 
@@ -97,6 +129,7 @@ In addition, each resource definition has a `name`, an optional `description`, a
         additional_payload:
         ...
     ```
+
 #### synchronized partition
 
 `synchronized partition` allows to create a new synchronized partition in otds
@@ -105,7 +138,7 @@ Each list element includes a switch `enabled` to turn them on or off. This switc
 
 In addition, each synchronized partition has a `name`, an optional `description`. It is also possible to directly put the new synchronized partition into an existing `access_role`. Also `licenses` this synchronized partition should be assigned to can be specified:
 
-In case of importing Active Directory users and groups ignore licenses. 
+In case of importing Active Directory users and groups ignore licenses.
 
 === "Terraform / HCL"
 
@@ -457,7 +490,7 @@ Each list element includes a switch `enabled` to turn them on or off. This switc
 
 #### authHandlers
 
-`authHandlers` is a list of additional OTDS authentication handlers. 
+`authHandlers` is a list of additional OTDS authentication handlers.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
 
@@ -1059,6 +1092,43 @@ In addition, each setting is defined by a `description`, the `filename` of an XM
       filename: DocumentTemplatesSettings.xml
     ```
 
+#### docGenSettings
+
+`docgenSettings` allows you to set settings in Extended ECM Document Generation (OTPD - PowerDocs).
+
+Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
+
+In addition, each document generation setting has a `name`, `value` and an optional `tenant`.
+
+=== "Terraform / HCL"
+
+    ```terraform
+    docGenSetting = [
+      {
+        enabled = true
+        name    = "LocalOtdsUrl"
+        value   = "http://otds/otdsws"
+      },
+      {
+        description = "Fix settings for local Kubernetes deployments"
+        enabled     = true
+        name        = "LocalApplicationServerUrlForContentManager"
+        value       = "http://localhost:8080/c4ApplicationServer"
+        tenant      = "Successfactors"
+      }
+    ]
+    ```
+
+=== "YAML"
+
+    ```yaml
+    docGenSetting:
+    - enabled: true
+      name: LocalApplicationServerUrlForContentManager
+      tenant: Successfactors
+      value: http://localhost:8080/c4ApplicationServer
+    ```
+
 #### externalSystems
 
 `externalSystems` is a list of connections to external business applications such as SAP S/4HANA, Salesforce, or SuccessFactors. Some of the payload elements are common, some are specific for the type of the external system.
@@ -1265,6 +1335,26 @@ The `name` must be the exact file name of the ZIP package. Description is option
       name: Terrarium 310 Enterprise Asset Management Content.zip
       url: ${var.transporturl}/Terrarium-310-Enterprise-Asset-Management-Content.zip
     ```
+
+#### workspaceTemplates
+
+`workspaceTemplates` is a list of workspace templates that should be modified before used by the workspace processing.
+This payload allows to change the role memberships (adding new users or groups) and to add additional categories to workspace templates.
+
+Each element is a dict with these keys:
+
+- `enabled` (bool, optional, default = True)
+- `type_name` (str, mandatory)
+- `template_name` (str, mandatory)
+- `members` (list, optional)
+  - `role` (str, mandatory)
+  - `users` (list, optional, default = [])
+  - `groups` (list, optional, default = [])
+- `categories` (list, optional)
+  - `nickname` (str, optional) - the nickname of the category
+  - `path` (list, optional) - the path to the category object in the category volume
+  - `inheritance` (bool, optional) - should category inheritance be turned on on the workspace template node?
+  - `apply_to_sub_items` (bool, optional) - should the category be inherited to existing sub-items?
 
 #### workspaces
 
@@ -1726,47 +1816,65 @@ Each element is a dictionary with these fields:
 
 ### Bulk Load Customizing Syntax
 
-For mass loading and generation of workspaces and documents from external data sources the customizing allows to specify bulk datasources, bulk workspaces, bulk workspace relationships and bulk documents. The data sources will be loaded in an internal table representation (we use Pandas Data Frames for this).
+For mass loading and generation of workspaces, documents, items and classifications from external data sources the customizing allows to specify bulk datasources, bulk workspaces, bulk workspace relationships, bulk documents, bulk items, and bulk classifications. The data sources will be loaded in an internal table representation (we use Pandas Data Frames for this).
 
 #### bulkDatasources
 
-Before you can bulk load workspaces, workspace relationships, or documents you have to declare the used data sources. `bulkDatasources` is a list of datasources. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `type`. Supported types are `excel` (Microsoft Excel workbooks), `servicenow` (ServiceNow REST API), `otmm` (OpenText Media Management REST API), `otcs` (Extended ECM REST API), `pht` (internal OpenText System for Product Master Data, REST API), `json` (JSON files), and `xml` (XML files, or whole directories / zip files of XML files). Based on the selected `type` data sources may have many specific fields to configure the specifics of the data source and define how to connect to the data source.
+Before you can bulk load workspaces, workspace relationships, or documents you have to declare the used data sources. `bulkDatasources` is a list of datasources. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `type`. Supported types are `excel` (Microsoft Excel workbooks), `servicenow` (ServiceNow REST API), `otmm` (OpenText Media Management REST API), `otcs` (Extended ECM REST API), `pht` (internal OpenText System for Product Master Data, REST API), `json` (JSON files), `csv` (comma-separated values), and `xml` (XML files, or whole directories / zip files of XML files). Based on the selected `type` data sources may have many specific fields to configure the specifics of the data source and define how to connect to the data source.
 
 The following settings can be applied to all data source types:
 
 - `cleansings` (dictionary, optional, default = {}) to clean the values in defined columns of the data set. Each list item is a dictionary with these keys:
-    - `upper` (bool, optional, default = `false`)
-    - `lower` (bool, optional, default = `false`)
-    - `length` (int, optional, default = None)
-    - `replacements` (dict, optional, default = `{}`) - the keys are regular expressions and the values are replacement values
+  - `upper` (bool, optional, default = `false`) - convert complete string to upper case
+  - `lower` (bool, optional, default = `false`) - convert complete string to lower case
+  - `capitalize` (bool, optional, default = `false`) - capitalize first character of string
+  - `title` (bool, optional, default = `false`) - capitalize first chracter of each word
+  - `length` (int, optional, default = None)
+  - `replacements` (dict, optional, default = `{}`) - the keys are regular expressions and the values are replacement values
 - `columns_to_drop` (list, optional, default = `[]`) list of column names to remove from the data set (to black list those to delete)
 - `columns_to_keep` (list, optional, default = `[]`) list of columns to keep in the data set and delete all others (to white list those to keep)
 - `columns_to_add` (list, optional, default = `[]`) - each list item is a dictionary with these keys:
-    - `source_column` (str, mandatory) - name of the column the base value for the new column is taken from
-    - `name` (str, mandatory) - name of the new column
-    - `reg_exp` (str, optional, default = None)
-    - `prefix` (str, optional, default = "") - prefix to add to the new column value
-    - `suffix` (str, optional, default = "") - suffix to add to the new column value
-    - `length` (int, optional, default = None)
-    - `group_chars` (str, optional, default = None)
-    - `group_separator` (str, optional, default = `.`)
+  - `source_column` (str, mandatory) - name of the column the base value for the new column is taken from
+  - `name` (str, mandatory) - name of the new column
+  - `reg_exp` (str, optional, default = None)
+  - `prefix` (str, optional, default = "") - prefix to add to the new column value
+  - `suffix` (str, optional, default = "") - suffix to add to the new column value
+  - `length` (int, optional, default = None)
+  - `group_chars` (str, optional, default = None)
+  - `group_separator` (str, optional, default = `.`)
 - `columns_to_add_list` (list, optional, default = []): add a new column with list values. Each payload item is a dictionary with these keys:
-    - `source_columns` (str, mandatory) - names of the columns from which row values are taken from to create the list of string values
-    - `name` (str, mandatory) - name of the new column
+  - `source_columns` (str, mandatory) - names of the columns from which row values are taken from to create the list of string values
+  - `name` (str, mandatory) - name of the new column
+- `columns_to_add_concat` (list, optional, default = []): add a new column with concatenated values. Each payload item is a dictionary with these keys:
+  - `source_columns` (str, mandatory) - names of the columns from which row values are taken from to create the list of string values
+  - `name` (str, mandatory) - name of the new column
+  - `concat_char` (str, optional) - concatenation char e.g. "-", ".". Default is None = empty
+  - `columns_to_add_concat_lower` (bool,optional) - convert result to lower case
+  - `columns_to_add_concat_upper` (bool,optional) - convert result to upper case
+  - `columns_to_add_concat_capitalize` (bool,optional) - capitalize result
+  - `columns_to_add_concat_title` (bool,optional) - convert result to title case
 - `columns_to_add_table` (list, optional, default = []): add a new column with table values. Each payload item is a dictionary with these keys:
-    - `source_columns` (str, mandatory) - names of the columns from which row values are taken from to create a list of dictionary values. It is expected that the source columns already have list items or are strings with delimiter-separated values. 
-    - `name` (str, mandatory) - name of the new column
-    - `list_splitter` (str, optional, default = `,`) Defines the delimiter for splitting strings from the source columns into a list.
+  - `source_columns` (str, mandatory) - names of the columns from which row values are taken from to create a list of dictionary values. It is expected that the source columns already have list items or are strings with delimiter-separated values.
+  - `name` (str, mandatory) - name of the new column
+  - `list_splitter` (str, optional, default = `,`) Defines the delimiter for splitting strings from the source columns into a list.
 - `conditions` (list, optional, default = []) - each list item is a dict with these keys:
-    - `field` (str, mandatory)
-    - `value` (str | bool | list, optional, default = None)
+  - `field` (str, mandatory)
+  - `value` (str | bool | list, optional, default = None)
+  - `equal` (bool, optional): if `true` test for equality (this is the default), if `false` test for non-equality
 - `explosions` (list, optional, default = []) - each list item is a dict with these keys:
-    - `explode_fields` (str | list, mandatory)
-    - `flatten_fields` (list, optional, default = `[]`)
-    - `split_string_to_list` (bool, optional, default = False)
-    - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
+  - `explode_fields` (str | list, mandatory)
+  - `flatten_fields` (list, optional, default = `[]`)
+  - `split_string_to_list` (bool, optional, default = False)
+  - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
 - `name_column` (str, optional, default = None) - name of the column in the data source that determines the bulk item name
 - `synonyms_column` (str, optional, default = None)
+
+CSV File specific settings:
+
+- `csv_delimiter` (str, optional) - value delimiter in the file - default is a comma
+- `csv_header_index` (int, optional) - if the file has a header line this parameter specifies the index (0 = first line, this is the default)
+- `csv_column_names` (list, optional) - if the file has no header line the column name can be specified as a list of strings
+- `csv_use_columns` (list, optional) - this list can either include integers (index of columns to keep), strings (names of columns to keep), or a list of boolean values (True = column is kept, False = column is dropped)
 
 OpenText Extended ECM / Content Server specific settings (fields):
 
@@ -1778,50 +1886,74 @@ OpenText Extended ECM / Content Server specific settings (fields):
 - `otcs_password` (str, mandatory)
 - `otcs_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
 - `otcs_download_dir` (str, optional, default = `/data/contentserver`)
-- `otcs_root_node_id` (int | list[int], mandatory)
+- `otcs_root_node_ids` (int | list[int], mandatory)
 - `otcs_filter_workspace_depth` (int, optional, default = 0) - 0 = workspaces are located immedeately below given root node
 - `otcs_filter_workspace_subtypes` (list, optional, default = `[]`) - 0 = folder subtype
 - `otcs_filter_workspace_category` (str, optional, default = None) - defines the category the workspace needs to have to pass the filter
 - `otcs_filter_workspace_attributes` (dict | list, optional, default = None)
-    - `set` (str, optional, default = None) - name of the attribute set
-    - `row` (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
-    - `attribute` (str, mandatory) - name of the attribute
-    - `value` (str, mandatory) - value the attribute should have to pass the filter
+  - `set` (str, optional, default = None) - name of the attribute set
+  - `row` (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
+  - `attribute` (str, mandatory) - name of the attribute
+  - `value` (str, mandatory) - value the attribute should have to pass the filter
 - `otcs_filter_item_depth` (int, optional, default = None) - depth of the document under the given root
+- `otcs_filter_item_subtypes` (list, optional, default = `[]`) - 0 = folder subtype, 144 = document subtype
 - `otcs_filter_item_category` (str, optional, default = None) - defines the category that the item needs to have to pass the filter
 - `otcs_filter_item_attributes` (dict | list, optional, default = None)
-    - `set` (str, optional, default = None) - name of the attribute set
-    - `row` (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
-    - `attribute` (str, mandatory) - name of the attribute
-    - `value` (str, mandatory) - value the attribute should have to pass the filter
+  - `set` (str, optional, default = None) - name of the attribute set
+  - `row` (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
+  - `attribute` (str, mandatory) - name of the attribute
+  - `value` (str, mandatory) - value the attribute should have to pass the filter
+- `otcs_exclude_node_ids` (list, optional, default = None) - list of Content Server IDs to exclude from loading / traversing
 
 ServiceNow specific settings (fields):
 
-- `sn_base_url` (str, mandatory)
-- `sn_auth_type` (str, optional, default = `basic`)
-- `sn_username` (str, optional, default = "")
-- `sn_password` (str, optional, default = "")
-- `sn_client_id` (str, optional, default = None)
-- `sn_client_secret` (str, optional, default = None)
-- `sn_table_name` (str, optional, default = `u_kb_template_technical_article_public`)
-- `sn_queries` (list, mandatory)
-    - `sn_table_name` (str, mandatory) - name of the ServiceNow database table for the query
-    - `sn_query` (str, mandatory) - query string
+- `sn_base_url` (str, mandatory) - ServiceNow base URL
+- `sn_auth_type` (str, optional, default = `basic`) - authentication type of ServiceNow
+- `sn_username` (str, optional, default = "") - user name used with ServiceNow
+- `sn_password` (str, optional, default = "") - password of the provided user
+- `sn_client_id` (str, optional, default = None) - client ID of ServiceNow
+- `sn_client_secret` (str, optional, default = None) - client secret of ServiceNow
+- `sn_table_name` (str, optional, default = `u_kb_template_technical_article_public`) - name of the table used for the Knowledge Base Articles
+- `sn_queries` (list, mandatory) - list of queries to retrieve the Knowledge base articles
+  - `sn_table_name` (str, mandatory) - name of the ServiceNow database table for the query
+  - `sn_query` (str, mandatory) - query string
 - `sn_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
-- `sn_download_dir` (str, optional, default = `/data/knowledgebase`)
+- `sn_download_dir` (str, optional, default = `/data/knowledgebase`) - the directory in the file system where attachments from ServciceNow should be stored for further processing
+- `sn_skip_existing_downloads` (bool, optional, default = True) - whether or not attachments that have been downloaded before should be reused
 
 OpenText Media management specific settings (fields):
 
-- `otmm_username` (str, optional, default = "")
-- `otmm_password` (str, optional, default = "")
-- `otmm_client_id` (str, optional, default = None)
-- `otmm_client_secret` (str, optional, default = None)
-- `otmm_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
-- `otmm_download_dir` (str, optional, default = `/data/mediaassets`)
-- `otmm_business_unit_exclusions` (list, optional, default = `[]`)
-- `otmm_product_exclusions` (list, optional, default = `[]`)
+- `otmm_username` (str, optional, default = "") - name of the user for the asset retrieval
+- `otmm_password` (str, optional, default = "") - password of the given user
+- `otmm_client_id` (str, optional, default = None) - client ID for authentication
+- `otmm_client_secret` (str, optional, default = None) - client secret for authentication
+- `otmm_thread_number` (int, optional, default = BULK_THREAD_NUMBER) - number of parallel running threads
+- `otmm_download_dir` (str, optional, default = `/data/mediaassets`) - directory in the customizer pod to temporarily store the asset files
+- `otmm_business_unit_exclusions` (list, optional, default = `[]`) - black list for Business Units to exclude
+- `otmm_business_unit_inclusions` (list, optional, default = `[]`) - white list for Business Units to include
+- `otmm_product_exclusions` (list, optional, default = `[]`) - black list of products to exclude
+- `otmm_product_inclusions` (list, optional, default = `[]`) - white list of products to include
 
-This is an example for bulkDatasources definitions:
+OpenText Product Hierarchy Tracker (PHT) specific settings (fields):
+
+- `pht_base_url` (str, mandatory) - PHT base URL
+- `pht_username` (str, optional, default = "") - name of the user for the data retrieval
+- `pht_password` (str, optional, default = "") - password of the given user
+- `pht_business_unit_exclusions` (list, optional, default = `[]`) - black list for Business Units to exclude
+- `pht_business_unit_inclusions` (list, optional, default = `[]`) - white list for Business Units to include
+- `pht_product_exclusions` (list, optional, default = `[]`) - black list of products to exclude
+- `pht_product_inclusions` (list, optional, default = `[]`) - white list of products to include
+- `pht_product_category_exclusions` (list, optional, default = [])
+- `pht_product_category_inclusions` (list, optional, default = [])
+- `pht_product_status_exclusions` (list, optional, default = [])
+- `pht_product_status_inclusions` (list, optional, default = [])
+- `pht_product_attributes` (list, optional, default = []) - a list of attribute names that should be extracted and added as columns to the data frame
+
+Filesystem specific settings (fields):
+
+- `root_folders` (list, mandatory) - a list of pathes to root folders that are traversed to load the data frame. The dataframe will have the following columns: `filename`, `size`, `path`, `relative_path`, `download_dir` and columns for each path part that are numbered like this: `level <n>`.
+
+This is an example for a bulkDatasources definition:
 
 === "Terraform / HCL"
 
@@ -1880,7 +2012,7 @@ This is an example for bulkDatasources definitions:
 
 #### bulkWorkspaces
 
-To bulk load workspaces you can define a payload section `bulkWorkspaces` which can produce a large number of workspaces based on placeholders that are filled with data from a defined datasource. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `data_source` that specifies the name of a data source in the `bulkDatasources` payload section.
+To bulk load workspaces you can define a payload section `bulkWorkspaces` which can produce a large number of workspaces based on placeholders that are filled with data from a defined data source. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `data_source` that specifies the name of a data source in the `bulkDatasources` payload section.
 
 These are the settings in a single bulk workspace list element:
 
@@ -1890,40 +2022,46 @@ These are the settings in a single bulk workspace list element:
 - `force_reload` (bool, optional, default = `true`) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
 - `copy_data_source` (bool, optional, default = `false`) - to avoid sideeffects for repeative usage of the data source
 - `operations` (list, optional, default = `["create"]`) - list of operations to apply for workspaces: `create`, `update`, `delete`, `recreate` (any combination of these). "recreate" = delete existing + create new
+- `update_operations` (list, optional, default = `["name", "description", "categories", "nickname"]`) - list of update operations to apply for workspaces if operation `update` is selected.
 - `explosions` (list, optional, default = `[]`) - each list item is a dict with these keys:
-    - `explode_fields` (str | list, mandatory)
-    - `flatten_fields` (list, optional, default = `[]`)
-    - `split_string_to_list` (bool, optional, default = `false`)
-    - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
+  - `explode_fields` (str | list, mandatory)
+  - `flatten_fields` (list, optional, default = `[]`)
+  - `split_string_to_list` (bool, optional, default = `false`)
+  - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
 - `unique` (list, optional, default = `[]`) - list of fields (columns) that should be unique -> deduplication
 - `sort` (list, optional, default = `[]`) - list of fields to sort the data frame by
-- `name` (str, mandatory)
-- `description` (str, optional, default = "")
+- `name` (str, mandatory) - name of the workspace - can include placeholder surrounded by {...}
+- `name_alt` (str, mandatory) - alternative name of the workspace (used if `name` is evaluated to empty string)
+- `description` (str, optional, default = "") - can include placeholder surrounded by {...}
+- `description_alt` (str, mandatory) - alternative name of the workspace (used if `description` is evaluated to empty string)
 - `template_name` (str, optional, default = take first template)
 - `categories` (list, optional, default = `[]`) - each list item is a dictionary that may have these keys:
-    - `name` (str, mandatory)
-    - `set` (str, default = "")
-    - `row` (int, optional)
-    - `attribute` (str, mandatory)
-    - `value` (str, optional if value_field is specified, default = None)
-    - `value_field` (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-    - `value_type` (str, optional, default = `string`) - possible values: `string`, `date`, `list` and `table`. If `list`is selected, then string with delimiter-separated values will be converted to a list.
-    - `attribute_mapping` (dict, optional, default = None) - only relevant for value_type = "table" - defines a mapping from the data frame column names to the category attribute names
-    - `list_splitter` (str, optional, default = `;,`) - only relevant for value_type `list`. Defines the delimiter for splitting strings in a list.
-    - `lookup_data_source` (str, optional, default = None)
-    - `lookup_data_failure_drop` (bool, optional, default = false) - should we clear / drop values that cannot be looked up?
-    - `is_key` (bool, optional, default = false) - find workspace if name matching does not work (e.g. workspace name has changed in the data source since last run). For this we expect a `key` value to be defined in the bulk workspace and one of the category / attribute item to be marked with `is_key = true`.
+  - `name` (str, mandatory)
+  - `set` (str, default = "")
+  - `row` (int, optional)
+  - `attribute` (str, mandatory)
+  - `value` (str, optional if value_field is specified, default = None)
+  - `value_field` (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
+  - `value_type` (str, optional, default = `string`) - possible values: `string`, `date`, `list` and `table`. If `list`is selected, then string with delimiter-separated values will be converted to a list.
+  - `attribute_mapping` (dict, optional, default = None) - only relevant for value_type = "table" - defines a mapping from the data frame column names to the category attribute names
+  - `value_mapping` (dict, optional, default = None) - dictionary keys are the original values and dictionary values are the mapped values. This makes most sense for values with a limited / fixed domain of possible values
+  - `list_splitter` (str, optional, default = `;,`) - only relevant for value_type `list`. Defines the delimiter for splitting strings in a list.
+  - `lookup_data_source` (str, optional, default = None)
+  - `lookup_data_failure_drop` (bool, optional, default = false) - should we clear / drop values that cannot be looked up?
+  - `is_key` (bool, optional, default = false) - find workspace if name matching does not work (e.g. workspace name has changed in the data source since last run). For this we expect a `key` value to be defined in the bulk workspace and one of the category / attribute item to be marked with `is_key = true`.
 - `external_create_date` (str, optional, default = "")
 - `external_modify_date` (str, optional, default = "")
 - `key` (str, optional, default = None) - lookup value for workspaces other then the name. Works in combination with `is_key` in the `categories` payload.
 - `replacements` (dict, optional, default = `{}`) - Each dictionary item has the field name as the dictionary key and a list of regular expressions as dictionary value
- - `nickname` (str, optional, default = None)
- - `conditions` (list, optional, default = `[]`) - each list item is a dictionary that may have these keys:
-    - `field` (str, mandatory)
-    - `value` (str | bool | list, optional, default = None)
-  - `aviator_metadata` (bool, optional, default = `false`) - Send request to feme to embedd the metadata for the workspace. Action will be performed after updates and creations.
+- `nickname` (str, optional, default = None) - nickname of the workspace - can include placeholder surrounded by {...}
+- `nickname_alt` (str, optional, default = None) - alternative nickname of the workspace (used if `nickname` is evaluated to empty string)
+- `conditions` (list, optional, default = `[]`) - each list item is a dictionary that may have these keys:
+  - `field` (str, mandatory)
+  - `value` (str | bool | list, optional, default = None) - if no value is specified only the existence of the field is tested
+  - `equal` (bool, optional): if True test for equality (this is the default), if False test for non-equality
+- `aviator_metadata` (bool, optional, default = `false`) - Send request to FEME to embedd the metadata for the workspace. Action will be performed after updates and creations.
 
-This is an example for bulkWorkspaces definitions:
+This is an example for a bulkWorkspaces definitions:
 
 === "Terraform / HCL"
 
@@ -2026,7 +2164,7 @@ This is an example for bulkWorkspaces definitions:
 
 #### bulkWorkspaceRelationships
 
-To bulk load workspace relationships you can define a payload section `bulkWorkspaceRelationships` which can produce a large number of workspace relationships based on placeholders that are filled with data from a defined datasource.
+To bulk load workspace relationships you can define a payload section `bulkWorkspaceRelationships` which can produce a large number of workspace relationships based on placeholders that are filled with data from a defined data source.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`).
 
@@ -2041,28 +2179,31 @@ These are all the settings in a single bulk workspace relationship list element:
 - `from_workspace_data_source` (str, optional, default = None)
 - `from_sub_workspace_name` (str, optional, default = None) - if the related workspace is a sub-workspace
 - `from_sub_workspace_path` (list, optional, default = None) - the folder path under the main workspace where the sub-workspaces are located
+- `from_workspace_lookup_error` (bool, optional, default = True) - whether or not an error should be logged if a relationship endpoint cannot be looked up
 - `to_workspace` (str, mandatory) - nickname of the workspace on the _to_ side.
 - `to_workspace_type` (str, optional, default = None) - type name of the workspace on the _from_ side.
 - `to_workspace_name` (str, optional, default = None) - name of the workspace on the _from_ side.
 - `to_workspace_data_source` (str, optional, default = None)
 - `to_sub_workspace_name` (str, optional, default = None) - if the related workspace is a sub-workspace
 - `to_sub_workspace_path` (list, optional, default = None) - the folder path under the main workspace where the sub-workspaces are located
+- `to_workspace_lookup_error` (bool, optional, default = True) - whether or not an error should be logged if a relationship endpoint cannot be looked up
 - `type` (str, optional, default = `child`) - type of the relationship (defines if the _from_ workspace is the parent or the child)
 - `data_source` (str, mandatory)
 - `force_reload` (bool, optional, default = true) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
 - `copy_data_source` (bool, optional, default = false) - to avoid sideeffects for repeative usage of the data source
 - `explosions` (list, optional, default = `[]`) - each list item is a dict with these keys:
-    - `explode_fields` (str | list, mandatory)
-    - `flatten_fields` (list, optional, default = `[]`)
-    - `split_string_to_list` (bool, optional, default = false)
-    - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
+  - `explode_fields` (str | list, mandatory)
+  - `flatten_fields` (list, optional, default = `[]`)
+  - `split_string_to_list` (bool, optional, default = `false`)
+  - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
 - `unique` (list, optional, default = [])
 - `sort` (list, optional, default = [])
 - `thread_number` (int, optional, default = BULK_THREAD_NUMBER)
 - `replacements` (list, optional, default = None)
 - `conditions` (list, optional, default = None)
-    - `field` (str, mandatory)
-    - `value` (str | bool | list, optional, default = None)
+  - `field` (str, mandatory)
+  - `value` (str | bool | list, optional, default = None)
+  - `equal` (bool, optional): if `true` then test for equality (this is the default), if `false` test for non-equality
 
 This is an example for bulkWorkspaceRelationships definitions:
 
@@ -2123,7 +2264,7 @@ This is an example for bulkWorkspaceRelationships definitions:
 
 #### bulkDocuments
 
-To bulk load documents you can define a payload section `bulkDocuments` which can upload a large number of documents based on placeholders that are filled with data from a defined datasource. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a bulk document needs a `data_source` that specifies the name of a data source in the `bulkDatasources` payload section.
+To bulk load documents you can define a payload section `bulkDocuments` which can upload a large number of documents based on placeholders that are filled with data from a defined data source. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a bulk document needs a `data_source` that specifies the name of a data source in the `bulkDatasources` payload section.
 
 These are all the settings in a single bulk document list element:
 
@@ -2132,17 +2273,20 @@ These are all the settings in a single bulk document list element:
 - `force_reload` (bool, optional, default = true) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
 - `copy_data_source` (bool, optional, default = false) - to avoid sideeffects for repeative usage of the data source
 - `explosions` (list of dicts, optional, default = [])
-    - `explode_fields` (str | list, mandatory)
-    - `flatten_fields` (list, optional, default = [])
-    - `split_string_to_list` (bool, optional, default = false)
-    - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
+  - `explode_fields` (str | list, mandatory)
+  - `flatten_fields` (list, optional, default = [])
+  - `split_string_to_list` (bool, optional, default = false)
+  - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
 - `unique` (list, optional, default = []) - list of fields (columns) that should be unique -> deduplication
 - `sort` (list, optional, default = []) - list of fields to sort the data frame by
 - `operations` (list, optional, default = ["create"]) - possible values: `create`, `update`, `delete`, `recreate`
+- `update_operations` (list, optional, default = `["name", "description", "categories", "version"]`) - list of update operations to apply for documents if `update` is included in operations (see above).
 - `name` (str, mandatory) - can include placeholder surrounded by {...}
 - `name_alt` (str, optional, default = None) - can include placeholder surrounded by {...}
+- `name_regex` (str, optional, default = r"") - regex replacement for document names. The pattern and replacement are separated by pipe character |
 - `description` (str, optional, default = None) - can include placeholder surrounded by {...}
 - `download_name` (str, optional, default = name) - - can include placeholder surrounded by {...}
+- `download_name_wildcards` (bool, optional, default = False) - defines if the download name includes wildcards, e.g. "*.pdf"
 - `nickname` (str, optional, default = None) - can include placeholder surrounded by {...}
 - `download_url` (str, optional, default = None)
 - `download_url_alt` (str, optional, default = None)
@@ -2153,18 +2297,18 @@ These are all the settings in a single bulk document list element:
 - `mime_type` (str, optional, default = `application/pdf`)
 - `mime_type_alt` (str, optional, default = `text/html`)
 - `categories` (list, optional, default = `[]`)
-    - `name` (str, mandatory)
-    - `set` (str, default = "")
-    - `row` (int, optional)
-    - `attribute` (str, mandatory)
-    - `value` (str, optional if value_field is specified, default = None)
-    - `value_field` (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-    - `value_type` (str, optional, default = `string`) - possible values: `string`, `date`, `list`, and `table`. If list then string with comma-separated values will be converted to a list.
-    - `attribute_mapping` (dict, optional, default = None) - only relevant for value type `table` - defines a mapping from the data frame column names to the category attribute names
-    - `list_splitter` (str, optional, default = `;,`) - only relevant for value type `list`. Defines the delimiter for splitting strings in a list.
-    - `lookup_data_source` (str, optional, default = None)
-    - `lookup_data_failure_drop` (bool, optional, default = false) - should we clear / drop values that cannot be looked up?
-    - `is_key` (bool, optional, default = false) - find document is old name. For this we expect a `key` value to be defined for the bulk document and one of the category / attribute item to be marked with `is_key = true`.
+  - `name` (str, mandatory)
+  - `set` (str, default = "")
+  - `row` (int, optional)
+  - `attribute` (str, mandatory)
+  - `value` (str, optional if value_field is specified, default = None)
+  - `value_field` (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
+  - `value_type` (str, optional, default = `string`) - possible values: `string`, `date`, `list`, and `table`. If list then string with comma-separated values will be converted to a list.
+  - `attribute_mapping` (dict, optional, default = None) - only relevant for value type `table` - defines a mapping from the data frame column names to the category attribute names
+  - `list_splitter` (str, optional, default = `;,`) - only relevant for value type `list`. Defines the delimiter for splitting strings in a list.
+  - `lookup_data_source` (str, optional, default = None)
+  - `lookup_data_failure_drop` (bool, optional, default = false) - should we clear / drop values that cannot be looked up?
+  - `is_key` (bool, optional, default = false) - find document is old name. For this we expect a `key` value to be defined for the bulk document and one of the category / attribute item to be marked with `is_key = true`.
 - `thread_number` (int, optional, default = BULK_THREAD_NUMBER)
 - `external_create_date` (str, optional, default = "")
 - `external_modify_date` (str, optional, default = "")
@@ -2173,23 +2317,24 @@ These are all the settings in a single bulk document list element:
 - `download_retries` (int, optional, default = 2)
 - `replacements` (list, optional, default = `[]`)
 - `conditions` (list, optional, default = `[]`) - all conditions must evaluate to true
+  - `field` (str, mandatory)
+  - `value` (str | bool | list, optional, default = None)
+  - `equal` (bool, optional): if `true` test for equality (this is the default), if `false` test for non-equality
+- `workspaces` (list, optional, default = `[]`) - the workspaces the document should be uploaded to
+  - `workspace_name` (str, mandatory)
+  - `conditions` (list, optional, default = `[]`)
     - `field` (str, mandatory)
     - `value` (str | bool | list, optional, default = None)
-- `workspaces` (list, optional, default = `[]`) - the workspaces the document should be uploaded to
-    - `workspace_name` (str, mandatory)
-    - `conditions` (list, optional, default = `[]`)
-        - `field` (str, mandatory)
-        - `value` (str | bool | list, optional, default = None)
-    - `workspace_type` (str, mandatory)
-    - `datasource` (str, optional, default = None)
-    - `workspace_folder` (str, optional, default = "")
-    - `workspace_path` (list, optional, default = `[]`)
-    - `sub_workspace_type` (str, optional, default = "")
-    - `sub_workspace_name` (str, optional, default = "")
-    - `sub_workspace_template` (str, optional, default = "")
-    - `sub_workspace_folder` (str, optional, default = "")
-    - `sub_workspace_path` (list, optional, default = `[]`)
-
+    - `equal` (bool, optional): if `true` test for equality (this is the default), if `false` test for non-equality
+  - `workspace_type` (str, mandatory)
+  - `data_source` (str, optional, default = None)
+  - `workspace_folder` (str, optional, default = "")
+  - `workspace_path` (list, optional, default = `[]`)
+  - `sub_workspace_type` (str, optional, default = "")
+  - `sub_workspace_name` (str, optional, default = "")
+  - `sub_workspace_template` (str, optional, default = "")
+  - `sub_workspace_folder` (str, optional, default = "")
+  - `sub_workspace_path` (list, optional, default = `[]`)
 
 This is an example for bulkWorkspaceRelationships definitions:
 
@@ -2198,17 +2343,147 @@ This is an example for bulkWorkspaceRelationships definitions:
     ```terraform
     bulkDocuments = [
       {
-        data_source        = "ntsb"
-        download_url       = "https://data.ntsb.gov/carol-repgen/api/Aviation/ReportMain/GenerateNewestReport/{cm_mkey}/pdf"
-        download_dir       = "/data/ntsb/incident-reports/"
-        name               = "{cm_ntsbNum}"
-        file_extension     = "pdf"
-        mime_type          = "application/pdf"
-        download_name      = "{cm_mkey}"
-        delete_download    = false
-        download_retries   = 2
-        download_wait_time = 5 # wait to before retry in seconds
-        conditions         = [
+        data_source             = "ntsb"
+        download_url            = "https://data.ntsb.gov/carol-repgen/api/Aviation/ReportMain/GenerateNewestReport/{cm_mkey}/pdf"
+        download_dir            = "/data/ntsb/incident-reports/"
+        name                    = "{cm_ntsbNum}"
+        file_extension          = "pdf"
+        mime_type               = "application/pdf"
+        download_name           = "{cm_mkey}"
+        download_name_wildcards = false
+        delete_download         = false
+        download_retries        = 2
+        download_wait_time      = 5 # wait to before retry in seconds
+        conditions              = [
+          {
+            field = "{cm_mostRecentReportType}" # just check there's a field and any value
+          }
+        ]   
+        unique = ["cm_ntsbNum"] # make sure we don't have duplicates created by exploded bulkDataSource
+        sort = ["cm_ntsbNum"] # sorting may help to avoid name clashes between threads
+        replacements = {} # no "local" replacements
+        workspaces   = [
+          {
+            workspace_name   = "{cm_ntsbNum}"
+            workspace_type   = "Incident"
+            workspace_folder = ""
+          },
+          {
+            workspace_name   = "{airportName} ({airportId})"
+            workspace_type   = "Location"
+            workspace_folder = "{cm_vehicles.operatorName}"
+            conditions       = [
+              {
+                field = "{airportName}"
+              },
+              {
+                field = "{airportId}"
+              }
+            ]
+          },
+          {
+            workspace_name   = "{cm_vehicles.make}"
+            workspace_type   = "Manufacturer"
+            workspace_folder = "{cm_vehicles.model}"
+            conditions       = [
+              {
+                field = "{cm_vehicles.make}"
+              }
+            ]
+          },
+          {
+            workspace_name   = "{cm_vehicles.operatorName}"
+            workspace_type   = "Operator"
+            conditions       = [
+              {
+                field = "{cm_vehicles.operatorName}"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+
+    ```
+
+#### bulkItems
+
+To bulk create items such as folders, shortcuts, or URL items, you can define a payload section `bulkItems` which can create a large number of items based on placeholders that are filled with data from a defined data source. Each `bulkItems` list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a bulk item needs a `data_source` that specifies the name of a data source in the `bulkDatasources` payload section.
+
+These are all the settings in a single bulk document list element:
+
+- `enabled` (bool, optional, default = true)
+- `data_source` (str, mandatory)
+- `force_reload` (bool, optional, default = true) - enforce a reload of the data source, e.g. useful if data source has been modified before by column operations or explosions
+- `copy_data_source` (bool, optional, default = false) - to avoid side-effects for repeative usage of the data source
+- `explosions` (list of dicts, optional, default = [])
+  - `explode_fields` (str | list, mandatory)
+  - `flatten_fields` (list, optional, default = [])
+  - `split_string_to_list` (bool, optional, default = false)
+  - `list_splitter` (str, optional, default = `;,`) - defines the delimiters for splitting strings in a list.
+- `unique` (list, optional, default = []) - list of fields (columns) that should be unique -> deduplication
+- `sort` (list, optional, default = []) - list of fields to sort the data frame by
+- `operations` (list, optional, default = `["create"]`) - possible values: `create`, `update`, `delete`, `recreate`
+- `update_operations` (list, optional, default = `["name", "description", "categories", "url"]`) - list of update operations to apply for workspaces if `update` is included in operations (see above).
+- `name` (str, mandatory) - can include placeholder surrounded by {...}
+- `name_alt` (str, optional, default = None) - can include placeholder surrounded by {...}
+- `name_regex` (str, optional, default = r"") - regex replacement for document names. The pattern and replacement are separated by pipe character |
+- `description` (str, optional, default = None) - can include placeholder surrounded by {...}
+- `nickname` (str, optional, default = None) - can include placeholder surrounded by {...}
+- `categories` (list, optional, default = `[]`)
+  - `name` (str, mandatory)
+  - `set` (str, default = "")
+  - `row` (int, optional)
+  - `attribute` (str, mandatory)
+  - `value` (str, optional if value_field is specified, default = None)
+  - `value_field` (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
+  - `value_type` (str, optional, default = `string`) - possible values: `string`, `date`, `list`, and `table`. If list then string with comma-separated values will be converted to a list.
+  - `attribute_mapping` (dict, optional, default = None) - only relevant for value type `table` - defines a mapping from the data frame column names to the category attribute names
+  - `list_splitter` (str, optional, default = `;,`) - only relevant for value type `list`. Defines the delimiter for splitting strings in a list.
+  - `lookup_data_source` (str, optional, default = None)
+  - `lookup_data_failure_drop` (bool, optional, default = false) - should we clear / drop values that cannot be looked up?
+  - `is_key` (bool, optional, default = false) - find document is old name. For this we expect a `key` value to be defined for the bulk document and one of the category / attribute item to be marked with `is_key = true`.
+- `thread_number` (int, optional, default = BULK_THREAD_NUMBER)
+- `external_create_date` (str, optional, default = "")
+- `external_modify_date` (str, optional, default = "")
+- `key` (str, optional, default = None) - lookup key for documents other then the name
+- `download_wait_time` (int, optional, default = 30)
+- `download_retries` (int, optional, default = 2)
+- `replacements` (list, optional, default = `[]`)
+- `conditions` (list, optional, default = `[]`) - all conditions must evaluate to true
+  - `field` (str, mandatory)
+  - `value` (str | bool | list, optional, default = None)
+  - `equal` (bool, optional): if `true` test for equality (this is the default), if `false` test for non-equality
+- `workspaces` (list, optional, default = `[]`) - the workspaces the document should be uploaded to
+  - `workspace_name` (str, mandatory)
+  - `conditions` (list, optional, default = `[]`)
+    - `field` (str, mandatory)
+    - `value` (str | bool | list, optional, default = None)
+    - `equal` (bool, optional): if `true` test for equality (this is the default), if `false` test for non-equality
+  - `workspace_type` (str, mandatory)
+  - `data_source` (str, optional, default = None)
+  - `workspace_folder` (str, optional, default = "")
+  - `workspace_path` (list, optional, default = `[]`)
+  - `sub_workspace_type` (str, optional, default = "")
+  - `sub_workspace_name` (str, optional, default = "")
+  - `sub_workspace_template` (str, optional, default = "")
+  - `sub_workspace_folder` (str, optional, default = "")
+  - `sub_workspace_path` (list, optional, default = `[]`)
+
+This is an example for bulkItems definitions:
+
+=== "Terraform / HCL"
+
+    ```terraform
+    bulkItems = [
+      {
+        data_source       = "ntsb"
+        name              = "{cm_ntsbNum}"
+        type              = 0  # the type of the item. 0 = Folder, 1 = Shortcut, 140 = URL
+        url               = "" # the actual URL for an url item. Empty / irrelevant if type is not 140 = URL
+        original_nickname = "" # the nickname of the original item
+        original_path     = [] # the top-down folder path (each folder or workspace name is a list item)
+        conditions        = [
           {
             field = "{cm_mostRecentReportType}" # just check there's a field and any value
           }
@@ -2295,6 +2570,35 @@ This includes calling SAP Remote Function Calls (RFC), executing commands in the
       enabled: false
       interactive: false
       pod_name: otcs-admin-0
+
+    ```
+
+#### execCommands
+
+`execCommands` is used to execute a command. `command` is a list of the command terms and parameters. The first element is typically the Linux shell that is used for executing the command and the second parameter is typically `-c`.
+
+=== "Terraform / HCL"
+
+    ```terraform
+    execCommands = [
+        {
+          enabled     = false
+          description = "Test"
+          command     = ["/bin/sh", "-c", "touch /tmp/python_was_here"]
+        }
+    ]
+    ```
+
+=== "YAML"
+
+    ```yaml
+    execCommands:
+    - command:
+      - /bin/sh
+      - -c
+      - touch /tmp/python_was_here
+      description: Test
+      enabled: false
 
     ```
 
@@ -2413,13 +2717,13 @@ These are all the settings in a single repository list element:
 - `enabled`: true/false
 - `name`: Name of the Repository needs to be unique
 - `type`: AVTS repository type:
-    - Extended ECM
-    - Documentum
+  - Extended ECM
+  - Documentum
 
 ##### Extended ECM specific values
 
-- `otcs_url`: URL of Content Server (OTCS) https://otcs.domain.tld/cs/cs
-- `otcs_api_url`: URL of Content Server (OTCS) https://otcs.domain.tld/cs/cs
+- `otcs_url`: URL of Content Server (OTCS), e.g. `https://otcs.domain.tld/cs/cs`
+- `otcs_api_url`: URL of Content Server (OTCS), e.g. `https://otcs.domain.tld/cs/cs`
 - `username`: Username for Content Server crawling
 - `password`: Passoword for the crawling user
 - `node_id`: Node ID of the Content Server root folder

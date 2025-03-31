@@ -1,35 +1,20 @@
-"""
-AVTS stands for Aviator Search and is an OpenText offering for LLMM-based search across multiple repositories
-
-Class: AVTS
-Methods:
-__init__: class initializer
-request_header: Returns the request header used for Application calls.
-do_request: Call an Aviator Search REST API in a safe way
-parse_request_response: Converts the request response (JSon) to a Python list in a safe way
-authenticate: Authenticate at Search Aviator via oAuth authentication
-repo_create_extended_ecm: Create a new repository to crawl in Aviator Search
-start_crawling: Start crawling of a repository
-stop_crawling: Stop the crawling of a repository
-get_repo_list: Get a list of all repositories
-get_repo_by_name: Get a repository by name
-"""
+"""AVTS stands for Aviator Search and is an OpenText offering for LLMM-based search across multiple repositories."""
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
+import base64
 import json
 import logging
-import time
 import os
-import base64
+import time
 
 import requests
 
-logger = logging.getLogger("pyxecm.customizer.avts")
+default_logger = logging.getLogger("pyxecm.customizer.avts")
 
 REQUEST_HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
@@ -38,8 +23,10 @@ REQUEST_RETRY_DELAY = 20
 REQUEST_MAX_RETRIES = 2
 
 
-class AVTS(object):
-    """Used to configure and interact with Aviator Search"""
+class AVTS:
+    """Configure and interact with Aviator Search REST API."""
+
+    logger: logging.Logger = default_logger
 
     _config: dict
     _session = None
@@ -52,17 +39,32 @@ class AVTS(object):
         base_url: str,
         username: str,
         password: str,
-    ):
-        """Initialize the AVTS object
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the AVTS object.
 
         Args:
-            otds_url (str): URL of the OTDS Server used by Aviator Search
-            client_id (str): Client ID for the Aviator Search oAuth client
-            client_secret (str): Client Secret for the Aviator Search oAuth client
-            base_url (str): Aviator Search base URL
-            username (str): User with administrative permissions in Aviator Search
-            password (str): Password of the user with administrative permissions in Aviator Search
+            otds_url (str):
+                The URL of the OTDS Server used by Aviator Search.
+            client_id (str):
+                The client ID for the Aviator Search oAuth client.
+            client_secret (str):
+                The client secret for the Aviator Search oAuth client.
+            base_url (str):
+                The Aviator Search base URL.
+            username (str):
+                User with administrative permissions in Aviator Search.
+            password (str):
+                Password of the user with administrative permissions in Aviator Search.
+            logger (logging.Logger, optional):
+                The logging object to use for all log messages. Defaults to default_logger.
+
         """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("avts")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         avts_config = {}
 
@@ -75,9 +77,7 @@ class AVTS(object):
         avts_config["password"] = password
 
         avts_config["tokenUrl"] = avts_config["otdsUrl"] + "/otdsws/oauth2/token"
-        avts_config["repoUrl"] = (
-            avts_config["baseUrl"] + "/aviator-gateway/avts-api/admin/v1/repo"
-        )
+        avts_config["repoUrl"] = avts_config["baseUrl"] + "/aviator-gateway/avts-api/admin/v1/repo"
 
         self._config = avts_config
         self._accesstoken = None
@@ -87,23 +87,34 @@ class AVTS(object):
     # end method definition
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
             dict: Configuration dictionary
+
         """
+
         return self._config
 
     # end method definition
 
     def request_header(self, content_type: str = "") -> dict:
-        """Returns the request header used for Application calls.
-           Consists of Bearer access token and Content Type
+        """Return the request header used for Application calls.
+
+        Consists of Bearer access token and Content Type
 
         Args:
-            content_type (str, optional): custom content type for the request
-        Return:
-            dict: request header values
+            content_type (str, optional):
+                Custom content type for the request.
+                Typical values:
+                * application/json - Used for sending JSON-encoded data
+                * application/x-www-form-urlencoded - The default for HTML forms.
+                  Data is sent as key-value pairs in the body of the request, similar to query parameters.
+                * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
+
+        Returns:
+            dict: The request header values.
+
         """
 
         request_header = {}
@@ -135,24 +146,40 @@ class AVTS(object):
         max_retries: int = REQUEST_MAX_RETRIES,
         retry_forever: bool = False,
     ) -> dict | None:
-        """Call an Aviator Search REST API in a safe way
+        """Call an Aviator Search REST API in a safe way.
 
         Args:
-            url (str): URL to send the request to.
-            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
-            headers (dict | None, optional): Request Headers. Defaults to None.
-            json (dict | None, optional): Request payload. Defaults to None.
-            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
-                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
-            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
-                                         If False, then only a warning is logged. Defaults to True.
-            failure_message (str, optional): Specific error message. Defaults to "".
-            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
-            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
+            url (str):
+                URL to send the request to.
+            method (str, optional):
+                HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional):
+                Request headers. Defaults to None.
+            data (dict | None, optional):
+                Request payload. Defaults to None.
+            json_data (dict | None, optional):
+                Request payload for the JSON parameter. Defaults to None.
+            files (dict | None, optional):
+                Dictionary of {"name": file-tuple} for multipart encoding upload.
+                The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple
+                ("filename", fileobj, "content_type").
+            timeout (int | None, optional):
+                Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            failure_message (str, optional):
+                Specific error message. Defaults to "".
+            success_message (str, optional):
+                Specific success message. Defaults to "".
+            max_retries (int, optional):
+                Number of retries on connection errors. Defaults to REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional):
+                Whether to wait forever without timeout. Defaults to False.
 
         Returns:
             dict | None: Response of Aviator Search REST API or None in case of an error.
+
         """
 
         retries = 0
@@ -170,30 +197,27 @@ class AVTS(object):
 
                 if response.ok:
                     if success_message:
-                        logger.debug(success_message)
+                        self.logger.debug(success_message)
                     return self.parse_request_response(response)
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
-                    logger.debug("Session has expired - try to re-authenticate...")
+                    self.logger.debug("Session has expired - try to re-authenticate...")
                     self.authenticate()
                     retries += 1
                 else:
                     # Handle plain HTML responses to not pollute the logs
                     content_type = response.headers.get("content-type", None)
-                    if content_type == "text/html":
-                        response_text = "HTML content (see debug log)"
-                    else:
-                        response_text = response.text
+                    response_text = "HTML content (see debug log)" if content_type == "text/html" else response.text
 
                     if show_error:
-                        logger.error(
+                        self.logger.error(
                             "%s; status -> %s; error -> %s",
                             failure_message,
                             response.status_code,
                             response_text,
                         )
                     else:
-                        logger.warning(
+                        self.logger.warning(
                             "%s; status -> %s; warning -> %s",
                             failure_message,
                             response.status_code,
@@ -201,7 +225,7 @@ class AVTS(object):
                         )
 
                     if content_type == "text/html":
-                        logger.debug(
+                        self.logger.debug(
                             "%s; status -> %s; warning -> %s",
                             failure_message,
                             response.status_code,
@@ -211,39 +235,39 @@ class AVTS(object):
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Request timed out. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; timeout error",
+                    self.logger.error(
+                        "%s; timeout error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                     else:
                         return None
             except requests.exceptions.ConnectionError:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Connection error. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; connection error",
+                    self.logger.error(
+                        "%s; connection error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                         time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                     else:
@@ -257,43 +281,47 @@ class AVTS(object):
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> list | None:
-        """Converts the request response (JSon) to a Python list in a safe way
-           that also handles exceptions. It first tries to load the response.text
-           via json.loads() that produces a dict output. Only if response.text is
-           not set or is empty it just converts the response_object to a dict using
-           the vars() built-in method.
+        """Convert the request response (JSon) to a Python list in a safe way that also handles exceptions.
+
+        It first tries to load the response.text
+        via json.loads() that produces a dict output. Only if response.text is
+        not set or is empty it just converts the response_object to a dict using
+        the vars() built-in method.
 
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str, optional): use a more specific error message
-                                                      in case of an error
-            show_error (bool): True: write an error to the log file
-                               False: write a warning to the log file
+            response_object (object):
+                This is reponse object delivered by the request call.
+            additional_error_message (str, optional):
+                Use a more specific error message in case of an error.
+            show_error (bool, optional):
+                If True, write an error to the log file.
+                If False, write a warning to the log file.
+
         Returns:
-            list: response information or None in case of an error
+            list | None:
+                The response information or None in case of an error.
+
         """
 
         if not response_object:
             return None
 
         try:
-            if response_object.text:
-                list_object = json.loads(response_object.text)
-            else:
-                list_object = vars(response_object)
+            list_object = json.loads(response_object.text) if response_object.text else vars(response_object)
         except json.JSONDecodeError as exception:
             if additional_error_message:
                 message = "Cannot decode response as JSON. {}; error -> {}".format(
-                    additional_error_message, exception
+                    additional_error_message,
+                    exception,
                 )
             else:
                 message = "Cannot decode response as JSON; error -> {}".format(
-                    exception
+                    exception,
                 )
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.warning(message)
+                self.logger.warning(message)
             return None
         else:
             return list_object
@@ -301,7 +329,13 @@ class AVTS(object):
     # end method definition
 
     def authenticate(self) -> str | None:
-        """Authenticate at Search Aviator via oAuth authentication."""
+        """Authenticate at Aviator Search via OAuth.
+
+        Returns:
+            str | None:
+                The access token or None in case of an error.
+
+        """
 
         if not self._session:
             self._session = requests.Session()
@@ -319,6 +353,7 @@ class AVTS(object):
             "client_secret": self.config()["clientSecret"],
             "username": self.config()["username"],
             "password": self.config()["password"],
+            "scope": "otds:roles",
         }
 
         response = self.do_request(
@@ -327,7 +362,10 @@ class AVTS(object):
             headers=request_header,
             data=request_payload,
             timeout=None,
-            failure_message=f"Failed to authenticate to OTDS with username -> {self.config()['username']} and client_id -> {self.config()['clientId']}",
+            failure_message="Failed to authenticate to OTDS with username -> {} and client_id -> {}".format(
+                self.config()["username"],
+                self.config()["clientId"],
+            ),
         )
 
         if response is not None:
@@ -337,7 +375,7 @@ class AVTS(object):
 
     # end method definition
 
-    def repo_create_extended_ecm(
+    def create_extended_ecm_repo(
         self,
         name: str,
         username: str,
@@ -345,128 +383,223 @@ class AVTS(object):
         otcs_url: str,
         otcs_api_url: str,
         node_id: int,
-        version: str = "24.3.0",
     ) -> dict | None:
-        """Create a new repository to crawl in Aviator Search
+        """Create a new Extended ECM repository to crawl with Aviator Search.
 
         Args:
-            id (str): ID of the repository
-            name (str): socName of the repository
-            username (str): Username to use for crawling
-            password (str): Password of the user used for crawling
-            otcs_url (str): Base URL of Content Server e.g. https://otcs.base-url.tld/cs/cs
-            node_id (int): Root Node ID for crawling
+            name (str):
+                The name of the repository.
+            username (str):
+                Username to use for crawling.
+            password (str):
+                Password of the user used for crawling.
+            otcs_url (str):
+                Base URL of Content Server e.g. https://otcs.base-url.tld/cs/cs
+            otcs_api_url (str):
+                The REST API URL of Content Server.
+            node_id (int):
+                Root Node ID for crawling
+            version (str, optional):
+                TODO: The version number of ???
 
         Returns:
-            dict | None: Parsed response object from the API or None in case of an error
+            dict | None:
+                Parsed response object from the API or None in case of an error
+
         """
 
         payload = {
-            "id": "xECM",
-            "name": name,
-            "metadataFields": ["NODE"],
-            "socName": "xECM",
+            "authType": "Basic",
             "params": [
                 {
                     "id": "OpenTextApiUrl",
-                    "label": "xECM API URL",
+                    "label": "Service URL",
                     "ctlType": "text",
+                    "description": "OpenText Content Management API URL",
                     "required": True,
+                    "defaultValue": "localhost",
+                    "visible": True,
+                    "editable": False,
                     "value": otcs_api_url,
                 },
                 {
                     "id": "Username",
-                    "label": "xECM username",
+                    "label": "Username",
                     "ctlType": "text",
+                    "description": "OpenText Content Management Username",
                     "required": True,
+                    "defaultValue": "",
+                    "visible": True,
+                    "editable": True,
                     "value": username,
                 },
                 {
                     "id": "Password",
-                    "label": "xECM Password",
+                    "label": "Password",
                     "ctlType": "password",
+                    "description": "OpenText Content Management password",
                     "required": True,
+                    "defaultValue": "",
+                    "visible": True,
+                    "editable": True,
                     "value": password,
                 },
                 {
-                    "id": "RootNodeId",
-                    "label": "Root Node ID",
-                    "ctlType": "text",
-                    "required": True,
-                    "value": node_id,
-                },
-                {
                     "id": "sourceLink",
-                    "label": "Source Link( ex:https://<xECM host>/cs/cs/app/nodes/${NODE}/metadata )",
+                    "label": "Source Link",
                     "ctlType": "text",
+                    "description": "Example: <OpenText Content Management API URL>/app/nodes/${NODE}/metadata",
                     "required": False,
                     "defaultValue": otcs_url + "/app/nodes/${NODE}/metadata",
                     "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "RootNodeIds",
+                    "label": "Root Node ID's",
+                    "ctlType": "text",
+                    "description": "List of nodes to be crawled(comma seperated)",
+                    "required": True,
+                    "defaultValue": "",
+                    "visible": True,
+                    "editable": False,
+                    "value": "2000",
+                },
+                {
+                    "id": "proxy",
+                    "label": "Proxy Service",
+                    "ctlType": "boolean",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "false",
+                    "value": "false",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxyScheme",
+                    "label": "Proxy Scheme",
+                    "ctlType": "select",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "HTTP",
+                    "value": "HTTP",
+                    "visible": True,
+                    "acceptedValues": ["HTTP", "HTTPS", "SOCKS5"],
+                    "editable": True,
+                },
+                {
+                    "id": "proxyHost",
+                    "label": "Proxy Host",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxyPort",
+                    "label": "Proxy Port",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "ProxyConfigService",
+                    "label": "Proxy Config Service",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "",
+                    "visible": False,
+                    "editable": True,
                 },
             ],
-            "idolConfig": {
-                "view": {
-                    "name": "ViewOpenText",
-                    "type": "idol.nifi.connector.ViewOpenText",
-                    "group": "idol.nifi.connector",
-                    "artifact": "idol-nifi-connector-opentext",
-                    "version": version,
-                },
-                "crawler": {
+            "config": {
+                "type": "nifi",
+                "id": "xECM",
+                "crawlConfig": {
                     "name": "GetOpenText",
                     "type": "idol.nifi.connector.GetOpenText",
                     "group": "idol.nifi.connector",
                     "artifact": "idol-nifi-connector-opentext",
-                    "version": version,
+                    "version": "25.1.0-nifi1",
                 },
-                "omniGroup": {
+                "viewConfig": {
+                    "name": "ViewOpenText",
+                    "type": "idol.nifi.connector.ViewOpenText",
+                    "group": "idol.nifi.connector",
+                    "artifact": "idol-nifi-connector-opentext",
+                    "version": "25.1.0-nifi1",
+                },
+                "omniConfig": {
                     "name": "GetOpenTextGroups",
                     "type": "idol.nifi.connector.GetOpenTextGroups",
                     "group": "idol.nifi.connector",
                     "artifact": "idol-nifi-connector-opentext",
-                    "version": version,
+                    "version": "25.1.0-nifi1",
+                    "repoName": "ECM",
                 },
-            },
-            "idolProperties": {
-                "view": {
+                "crawlProps": {
                     "Password": "${Password}",
                     "Username": "${UserName}",
-                    "OpenTextApiUrl": "${OpenTextApiUrl}",
-                },
-                "crawler": {
-                    "Password": "${Password}",
-                    "Username": "${UserName}",
-                    "RootNodeId": "${RootNodeId}",
                     "META:SOURCE": "OPENTEXT",
+                    "RootNodeIds": "${RootNodeIds}",
                     "MappedSecurity": "true",
                     "OpenTextApiUrl": "${OpenTextApiUrl}",
+                    "ProxyConfigService": "${ProxyConfigService}",
                 },
-                "omniGroup": {
+                "viewProps": {
                     "Password": "${Password}",
                     "Username": "${UserName}",
                     "OpenTextApiUrl": "${OpenTextApiUrl}",
+                    "ProxyConfigService": "${ProxyConfigService}",
+                },
+                "omniProps": {
+                    "Password": "${Password}",
+                    "Username": "${UserName}",
+                    "OpenTextApiUrl": "${OpenTextApiUrl}",
+                    "ProxyConfigService": "${ProxyConfigService}",
                     "OpenTextApiPageSize": "10",
                 },
+                "metadataFields": ["NODE"],
             },
+            "name": name,
+            "id": "xECM",
+            "sourceId": "xECM",
         }
 
         request_header = self.request_header()
         request_url = self.config()["repoUrl"]
 
-        return self.do_request(
+        response = self.do_request(
             url=request_url,
             method="POST",
             json_data=payload,
             headers=request_header,
             timeout=None,
             failure_message="Failed to create repository -> '{}' ({})".format(
-                name, node_id
+                name,
+                node_id,
             ),
+            show_error=False,
         )
+
+        if response is None:
+            self.logger.error("Failed to create repository -> %s (%s)", name, node_id)
+
+        return response
 
     # end method definition
 
-    def repo_create_msteams(
+    def create_msteams_repo(
         self,
         name: str,
         client_id: str,
@@ -477,36 +610,44 @@ class AVTS(object):
         index_call_recordings: bool = True,
         index_message_replies: bool = True,
         index_user_chats: bool = True,
-        oauth2_site_name: str = "AVTS",
-        oauth2_sites_file: str = "",
-        version: str = "24.3.0",
     ) -> dict | None:
-        """Create a new repository to crawl in Aviator Search
+        """Create a new Microsoft Teams repository to crawl with Aviator Search.
 
         Args:
-            id (str): ID of the repository
-            name (str): socName of the repository
-            #todo: add more params
+            name (str):
+                The name of the repository.
+            client_id (str):
+                The M365 client ID.
+            tenant_id (str):
+                The M365 tenant ID.
+            certificate_file (str):
+                The path to the certificate file.
+            certificate_password (str):
+                The password for the certificate.
+            index_attachments (bool, optional):
+                Whether or not to index / crawl attachments.
+            index_call_recordings (bool, optional):
+                Whether or not to index / crawl meeting recordings.
+            index_message_replies (bool, optional):
+                Whether or not to index / crawl message replies.
+            index_user_chats (bool, optional):
+                Whether or not to index / crawl user chats.
+            version(str, optional): default 24.3.0
+
+            # TODO: add more params
 
         Returns:
-            dict | None: Parsed response object from the API or None in case of an error
+            dict | None:
+                Parsed response object from the API or None in case of an error
+
         """
 
-        if os.path.isfile(certificate_file):
-            # Open the file in binary mode
-            with open(certificate_file, "rb") as file:
-                # Read the content of the file
-                certificate_file_content = file.read()
-                # Convert the bytes to a base64 string
-                certificate_file_content_base64 = base64.b64encode(
-                    certificate_file_content
-                ).decode("utf-8")
+        certificate_file_content_base64 = self.get_certificate_file_content_base64(
+            certificate_file,
+        )
 
         payload = {
-            "id": "MSTeams",
-            "socName": "Microsoft Teams",
             "authType": "OAUTH",
-            "name": name,
             "params": [
                 {
                     "id": "OAuth2SiteName",
@@ -516,6 +657,7 @@ class AVTS(object):
                     "defaultValue": "AVTS",
                     "value": "AVTS",
                     "visible": False,
+                    "editable": True,
                 },
                 {
                     "id": "OAuth2SitesFile",
@@ -525,6 +667,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": "",
                     "visible": False,
+                    "editable": True,
                 },
                 {
                     "id": "sourceLink",
@@ -533,6 +676,7 @@ class AVTS(object):
                     "required": False,
                     "defaultValue": "",
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "clientID",
@@ -543,6 +687,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": client_id,
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "tenant",
@@ -553,6 +698,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": tenant_id,
                     "visible": True,
+                    "editable": False,
                 },
                 {
                     "id": "IndexAttachments",
@@ -561,8 +707,9 @@ class AVTS(object):
                     "description": "Specifies whether to index attachments",
                     "required": False,
                     "defaultValue": "true",
-                    "value": str(index_attachments).lower(),
-                    "visible": True,
+                    "value": "true",
+                    "visible": str(index_attachments).lower(),
+                    "editable": True,
                 },
                 {
                     "id": "IndexCallRecordings",
@@ -573,6 +720,7 @@ class AVTS(object):
                     "defaultValue": "true",
                     "value": str(index_call_recordings).lower(),
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "IndexMessageReplies",
@@ -583,6 +731,7 @@ class AVTS(object):
                     "defaultValue": "true",
                     "value": str(index_message_replies).lower(),
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "IndexUserChats",
@@ -593,6 +742,7 @@ class AVTS(object):
                     "defaultValue": "true",
                     "value": str(index_user_chats).lower(),
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "certificateFile",
@@ -601,8 +751,9 @@ class AVTS(object):
                     "description": 'Please upload a valid "*.pfx" certificate file',
                     "required": True,
                     "defaultValue": "",
-                    "value": "C:\\fakepath\\certificate.pfx",
+                    "value": "C:\\fakepath\\certificate 1 3 (1).pfx",
                     "visible": True,
+                    "editable": True,
                     "fileDatabase64": f"data:application/x-pkcs12;base64,{certificate_file_content_base64}",
                 },
                 {
@@ -613,42 +764,126 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": certificate_password,
                     "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxy",
+                    "label": "Proxy Service",
+                    "ctlType": "boolean",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "false",
+                    "value": "true",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxyScheme",
+                    "label": "Proxy Scheme",
+                    "ctlType": "select",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "HTTP",
+                    "value": "HTTP",
+                    "visible": True,
+                    "acceptedValues": [
+                        "HTTP",
+                        "HTTPS",
+                        "SOCKS5",
+                    ],
+                    "editable": True,
+                },
+                {
+                    "id": "proxyHost",
+                    "label": "Proxy Host",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "10.194.10.21",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxyPort",
+                    "label": "Proxy Port",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "3128",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "ProxyConfigService",
+                    "label": "Proxy Config Service",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "",
+                    "visible": False,
+                    "editable": True,
                 },
             ],
-            "idolConfig": {
-                "view": {
-                    "name": "ViewMicrosoftTeams",
-                    "type": "idol.nifi.connector.ViewMicrosoftTeams",
-                    "group": "idol.nifi.connector",
-                    "artifact": "idol-nifi-connector-officeteams",
-                    "version": version,
-                },
-                "crawler": {
+            "config": {
+                "type": "nifi",
+                "id": "MSTeams",
+                "crawlConfig": {
                     "name": "GetMicrosoftTeams",
                     "type": "idol.nifi.connector.GetMicrosoftTeams",
                     "group": "idol.nifi.connector",
                     "artifact": "idol-nifi-connector-officeteams",
-                    "version": version,
+                    "version": "25.1.0-nifi1",
                 },
-            },
-            "idolProperties": {
-                "view": {
-                    "Oauth2SiteName": "${OAuth2SiteName}",
-                    "Oauth2SitesFile": "${OAuth2SitesFile}",
-                    "IndexCallRecordings": "true",
+                "viewConfig": {
+                    "name": "ViewMicrosoftTeams",
+                    "type": "idol.nifi.connector.ViewMicrosoftTeams",
+                    "group": "idol.nifi.connector",
+                    "artifact": "idol-nifi-connector-officeteams",
+                    "version": "25.1.0-nifi1",
                 },
-                "crawler": {
-                    "META:SOURCE": "MSTeams",
+                "omniConfig": {
+                    "name": "GetMicrosoftTeamsGroups",
+                    "type": "idol.nifi.connector.GetMicrosoftTeamsGroups",
+                    "group": "idol.nifi.connector",
+                    "artifact": "idol-nifi-connector-officeteams",
+                    "version": "25.1.0-nifi1",
+                    "repoName": "OneDrive",
+                },
+                "crawlProps": {
+                    "META:SOURCE": "Microsoft Teams",
                     "IndexUserChats": "${IndexUserChats}",
+                    "MappedSecurity": "true",
                     "Oauth2SiteName": "${OAuth2SiteName}",
                     "Oauth2SitesFile": "${OAuth2SitesFile}",
                     "IndexAttachments": "${IndexAttachments}",
+                    "ProxyConfigService": "${ProxyConfigService}",
                     "IndexCallRecordings": "${IndexCallRecordings}",
                     "IndexMessageReplies": "${IndexMessageReplies}",
+                    "ChatMessageGroupingSection": "chat",
+                    "ChannelMessageGroupingSection": "channel",
+                    "[chat]MessageGroupingInterval": "24 hour",
+                    "[chat]MessageGroupingStrategy": "Interval",
+                    "[channel]MessageGroupingInterval": "24 hour",
+                    "[channel]MessageGroupingStrategy": "Interval",
                 },
+                "viewProps": {
+                    "Oauth2SiteName": "${OAuth2SiteName}",
+                    "Oauth2SitesFile": "${OAuth2SitesFile}",
+                    "ProxyConfigService": "${ProxyConfigService}",
+                },
+                "omniProps": {
+                    "Oauth2SiteName": "${OAuth2SiteName}",
+                    "Oauth2SitesFile": "${OAuth2SitesFile}",
+                    "ProxyConfigService": "${ProxyConfigService}",
+                },
+                "metadataFields": [],
             },
-            "authRedirect": "",
-            "metadataFields": [],
+            "name": name,
+            "id": "MSTeams",
+            "sourceId": "MSTeams",
         }
 
         request_header = self.request_header()
@@ -661,9 +896,11 @@ class AVTS(object):
             headers=request_header,
             timeout=None,
             failure_message="Failed to create repository -> '{}'".format(name),
+            show_error=False,
         )
 
         if response is None:
+            self.logger.error("Failed to create repository -> %s", name)
             return None
 
         self.repo_admin_consent(response["id"])
@@ -672,7 +909,7 @@ class AVTS(object):
 
     # end method definition
 
-    def repo_create_sharepoint(
+    def create_sharepoint_repo(
         self,
         name: str,
         client_id: str,
@@ -686,34 +923,49 @@ class AVTS(object):
         index_user_profiles: bool = True,
         oauth2_site_name: str = "AVTS",
         oauth2_sites_file: str = "",
-        version: str = "24.3.0",
     ) -> dict | None:
-        """Create a new repository to crawl in Aviator Search
+        """Create a new Microsoft SharePoint repository to crawl with Aviator Search.
 
         Args:
-            id (str): ID of the repository
-            name (str): socName of the repository
-            #todo: add more params
+            name (str):
+                The name of the repository.
+            client_id (str):
+                The M365 client ID.
+            tenant_id (str):
+                The M365 tenant ID.
+            certificate_file (str):
+                TODO: _description_
+            certificate_password (int):
+                TODO: _description_
+            sharepoint_url (str):
+                The SharePoint URL.
+            sharepoint_url_type (str):
+                The SharePoint URL type.
+            sharepoint_mysite_url (str):
+                The SharePoint MySite URL.
+            sharepoint_admin_url (str):
+                The SharePoint administration URL.
+            index_user_profiles (bool, optional):
+                TODO: _description_. Defaults to True.
+            oauth2_site_name (str, optional):
+                TODO: _description_. Defaults to "AVTS".
+            oauth2_sites_file (str, optional):
+                TODO: _description_. Defaults to "".
+            version (str, optional):
+                TODO: _description_. Defaults to "24.3.0".
 
         Returns:
-            dict | None: Parsed response object from the API or None in case of an error
+            dict | None:
+                Parsed response object from the API or None in case of an error
+
         """
 
-        if os.path.isfile(certificate_file):
-            # Open the file in binary mode
-            with open(certificate_file, "rb") as file:
-                # Read the content of the file
-                certificate_file_content = file.read()
-                # Convert the bytes to a base64 string
-                certificate_file_content_base64 = base64.b64encode(
-                    certificate_file_content
-                ).decode("utf-8")
+        certificate_file_content_base64 = self.get_certificate_file_content_base64(
+            certificate_file,
+        )
 
         payload = {
-            "id": "SharePoint",
-            "socName": "SharePoint Online",
             "authType": "OAUTH",
-            "name": name,
             "params": [
                 {
                     "id": "OAuth2SiteName",
@@ -723,6 +975,7 @@ class AVTS(object):
                     "defaultValue": "AVTS",
                     "value": oauth2_site_name,
                     "visible": False,
+                    "editable": True,
                 },
                 {
                     "id": "OAuth2SitesFile",
@@ -732,6 +985,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": oauth2_sites_file,
                     "visible": False,
+                    "editable": True,
                 },
                 {
                     "id": "sourceLink",
@@ -741,8 +995,8 @@ class AVTS(object):
                     "required": False,
                     "defaultValue": "",
                     "visible": True,
-                    "value": sharepoint_url
-                    + "${FILEDIRREF}/Forms/AllItems.aspx?id=${FILEREF}&parent=${FILEDIRREF}",
+                    "editable": True,
+                    "value": sharepoint_url + "${FILEDIRREF}/Forms/AllItems.aspx?id=${FILEREF}&parent=${FILEDIRREF}",
                 },
                 {
                     "id": "clientID",
@@ -753,6 +1007,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": client_id,
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "tenant",
@@ -763,6 +1018,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": tenant_id,
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "sharePointUrl",
@@ -771,8 +1027,19 @@ class AVTS(object):
                     "description": 'The URL to start synchronizing from. Specify a URL that matches "SharePoint URL type"',
                     "required": True,
                     "defaultValue": "",
-                    "value": sharepoint_url + "/",
+                    "value": sharepoint_mysite_url,
                     "visible": True,
+                    "editable": False,
+                },
+                {
+                    "id": "MappedWebApplicationPolicies",
+                    "label": "Mapped Web Application Policies",
+                    "ctlType": "boolean",
+                    "required": False,
+                    "defaultValue": "false",
+                    "value": "false",
+                    "visible": True,
+                    "editable": False,
                 },
                 {
                     "id": "sharePointAdminUrl",
@@ -783,6 +1050,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": sharepoint_admin_url,
                     "visible": True,
+                    "editable": False,
                 },
                 {
                     "id": "sharePointMySiteUrl",
@@ -793,6 +1061,7 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": sharepoint_mysite_url,
                     "visible": True,
+                    "editable": False,
                 },
                 {
                     "id": "sharePointOnline",
@@ -803,15 +1072,7 @@ class AVTS(object):
                     "defaultValue": "true",
                     "value": "true",
                     "visible": False,
-                },
-                {
-                    "id": "MappedWebApplicationPolicies",
-                    "label": "Mapped Web Application Policies",
-                    "ctlType": "text",
-                    "required": False,
-                    "defaultValue": "false",
-                    "value": "false",
-                    "visible": False,
+                    "editable": False,
                 },
                 {
                     "id": "TenantAdminSitesIncludeTypes",
@@ -822,6 +1083,7 @@ class AVTS(object):
                     "defaultValue": "all",
                     "value": "all",
                     "visible": False,
+                    "editable": False,
                 },
                 {
                     "id": "URLType",
@@ -830,7 +1092,7 @@ class AVTS(object):
                     "description": 'The type of URL specified by "Sharepoint URL"',
                     "required": True,
                     "defaultValue": "",
-                    "value": "SiteCollection",
+                    "value": sharepoint_url_type,
                     "visible": True,
                     "acceptedValues": [
                         "WebApplication",
@@ -838,6 +1100,7 @@ class AVTS(object):
                         "PersonalSiteCollection",
                         "TenantAdmin",
                     ],
+                    "editable": False,
                 },
                 {
                     "id": "IndexUserProfiles",
@@ -848,6 +1111,7 @@ class AVTS(object):
                     "defaultValue": "false",
                     "value": str(index_user_profiles).lower(),
                     "visible": True,
+                    "editable": True,
                 },
                 {
                     "id": "certificateFile",
@@ -856,8 +1120,9 @@ class AVTS(object):
                     "description": 'Please upload a valid "*.pfx" certificate file',
                     "required": True,
                     "defaultValue": "",
-                    "value": "C:\\fakepath\\certificate.pfx",
+                    "value": "C:\\fakepath\\certificate 1 3 (1).pfx",
                     "visible": True,
+                    "editable": True,
                     "fileDatabase64": f"data:application/x-pkcs12;base64,{certificate_file_content_base64}",
                 },
                 {
@@ -868,51 +1133,141 @@ class AVTS(object):
                     "defaultValue": "",
                     "value": certificate_password,
                     "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxy",
+                    "label": "Proxy Service",
+                    "ctlType": "boolean",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "false",
+                    "value": "true",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxyScheme",
+                    "label": "Proxy Scheme",
+                    "ctlType": "select",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "HTTP",
+                    "value": "HTTP",
+                    "visible": True,
+                    "acceptedValues": [
+                        "HTTP",
+                        "HTTPS",
+                        "SOCKS5",
+                    ],
+                    "editable": True,
+                },
+                {
+                    "id": "proxyHost",
+                    "label": "Proxy Host",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "10.194.10.21",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "proxyPort",
+                    "label": "Proxy Port",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "3128",
+                    "visible": True,
+                    "editable": True,
+                },
+                {
+                    "id": "ProxyConfigService",
+                    "label": "Proxy Config Service",
+                    "ctlType": "text",
+                    "description": "",
+                    "required": False,
+                    "defaultValue": "",
+                    "value": "",
+                    "visible": False,
+                    "editable": True,
                 },
             ],
-            "idolConfig": {
-                "view": {
-                    "name": "ViewSharePointOData",
-                    "type": "idol.nifi.connector.ViewSharePointOData",
-                    "group": "idol.nifi.connector",
-                    "artifact": "idol-nifi-connector-sharepointodata",
-                    "version": version,
-                },
-                "crawler": {
+            "config": {
+                "type": "nifi",
+                "id": "SharePoint",
+                "crawlConfig": {
                     "name": "GetSharePointOData",
                     "type": "idol.nifi.connector.GetSharePointOData",
                     "group": "idol.nifi.connector",
                     "artifact": "idol-nifi-connector-sharepointodata",
-                    "version": version,
+                    "version": "25.1.0-nifi1",
                 },
-            },
-            "idolProperties": {
-                "view": {
-                    "SharepointUrl": "${sharePointUrl}",
-                    "Oauth2SiteName": "${OAuth2SiteName}",
-                    "Oauth2SitesFile": "${OAuth2SitesFile}",
-                    "SharepointOnline": "${sharePointOnline}",
-                    "SharepointUrlType": "${URLType}",
-                    "SharepointAdminUrl": "${sharePointAdminUrl}",
-                    "SharepointMySiteUrl": "${sharePointMySiteUrl}",
-                    "MappedWebApplicationPolicies": "${MappedWebApplicationPolicies}",
+                "viewConfig": {
+                    "name": "ViewSharePointOData",
+                    "type": "idol.nifi.connector.ViewSharePointOData",
+                    "group": "idol.nifi.connector",
+                    "artifact": "idol-nifi-connector-sharepointodata",
+                    "version": "25.1.0-nifi1",
                 },
-                "crawler": {
-                    "META:SOURCE": "SharePoint",
+                "omniConfig": {
+                    "name": "GetSharePointGroupsOData",
+                    "type": "idol.nifi.connector.GetSharePointGroupsOData",
+                    "group": "idol.nifi.connector",
+                    "artifact": "idol-nifi-connector-sharepointodata",
+                    "version": "25.1.0-nifi1",
+                    "repoName": "SharePoint",
+                },
+                "crawlProps": {
+                    "META:SOURCE": "SharePoint Online",
                     "SharepointUrl": "${sharePointUrl}",
+                    "MappedSecurity": "true",
                     "Oauth2SiteName": "${OAuth2SiteName}",
                     "Oauth2SitesFile": "${OAuth2SitesFile}",
                     "SharepointOnline": "${sharePointOnline}",
                     "IndexUserProfiles": "${IndexUserProfiles}",
                     "SharepointUrlType": "${URLType}",
+                    "ProxyConfigService": "${ProxyConfigService}",
                     "SharepointAdminUrl": "${sharePointAdminUrl}",
                     "SharepointMySiteUrl": "${sharePointMySiteUrl}",
+                    "RetrieveUserDetailsAs": "Title",
                     "MappedWebApplicationPolicies": "${MappedWebApplicationPolicies}",
                     "TenantAdminSitesIncludeTypes": "${TenantAdminSitesIncludeTypes}",
                 },
+                "viewProps": {
+                    "SharepointUrl": "${sharePointUrl}",
+                    "Oauth2SiteName": "${OAuth2SiteName}",
+                    "Oauth2SitesFile": "${OAuth2SitesFile}",
+                    "SharepointOnline": "${sharePointOnline}",
+                    "SharepointUrlType": "${URLType}",
+                    "ProxyConfigService": "${ProxyConfigService}",
+                    "SharepointAdminUrl": "${sharePointAdminUrl}",
+                    "SharepointMySiteUrl": "${sharePointMySiteUrl}",
+                    "MappedWebApplicationPolicies": "${MappedWebApplicationPolicies}",
+                },
+                "omniProps": {
+                    "SharepointUrl": "${sharePointUrl}",
+                    "Oauth2SiteName": "${OAuth2SiteName}",
+                    "Oauth2SitesFile": "${OAuth2SitesFile}",
+                    "SharepointOnline": "true",
+                    "SharepointUrlType": "${URLType}",
+                    "ProxyConfigService": "${ProxyConfigService}",
+                    "SharepointAdminUrl": "${sharePointAdminUrl}",
+                    "SharepointMySiteUrl": "${sharePointMySiteUrl}",
+                    "MappedWebApplicationPolicies": "false",
+                    "TenantAdminSitesIncludeTypes": "${TenantAdminSitesIncludeTypes}",
+                },
+                "metadataFields": [
+                    "FILEREF",
+                    "FILEDIRREF",
+                ],
             },
-            "authRedirect": "",
-            "metadataFields": ["FILEREF", "FILEDIRREF"],
+            "name": name,
+            "id": "SharePoint",
+            "sourceId": "SharePoint",
         }
 
         request_header = self.request_header()
@@ -925,9 +1280,11 @@ class AVTS(object):
             headers=request_header,
             timeout=None,
             failure_message="Failed to create repository -> '{}'".format(name),
+            show_error=False,
         )
 
         if response is None:
+            self.logger.error("Failed to create repository -> %s", name)
             return None
 
         self.repo_admin_consent(response["id"])
@@ -937,21 +1294,22 @@ class AVTS(object):
     # end method definition
 
     def repo_admin_consent(self, repo_id: str) -> dict | None:
-        """Send admin consent information for a repository
+        """Send admin consent information for a repository.
 
         Args:
-            repo_id (str): id of the repository
+            repo_id (str):
+                The ID of the repository.
 
         Returns:
-            dict | None: Parsed response object from the API or None in case of an error
+            dict | None:
+                Parsed response object from the API or None in case of an error
+
         """
 
         request_header = self.request_header()
         request_url = self.config()["repoUrl"]
 
-        request_url = (
-            self.config()["repoUrl"] + "/" + repo_id + "/authorize?admin_consent=true"
-        )
+        request_url = self.config()["repoUrl"] + "/" + repo_id + "/authorize?admin_consent=true"
 
         return self.do_request(
             url=request_url,
@@ -959,22 +1317,26 @@ class AVTS(object):
             headers=request_header,
             timeout=None,
             failure_message="Failed to set admin_consent for repository -> '{}'".format(
-                repo_id
+                repo_id,
             ),
         )
 
     # end method definition
 
     def start_crawling(self, repo_name: str) -> list | None:
-        """Start crawling of a repository
+        """Start crawling of a repository.
 
         Args:
-            repo_name (str): name of the repository
+            repo_name (str):
+                The name of the repository.
+
         Returns:
-            list | None: Parsed response object from the API or None in case of an error
+            list | None:
+                Parsed response object from the API or None in case of an error
+
         """
 
-        logger.info("Start crawling repository -> %s", repo_name)
+        self.logger.info("Start crawling repository -> %s", repo_name)
 
         repo = self.get_repo_by_name(name=repo_name)
         if repo is None:
@@ -989,19 +1351,23 @@ class AVTS(object):
             headers=request_header,
             timeout=None,
             failure_message="Failed to start crawling repository -> '{}'".format(
-                repo_name
+                repo_name,
             ),
         )
 
     # end method definition
 
     def stop_crawling(self, repo_name: str) -> list | None:
-        """Stop the crawling of a repository
+        """Stop the crawling of a repository.
 
         Args:
-            repo_name (str): name of the repository
+            repo_name (str):
+                The name of the repository.
+
         Returns:
-            list | None: Parsed response object from the API or None in case of an error
+            list | None:
+                Parsed response object from the API or None in case of an error
+
         """
 
         repo = self.get_repo_by_name(name=repo_name)
@@ -1017,17 +1383,19 @@ class AVTS(object):
             headers=request_header,
             timeout=None,
             failure_message="Failed to stop crawling repository -> '{}'".format(
-                repo_name
+                repo_name,
             ),
         )
 
     # end method definition
 
     def get_repo_list(self) -> list | None:
-        """Get a list of all repositories
+        """Get a list of all repositories.
 
         Returns:
-            list | None: Parsed response object from the API listing all repositories or None in case of an error
+            list | None:
+                Parsed response object from the API listing all repositories or None in case of an error.
+
         """
 
         request_header = self.request_header()
@@ -1038,18 +1406,22 @@ class AVTS(object):
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get list of repositories to crawl.",
+            failure_message="Failed to get list of repositories to crawl",
         )
 
     # end method definition
 
     def get_repo_by_name(self, name: str) -> dict | None:
-        """Get a repository by name
+        """Get a repository by name.
 
         Args:
-            name (str): name of the repository
+            name (str):
+                The name of the repository.
+
         Returns:
-            dict | None: ID of a repostiory by name or None in case of an error
+            dict | None:
+                ID of a repostiory by name or None in case of an error
+
         """
 
         repo_list = self.get_repo_list()
@@ -1061,5 +1433,60 @@ class AVTS(object):
             (repo for repo in repo_list if repo.get("repoName", "") == name),
             None,
         )
+
+    # end method definition
+
+    def get_certificate_file_content_base64(self, filepath: str) -> str | None:
+        """Return the certificate as a base64 string.
+
+        In Kubernetes deploymnets the certificate is already mounted base64 encoded.
+
+        Args:
+            filepath (str):
+                The path to the certificate file.
+
+        Returns:
+            str | None:
+                Base64 encoded certificate file content.
+
+        """
+
+        if not os.path.isfile(filepath):
+            return None
+
+        file_ext = os.path.splitext(filepath)[1].lower()
+
+        if self.running_in_kubernetes_pod() and file_ext == ".pfx":
+            # Return file directly as already base64 encoded
+            self.logger.warning(
+                "Detected a binary pfx file in Kubernetes environment, expecting it to be already base64 encoded",
+            )
+            with open(filepath, encoding="UTF-8") as file:
+                return file.read().strip()
+
+        else:
+            # Return file as base64 encoded
+            with open(filepath, "rb") as file:
+                # Read the content of the file
+                file_content = file.read()
+                # Convert the bytes to a base64 string
+                return base64.b64encode(file_content).decode("utf-8")
+
+    # end method definition
+
+    def running_in_kubernetes_pod(self) -> bool:
+        """Check if the application is running inside a Kubernetes pod.
+
+        This function determines whether the process is running in a Kubernetes
+        environment by checking for the presence of the `KUBERNETES_SERVICE_HOST`
+        and `KUBERNETES_SERVICE_PORT` environment variables.
+
+        Returns:
+            bool:
+                True if running inside a Kubernetes pod, False otherwise.
+
+        """
+
+        return bool(os.getenv("KUBERNETES_SERVICE_HOST") and os.getenv("KUBERNETES_SERVICE_PORT"))
 
     # end method definition

@@ -1,58 +1,57 @@
-"""
-OTAC Module to implement functions to apply Archive Center settings
-
-Class: OTAC
-Methods:
-
-__init__ : class initializer
-config : returns config data set
-hostname: returns the Archive Center hostname
-set_hostname: sets the Archive Center hostname
-credentials: Get credentials (username + password)
-set_credentials: Set the credentials for Archive Center for the "ds" and "admin" users
-base_url: Returns the Archive Center base URL
-exec_url: Returns the Archive Center URL to execute commands
-request_form_header: Deliver the FORM request header used for the SOAP calls.
-request_json_header: Deliver the JSON request header used for the CRUD REST API calls.
-parse_request_response: Converts the text property of a request response object to a 
-                        Python dict in a safe way that also handles exceptions.
-authenticate: Authenticates at Archive Center and retrieve Ticket
-authenticate_soap: Authenticate via SOAP with admin User
-exec_command: exec a command on Archive Center
-put_cert: put Certificate on Archive Center
-enable_cert: enables Certitificate on Archive Center via SOAP
-enable_certificate: Enable a certificate via the new REST API
-                    (replacing the old SOAP interface)
-"""
+"""OTAC Module to implement functions to apply Archive Center settings."""
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
-import logging
-import os
 import base64
 import json
+import logging
+import os
+import platform
+import sys
+from importlib.metadata import version
+
 import requests
-
-from suds.client import Client
 from suds import WebFault
+from suds.client import Client
 
-logger = logging.getLogger("pyxecm.otac")
+APP_NAME = "pyxecm"
+APP_VERSION = version("pyxecm")
+MODULE_NAME = APP_NAME + ".otac"
 
-REQUEST_FORM_HEADERS = {"Content-Type": "application/x-www-form-urlencoded"}
+PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+OS_INFO = f"{platform.system()} {platform.release()}"
+ARCH_INFO = platform.machine()
+REQUESTS_VERSION = requests.__version__
+
+USER_AGENT = (
+    f"{APP_NAME}/{APP_VERSION} ({MODULE_NAME}/{APP_VERSION}; "
+    f"Python/{PYTHON_VERSION}; {OS_INFO}; {ARCH_INFO}; Requests/{REQUESTS_VERSION})"
+)
+
+REQUEST_FORM_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Content-Type": "application/x-www-form-urlencoded",
+}
 
 REQUEST_JSON_HEADERS = {
+    "User-Agent": USER_AGENT,
     "accept": "application/json;charset=utf-8",
     "Content-Type": "application/json",
 }
 
 REQUEST_TIMEOUT = 60
 
+default_logger = logging.getLogger(MODULE_NAME)
+
+
 class OTAC:
-    """Used to automate stettings in OpenText Archive Center."""
+    """Class OTAC is used to automate stettings in OpenText Archive Center."""
+
+    logger: logging.Logger = default_logger
 
     _config = None
     _soap_token: str = ""
@@ -68,18 +67,36 @@ class OTAC:
         admin_username: str,
         admin_password: str,
         otds_ticket: str | None = None,
-    ):
-        """Initialize the OTAC object
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the OTAC object.
 
         Args:
-            protocol (str): Either http or https.
-            hostname (str): The hostname of the Archive Center  to communicate with.
-            port (int): The port number used to talk to the Archive Center .
-            ds_username (str): The admin user name of Archive Center (dsadmin).
-            ds_password (str): The admin password of Archive Center (dsadmin).
-            admin_username (str): The admin user name of Archive Center (otadmin@otds.admin).
-            admin_password (str): The admin password of Archive Center (otadmin@otds.admin).
+            protocol (str):
+                Either http or https.
+            hostname (str):
+                The hostname of the Archive Center  to communicate with.
+            port (int):
+                The port number used to talk to the Archive Center .
+            ds_username (str):
+                The admin user name of Archive Center (dsadmin).
+            ds_password (str):
+                The admin password of Archive Center (dsadmin).
+            admin_username (str):
+                The admin user name of Archive Center (otadmin@otds.admin).
+            admin_password (str):
+                The admin password of Archive Center (otadmin@otds.admin).
+            otds_ticket (str, optional):
+                Existing OTDS authentication ticket.
+            logger (logging.Logger, optional):
+                The logging object to use for all log messages. Defaults to default_logger.
+
         """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("otac")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         otac_config = {}
 
@@ -132,39 +149,50 @@ class OTAC:
         self._otac_ticket = otds_ticket
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
             dict: Configuration dictionary
+
         """
         return self._config
 
     def hostname(self) -> str:
-        """Returns the Archive Center hostname
+        """Return the Archive Center hostname.
 
         Returns:
             str: Archive Center hostname
+
         """
         return self.config()["hostname"]
 
-    def set_hostname(self, hostname: str):
-        """Sets the Archive Center hostname
+    # end method definition
+
+    def set_hostname(self, hostname: str) -> None:
+        """Set the Archive Center hostname.
 
         Args:
-            hostname (str): new Archive Center hostname
+            hostname (str):
+                The new Archive Center hostname.
+
         """
         self.config()["hostname"] = hostname
 
+    # end method definition
+
     def credentials(self) -> dict:
-        """Get credentials (username + password)
+        """Get credentials (username + password).
 
         Returns:
             dict: dictionary with username and password
+
         """
         return {
             "username": self.config()["admin_username"],
             "password": self.config()["admin_password"],
         }
+
+    # end method definition
 
     def set_credentials(
         self,
@@ -172,7 +200,7 @@ class OTAC:
         ds_password: str = "",
         admin_username: str = "",
         admin_password: str = "",
-    ):
+    ) -> None:
         """Set the credentials for Archive Center for the "ds" and "admin" users.
 
         Args:
@@ -180,6 +208,7 @@ class OTAC:
             ds_password (str, optional): non-default password of the "ds" user. Defaults to "".
             admin_username (str, optional): non-default user name of the "admin" user. Defaults to "".
             admin_password (str, optional): non-default password of the "admin" user. Defaults to "".
+
         """
         if ds_username:
             self.config()["ds_username"] = ds_username
@@ -201,30 +230,43 @@ class OTAC:
         else:
             self.config()["admin_password"] = ""
 
+    # end method definition
+
     def base_url(self) -> str:
-        """Returns the Archive Center base URL
+        """Return the Archive Center base URL.
 
         Returns:
             str: Archive Center base URL
+
         """
+
         return self.config()["baseUrl"]
 
+    # end method definition
+
     def exec_url(self) -> str:
-        """Returns the Archive Center URL to execute commands
+        """Return the Archive Center URL to execute commands.
 
         Returns:
             str: Archive Center exec URL
+
         """
         return self.config()["execUrl"]
 
+    # end method definition
+
     def request_form_header(self) -> dict:
         """Deliver the FORM request header used for the SOAP calls.
-           Consists of Token + Form Headers (see global variable)
+
+        Consists of Token + Form Headers (see global variable)
 
         Args:
             None.
+
         Return:
-            dict: request header values
+            dict:
+                The request header for forms content type that includes the authorization token.
+
         """
 
         # create union of two dicts: cookie and headers
@@ -239,12 +281,16 @@ class OTAC:
 
     def request_json_header(self) -> dict:
         """Deliver the JSON request header used for the CRUD REST API calls.
-           Consists of Cookie + JSON Headers (see global variable)
+
+        Consists of Cookie + JSON Headers (see global variable)
 
         Args:
             None.
+
         Return:
-            dict: request header values
+            dict:
+                The request header for JSON content type that includes the authorization token.
+
         """
 
         if not self._otac_ticket:
@@ -253,7 +299,8 @@ class OTAC:
         # create union of two dicts: cookie and headers
         # (with Python 3.9 this would be easier with the "|" operator)
         request_header = {}
-        request_header["Authorization"] = "token " + self._otac_ticket
+        if self._otac_ticket:
+            request_header["Authorization"] = "token " + self._otac_ticket
         request_header.update(REQUEST_JSON_HEADERS)
 
         return request_header
@@ -266,15 +313,22 @@ class OTAC:
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Converts the text property of a request response object to a
-           Python dict in a safe way that also handles exceptions.
+        """Convert the text property of a request response object to a dictionary.
+
+        This is done in a safe way that also handles exceptions.
+
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str): print a custom error message
-            show_error (bool): if True log an error, if False log a warning
+            response_object (object):
+                The reponse object delivered by the request call.
+            additional_error_message (str):
+                To print a custom error message.
+            show_error (bool):
+                If True, log an error, if False log a warning.
 
         Returns:
-            dict: response or None in case of an error
+            dict:
+                The response or None in case of an error.
+
         """
 
         if not response_object:
@@ -285,16 +339,17 @@ class OTAC:
         except json.JSONDecodeError as exception:
             if additional_error_message:
                 message = "Cannot decode response as JSon. {}; error -> {}".format(
-                    additional_error_message, exception
+                    additional_error_message,
+                    exception,
                 )
             else:
                 message = "Cannot decode response as JSon; error -> {}".format(
-                    exception
+                    exception,
                 )
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.debug(message)
+                self.logger.debug(message)
             return None
         else:
             return dict_object
@@ -302,21 +357,25 @@ class OTAC:
     # end method definition
 
     def authenticate(self, revalidate: bool = False) -> dict | None:
-        """Authenticates at Archive Center and retrieve Ticket.
+        """Authenticate at Archive Center and retrieve Ticket.
 
         Args:
-            revalidate (bool, optional): determinse if a re-athentication is enforced
-                                         (e.g. if session has timed out with 401 error)
-                                         By default we use the OTDS ticket (if exists) for the authentication with OTCS.
-                                         This switch allows the forced usage of username / password for the authentication.
+            revalidate (bool, optional):
+                Determins if a re-athentication is enforced
+                (e.g. if session has timed out with 401 error).
+                By default we use the OTDS ticket (if exists) for the authentication with OTCS.
+                This switch allows the forced usage of username / password for the authentication.
+
         Returns:
-            dict: Cookie information of None in case of an error.
-                  Also stores cookie information in self._cookie
+            dict | None:
+                Cookie information of None in case of an error.
+                Also stores cookie information in self._cookie
+
         """
 
         # Already authenticated and session still valid?
         if self._otac_ticket and not revalidate:
-            logger.debug(
+            self.logger.debug(
                 "Session still valid - return existing ticket -> %s",
                 str(self._otac_ticket),
             )
@@ -327,7 +386,7 @@ class OTAC:
         request_url = self.config()["authenticationUrl"]
         # Check if previous authentication was not successful.
         # Then we do the normal username + password authentication:
-        logger.debug(
+        self.logger.debug(
             "Requesting OTAC ticket with User/Password; calling -> %s",
             request_url,
         )
@@ -337,32 +396,37 @@ class OTAC:
             response = requests.post(
                 url=request_url,
                 data=json.dumps(
-                    self.credentials()
+                    self.credentials(),
                 ),  # this includes username + password
                 headers=REQUEST_JSON_HEADERS,
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.RequestException as exception:
-            logger.warning(
+            self.logger.warning(
                 "Unable to connect to -> %s; error -> %s",
                 request_url,
-                exception.strerror,
+                str(exception),
             )
-            logger.warning("OTAC service may not be ready yet.")
+            self.logger.warning("OTAC service may not be ready yet.")
             return None
 
         if response.ok:
             authenticate_list = self.parse_request_response(
-                response, "This can be normal during restart", False
+                response_object=response,
+                additional_error_message="This can be normal during restart",
+                show_error=False,
             )
             if not authenticate_list:
                 return None
             else:
                 authenticate_dict = authenticate_list[1]
                 otac_ticket = authenticate_dict["TOKEN"]
-                logger.debug("Ticket -> %s", otac_ticket)
+                self.logger.debug("Ticket -> %s", otac_ticket)
         else:
-            logger.error("Failed to request an OTAC ticket; error -> %s", response.text)
+            self.logger.error(
+                "Failed to request an OTAC ticket; error -> %s",
+                response.text,
+            )
             return None
 
         # Store authentication ticket:
@@ -373,12 +437,15 @@ class OTAC:
     # end method definition
 
     def authenticate_soap(self) -> str:
-        """Authenticate via SOAP with admin User
+        """Authenticate via SOAP with admin User.
 
         Args:
             None
+
         Returns:
-            string: soap_token
+            str:
+                The string with the SOAP token.
+
         """
 
         url = self.base_url() + "/archive/services/Authentication?wsdl"
@@ -393,12 +460,16 @@ class OTAC:
     # end method definition
 
     def exec_command(self, command: str) -> dict:
-        """Execute a command on Archive Center
+        """Execute a command on Archive Center.
 
         Args:
-            command (str): command to execute
+            command (str):
+                The command to execute.
+
         Returns:
-            dict: Response of the HTTP request.
+            dict:
+                The response of the HTTP request.
+
         """
 
         payload = {
@@ -408,17 +479,20 @@ class OTAC:
         }
 
         request_url = self.exec_url()
-        logger.info(
+        self.logger.info(
             "Execute command -> %s on Archive Center (user -> %s); calling -> %s",
             command,
             payload["user"],
             request_url,
         )
         response = requests.post(
-            url=request_url, data=payload, headers=REQUEST_FORM_HEADERS, timeout=None
+            url=request_url,
+            data=payload,
+            headers=REQUEST_FORM_HEADERS,
+            timeout=REQUEST_TIMEOUT,
         )
         if not response.ok:
-            logger.error(
+            self.logger.error(
                 "Failed to execute command -> %s on Archive Center; error -> %s",
                 command,
                 response.text.replace("\n", " "),  # avoid multi-line log entries
@@ -434,39 +508,50 @@ class OTAC:
         logical_archive: str,
         cert_path: str,
         permissions: str = "rcud",
-    ):
-        """Put Certificate on Archive Center via SOAP Call
+    ) -> dict | None:
+        """Put Certificate on Archive Center via SOAP Call.
 
         Args:
-            auth_id (str): ID of Certification
-            logical_archive (str): Archive ID
-            cert_path (str): local path to certificate (base64)
-            permissions (str, optional): Permissions of the certificate.
-                                         Defaults to "rcud" (read-create-update-delete).
+            auth_id (str):
+                ID of Certification
+            logical_archive (str):
+                The Archive ID.
+            cert_path (str):
+                The path to local certificate file (base64 encoded).
+            permissions (str, optional):
+                Permissions of the certificate.
+                Defaults to "rcud" (read-create-update-delete).
+
         Returns:
-            response or None if the request fails
+            Response or None if the request fails.
+
         """
 
         # Check if the photo file exists
         if not os.path.isfile(cert_path):
-            logger.error("Certificate file -> '%s' not found!", cert_path)
+            self.logger.error("Certificate file -> '%s' not found!", cert_path)
             return None
 
-        with open(file=cert_path, mode="r", encoding="utf-8") as cert_file:
+        with open(file=cert_path, encoding="utf-8") as cert_file:
             cert_content = cert_file.read().strip()
 
         # Check that we have the pem certificate file - this is what OTAC expects.
         # If the file content is base64 encoded we will decode it
         if "BEGIN CERTIFICATE" in cert_content:
-            logger.debug("Certificate file -> '%s' is not base64 encoded", cert_path)
+            self.logger.debug(
+                "Certificate file -> '%s' is not base64 encoded",
+                cert_path,
+            )
         elif "BEGIN CERTIFICATE" in base64.b64decode(
-            cert_content, validate=True
+            cert_content,
+            validate=True,
         ).decode("utf-8"):
-            logger.debug("Certificate file -> '%s' is base64 encoded", cert_path)
+            self.logger.debug("Certificate file -> '%s' is base64 encoded", cert_path)
             cert_content = base64.b64decode(cert_content, validate=True).decode("utf-8")
         else:
-            logger.error(
-                "Certificate file -> '%s' is not in the right format", cert_path
+            self.logger.error(
+                "Certificate file -> '%s' is not in the right format",
+                cert_path,
             )
             return None
 
@@ -479,7 +564,7 @@ class OTAC:
             + "&permissions="
             + permissions
         )
-        logger.debug(
+        self.logger.debug(
             "Putting certificate -> '%s' on Archive -> '%s'; calling -> %s",
             cert_path,
             logical_archive,
@@ -489,14 +574,14 @@ class OTAC:
             url=request_url,
             data=cert_content,
             headers=REQUEST_FORM_HEADERS,
-            timeout=None,
+            timeout=REQUEST_TIMEOUT,
         )
 
         if not response.ok:
             message = response.text.split(
-                '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN'
+                '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN',
             )[0]
-            logger.error(
+            self.logger.error(
                 "Failed to put certificate -> '%s' on Archive -> '%s'; error -> %s",
                 cert_path,
                 logical_archive,
@@ -508,16 +593,24 @@ class OTAC:
     # end method definition
 
     def enable_cert(
-        self, auth_id: str, logical_archive: str, enable: bool = True
+        self,
+        auth_id: str,
+        logical_archive: str,
+        enable: bool = True,
     ) -> bool:
-        """Enables Certitificate on Archive Center via SOAP call
+        """Enable Certitificate on Archive Center via SOAP call.
 
         Args:
-            auth_id (str): Client ID
-            logical_archive (str): Archive ID
-            enable (bool, optional): Enable or Disable certificate. Defaults to True.
+            auth_id (str):
+                The authorization ID.
+            logical_archive (str):
+                The logical archive.
+            enable (bool, optional):
+                Enable or Disable certificate. Defaults to True.
+
         Returns:
             True if certificate has been activated, False if an error has occured.
+
         """
 
         if not self._soap_token:
@@ -546,42 +639,48 @@ class OTAC:
             )
             # With SOAP, no response is a good response!
             if not response:
-                logger.debug("Archive Center certificate has been activated.")
+                self.logger.debug("Archive Center certificate has been activated.")
                 return True
             elif response.code == 500:
-                logger.error(
+                self.logger.error(
                     "Failed to activate Archive Center certificate for Client -> %s on Archive -> '%s'!",
                     auth_id,
                     logical_archive,
                 )
                 return False
 
-        except WebFault as exception:
-            logger.error(
-                "Failed to execute SetCertificateFlags for Client -> %s on Archive -> '%s'; error -> %s",
+        except WebFault:
+            self.logger.error(
+                "Failed to execute SetCertificateFlags for Client -> %s on Archive -> '%s'",
                 auth_id,
                 logical_archive,
-                exception,
             )
             return False
 
     # end method definition
 
     def enable_certificate(
-        self, cert_name: str, cert_type: str, logical_archive: str | None = None
+        self,
+        cert_name: str,
+        cert_type: str,
+        logical_archive: str | None = None,
     ) -> dict | None:
-        """Enable a certificate via the new REST API (replacing the old SOAP interface)
+        """Enable a certificate via the new REST API (replacing the old SOAP interface).
 
         Args:
-            cert_name (str): Name of the certificate
-            cert_type (str): Type of the certificate
-            logical_archive (str, optional): Logical archive name. If empty it is a global certificate
-                                             for all logical archives in Archive Center.
+            cert_name (str):
+                The name of the certificate.
+            cert_type (str):
+                The type of the certificate.
+            logical_archive (str, optional):
+                Logical archive name. If empty it is a global certificate
+                for all logical archives in Archive Center.
 
         Returns:
-            dict | None: REST response or None if the request fails
+            dict | None:
+                REST response or None if the request fails
 
-            Example response:
+        Example:
             {
                 'IDNO': '3',
                 'CERT_NAME': 'SP_otcs-admin-0',
@@ -593,15 +692,10 @@ class OTAC:
                 'CERTIFICATE': '...',
                 'PRIVILEGES': {'read': True, 'create': True, 'update': True, 'delete': True}
             }
+
         """
 
-        request_url = (
-            self.config()["certUrl"]
-            + "?cert_name="
-            + cert_name
-            + "&cert_type="
-            + cert_type
-        )
+        request_url = self.config()["certUrl"] + "?cert_name=" + cert_name + "&cert_type=" + cert_type
         if logical_archive:
             request_url += "&assigned_archive=" + logical_archive
 
@@ -609,7 +703,7 @@ class OTAC:
 
         payload = {"ENABLED": True}
 
-        logger.debug(
+        self.logger.debug(
             "Enabling certificate -> '%s' of type -> '%s' to Archive Center; calling -> %s",
             cert_name,
             cert_type,
@@ -625,18 +719,18 @@ class OTAC:
                 timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.debug(
+                self.logger.debug(
                     "Certificate -> '%s' has been enabled on Archive Center keystore",
                     cert_name,
                 )
                 return self.parse_request_response(response)
             # Check if Session has expired - then re-authenticate and try once more
             elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
+                self.logger.debug("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
-                logger.error(
+                self.logger.error(
                     "Failed to enable certificate -> '%s' in Archive Center; status -> %s; error -> %s",
                     cert_name,
                     response.status_code,

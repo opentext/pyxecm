@@ -1,11 +1,19 @@
-dev:
-		pip install -r requirements.txt
-		pip install -e ./
+install:
+		brew install uv
+		uv sync --locked --extra dataloader --extra profiling --extra browserautomation
 
 build:
-		python3 -m build
+		uv build
 
 docs:
-		mkdocs build -d public
+		uv run settings-doc generate --class pyxecm.customizer.settings.Settings --output-format markdown --heading-offset 1 > customizersettings_doc.md
+		uv run settings-doc generate --class pyxecm.customizer.settings.Settings --output-format dotenv > customizersettings.env
+		uv run settings-doc generate --class pyxecm.customizer.api.settings.CustomizerAPISettings --output-format markdown --heading-offset 1 > customizerapisettings_doc.md
+		uv run settings-doc generate --class pyxecm.customizer.api.settings.CustomizerAPISettings --output-format dotenv > customizerapisettings.env
+		uv run mkdocs build -d public
 
-.PHONY: dev build docs
+ruff:
+		uv run ruff format pyxecm
+		uv run ruff check pyxecm --ignore FIX
+
+.PHONY: install build docs

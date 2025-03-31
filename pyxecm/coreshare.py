@@ -1,91 +1,53 @@
-"""
-CoreShare Module to interact with the Core Share API
-See: https://confluence.opentext.com/pages/viewpage.action?spaceKey=OTC&title=APIs+Consumption+based+on+roles
-See also: https://swagger.otxlab.net/ui/?branch=master&yaml=application-specific/core/core-api.yaml
+"""CoreShare Module to interact with the Core Share API.
+
+See:
+    - [Confluence](https://confluence.opentext.com/pages/viewpage.action?spaceKey=OTC&title=APIs+Consumption+based+on+roles)
+    - [swagger.otxlab.net](https://swagger.otxlab.net/ui/?branch=master&yaml=application-specific/core/core-api.yaml)
 
 Authentication - get Client Secrets:
-1. Login to Core Share as a Tenant Admin User .
-2. Navigate to Security P age.
-3. On OAuth Confidential Clients section provide Description and Redirect URLs. It will populate a
-dialog with Client Secret. 
-4. Copy Client Secret as it will not be available anywhere once the dialog is closed.
-
-Class: CoreShare
-Methods:
-
-__init__ : class initializer
-config : Returns config data set
-credentials: Get credentials (username + password)
-set_credentials: Set the credentials for Core Share based on username and password.
-
-request_header_admin: Returns the request header used for Application calls
-                      that require administrator credentials
-request_header_user: Returns the request header used for Application calls
-                     that require user (non-admin) credentials.
-do_request: call an Core Share REST API in a safe way.
-parse_request_response: Parse the REST API responses and convert
-                        them to Python dict in a safe way
-lookup_result_value: Lookup a property value based on a provided key / value pair in the response
-                     properties of a Core Share REST API call
-exist_result_item: Check if an dict item is in the response
-                   of the Core Share API call
-get_result_value: Check if a defined value (based on a key) is in the Core Share API response
-
-authenticate_admin : Authenticates as Admin at Core Share API
-authenticate_user : Authenticates as Service user at Core Share API
-
-get_groups: Get Core Share groups.
-add_group: Add a new Core Share group.
-get_group_members: Get Core Share group members.
-add_group_member: Add a Core Share user to a Cire Share group.
-remove_group_member: Remove a Core Share user from a Core Share group.
-get_group_by_id: Get a Core Share group by its ID.
-get_group_by_name: Get Core Share group by its name.
-search_groups: Search Core Share group(s) by name.
-
-get_users: Get Core Share users.
-get_user_by_id: Get a Core Share user by its ID.
-get_user_by_name: Get Core Share user by its first and last name.
-search_users: Search Core Share user(s) by name / property.
-add_user: Add a new Core Share user. This requires a Tenent Admin authorization.
-resend_user_invite: Resend the invite for a Core Share user.
-update_user: Update a Core Share user.
-add_user_access_role: Add an access role to a Core Share user.
-remove_user_access_role: Remove an access role from a Core Share user.
-update_user_access_roles: Define the access roles of a Core Share user.
-update_user_password: Update the password of a Core Share user.
-update_user_photo: Update the Core Share user photo.
-
-get_folders: Get Core Share folders under a given parent ID.
-unshare_folder: Unshare Core Share folder with a given resource ID.
-delete_folder: Delete Core Share folder with a given resource ID.
-delete_document: Delete Core Share document with a given resource ID.
-leave_share: Remove a Core Share user from a share (i.e. the user leaves the share)
-stop_share: Stop of share of a user.
-cleanup_user_files: Cleanup all files of a user. This handles different types of resources.
-get_group_shares: Get (incoming) shares of a Core Share group.
-revoke_group_share: Revoke sharing of a folder with a group.
-cleanup_group_shares: Cleanup all incoming shares of a group.
+    1. Login to Core Share as a Tenant Admin User.
+    2. Navigate to Security Page.
+    3. On OAuth Confidential Clients section provide Description and Redirect URLs. It will populate a
+    dialog with Client Secret.
+    4. Copy Client Secret as it will not be available anywhere once the dialog is closed.
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
-import os
 import json
 import logging
+import os
+import platform
+import sys
 import time
-
 import urllib.parse
 from http import HTTPStatus
+from importlib.metadata import version
+
 import requests
 
-logger = logging.getLogger("pyxecm.customizer.coreshare")
+APP_NAME = "pyxecm"
+APP_VERSION = version("pyxecm")
+MODULE_NAME = APP_NAME + ".coreshare"
+
+PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+OS_INFO = f"{platform.system()} {platform.release()}"
+ARCH_INFO = platform.machine()
+REQUESTS_VERSION = requests.__version__
+
+USER_AGENT = (
+    f"{APP_NAME}/{APP_VERSION} ({MODULE_NAME}/{APP_VERSION}; "
+    f"Python/{PYTHON_VERSION}; {OS_INFO}; {ARCH_INFO}; Requests/{REQUESTS_VERSION})"
+)
+
+default_logger = logging.getLogger(MODULE_NAME)
 
 REQUEST_LOGIN_HEADERS = {
+    "User-Agent": USER_AGENT,
     "Content-Type": "application/x-www-form-urlencoded",
     "Accept": "application/json",
 }
@@ -94,9 +56,14 @@ REQUEST_TIMEOUT = 60
 REQUEST_RETRY_DELAY = 20
 REQUEST_MAX_RETRIES = 2
 
+CONTENT_MANAGER_ROLE_ID = 5
+GROUP_ADMIN_ROLE_ID = 3
 
-class CoreShare(object):
-    """Used to retrieve and automate stettings in Core Share."""
+
+class CoreShare:
+    """Class CoreShare is used to retrieve and automate settings and objects (users, groups) in Core Share."""
+
+    logger: logging.Logger = default_logger
 
     _config: dict
     _access_token_user = None
@@ -110,17 +77,31 @@ class CoreShare(object):
         client_secret: str,
         username: str,
         password: str,
-    ):
-        """Initialize the CoreShare object
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the CoreShare object.
 
         Args:
-            base_url (str): base URL of the Core Share tenant
-            sso_url (str): Single Sign On URL of the Core Share tenant
-            client_id (str): Core Share Client ID
-            client_secret (str): Core Share Client Secret
-            username (str): admin user name in Core Share
-            password (str): admin password in Core Share
+            base_url (str):
+                The base URL of the Core Share tenant.
+            sso_url (str):
+                The single sign on URL of the Core Share tenant.
+            client_id (str):
+                The Core Share Client ID.
+            client_secret (str):
+                The Core Share client secret.
+            username (str):
+                The admin user name in Core Share.
+            password (str):
+                The admin password in Core Share.
+            logger (logging.Logger, optional):
+                The logging object to use for all log messages. Defaults to default_logger.
+
         """
+        if logger != default_logger:
+            self.logger = logger.getChild("coreshare")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         core_share_config = {}
 
@@ -141,22 +122,14 @@ class CoreShare(object):
         core_share_config["invitesUrl"] = core_share_config["restUrlv1"] + "/invites"
         core_share_config["foldersUrlv1"] = core_share_config["restUrlv1"] + "/folders"
         core_share_config["foldersUrlv3"] = core_share_config["restUrlv3"] + "/folders"
-        core_share_config["documentsUrlv1"] = (
-            core_share_config["restUrlv1"] + "/documents"
-        )
-        core_share_config["documentsUrlv3"] = (
-            core_share_config["restUrlv3"] + "/documents"
-        )
+        core_share_config["documentsUrlv1"] = core_share_config["restUrlv1"] + "/documents"
+        core_share_config["documentsUrlv3"] = core_share_config["restUrlv3"] + "/documents"
         core_share_config["searchUrl"] = core_share_config["baseUrl"] + "/search/v1"
         core_share_config["searchUserUrl"] = core_share_config["searchUrl"] + "/user"
-        core_share_config["searchGroupUrl"] = (
-            core_share_config["searchUrl"] + "/user/group-all"
-        )
+        core_share_config["searchGroupUrl"] = core_share_config["searchUrl"] + "/user/group-all"
 
         core_share_config["sessionsUrl"] = core_share_config["restUrlv1"] + "/sessions"
-        core_share_config["tokenUrl"] = (
-            core_share_config["ssoUrl"] + "/otdsws/oauth2/token"
-        )
+        core_share_config["tokenUrl"] = core_share_config["ssoUrl"] + "/otdsws/oauth2/token"
         core_share_config["sessionsUrl"] = core_share_config["restUrlv1"] + "/sessions"
 
         # Tenant Admin User Authentication information (Session URL):
@@ -196,21 +169,27 @@ class CoreShare(object):
     # end method definition
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
-            dict: Configuration dictionary
+            dict:
+                The configuration dictionary.
+
         """
+
         return self._config
 
     # end method definition
 
     def credentials(self) -> dict:
-        """Get credentials (username + password)
+        """Get credentials (username + password).
 
         Returns:
-            dict: dictionary with username and password
+            dict:
+                A dictionary with username and password.
+
         """
+
         return {
             "username": self.config()["username"],
             "password": self.config()["password"],
@@ -218,15 +197,16 @@ class CoreShare(object):
 
     # end method definition
 
-    def set_credentials(self, username: str = "admin", password: str = ""):
+    def set_credentials(self, username: str = "admin", password: str = "") -> None:
         """Set the credentials for Core Share based on username and password.
 
         Args:
             username (str, optional): Username. Defaults to "admin".
             password (str, optional): Password of the user. Defaults to "".
+
         """
 
-        logger.info("Change Core Share credentials to user -> %s...", username)
+        self.logger.info("Change Core Share credentials to user -> %s...", username)
 
         self.config()["username"] = username
         self.config()["password"] = password
@@ -258,17 +238,27 @@ class CoreShare(object):
     # end method definition
 
     def request_header_admin(self, content_type: str = "application/json") -> dict:
-        """Returns the request header used for Application calls
-           that require administrator credentials.
-           Consists of Bearer access token and Content Type
+        """Return the request header used for application calls that require administrator credentials.
+
+        Consists of Bearer access token and Content Type
 
         Args:
-            content_type (str, optional): content type for the request
+            content_type (str, optional):
+                Custom content type for the request.
+                Typical values:
+                * application/json - Used for sending JSON-encoded data
+                * application/x-www-form-urlencoded - The default for HTML forms.
+                  Data is sent as key-value pairs in the body of the request, similar to query parameters.
+                * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
+
         Return:
-            dict: request header values
+            dict:
+                The request header values.
+
         """
 
         request_header = {
+            "User-Agent": USER_AGENT,
             "Authorization": "Bearer {}".format(self._access_token_admin),
         }
         if content_type:
@@ -279,17 +269,22 @@ class CoreShare(object):
     # end method definition
 
     def request_header_user(self, content_type: str = "application/json") -> dict:
-        """Returns the request header used for Application calls
-           that require user (non-admin) credentials.
-           Consists of Bearer access token and Content Type
+        """Return the request header used for Application calls that require user (non-admin) credentials.
+
+        Consists of Bearer access token and Content Type
 
         Args:
-            content_type (str, optional): content type for the request
+            content_type (str, optional):
+                The content type for the request.
+
         Return:
-            dict: request header values
+            dict:
+                The request header values.
+
         """
 
         request_header = {
+            "User-Agent": USER_AGENT,
             "Authorization": "Bearer {}".format(self._access_token_user),
         }
         if content_type:
@@ -319,33 +314,61 @@ class CoreShare(object):
         user_credentials: bool = False,
         verify: bool = True,
     ) -> dict | None:
-        """Call an OTDS REST API in a safe way
+        """Call an OTDS REST API in a safe way.
 
         Args:
-            url (str): URL to send the request to.
-            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
-            headers (dict | None, optional): Request Headers. Defaults to None.
-            data (dict | None, optional): Request payload. Defaults to None
-            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
-                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
-            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
-                                         If False, then only a warning is logged. Defaults to True.
-            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
-            failure_message (str, optional): Specific error message. Defaults to "".
-            success_message (str, optional): Specific success message. Defaults to "".
-            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
-            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
-            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
-            user_credentials (bool, optional): defines if admin or user credentials are used for the REST API call. Default = False = admin credentials
-            verify (bool, optional): specify whether or not SSL certificates should be verified when making an HTTPS request. Default = True
+            url (str):
+                The URL to send the request to.
+            method (str, optional):
+                HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional):
+                Request Headers. Defaults to None.
+            data (dict | None, optional):
+                Request payload. Defaults to None
+            json_data (dict | None, optional):
+                Request payload for the JSON parameter. Defaults to None.
+            files (dict | None, optional):
+                Dictionary of {"name": file-tuple} for multipart encoding upload.
+                The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            timeout (int | None, optional):
+                Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            show_warning (bool, optional):
+                Whether or not an warning should be logged in case of a
+                failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional):
+                Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional):
+                Specific error message. Defaults to "".
+            success_message (str, optional):
+                Specific success message. Defaults to "".
+            max_retries (int, optional):
+                How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional):
+                Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional):
+                If True the response.text will be interpreted as json and loaded into a dictionary.
+                True is the default.
+            user_credentials (bool, optional):
+                Defines if admin or user credentials are used for the REST API call.
+                Default = False = admin credentials
+            verify (bool, optional):
+                Specify whether or not SSL certificates should be verified when making an HTTPS request.
+                Default = True
 
         Returns:
-            dict | None: Response of OTDS REST API or None in case of an error.
+            dict | None:
+                Response of OTDS REST API or None in case of an error.
+
         """
 
         if headers is None:
-            logger.error("Missing request header. Cannot send request to Core Share!")
+            self.logger.error(
+                "Missing request header. Cannot send request to Core Share!",
+            )
             return None
 
         # In case of an expired session we reauthenticate and
@@ -368,7 +391,7 @@ class CoreShare(object):
 
                 if response.ok:
                     if success_message:
-                        logger.info(success_message)
+                        self.logger.info(success_message)
                     if parse_request_response:
                         return self.parse_request_response(response)
                     else:
@@ -376,22 +399,22 @@ class CoreShare(object):
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     if user_credentials:
-                        logger.debug(
-                            "User session has expired - try to re-authenticate..."
+                        self.logger.debug(
+                            "User session has expired - try to re-authenticate...",
                         )
                         self.authenticate_user(revalidate=True)
                         # Make sure to not change the content type:
                         headers = self.request_header_user(
-                            content_type=headers.get("Content-Type", None)
+                            content_type=headers.get("Content-Type", None),
                         )
                     else:
-                        logger.warning(
-                            "Admin session has expired - try to re-authenticate..."
+                        self.logger.warning(
+                            "Admin session has expired - try to re-authenticate...",
                         )
                         self.authenticate_admin(revalidate=True)
                         # Make sure to not change the content type:
                         headers = self.request_header_admin(
-                            content_type=headers.get("Content-Type", None)
+                            content_type=headers.get("Content-Type", None),
                         )
                     retries += 1
                 else:
@@ -405,7 +428,7 @@ class CoreShare(object):
                         response_text = response.text
 
                     if show_error:
-                        logger.error(
+                        self.logger.error(
                             "%s; status -> %s/%s; error -> %s",
                             failure_message,
                             response.status_code,
@@ -413,7 +436,7 @@ class CoreShare(object):
                             response_text,
                         )
                     elif show_warning:
-                        logger.warning(
+                        self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
                             warning_message if warning_message else failure_message,
                             response.status_code,
@@ -421,7 +444,7 @@ class CoreShare(object):
                             response_text,
                         )
                     if content_type == "text/html":
-                        logger.debug(
+                        self.logger.debug(
                             "%s; status -> %s/%s; warning -> %s",
                             failure_message,
                             response.status_code,
@@ -431,45 +454,45 @@ class CoreShare(object):
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Request timed out. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; timeout error",
+                    self.logger.error(
+                        "%s; timeout error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                     else:
                         return None
             except requests.exceptions.ConnectionError:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Connection error. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; connection error",
+                    self.logger.error(
+                        "%s; connection error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                         time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                     else:
                         return None
             # end try
-            logger.debug(
+            self.logger.debug(
                 "Retrying REST API %s call -> %s... (retry = %s)",
                 method,
                 url,
@@ -485,43 +508,47 @@ class CoreShare(object):
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Converts the request response (JSon) to a Python dict in a safe way
-           that also handles exceptions. It first tries to load the response.text
-           via json.loads() that produces a dict output. Only if response.text is
-           not set or is empty it just converts the response_object to a dict using
-           the vars() built-in method.
+        """Convert the request response to a dict in a safe way.
+
+        This also handles exceptions. It first tries to load the response.text
+        via json.loads() that produces a dict output. Only if response.text is
+        not set or is empty it just converts the response_object to a dict using
+        the vars() built-in method.
 
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str, optional): use a more specific error message
-                                                      in case of an error
-            show_error (bool): True: write an error to the log file
-                               False: write a warning to the log file
+            response_object (object):
+                This is reponse object returned by the request call.
+            additional_error_message (str, optional):
+                Can be used to provide a more specific error message
+                in case an error occurs.
+            show_error (bool, optional):
+                True: write an error to the log file
+                False: write a warning to the log file
+
         Returns:
             dict: response information or None in case of an error
+
         """
 
         if not response_object:
             return None
 
         try:
-            if response_object.text:
-                dict_object = json.loads(response_object.text)
-            else:
-                dict_object = vars(response_object)
+            dict_object = json.loads(response_object.text) if response_object.text else vars(response_object)
         except json.JSONDecodeError as exception:
             if additional_error_message:
                 message = "Cannot decode response as JSon. {}; error -> {}".format(
-                    additional_error_message, exception
+                    additional_error_message,
+                    exception,
                 )
             else:
                 message = "Cannot decode response as JSon; error -> {}".format(
-                    exception
+                    exception,
                 )
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.warning(message)
+                self.logger.warning(message)
             return None
         else:
             return dict_object
@@ -529,24 +556,34 @@ class CoreShare(object):
     # end method definition
 
     def lookup_result_value(
-        self, response: dict, key: str, value: str, return_key: str
+        self,
+        response: dict,
+        key: str,
+        value: str,
+        return_key: str,
     ) -> str | None:
-        """Lookup a property value based on a provided key / value pair in the
-           response properties of an Extended ECM REST API call.
+        """Lookup a property value based on a provided key / value pair in the response of an Core Share REST API call.
 
         Args:
-            response (dict): REST response from an OTCS REST Call
-            key (str): property name (key)
-            value (str): value to find in the item with the matching key
-            return_key (str): determines which value to return based on the name of the dict key
+            response (dict):
+                REST response from an Core Share REST Call
+            key (str):
+                The property name (key).
+            value (str):
+                The value to find in the item with the matching key.
+            return_key (str):
+                Determines which value to return based on the name of the dict key.
+
         Returns:
-            str: value of the property with the key defined in "return_key"
-                 or None if the lookup fails
+            str | None:
+                The value of the property with the key defined in "return_key"
+                 or None if the lookup fails.
+
         """
 
         if not response:
             return None
-        if not "results" in response:
+        if "results" not in response:
             return None
 
         results = response["results"]
@@ -562,16 +599,28 @@ class CoreShare(object):
     # end method definition
 
     def exist_result_item(
-        self, response: dict, key: str, value: str, results_marker: str = "results"
+        self,
+        response: dict,
+        key: str,
+        value: str,
+        results_marker: str = "results",
     ) -> bool:
         """Check existence of key / value pair in the response properties of a Core Share API call.
 
         Args:
-            response (dict): REST response from a Core Share API call
-            key (str): property name (key)
-            value (str): value to find in the item with the matching key
+            response (dict):
+                REST response from a Core Share API call
+            key (str):
+                A property name (key)
+            value (str):
+                The value to find in the item with the matching key.
+            results_marker (str, optional):
+                The name of the data structure for the results.
+
         Returns:
-            bool: True if the value was found, False otherwise
+            bool:
+                True, if the value was found, False otherwise.
+
         """
 
         if not response:
@@ -586,7 +635,7 @@ class CoreShare(object):
                 if value == result[key]:
                     return True
         else:
-            if not key in response:
+            if key not in response:
                 return False
             if value == response[key]:
                 return True
@@ -604,12 +653,18 @@ class CoreShare(object):
         """Get value of a result property with a given key of a Core Share API call.
 
         Args:
-            response (dict or list): REST response from a Core Share REST Call
-            key (str): property name (key)
-            index (int, optional): Index to use (1st element has index 0).
-                                   Defaults to 0.
+            response (dict or list):
+                REST response from a Core Share REST Call
+            key (str):
+                The property name (key).
+            index (int, optional):
+                Index to use (1st element has index 0).
+                Defaults to 0.
+
         Returns:
-            str: value for the key, None otherwise
+            str:
+                The value for the key, None in case of an error.
+
         """
 
         if not response:
@@ -619,7 +674,7 @@ class CoreShare(object):
         if isinstance(response, list):
             if len(response) - 1 < index:
                 return None
-            if not key in response[index]:
+            if key not in response[index]:
                 return None
             value = response[index][key]
             return value
@@ -629,17 +684,13 @@ class CoreShare(object):
             if "results" in response:
                 # we expect results to be a list!
                 values = response["results"]
-                if (
-                    not values
-                    or not isinstance(values, list)
-                    or len(values) - 1 < index
-                ):
+                if not values or not isinstance(values, list) or len(values) - 1 < index:
                     return None
-                if not key in values[index]:
+                if key not in values[index]:
                     return None
                 value = values[index][key]
             else:  # simple response as dictionary - try to find key in response directly:
-                if not key in response:
+                if key not in response:
                     return None
                 value = response[key]
 
@@ -656,15 +707,20 @@ class CoreShare(object):
         """Authenticate at Core Share as Tenant Admin.
 
         Args:
-            revalidate (bool, optional): determinse if a re-athentication is enforced
-                                         (e.g. if session has timed out with 401 error)
+            revalidate (bool, optional):
+                Defines whether or not a re-athentication is enforced
+                (e.g. if session has timed out with 401 error).
+
         Returns:
-            str: Access token. Also stores access token in self._access_token. None in case of error
+            str:
+                The access token. Also stores access token in self._access_token.
+                None in case of error.
+
         """
 
         # Already authenticated and session still valid?
         if self._access_token_admin and not revalidate:
-            logger.debug(
+            self.logger.debug(
                 "Session still valid - return existing access token -> %s",
                 str(self._access_token_admin),
             )
@@ -674,7 +730,10 @@ class CoreShare(object):
 
         request_header = REQUEST_LOGIN_HEADERS
 
-        logger.debug("Requesting Core Share Admin Access Token from -> %s", request_url)
+        self.logger.debug(
+            "Requesting Core Share Admin Access Token from -> %s",
+            request_url,
+        )
 
         response = None
         self._access_token_admin = None
@@ -686,7 +745,7 @@ class CoreShare(object):
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.ConnectionError as exception:
-            logger.warning(
+            self.logger.warning(
                 "Unable to connect to -> %s : %s",
                 request_url,
                 exception,
@@ -709,13 +768,14 @@ class CoreShare(object):
 
                     # Store authentication access_token:
                     self._access_token_admin = access_token
-                    logger.debug(
-                        "Tenant Admin Access Token -> %s", self._access_token_admin
+                    self.logger.debug(
+                        "Tenant Admin Access Token -> %s",
+                        self._access_token_admin,
                     )
                 else:
                     return None
         else:
-            logger.error(
+            self.logger.error(
                 "Failed to request a Core Share Tenant Admin Access Token; error -> %s",
                 response.text,
             )
@@ -726,37 +786,38 @@ class CoreShare(object):
     # end method definition
 
     def authenticate_user(
-        self, revalidate: bool = False, grant_type: str = "password"
+        self,
+        revalidate: bool = False,
+        grant_type: str = "password",
     ) -> str | None:
         """Authenticate at Core Share as Tenant Service User (TSU) with client ID and client secret.
 
         Args:
-            revalidate (bool, optional): determinse if a re-athentication is enforced
-                                         (e.g. if session has timed out with 401 error)
-            grant_type (str, optional): Can either be "client_credentials" (default) or "password".
+            revalidate (bool, optional):
+                Defines whether or not a re-athentication is enforced
+                (e.g. if session has timed out with 401 error).
+            grant_type (str, optional):
+                Can either be "client_credentials" (default) or "password".
+
         Returns:
-            str: Access token. Also stores access token in self._access_token. None in case of error
+            str:
+                The access token. Also stores access token in self._access_token.
+                None in case of error.
+
         """
 
         # Already authenticated and session still valid?
         if self._access_token_user and not revalidate:
-            logger.debug(
+            self.logger.debug(
                 "Session still valid - return existing access token -> %s",
                 str(self._access_token_user),
             )
             return self._access_token_user
 
-        if grant_type == "client_credentials":
-            request_url = self.config()["authorizationUrlCredentials"]
-        elif grant_type == "password":
-            request_url = self.config()["authorizationUrlPassword"]
-        else:
-            logger.error("Illegal grant type - authorization not possible!")
-            return None
-
         request_header = REQUEST_LOGIN_HEADERS
+        request_url = self.config()["tokenUrl"]
 
-        logger.debug(
+        self.logger.debug(
             "Requesting Core Share Tenant Service User Access Token from -> %s",
             request_url,
         )
@@ -764,14 +825,25 @@ class CoreShare(object):
         response = None
         self._access_token_user = None
 
+        authentication_body_post = {
+            "grant_type": grant_type,
+            "client_id": self.config()["clientId"],
+            "client_secret": self.config()["clientSecret"],
+        }
+
+        if grant_type == "password":
+            authentication_body_post["username"] = self.config()["username"]
+            authentication_body_post["password"] = self.config()["password"]
+
         try:
             response = requests.post(
                 request_url,
                 headers=request_header,
+                data=authentication_body_post,
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.ConnectionError as exception:
-            logger.warning(
+            self.logger.warning(
                 "Unable to connect to -> %s : %s",
                 request_url,
                 exception,
@@ -785,11 +857,12 @@ class CoreShare(object):
             else:
                 # Store authentication access_token:
                 self._access_token_user = authenticate_dict["access_token"]
-                logger.debug(
-                    "Tenant Service User Access Token -> %s", self._access_token_user
+                self.logger.debug(
+                    "Tenant Service User Access Token -> %s",
+                    self._access_token_user,
                 )
         else:
-            logger.error(
+            self.logger.error(
                 "Failed to request a Core Share Tenant Service User Access Token; error -> %s",
                 response.text,
             )
@@ -803,11 +876,14 @@ class CoreShare(object):
         """Get Core Share groups.
 
         Args:
-            offset (int, optional): index of first group (for pagination). Defaults to 0.
-            count (int, optional): number of groups to return (page length). Defaults to 25.
+            offset (int, optional):
+                The index of first group (for pagination). Defaults to 0.
+            count (int, optional):
+                The number of groups to return (page length). Defaults to 25.
 
         Returns:
-            dict | None: Dictionary with the Core Share group data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share group data or None if the request fails.
 
             Example response:
             {
@@ -832,6 +908,7 @@ class CoreShare(object):
                     }
                 ]
             }
+
         """
 
         if not self._access_token_user:
@@ -839,10 +916,11 @@ class CoreShare(object):
 
         request_header = self.request_header_user()
         request_url = self.config()["groupsUrl"] + "?offset={}&count={}".format(
-            offset, count
+            offset,
+            count,
         )
 
-        logger.debug("Get Core Share groups; calling -> %s", request_url)
+        self.logger.debug("Get Core Share groups; calling -> %s", request_url)
 
         return self.do_request(
             url=request_url,
@@ -863,11 +941,14 @@ class CoreShare(object):
         """Add a new Core Share group. This requires a Tenent Admin authorization.
 
         Args:
-            group_name (str): Name of the new Core Share group
-            description (str): Description of the new Core Share group
+            group_name (str):
+                The name of the new Core Share group.
+            description (str, optional):
+                The description of the new Core Share group.
 
         Returns:
-            dict | None: Dictionary with the Core Share Group data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share Group data or None if the request fails.
 
             Example response:
             {
@@ -887,6 +968,7 @@ class CoreShare(object):
                 "isSync": false,
                 "tenantId": "2157293035593927996"
             }
+
         """
 
         if not self._access_token_admin:
@@ -897,8 +979,10 @@ class CoreShare(object):
 
         payload = {"name": group_name, "description": description}
 
-        logger.debug(
-            "Adding Core Share group -> %s; calling -> %s", group_name, request_url
+        self.logger.debug(
+            "Adding Core Share group -> %s; calling -> %s",
+            group_name,
+            request_url,
         )
 
         return self.do_request(
@@ -917,10 +1001,12 @@ class CoreShare(object):
         """Get Core Share group members.
 
         Args:
-            group_id (str): ID of the group to deliver the members for.
+            group_id (str):
+                The ID of the group to deliver the members for.
 
         Returns:
-            dict | None: Dictionary with the Core Share group membership data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share group membership data or None if the request fails.
 
             Example response:
             {
@@ -949,6 +1035,7 @@ class CoreShare(object):
                 ],
                 'count': 0
             }
+
         """
 
         if not self._access_token_admin:
@@ -957,7 +1044,7 @@ class CoreShare(object):
         request_header = self.request_header_admin()
         request_url = self.config()["groupsUrl"] + "/{}".format(group_id) + "/members"
 
-        logger.debug(
+        self.logger.debug(
             "Get members for Core Share group with ID -> %s; calling -> %s",
             group_id,
             request_url,
@@ -969,7 +1056,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get members of Core Share group -> '{}'".format(
-                group_id
+                group_id,
             ),
             user_credentials=False,
         )
@@ -977,16 +1064,25 @@ class CoreShare(object):
     # end method definition
 
     def add_group_member(
-        self, group_id: str, user_id: str, is_group_admin: bool = False
+        self,
+        group_id: str,
+        user_id: str,
+        is_group_admin: bool = False,
     ) -> list | None:
         """Add a Core Share user to a Core Share group.
 
         Args:
-            group_id (str): ID of the Core Share Group
-            user_id (str): ID of the Core Share User
+            group_id (str):
+                ID of the Core Share group.
+            user_id (str):
+                ID of the Core Share user.
+            is_group_admin (bool, optional):
+                Whether or not the member is a group administrator.
+                Default is False.
 
         Returns:
-            list | None: Dictionary with the Core Share group membership or None if the request fails.
+            list | None:
+                Dictionary with the Core Share group membership or None if the request fails.
 
             Example Response ('errors' is only output if success = False):
             [
@@ -1020,6 +1116,7 @@ class CoreShare(object):
                     ]
                 }
             ]
+
         """
 
         if not self._access_token_admin:
@@ -1033,7 +1130,7 @@ class CoreShare(object):
 
         payload = {"members": [user_email], "specificGroupRole": is_group_admin}
 
-        logger.debug(
+        self.logger.debug(
             "Add Core Share user -> '%s' (%s) as %s to Core Share group with ID -> %s; calling -> %s",
             user_email,
             user_id,
@@ -1049,7 +1146,8 @@ class CoreShare(object):
             json_data=payload,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add Core Share user -> '{}' to Core Share group with ID -> {}".format(
-                user_email, group_id
+                user_email,
+                group_id,
             ),
             user_credentials=False,
         )
@@ -1057,16 +1155,25 @@ class CoreShare(object):
     # end method definition
 
     def remove_group_member(
-        self, group_id: str, user_id: str, is_group_admin: bool = False
+        self,
+        group_id: str,
+        user_id: str,
+        is_group_admin: bool = False,
     ) -> list | None:
         """Remove a Core Share user from a Core Share group.
 
         Args:
-            group_id (str): ID of the Core Share Group
-            user_id (str): ID of the Core Share User
+            group_id (str):
+                The ID of the Core Share Group.
+            user_id (str):
+                The ID of the Core Share User.
+            is_group_admin (bool, optional):
+                True, if the member is a group admin.
+                Default is False.
 
         Returns:
-            list | None: Dictionary with the Core Share group membership or None if the request fails.
+            list | None:
+                Dictionary with the Core Share group membership or None if the request fails.
 
             Example Response ('errors' is only output if success = False):
             [
@@ -1081,6 +1188,7 @@ class CoreShare(object):
                     ]
                 }
             ]
+
         """
 
         if not self._access_token_admin:
@@ -1094,7 +1202,7 @@ class CoreShare(object):
 
         payload = {"members": [user_email], "specificGroupRole": is_group_admin}
 
-        logger.debug(
+        self.logger.debug(
             "Remove Core Share user -> '%s' (%s) as %s from Core Share group with ID -> %s; calling -> %s",
             user_email,
             user_id,
@@ -1110,7 +1218,9 @@ class CoreShare(object):
             json_data=payload,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to remove Core Share user -> '{}' ({}) from Core Share group with ID -> {}".format(
-                user_email, user_id, group_id
+                user_email,
+                user_id,
+                group_id,
             ),
             user_credentials=False,
         )
@@ -1121,12 +1231,13 @@ class CoreShare(object):
         """Get a Core Share group by its ID.
 
         Args:
-            None
+            group_id (str):
+                The ID of the Core Share group.
 
         Returns:
-            dict | None: Dictionary with the Core Share group data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share group data or None if the request fails.
 
-            Response example:
         """
 
         if not self._access_token_admin:
@@ -1135,8 +1246,10 @@ class CoreShare(object):
         request_header = self.request_header_admin()
         request_url = self.config()["groupsUrl"] + "/" + group_id
 
-        logger.debug(
-            "Get Core Share group with ID -> %s; calling -> %s", group_id, request_url
+        self.logger.debug(
+            "Get Core Share group with ID -> %s; calling -> %s",
+            group_id,
+            request_url,
         )
 
         return self.do_request(
@@ -1145,7 +1258,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get Core Share group with ID -> {}".format(
-                group_id
+                group_id,
             ),
             user_credentials=False,
         )
@@ -1156,10 +1269,12 @@ class CoreShare(object):
         """Get Core Share group by its name.
 
         Args:
-            name (str): Name of the group to search.
+            name (str):
+                The name of the group to search.
 
         Returns:
-            dict | None: Dictionary with the Core Share group data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share group data or None if the request fails.
 
             Example result:
             {
@@ -1181,6 +1296,7 @@ class CoreShare(object):
                 ],
                 'total': 1
             }
+
         """
 
         groups = self.search_groups(
@@ -1192,7 +1308,7 @@ class CoreShare(object):
     # end method definition
 
     def search_groups(self, query_string: str) -> dict | None:
-        """Search Core Share group(s) by name.
+        """Search Core Share group(s) using a query string.
 
         Args:
             query_string(str): Query for the group name / property
@@ -1200,7 +1316,6 @@ class CoreShare(object):
         Returns:
             dict | None: Dictionary with the Core Share user data or None if the request fails.
 
-            Example response:
         """
 
         if not self._access_token_admin:
@@ -1209,8 +1324,10 @@ class CoreShare(object):
         request_header = self.request_header_admin()
         request_url = self.config()["searchGroupUrl"] + "?q=" + query_string
 
-        logger.debug(
-            "Search Core Share group by -> %s; calling -> %s", query_string, request_url
+        self.logger.debug(
+            "Search Core Share group by -> %s; calling -> %s",
+            query_string,
+            request_url,
         )
 
         return self.do_request(
@@ -1219,7 +1336,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Cannot find Core Share group with name / property -> {}".format(
-                query_string
+                query_string,
             ),
             user_credentials=False,
         )
@@ -1233,7 +1350,8 @@ class CoreShare(object):
             None
 
         Returns:
-            dict | None: Dictionary with the Core Share user data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share user data or None if the request fails.
 
             Example response (it is a list!):
             [
@@ -1298,6 +1416,7 @@ class CoreShare(object):
                 },
                 ...
             ]
+
         """
 
         if not self._access_token_admin:
@@ -1306,7 +1425,7 @@ class CoreShare(object):
         request_header = self.request_header_admin()
         request_url = self.config()["usersUrlv1"]
 
-        logger.debug("Get Core Share users; calling -> %s", request_url)
+        self.logger.debug("Get Core Share users; calling -> %s", request_url)
 
         return self.do_request(
             url=request_url,
@@ -1323,10 +1442,12 @@ class CoreShare(object):
         """Get a Core Share user by its ID.
 
         Args:
-            None
+            user_id (str):
+                The ID of the user.
 
         Returns:
-            dict | None: Dictionary with the Core Share user data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share user data or None if the request fails.
 
             Response example:
             {
@@ -1387,6 +1508,7 @@ class CoreShare(object):
                 'quota': 10737418240,
                 'usage': 0
             }
+
         """
 
         if not self._access_token_user:
@@ -1395,8 +1517,10 @@ class CoreShare(object):
         request_header = self.request_header_user()
         request_url = self.config()["usersUrlv1"] + "/" + user_id
 
-        logger.debug(
-            "Get Core Share user with ID -> %s; calling -> %s", user_id, request_url
+        self.logger.debug(
+            "Get Core Share user with ID -> %s; calling -> %s",
+            user_id,
+            request_url,
         )
 
         return self.do_request(
@@ -1405,7 +1529,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get Core Share user with ID -> {}".format(
-                user_id
+                user_id,
             ),
             user_credentials=True,
         )
@@ -1413,22 +1537,30 @@ class CoreShare(object):
     # end method definition
 
     def get_user_by_name(
-        self, first_name: str, last_name: str, user_status: str = "internal-native"
+        self,
+        first_name: str,
+        last_name: str,
+        user_status: str = "internal-native",
     ) -> dict | None:
         """Get Core Share user by its first and last name.
 
         Args:
-            first_name (str): First name of the users to search.
-            last_name (str): Last name of the users to search.
-            user_status (str, optional): type of users. Possible values:
-                                         * internal-enabled
-                                         * internal-pending
-                                         * internal-locked
-                                         * internal-native   (non-SSO)
-                                         * internal-sso
+            first_name (str):
+                First name of the users to search.
+            last_name (str):
+                Last name of the users to search.
+            user_status (str, optional):
+                Type of users. Possible values:
+                * internal-enabled
+                * internal-pending
+                * internal-locked
+                * internal-native   (non-SSO)
+                * internal-sso
 
         Returns:
-            dict | None: Dictionary with the Core Share user data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share user data or None if the request fails.
+
         """
 
         # Search the users with this first and last name (and hope this is unique ;-).
@@ -1442,21 +1574,27 @@ class CoreShare(object):
     # end method definition
 
     def get_user_by_email(
-        self, email: str, user_status: str = "internal-native"
+        self,
+        email: str,
+        user_status: str = "internal-native",
     ) -> dict | None:
         """Get Core Share user by its email address.
 
         Args:
-            email (str): Email address of the users to search.
-            user_status (str, optional): type of users. Possible values:
-                                         * internal-enabled
-                                         * internal-pending
-                                         * internal-locked
-                                         * internal-native   (non-SSO)
-                                         * internal-sso
+            email (str):
+                Email address of the users to search.
+            user_status (str, optional):
+                Type of users. Possible values:
+                * internal-enabled
+                * internal-pending
+                * internal-locked
+                * internal-native   (non-SSO)
+                * internal-sso
 
         Returns:
-            dict | None: Dictionary with the Core Share user data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share user data or None if the request fails.
+
         """
 
         # Search the users with this first and last name (and hope this is unique ;-).
@@ -1478,14 +1616,17 @@ class CoreShare(object):
         """Search Core Share user(s) by name / property. Needs to be a Tenant Administrator to do so.
 
         Args:
-            query_string (str): string to query the user(s)
-            user_status (str, optional): type of users. Possible values:
-                                         * internal-enabled
-                                         * internal-pending
-                                         * internal-locked
-                                         * internal-native   (non-SSO)
-                                         * internal-sso
-            page_size (int, optional): max number of results per page. We set the default to 100 (Web UI uses 25)
+            query_string (str):
+                The string to query the user(s).
+            user_status (str, optional):
+                The type of users. Possible values:
+                * internal-enabled
+                * internal-pending
+                * internal-locked
+                * internal-native   (non-SSO)
+                * internal-sso
+            page_size (int, optional):
+                The maximum number of results per page. We set the default to 100 (Web UI uses 25)
 
         Returns:
             dict | None: Dictionary with the Core Share user data or None if the request fails.
@@ -1524,6 +1665,7 @@ class CoreShare(object):
                     ...
                 ]
             }
+
         """
 
         if not self._access_token_admin:
@@ -1539,8 +1681,10 @@ class CoreShare(object):
             + str(page_size)
         )
 
-        logger.debug(
-            "Search Core Share user by -> %s; calling -> %s", query_string, request_url
+        self.logger.debug(
+            "Search Core Share user by -> %s; calling -> %s",
+            query_string,
+            request_url,
         )
 
         return self.do_request(
@@ -1549,7 +1693,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to search Core Share user with name / property -> {}".format(
-                query_string
+                query_string,
             ),
             user_credentials=False,
         )
@@ -1568,15 +1712,22 @@ class CoreShare(object):
         """Add a new Core Share user. This requires a Tenent Admin authorization.
 
         Args:
-            first_name (str): First name of the new user
-            last_name (str): Last name of the new user
-            email (str): Email of the new Core Share user
-            password (str | None, optional): Password of the new Core Share user
-            title (str | None, optional): Title of the user
-            company (str | None, optional): Name of the Company of the user
+            first_name (str):
+                First name of the new user
+            last_name (str):
+                Last name of the new user
+            email (str):
+                Email of the new Core Share user
+            password (str | None, optional):
+                Password of the new Core Share user
+            title (str | None, optional):
+                Title of the user
+            company (str | None, optional):
+                Name of the Company of the user
 
         Returns:
-            dict | None: Dictionary with the Core Share User data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share User data or None if the request fails.
 
             Example response:
             {
@@ -1615,6 +1766,7 @@ class CoreShare(object):
                 "quota": 10737418240,
                 "usage": 0
             }
+
         """
 
         if not self._access_token_admin:
@@ -1637,7 +1789,7 @@ class CoreShare(object):
         if company:
             payload["company"] = company
 
-        logger.debug(
+        self.logger.debug(
             "Adding Core Share user -> %s %s; calling -> %s",
             first_name,
             last_name,
@@ -1651,7 +1803,9 @@ class CoreShare(object):
             json_data=payload,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add Core Share user -> '{} {}' ({})".format(
-                first_name, last_name, email
+                first_name,
+                last_name,
+                email,
             ),
             user_credentials=False,
         )
@@ -1662,10 +1816,13 @@ class CoreShare(object):
         """Resend the invite for a Core Share user.
 
         Args:
-            user_id (str): The Core Share user ID.
+            user_id (str):
+                The Core Share user ID.
 
         Returns:
-            dict: Response from the Core Share API.
+            dict:
+                Response from the Core Share API.
+
         """
 
         if not self._access_token_admin:
@@ -1675,7 +1832,7 @@ class CoreShare(object):
 
         request_url = self.config()["usersUrlv1"] + "/{}".format(user_id)
 
-        logger.debug(
+        self.logger.debug(
             "Resend invite for Core Share user with ID -> %s; calling -> %s",
             user_id,
             request_url,
@@ -1690,7 +1847,7 @@ class CoreShare(object):
             json_data=update_data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to resend invite for Core Share user with ID -> {}".format(
-                user_id
+                user_id,
             ),
             user_credentials=False,
         )
@@ -1701,10 +1858,15 @@ class CoreShare(object):
         """Update a Core Share user.
 
         Args:
-            user_id (str): ID of the Core Share user.
+            user_id (str):
+                The ID of the Core Share user.
+            update_data (dict):
+                The updated user data.
 
         Returns:
-            dict: Response or None if the request has failed.
+            dict:
+                REST response or None if the REST call has failed.
+
         """
 
         if not self._access_token_admin:
@@ -1714,15 +1876,15 @@ class CoreShare(object):
 
         request_url = self.config()["usersUrlv1"] + "/{}".format(user_id)
 
-        logger.debug(
+        self.logger.debug(
             "Update data of Core Share user with ID -> %s; calling -> %s",
             user_id,
             request_url,
         )
 
-        if "email" in update_data and not "password" in update_data:
-            logger.warning(
-                "Trying to update the email without providing the password. This is likely to fail..."
+        if "email" in update_data and "password" not in update_data:
+            self.logger.warning(
+                "Trying to update the email without providing the password. This is likely to fail...",
             )
 
         return self.do_request(
@@ -1732,7 +1894,7 @@ class CoreShare(object):
             json_data=update_data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update Core Share user with ID -> {}".format(
-                user_id
+                user_id,
             ),
             user_credentials=False,
         )
@@ -1743,13 +1905,17 @@ class CoreShare(object):
         """Add an access role to a Core Share user.
 
         Args:
-            user_id (str): The Core Share user ID.
-            role_id (int): The role ID:
-                           * Content Manager = 5
-                           * Group Admin = 3
+            user_id (str):
+                The Core Share user ID.
+            role_id (int):
+                The role ID:
+                - Content Manager = 5
+                - Group Admin = 3
 
         Returns:
-            dict: Response from the Core Share API.
+            dict:
+                Response from the Core Share API.
+
         """
 
         if not self._access_token_admin:
@@ -1757,14 +1923,9 @@ class CoreShare(object):
 
         request_header = self.request_header_admin()
 
-        request_url = (
-            self.config()["usersUrlv1"]
-            + "/{}".format(user_id)
-            + "/roles/"
-            + str(role_id)
-        )
+        request_url = self.config()["usersUrlv1"] + "/{}".format(user_id) + "/roles/" + str(role_id)
 
-        logger.debug(
+        self.logger.debug(
             "Add access role -> %s to Core Share user with ID -> %s; calling -> %s",
             str(role_id),
             user_id,
@@ -1777,7 +1938,8 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add access role with ID -> {} to Core Share user with ID -> {}".format(
-                role_id, user_id
+                role_id,
+                user_id,
             ),
             user_credentials=False,
         )
@@ -1788,13 +1950,17 @@ class CoreShare(object):
         """Remove an access role from a Core Share user.
 
         Args:
-            user_id (str): The Core Share user ID.
-            role_id (int): The role ID:
-                           * Content Manager = 5
-                           * Group Admin = 3
+            user_id (str):
+                The Core Share user ID.
+            role_id (int):
+                The role ID:
+                * Content Manager = 5
+                * Group Admin = 3
 
         Returns:
-            dict: Response from the Core Share API.
+            dict:
+                Response from the Core Share API.
+
         """
 
         if not self._access_token_admin:
@@ -1802,14 +1968,9 @@ class CoreShare(object):
 
         request_header = self.request_header_admin()
 
-        request_url = (
-            self.config()["usersUrlv1"]
-            + "/{}".format(user_id)
-            + "/roles/"
-            + str(role_id)
-        )
+        request_url = self.config()["usersUrlv1"] + "/{}".format(user_id) + "/roles/" + str(role_id)
 
-        logger.debug(
+        self.logger.debug(
             "Remove access role with ID -> %s from Core Share user with ID -> %s; calling -> %s",
             str(role_id),
             user_id,
@@ -1822,7 +1983,8 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to remove access role with ID -> {} from Core Share user with ID -> {}".format(
-                role_id, user_id
+                role_id,
+                user_id,
             ),
             user_credentials=False,
         )
@@ -1839,26 +2001,29 @@ class CoreShare(object):
         """Define the access roles of a Core Share user.
 
         Args:
-            user_id (str): ID of the Core Share user
-            is_content_manager (bool | None, optional): Assign Content Manager Role if True.
-                                                        Removes Content Manager Role if False.
-                                                        Does nothing if None.
-                                                        Defaults to None.
-            is_group_admin (bool | None, optional): Assign Group Admin Role if True.
-                                                    Removes Group Admin Role if False.
-                                                    Does nothing if None.
-                                                    Defaults to None.
-            is_admin (bool | None, optional): Makes user Admin if True.
-                                              Removes Admin rights if False.
-                                              Does nothing if None.
-                                              Defaults to None.
+            user_id (str):
+                The ID of the Core Share user.
+            is_content_manager (bool | None, optional):
+                Assign Content Manager Role if True.
+                Removes Content Manager Role if False.
+                Does nothing if None.
+                Defaults to None.
+            is_group_admin (bool | None, optional):
+                Assign Group Admin Role if True.
+                Removes Group Admin Role if False.
+                Does nothing if None.
+                Defaults to None.
+            is_admin (bool | None, optional):
+                Makes user Admin if True.
+                Removes Admin rights if False.
+                Does nothing if None.
+                Defaults to None.
 
         Returns:
-            dict: Response from the Core Share API.
-        """
+            dict:
+                Response from the Core Share API.
 
-        CONTENT_MANAGER_ROLE_ID = 5
-        GROUP_ADMIN_ROLE_ID = 3
+        """
 
         response = None
 
@@ -1872,21 +2037,25 @@ class CoreShare(object):
         if is_content_manager is not None:
             if is_content_manager:
                 response = self.add_user_access_role(
-                    user_id=user_id, role_id=CONTENT_MANAGER_ROLE_ID
+                    user_id=user_id,
+                    role_id=CONTENT_MANAGER_ROLE_ID,
                 )
             else:
                 response = self.remove_user_access_role(
-                    user_id=user_id, role_id=CONTENT_MANAGER_ROLE_ID
+                    user_id=user_id,
+                    role_id=CONTENT_MANAGER_ROLE_ID,
                 )
 
         if is_group_admin is not None:
             if is_group_admin:
                 response = self.add_user_access_role(
-                    user_id=user_id, role_id=GROUP_ADMIN_ROLE_ID
+                    user_id=user_id,
+                    role_id=GROUP_ADMIN_ROLE_ID,
                 )
             else:
                 response = self.remove_user_access_role(
-                    user_id=user_id, role_id=GROUP_ADMIN_ROLE_ID
+                    user_id=user_id,
+                    role_id=GROUP_ADMIN_ROLE_ID,
                 )
 
         return response
@@ -1894,17 +2063,25 @@ class CoreShare(object):
     # end method definition
 
     def update_user_password(
-        self, user_id: str, password: str, new_password: str
+        self,
+        user_id: str,
+        password: str,
+        new_password: str,
     ) -> dict:
         """Update the password of a Core Share user.
 
         Args:
-            user_id (str): The Core Share user ID.
-            password (str): Old user password.
-            new_password (str): New user password.
+            user_id (str):
+                The Core Share user ID.
+            password (str):
+                The old user password.
+            new_password (str):
+                The new user password.
 
         Returns:
-            dict: Response from the Core Share API.
+            dict:
+                Response from the Core Share API.
+
         """
 
         if not self._access_token_admin:
@@ -1914,7 +2091,7 @@ class CoreShare(object):
 
         request_url = self.config()["usersUrlv1"] + "/{}".format(user_id)
 
-        logger.debug(
+        self.logger.debug(
             "Update password of Core Share user with ID -> %s; calling -> %s",
             user_id,
             request_url,
@@ -1929,7 +2106,7 @@ class CoreShare(object):
             json_data=update_data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update password of Core Share user with ID -> {}".format(
-                user_id
+                user_id,
             ),
             user_credentials=False,
         )
@@ -1937,15 +2114,25 @@ class CoreShare(object):
     # end method definition
 
     def update_user_photo(
-        self, user_id: str, photo_path: str, mime_type: str = "image/jpeg"
+        self,
+        user_id: str,
+        photo_path: str,
+        mime_type: str = "image/jpeg",
     ) -> dict | None:
         """Update the Core Share user photo.
 
         Args:
-            user_id (str): Core Share ID of the user
-            photo_path (str): file system path with the location of the photo
+            user_id (str):
+                The Core Share user ID.
+            photo_path (str):
+                The file system path with the location of the photo.
+            mime_type (str, optional):
+                The mime type of the photo. Default is "image/jpeg".
+
         Returns:
-            dict | None: Dictionary with the Core Share User data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share User data or None if the request fails.
+
         """
 
         if not self._access_token_user:
@@ -1953,17 +2140,18 @@ class CoreShare(object):
 
         # Check if the photo file exists
         if not os.path.isfile(photo_path):
-            logger.error("Photo file -> %s not found!", photo_path)
+            self.logger.error("Photo file -> %s not found!", photo_path)
             return None
 
         try:
             # Read the photo file as binary data
             with open(photo_path, "rb") as image_file:
                 photo_data = image_file.read()
-        except OSError as exception:
+        except OSError:
             # Handle any errors that occurred while reading the photo file
-            logger.error(
-                "Error reading photo file -> %s; error -> %s", photo_path, exception
+            self.logger.error(
+                "Error reading photo file -> %s",
+                photo_path,
             )
             return None
 
@@ -1972,7 +2160,7 @@ class CoreShare(object):
             "file": (photo_path, photo_data, mime_type),
         }
 
-        logger.debug(
+        self.logger.debug(
             "Update profile photo of Core Share user with ID -> %s; calling -> %s",
             user_id,
             request_url,
@@ -1985,7 +2173,7 @@ class CoreShare(object):
             files=files,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update profile photo of Core Share user with ID -> {}".format(
-                user_id
+                user_id,
             ),
             user_credentials=True,
             verify=False,
@@ -1994,13 +2182,17 @@ class CoreShare(object):
     # end method definition
 
     def get_folders(self, parent_id: str) -> list | None:
-        """Get Core Share folders under a given parent ID. This runs under user credentials (not admin!)
+        """Get Core Share folders under a given parent ID.
+
+        This runs under user credentials (not admin!)
 
         Args:
-            parent_id (str): ID of the parent folder or the rootID of a user
+            parent_id (str):
+                ID of the parent folder or the root ID of a user
 
         Returns:
-            list | None: List with the Core Share folders data or None if the request fails.
+            list | None:
+                List with the Core Share folders data or None if the request fails.
 
             Example response (it is a list!):
             [
@@ -2050,10 +2242,11 @@ class CoreShare(object):
                     'contentOriginator': {
                         'id': '0D949C67-473D-448C-8F4B-B2CCA769F586',
                         'name': 'IDEA-TE-QA',
-                        'imageUri': '/api/v1/tenants/2595192600759637225/contentOriginator/images/0D949C67-473D-448C-8F4B-B2CCA769F586'
+                        'imageUri': '/api/v1/tenants/2595192600759637225/contentOriginator/images/0D949C67'
                     }
                 }
             ]
+
         """
 
         if not self._access_token_user:
@@ -2067,7 +2260,7 @@ class CoreShare(object):
             + "?limit=25&order=lastModified:desc&filter=any"
         )
 
-        logger.debug(
+        self.logger.debug(
             "Get Core Share folders under parent -> %s; calling -> %s",
             parent_id,
             request_url,
@@ -2079,7 +2272,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get Core Share folders under parent -> {}".format(
-                parent_id
+                parent_id,
             ),
             user_credentials=True,
         )
@@ -2090,23 +2283,22 @@ class CoreShare(object):
         """Unshare Core Share folder with a given resource ID.
 
         Args:
-            resource_id (str): ID of the folder (resource) to unshare with all collaborators
+            resource_id (str):
+                The ID of the folder (resource) to unshare with all collaborators.
 
         Returns:
-            dict | None: Dictionary with the Core Share folders data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share folders data or None if the request fails.
 
-            Example response (it is a list!):
         """
 
         if not self._access_token_user:
             self.authenticate_user()
 
         request_header = self.request_header_user()
-        request_url = (
-            self.config()["foldersUrlv1"] + "/{}".format(resource_id) + "/collaborators"
-        )
+        request_url = self.config()["foldersUrlv1"] + "/{}".format(resource_id) + "/collaborators"
 
-        logger.debug(
+        self.logger.debug(
             "Unshare Core Share folder -> %s; calling -> %s",
             resource_id,
             request_url,
@@ -2118,7 +2310,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to unshare Core Share folder with ID -> {}".format(
-                resource_id
+                resource_id,
             ),
             user_credentials=True,
         )
@@ -2129,12 +2321,13 @@ class CoreShare(object):
         """Delete Core Share folder with a given resource ID.
 
         Args:
-            resource_id (str): ID of the folder (resource) to delete
+            resource_id (str):
+                The ID of the folder (resource) to delete.
 
         Returns:
-            dict | None: Dictionary with the Core Share request data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share request data or None if the request fails.
 
-            Example response (it is a list!):
         """
 
         if not self._access_token_user:
@@ -2145,7 +2338,7 @@ class CoreShare(object):
 
         payload = {"state": "deleted"}
 
-        logger.debug(
+        self.logger.debug(
             "Delete Core Share folder -> %s; calling -> %s",
             resource_id,
             request_url,
@@ -2158,7 +2351,7 @@ class CoreShare(object):
             data=json.dumps(payload),
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to delete Core Share folder -> {}".format(
-                resource_id
+                resource_id,
             ),
             user_credentials=True,
         )
@@ -2169,12 +2362,13 @@ class CoreShare(object):
         """Delete Core Share document with a given resource ID.
 
         Args:
-            resource_id (str): ID of the document (resource) to delete
+            resource_id (str):
+                The ID of the document (resource) to delete.
 
         Returns:
-            dict | None: Dictionary with the Core Share request data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share request data or None if the request fails.
 
-            Example response (it is a list!):
         """
 
         if not self._access_token_user:
@@ -2185,7 +2379,7 @@ class CoreShare(object):
 
         payload = {"state": "deleted"}
 
-        logger.debug(
+        self.logger.debug(
             "Delete Core Share document -> %s; calling -> %s",
             resource_id,
             request_url,
@@ -2198,7 +2392,7 @@ class CoreShare(object):
             data=json.dumps(payload),
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to delete Core Share document -> {}".format(
-                resource_id
+                resource_id,
             ),
             user_credentials=True,
         )
@@ -2206,14 +2400,18 @@ class CoreShare(object):
     # end method definition
 
     def leave_share(self, user_id: str, resource_id: str) -> dict | None:
-        """Remove a Core Share user from a share (i.e. the user leaves the share)
+        """Remove a Core Share user from a share (i.e. the user leaves the share).
 
         Args:
-            user_id (str): Core Share ID of the user.
-            resource_id (str): Core Share ID of the shared folder.
+            user_id (str):
+                The Core Share user ID.
+            resource_id (str):
+                The Core Share ID of the shared folder.
 
         Returns:
-            dict | None: Reponse of the REST call or None in case of an error.
+            dict | None:
+                Reponse of the REST call or None in case of an error.
+
         """
 
         if not self._access_token_user:
@@ -2221,16 +2419,11 @@ class CoreShare(object):
 
         request_header = self.request_header_user()
 
-        request_url = (
-            self.config()["foldersUrlv1"]
-            + "/{}".format(resource_id)
-            + "/collaborators/"
-            + str(user_id)
-        )
+        request_url = self.config()["foldersUrlv1"] + "/{}".format(resource_id) + "/collaborators/" + str(user_id)
 
         payload = {"action": "LEAVE_SHARE"}
 
-        logger.debug(
+        self.logger.debug(
             "User with ID -> %s leaves Core Share shared folder with ID -> %s; calling -> %s",
             user_id,
             resource_id,
@@ -2244,7 +2437,8 @@ class CoreShare(object):
             data=json.dumps(payload),
             timeout=REQUEST_TIMEOUT,
             failure_message="User with ID -> {} failed to leave Core Share folder with ID -> {}".format(
-                user_id, resource_id
+                user_id,
+                resource_id,
             ),
             user_credentials=True,
         )
@@ -2255,11 +2449,15 @@ class CoreShare(object):
         """Stop of share of a user.
 
         Args:
-            user_id (str): Core Share ID of the user.
-            resource_id (str): Core Share ID of the shared folder.
+            user_id (str):
+                The Core Share user ID.
+            resource_id (str):
+                The Core Share ID of the shared folder.
 
         Returns:
-            dict | None: Response of the REST call or None in case of an error.
+            dict | None:
+                Response of the REST call or None in case of an error.
+
         """
 
         if not self._access_token_user:
@@ -2267,11 +2465,9 @@ class CoreShare(object):
 
         request_header = self.request_header_user()
 
-        request_url = (
-            self.config()["foldersUrlv1"] + "/{}".format(resource_id) + "/collaborators"
-        )
+        request_url = self.config()["foldersUrlv1"] + "/{}".format(resource_id) + "/collaborators"
 
-        logger.debug(
+        self.logger.debug(
             "User -> %s stops sharing Core Share shared folder -> %s; calling -> %s",
             user_id,
             resource_id,
@@ -2284,7 +2480,8 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="User with ID -> {} failed to stop sharing Core Share folder with ID -> {}".format(
-                user_id, resource_id
+                user_id,
+                resource_id,
             ),
             user_credentials=True,
         )
@@ -2292,9 +2489,14 @@ class CoreShare(object):
     # end method definition
 
     def cleanup_user_files(
-        self, user_id: str, user_login: str, user_password: str
+        self,
+        user_id: str,
+        user_login: str,
+        user_password: str,
     ) -> bool:
-        """Cleanup files of a user. This handles different types of resources.
+        """Cleanup files of a user.
+
+        This handles different types of resources.
            * Local resources - not shared
            * Resources shared by the user
            * Resources shared by other users or groups
@@ -2302,12 +2504,17 @@ class CoreShare(object):
            The Core Share admin is not entitled to do this.
 
         Args:
-            user_id (str): Core Share ID of the user
-            user_login (str): Core Share email (= login) of the user
-            user_password (str): Core Share password of the user
+            user_id (str):
+                The Core Share user ID.
+            user_login (str):
+                The Core Share email (= login) of the user.
+            user_password (str):
+                The Core Share password of the user.
 
         Returns:
-            bool: True = success, False in case of an error.
+            bool:
+                True = success, False in case of an error.
+
         """
 
         user = self.get_user_by_id(user_id=user_id)
@@ -2316,13 +2523,13 @@ class CoreShare(object):
 
         is_confirmed = self.get_result_value(response=user, key="isConfirmed")
         if not is_confirmed:
-            logger.info(
+            self.logger.info(
                 "User -> %s is not yet confirmed - so it cannot have files to cleanup.",
                 user_id,
             )
             return True
 
-        logger.info("Inpersonate as user -> %s to cleanup files...", user_login)
+        self.logger.info("Inpersonate as user -> %s to cleanup files...", user_login)
 
         # Save admin credentials the class has been initialized with:
         admin_credentials = self.credentials()
@@ -2339,24 +2546,25 @@ class CoreShare(object):
         # Get all folders of the user:
         response = self.get_folders(parent_id=user_root_folder_id)
         if not response or not response["results"]:
-            logger.info("User -> %s has no items to cleanup!", user_id)
+            self.logger.info("User -> %s has no items to cleanup!", user_id)
         else:
             items = response["results"]
             for item in items:
                 if item["isShared"]:
                     if item["owner"]["id"] == user_id:
-                        logger.info(
+                        self.logger.info(
                             "User -> %s stops sharing item -> %s (%s)...",
                             user_id,
                             item["name"],
                             item["id"],
                         )
                         response = self.stop_share(
-                            user_id=user_id, resource_id=item["id"]
+                            user_id=user_id,
+                            resource_id=item["id"],
                         )
                         if not response:
                             success = False
-                        logger.info(
+                        self.logger.info(
                             "User -> %s deletes unshared item -> %s (%s)...",
                             user_id,
                             item["name"],
@@ -2366,19 +2574,20 @@ class CoreShare(object):
                         if not response:
                             success = False
                     else:
-                        logger.info(
+                        self.logger.info(
                             "User -> %s leaves shared folder -> '%s' (%s)...",
                             user_id,
                             item["name"],
                             item["id"],
                         )
                         response = self.leave_share(
-                            user_id=user_id, resource_id=item["id"]
+                            user_id=user_id,
+                            resource_id=item["id"],
                         )
                         if not response:
                             success = False
                 else:
-                    logger.info(
+                    self.logger.info(
                         "User -> %s deletes local item -> '%s' (%s) of type -> '%s'...",
                         user_id,
                         item["name"],
@@ -2390,21 +2599,23 @@ class CoreShare(object):
                     elif item["resourceType"] == "document":
                         response = self.delete_document(item["id"])
                     else:
-                        logger.error(
-                            "Unsupport resource type -> '%s'", item["resourceType"]
+                        self.logger.error(
+                            "Unsupport resource type -> '%s'",
+                            item["resourceType"],
                         )
                         response = None
                     if not response:
                         success = False
 
-        logger.info(
+        self.logger.info(
             "End inpersonation and switch back to admin account -> %s...",
             admin_credentials["username"],
         )
 
         # Reset credentials to admin:
         self.set_credentials(
-            admin_credentials["username"], admin_credentials["password"]
+            admin_credentials["username"],
+            admin_credentials["password"],
         )
         # Authenticate as administrator the class has been initialized with:
         self.authenticate_user(revalidate=True)
@@ -2417,10 +2628,13 @@ class CoreShare(object):
         """Get (incoming) shares of a Core Share group.
 
         Args:
-            group_id (str): Core Share ID of a group
+            group_id (str):
+                The Core Share group ID.
 
         Returns:
-            dict | None: Incoming shares or None if the request fails.
+            dict | None:
+                Incoming shares or None if the request fails.
+
         """
 
         if not self._access_token_admin:
@@ -2428,11 +2642,9 @@ class CoreShare(object):
 
         request_header = self.request_header_admin()
 
-        request_url = (
-            self.config()["groupsUrl"] + "/{}".format(group_id) + "/shares/incoming"
-        )
+        request_url = self.config()["groupsUrl"] + "/{}".format(group_id) + "/shares/incoming"
 
-        logger.debug(
+        self.logger.debug(
             "Get shares of Core Share group -> %s; calling -> %s",
             group_id,
             request_url,
@@ -2444,7 +2656,7 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get shares of Core Share group -> {}".format(
-                group_id
+                group_id,
             ),
             user_credentials=False,
         )
@@ -2455,11 +2667,15 @@ class CoreShare(object):
         """Revoke sharing of a folder with a group.
 
         Args:
-            group_id (str): ID of the Core Share group
-            resource_id (str): ID of the Core share folder
+            group_id (str):
+                The Core Share group ID.
+            resource_id (str):
+                The ID of the Core share folder.
 
         Returns:
-            dict | None: Response or None if the request fails.
+            dict | None:
+                Response or None if the request fails.
+
         """
 
         if not self._access_token_admin:
@@ -2468,13 +2684,10 @@ class CoreShare(object):
         request_header = self.request_header_admin()
 
         request_url = (
-            self.config()["foldersUrlv1"]
-            + "/{}".format(resource_id)
-            + "/collaboratorsAsAdmin/"
-            + str(group_id)
+            self.config()["foldersUrlv1"] + "/{}".format(resource_id) + "/collaboratorsAsAdmin/" + str(group_id)
         )
 
-        logger.debug(
+        self.logger.debug(
             "Revoke sharing of folder -> %s with group -> %s; calling -> %s",
             resource_id,
             group_id,
@@ -2487,7 +2700,8 @@ class CoreShare(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to revoke sharing Core Share folder with ID -> {} with group with ID -> {}".format(
-                resource_id, group_id
+                resource_id,
+                group_id,
             ),
             user_credentials=False,
         )
@@ -2496,33 +2710,38 @@ class CoreShare(object):
 
     def cleanup_group_shares(self, group_id: str) -> bool:
         """Cleanup all incoming shares of a group.
-           The Core Share admin is required to do this.
+
+        The Core Share admin is required to do this.
 
         Args:
-            group_id (str): Core Share ID of the group
+            group_id (str):
+                The Core Share group ID.
 
         Returns:
-            bool: True = success, False in case of an error.
+            bool:
+                True = success, False in case of an error.
+
         """
 
         response = self.get_group_shares(group_id=group_id)
 
         if not response or not response["shares"]:
-            logger.info("Group -> %s has no shares to revoke!", group_id)
+            self.logger.info("Group -> %s has no shares to revoke!", group_id)
             return True
 
         success = True
 
         items = response["shares"]
         for item in items:
-            logger.info(
+            self.logger.info(
                 "Revoke sharing of folder -> %s (%s) with group -> %s...",
                 item["name"],
                 item["id"],
                 group_id,
             )
             response = self.revoke_group_share(
-                group_id=group_id, resource_id=item["id"]
+                group_id=group_id,
+                resource_id=item["id"],
             )
             if not response:
                 success = False

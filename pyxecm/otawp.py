@@ -1,22 +1,27 @@
-"""
-Otawp module for synchorinizing the pojects , publsh and create run time instances for that.
-loanmanagement is such application.
-"""
+"""Synchronize AppWorks projects, publsh and create run time instances for that."""
 
-import logging
-import xml.etree.ElementTree as ET
-import uuid
+__author__ = "Dr. Marc Diefenbruch"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
+__credits__ = ["Kai-Philip Gatzweiler"]
+__maintainer__ = "Dr. Marc Diefenbruch"
+__email__ = "mdiefenb@opentext.com"
+
 import json
+import logging
 import re
 import time
-import requests
-from .otds import OTDS
+import uuid
+import xml.etree.ElementTree as ET
 
-logger = logging.getLogger("pyxecm.otawp")
+import requests
+
+from pyxecm.otds import OTDS
+
+default_logger = logging.getLogger("pyxecm.otawp")
 
 REQUEST_HEADERS = {
     "Content-Type": "text/xml; charset=utf-8",
-    "accept": "application/xml"
+    "accept": "application/xml",
 }
 
 REQUEST_FORM_HEADERS = {
@@ -26,12 +31,17 @@ REQUEST_FORM_HEADERS = {
 
 REQUEST_HEADERS_JSON = {
     "Content-Type": "application/json; charset=utf-8",
-    "accept": "application/json"
+    "accept": "application/json",
 }
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 120
+SYNC_PUBLISH_REQUEST_TIMEOUT = 300
+
 
 class OTAWP:
-    """Used to automate settings in OpenText AppWorks Platform (OTAWP)."""
+    """Class OTRAWP is used to automate settings in OpenText AppWorks Platform (OTAWP)."""
+
+    logger: logging.Logger = default_logger
+
     _config: dict
     _config = None
     _cookie = None
@@ -45,7 +55,46 @@ class OTAWP:
         username: str | None = None,
         password: str | None = None,
         otawp_ticket: str | None = None,
-    ):
+        otcs_partition_name: str | None = None,
+        otds_admin_partition_mame: str | None = None,
+        config_map_name: str | None = None,
+        otcs_resource_id: str | None = None,
+        otds_url: str | None = None,
+        otcs_url: str | None = None,
+        otcs_base_path: str | None = None,
+        license_file: str | None = None,
+        product_name: str | None = None,
+        product_description: str | None = None,
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize OTAWP (AppWorks Platform) object.
+
+        Args:
+            protocol (str): #TODO _description_
+            hostname (str): #TODO _description_
+            port (int): #TODO _description_
+            username (str | None, optional): #TODO _description_. Defaults to None.
+            password (str | None, optional): #TODO _description_. Defaults to None.
+            otawp_ticket (str | None, optional): #TODO _description_. Defaults to None.
+            otcs_partition_name (str | None, optional): #TODO _description_. Defaults to None.
+            otds_admin_partition_mame (str | None, optional): #TODO _description_. Defaults to None.
+            config_map_name (str | None, optional): #TODO _description_. Defaults to None.
+            otcs_resource_id (str | None, optional): #TODO _description_. Defaults to None.
+            otds_url (str | None, optional): #TODO _description_. Defaults to None.
+            otcs_url (str | None, optional): #TODO _description_. Defaults to None.
+            otcs_base_path (str | None, optional): #TODO _description_. Defaults to None.
+            license_file (str | None, optional): #TODO _description_. Defaults to None.
+            product_name (str | None, optional): #TODO _description_. Defaults to None.
+            product_description (str | None, optional): #TODO _description_. Defaults to None.
+            logger (logging.Logger, optional): #TODO: _description_. Defaults to default_logger.
+
+        """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("otawp")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
+
         otawp_config = {}
 
         otawp_config["hostname"] = hostname if hostname else "appworks"
@@ -53,125 +102,332 @@ class OTAWP:
         otawp_config["port"] = port if port else 8080
         otawp_config["username"] = username if username else "sysadmin"
         otawp_config["password"] = password if password else ""
+        otawp_config["otcs_partition_name"] = otcs_partition_name if otcs_partition_name else ""
+        otawp_config["otds_admin_partition_mame"] = otds_admin_partition_mame if otds_admin_partition_mame else ""
+        otawp_config["config_map_name"] = config_map_name if config_map_name else ""
+        otawp_config["otcs_resource_id"] = otcs_resource_id if otcs_resource_id else ""
+        otawp_config["otds_url"] = otds_url if otds_url else ""
+        otawp_config["otcs_url"] = otcs_url if otcs_url else ""
+        otawp_config["otcs_base_path"] = otcs_base_path if otcs_base_path else ""
+        otawp_config["license_file"] = license_file if license_file else ""
+        otawp_config["product_name"] = product_name if product_name else "APPWORKS_PLATFORM"
+        otawp_config["product_description"] = (
+            product_description if product_description else "OpenText Appworks Platform"
+        )
 
         if otawp_ticket:
             self._cookie = {"defaultinst_SAMLart": otawp_ticket}
 
-        otds_base_url = "{}://{}".format(protocol, otawp_config["hostname"])
+        server = "{}://{}".format(protocol, otawp_config["hostname"])
         if str(port) not in ["80", "443"]:
-            otds_base_url += f":{port}"
-        otds_base_url += "/home/system"
+            server += f":{port}"
+
+        otawp_base_url = server + "/home/system"
+
+        otawp_config["server"] = server if server else "http://appworks"
 
         otawp_config["gatewayAuthenticationUrl"] = (
-            otds_base_url
+            otawp_base_url
             + "/com.eibus.web.soap.Gateway.wcp?organization=o=system,cn=cordys,cn=defaultInst,o=opentext.net"
         )
 
         otawp_config["soapGatewayUrl"] = (
-            otds_base_url
+            otawp_base_url
             + "/com.eibus.web.soap.Gateway.wcp?organization=o=system,cn=cordys,cn=defaultInst,o=opentext.net&defaultinst_ct=abcd"
         )
 
         otawp_config["createPriority"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Priority?defaultinst_ct=abcd"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Priority?defaultinst_ct=abcd"
         )
         otawp_config["getAllPriorities"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Priority/lists/PriorityList"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Priority/lists/PriorityList"
         )
 
         otawp_config["createCustomer"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Customer?defaultinst_ct=abcd"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Customer?defaultinst_ct=abcd"
         )
-        otawp_config["getAllCustomeres"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Customer/lists/CustomerList"
+        otawp_config["getAllCustomers"] = (
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Customer/lists/CustomerList"
         )
 
         otawp_config["createCaseType"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/CaseType?defaultinst_ct=abcd"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/CaseType?defaultinst_ct=abcd"
         )
         otawp_config["getAllCaseTypes"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/CaseType/lists/AllCaseTypes"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/CaseType/lists/AllCaseTypes"
         )
 
         otawp_config["createCategory"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Category?defaultinst_ct=abcd"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Category?defaultinst_ct=abcd"
         )
         otawp_config["getAllCategories"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Category/lists/CategoryList"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Category/lists/CategoryList"
         )
 
         otawp_config["createSource"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Source"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Source"
         )
 
         otawp_config["getAllSources"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Source/lists/AllSources"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Source/lists/AllSources"
         )
 
         otawp_config["getAllSubCategories"] = (
-            otds_base_url
+            otawp_base_url
             + "/app/entityRestService/api/OpentextCaseManagement/entities/Category/childEntities/SubCategory/lists/AllSubcategories"
         )
 
-        otawp_config["baseurl"] = (
-            otds_base_url
-            + ""
-        )
+        otawp_config["baseurl"] = otawp_base_url + ""
         otawp_config["createLoan"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Case?defaultinst_ct=abcd"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Case?defaultinst_ct=abcd"
         )
         otawp_config["getAllLoans"] = (
-            otds_base_url
-            + "/app/entityRestService/api/OpentextCaseManagement/entities/Case/lists/AllCasesList"
+            otawp_base_url + "/app/entityRestService/api/OpentextCaseManagement/entities/Case/lists/AllCasesList"
         )
         self._config = otawp_config
 
     # end method definition
 
-    def baseurl(self) -> dict:
-        """Returns the configuration dictionary
+    def server(self) -> str:
+        """Return server information.
+
         Returns:
-            dict: Configuration dictionary
+            str:
+                Server configuration.
+
         """
+
+        return self.config()["server"]
+
+    # end method definition
+
+    def set_organization(self, organization: str) -> None:
+        """Set the organization context.
+
+        Args:
+            organization (str):
+                Organization name.
+
+        """
+
+        otawp_base_url = f"/home/{organization}"
+        otawp_url = self.server() + otawp_base_url
+        ldap_root = (
+            f"com.eibus.web.soap.Gateway.wcp?organization=o={organization},cn=cordys,cn=defaultInst,o=opentext.net"
+        )
+
+        # Assign to self._config if that's where you store configuration data
+        self._config["gatewayAuthenticationUrl"] = otawp_url + f"/com.eibus.web.soap.Gateway.wcp?{ldap_root}"
+
+        self._config["soapGatewayUrl"] = otawp_url + f"/com.eibus.web.soap.Gateway.wcp?{ldap_root}&defaultinst_ct=abcd"
+
+        self.logger.info("Organization set to '%s'.", organization)
+
+    # end method definition
+
+    def baseurl(self) -> str:
+        """Return the configuration dictionary.
+
+        Returns:
+            str:
+                Base URL of AppWorks Platform.
+
+        """
+
         return self.config()["baseurl"]
 
     # end method definition
 
+    def license_file(self) -> str:
+        """Return the license_file.
+
+        Returns:
+            str:
+                Returns license_file
+
+        """
+
+        return self.config()["license_file"]
+
+    # end method definition
+
+    def product_name(self) -> str:
+        """Return the product_name.
+
+        Returns:
+            str:
+                Returns product_name
+
+        """
+
+        return self.config()["product_name"]
+
+    # end method definition
+
+    def product_description(self) -> str:
+        """Return the product_description.
+
+        Returns:
+            str:
+                Returns product_description
+
+        """
+
+        return self.config()["product_description"]
+
+    # end method definition
+
+    def hostname(self) -> str:
+        """Return hostname.
+
+        Returns:
+            str: Returns hostname
+
+        """
+
+        return self.config()["hostname"]
+
+    def username(self) -> str:
+        """Return username.
+
+        Returns:
+            str: Returns username
+
+        """
+        return self.config()["username"]
+
+    # end method definition
+
+    def password(self) -> str:
+        """Return password.
+
+        Returns:
+            str: Returns password
+
+        """
+        return self.config()["password"]
+
+    # end method definition
+
+    def otcs_partition_name(self) -> str:
+        """Return OTCS partition name.
+
+        Returns:
+            str: Returns OTCS partition name
+
+        """
+        return self.config()["otcs_partition_name"]
+
+    # end method definition
+
+    def otds_admin_partition_mame(self) -> str:
+        """Return OTDS admin partition name.
+
+        Returns:
+            str:
+                Returns OTDS admin partition mame.
+
+        """
+
+        return self.config()["otds_admin_partition_mame"]
+
+    # end method definition
+
+    def config_map_name(self) -> str:
+        """Return config map name.
+
+        Returns:
+            str:
+                Returns config map name
+
+        """
+        return self.config()["config_map_name"]
+
+    # end method definition
+
+    def otcs_resource_id(self) -> str:
+        """Return OTCS resource ID.
+
+        Returns:
+            str:
+                Returns otcs resource id
+
+        """
+        return self.config()["otcs_resource_id"]
+
+    # end method definition
+
+    def otcs_url(self) -> str:
+        """Return OTCS URL.
+
+        Returns:
+            str:
+                Returns the OTCS URL.
+
+        """
+        return self.config()["otcs_url"]
+
+    # end method definition
+
+    def otds_url(self) -> str:
+        """Return the OTDS URL.
+
+        Returns:
+            str:
+                Returns otds url
+
+        """
+        return self.config()["otds_url"]
+
+    # end method definition
+
+    def otcs_base_path(self) -> str:
+        """Return the OTCS base path.
+
+        Returns:
+            str: Returns otcs base path
+
+        """
+        return self.config()["otcs_base_path"]
+
+    # end method definition
+
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
+
         Returns:
             dict: Configuration dictionary
+
         """
+
         return self._config
 
     # end method definition
 
     def cookie(self) -> dict:
-        """Returns the login cookie of OTAWP.
-           This is set by the authenticate() method
+        """Return the login cookie of OTAWP.
+
+        This is set by the authenticate() method
+
         Returns:
-            dict: OTAWP cookie
+            dict:
+                OTAWP cookie
+
         """
+
         return self._cookie
 
     # end method definition
 
     def credentials(self) -> str:
-        """Returns the SOAP payload with credentials (username and password)
+        """Return the SOAP payload with credentials (username and password).
+
         Returns:
-            str: SOAP payload with username and password
+            str:
+                SOAP payload with username and password.
+
         """
+
         username = self.config()["username"]
         password = self.config()["password"]
 
@@ -199,146 +455,196 @@ class OTAWP:
             </SOAP:Body>
         </SOAP:Envelope>
         """
+
         return soap_payload
 
     # end method definition
 
     def credential_url(self) -> str:
-        """Returns the Credentials URL of OTAWP
+        """Return the Credentials URL of OTAWP.
 
         Returns:
             str: Credentials URL
+
         """
+
         return self.config()["gatewayAuthenticationUrl"]
 
     # end method definition
 
     def gateway_url(self) -> str:
-        """Returns soapGatewayUrl URL of OTAWP
+        """Return SOAP gateway URL of OTAWP.
 
         Returns:
-            str: soapGatewayUrl URL
+            str:
+                The SOAP gateway URL.
+
         """
+
         return self.config()["soapGatewayUrl"]
 
     # end method definition
 
     def create_priority_url(self) -> str:
-        """Returns createPriority URL of OTAWP
+        """Return create priority URL of OTAWP.
 
         Returns:
             str: createPriority  URL
+
         """
+
         return self.config()["createPriority"]
 
     # end method definition
 
     def get_all_priorities_url(self) -> str:
-        """Returns getAllPriorities URL of OTAWP
+        """Return get all priorities URL of OTAWP.
 
         Returns:
-            str: getAllPriorities URL
+            str:
+                The getAllPriorities URL of OTAWP.
+
         """
+
         return self.config()["getAllPriorities"]
 
     # end method definition
 
     def create_customer_url(self) -> str:
-        """Returns createCustomer URL of OTAWP
+        """Return create customer URL of OTAWP.
 
         Returns:
-            str:  createCustomer url
+            str:
+                The create customer URL.
+
         """
+
         return self.config()["createCustomer"]
 
     # end method definition
 
     def get_all_customeres_url(self) -> str:
-        """Returns getAllCustomeres url of OTAWP
+        """Return get all customers URL of OTAWP.
 
         Returns:
-            str: getAllCustomeres url
+            str:
+                The get all customers URL.
+
         """
-        return self.config()["getAllCustomeres"]
+
+        return self.config()["getAllCustomers"]
 
     # end method definition
 
     def create_casetype_url(self) -> str:
-        """Returns createCaseType url of OTAWP
+        """Return create case type URL of OTAWP.
 
         Returns:
-            str: createCaseType url
+            str:
+                The create case type URL.
+
         """
+
         return self.config()["createCaseType"]
 
     # end method definition
 
     def get_all_case_types_url(self) -> str:
-        """Returns getAllCaseTypes  URL of OTAWP
+        """Return get all case types URL of OTAWP.
 
         Returns:
-            str: getAllCaseTypes URL
+            str:
+                The get all case types URL.
+
         """
+
         return self.config()["getAllCaseTypes"]
 
     # end method definition
 
     def create_category_url(self) -> str:
-        """Returns createCategory URL of OTAWP
+        """Return create category URL of OTAWP.
 
         Returns:
-            str: createCategory URL
+            str:
+                The create category URL.
+
         """
+
         return self.config()["createCategory"]
 
     # end method definition
 
     def get_all_categories_url(self) -> str:
-        """Returns the getAllCategories URL of OTAWP
+        """Return the get all categories URL of OTAWP.
 
         Returns:
-            str: getAllCategories URL
+            str:
+                The get all categories URL.
+
         """
+
         return self.config()["getAllCategories"]
 
     # end method definition
 
     def get_all_loans_url(self) -> str:
-        """Returns getAllLoans  URL of OTAWP
+        """Return get all loans URL of OTAWP.
 
         Returns:
-            str: getAllLoans URL
+            str:
+                The get all loans URL.
+
         """
+
         return self.config()["getAllLoans"]
 
     # end method definition
 
-    def remove_namespace(self, tag):
+    def remove_namespace(self, tag: str) -> str:
         """Remove namespace from XML tag."""
-        return tag.split('}', 1)[-1]
+
+        return tag.split("}", 1)[-1]
 
     # end method definition
 
-    def parse_xml(self, xml_string):
+    def parse_xml(self, xml_string: str) -> dict:
         """Parse XML string and return a dictionary without namespaces."""
-        def element_to_dict(element):
+
+        def element_to_dict(element) -> dict:  # noqa: ANN001
             """Convert XML element to dictionary."""
             tag = self.remove_namespace(element.tag)
             children = list(element)
             if children:
-                return {tag: {self.remove_namespace(child.tag): element_to_dict(child) for child in children}}
+                return {
+                    tag: {self.remove_namespace(child.tag): element_to_dict(child) for child in children},
+                }
             return {tag: element.text.strip() if element.text else None}
+
         root = ET.fromstring(xml_string)
+
         return element_to_dict(root)
 
     # end method definition
 
-    def find_key(self, data, target_key):
-        """Recursively search for a key in a nested dictionary and return its value."""
+    def find_key(self, data: dict | list, target_key: str) -> str:
+        """Recursively search for a key in a nested dictionary and return its value.
+
+        Args:
+            data (dict | list):
+                TODO: _description_
+            target_key (str):
+                TODO: _description_
+
+        Returns:
+            _type_: _description_
+
+        """
+
         if isinstance(data, dict):
             if target_key in data:
                 return data[target_key]
-            for _, value in data.items():
+            for value in data.values():
                 result = self.find_key(value, target_key)
                 if result is not None:
                     return result
@@ -347,6 +653,7 @@ class OTAWP:
                 result = self.find_key(item, target_key)
                 if result is not None:
                     return result
+
         return None
 
     # end method definition
@@ -357,20 +664,26 @@ class OTAWP:
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Converts the text property of a request response object to a Python dict in a safe way
-            that also handles exceptions.
+        """Convert the text property of a request response object to a Python dict in a safe way.
 
-            Content Server may produce corrupt response when it gets restarted
-            or hitting resource limits. So we try to avoid a fatal error and bail
-            out more gracefully.
+        Properly handle exceptions.
+
+        AppWorks may produce corrupt response when it gets restarted
+        or hitting resource limits. So we try to avoid a fatal error and bail
+        out more gracefully.
 
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str): print a custom error message
-            show_error (bool): if True log an error, if False log a warning
+            response_object (object):
+                This is reponse object delivered by the request call.
+            additional_error_message (str):
+                Print a custom error message.
+            show_error (bool):
+                If True log an error, if False log a warning.
 
         Returns:
-            dict: response or None in case of an error
+            dict:
+                Response or None in case of an error.
+
         """
 
         if not response_object:
@@ -381,34 +694,39 @@ class OTAWP:
         except json.JSONDecodeError as exception:
             if additional_error_message:
                 message = "Cannot decode response as JSon. {}; error -> {}".format(
-                    additional_error_message, exception
+                    additional_error_message,
+                    exception,
                 )
             else:
                 message = "Cannot decode response as JSon; error -> {}".format(
-                    exception
+                    exception,
                 )
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.warning(message)
+                self.logger.warning(message)
             return None
         return dict_object
 
     # end method definition
 
     def authenticate(self, revalidate: bool = False) -> dict | None:
-        """Authenticate at appworks.
+        """Authenticate at AppWorks.
 
         Args:
-            revalidate (bool, optional): determine if a re-authentication is enforced
-                                         (e.g. if session has timed out with 401 error)
+            revalidate (bool, optional):
+                Determine if a re-authentication is enforced
+                (e.g. if session has timed out with 401 error).
+
         Returns:
-            dict: Cookie information. Also stores cookie information in self._cookie
+            dict:
+                Cookie information. Also stores cookie information in self._cookie
+
         """
 
-        logger.info("SAMLart generation started")
+        self.logger.info("SAMLart generation started")
         if self._cookie and not revalidate:
-            logger.info(
+            self.logger.debug(
                 "Session still valid - return existing cookie -> %s",
                 str(self._cookie),
             )
@@ -423,30 +741,34 @@ class OTAWP:
                 url=self.credential_url(),
                 data=self.credentials(),
                 headers=REQUEST_HEADERS,
-                timeout=REQUEST_TIMEOUT
+                timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.RequestException as exception:
-            logger.warning(
-                "Unable to connect to -> %s; error -> %s",
+            self.logger.warning(
+                "Unable to connect to OTAWP authentication endpoint -> %s; error -> %s",
                 self.credential_url(),
-                exception.strerror,
+                str(exception),
             )
-            logger.warning("OTAWP service may not be ready yet.")
+            self.logger.warning("OTAWP service may not be ready yet.")
             return None
 
         if response.ok:
-            logger.info("SAMLart generated successfully")
+            self.logger.info("SAMLart generated successfully")
             authenticate_dict = self.parse_xml(response.text)
             if not authenticate_dict:
                 return None
             assertion_artifact_dict = self.find_key(
-                authenticate_dict, "AssertionArtifact"
+                authenticate_dict,
+                "AssertionArtifact",
             )
             if isinstance(assertion_artifact_dict, dict):
                 otawp_ticket = assertion_artifact_dict.get("AssertionArtifact")
-                logger.info("SAML token -> %s", otawp_ticket)
+                self.logger.debug("SAML token -> %s", otawp_ticket)
         else:
-            logger.error("Failed to request an OTAWP ticket; error -> %s", response.text)
+            self.logger.error(
+                "Failed to request an OTAWP ticket; error -> %s",
+                response.text,
+            )
             return None
 
         self._cookie = {"defaultinst_SAMLart": otawp_ticket, "defaultinst_ct": "abcd"}
@@ -456,21 +778,23 @@ class OTAWP:
 
     # end method definition
 
-    def create_workspace(
-        self,
-        workspace_name: str,
-        workspace_id: str
-    ) -> dict | None:
-        """Creates a workspace in cws
+    def create_workspace(self, workspace_name: str, workspace_id: str) -> dict | None:
+        """Create a workspace in cws.
+
         Args:
-            workspace_name (str): workspace_name
-            workspace_id (str): workspace_id
+            workspace_name (str):
+                The name of the workspace.
+            workspace_id (str):
+                The ID of the workspace.
+
         Returns:
-            response test or error text
+            dict | None:
+                Response dictionary or error text
+
         """
 
-        logger.info(
-            "Create workspace with name -> '%s' and ID -> %s...",
+        self.logger.info(
+            "Create workspace -> '%s' (%s)...",
             workspace_name,
             workspace_id,
         )
@@ -567,10 +891,10 @@ class OTAWP:
                 data=license_post_body_json,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info(
+                self.logger.info(
                     "Successfully created workspace -> '%s' with ID -> %s",
                     workspace_name,
                     workspace_id,
@@ -578,69 +902,105 @@ class OTAWP:
                 return response.text
             # Check if Session has expired - then re-authenticate and try once more
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return response.text
 
     # end method definition
 
-    def sync_workspace(
-        self,
-        workspace_name: str,
-        workspace_id: str
-    ) -> dict | None:
-        """ sync workspaces
+    def sync_workspace(self, workspace_name: str, workspace_id: str) -> dict | None:
+        """Synchronize workspace.
+
         Args:
-            workspace_name (str): workspace_name
-            workspace_id (str): workspace_id
+            workspace_name (str):
+                The name of the workspace.
+            workspace_id (str):
+                The ID of the workspace.
+
         Returns:
-             Request response (dictionary) or None if the REST call fails
+            dict | None:
+                Parsed response as a dictionary if successful, None otherwise.
+
         """
 
-        logger.info("Start synchronization of workspace -> '%s'...", workspace_name)
+        self.logger.info(
+            "Starting synchronization of workspace -> '%s'...",
+            workspace_name,
+        )
 
-        license_post_body_json = f"""<SOAP:Envelope xmlns:SOAP=\"http://schemas.xmlsoap.org/soap/envelope/\">\r\n" +
-		"	<SOAP:Body>\r\n" +
-		"		<Synchronize workspaceID=\"{workspace_id}\" xmlns=\"http://schemas.cordys.com/cws/synchronize/1.0\" >\r\n" +
-		"			<DocumentID/>\r\n" +
-		"			<Asynchronous>false</Asynchronous>\r\n" +
-		"		</Synchronize>\r\n" +
-		"	</SOAP:Body>\r\n" +
-		"</SOAP:Envelope>"""
-        # self.authenticate(revalidate=True)
+        # SOAP request body
+        license_post_body_json = f"""
+        <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP:Body>
+                <Synchronize workspaceID="{workspace_id}" xmlns="http://schemas.cordys.com/cws/synchronize/1.0">
+                    <DocumentID/>
+                    <Asynchronous>false</Asynchronous>
+                </Synchronize>
+            </SOAP:Body>
+        </SOAP:Envelope>
+        """
 
         retries = 0
-        while True:
-            response = requests.post(
-                url=self.gateway_url(),
-                data=license_post_body_json,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                logger.info("Workspace -> '%s' synced successfully", workspace_name)
-                return self.parse_xml(response.text)
-            if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
+        max_retries = 6
+        retry_delay = 60
+
+        while retries < max_retries:
+            try:
+                response = requests.post(
+                    url=self.gateway_url(),
+                    data=license_post_body_json,
+                    headers=REQUEST_HEADERS,
+                    cookies=self.cookie(),
+                    timeout=SYNC_PUBLISH_REQUEST_TIMEOUT,
+                )
+
+                if response.ok:
+                    self.logger.info(
+                        "Workspace -> '%s' synchronized successfully.",
+                        workspace_name,
+                    )
+                    return self.parse_xml(response.text)
+
+                if response.status_code == 401:
+                    self.logger.warning("Session expired. Re-authenticating...")
+                    self.authenticate(revalidate=True)
+                    retries += 1
+                    continue
+
+                if "faultcode" in response.text or "FaultDetails" in response.text:
+                    self.logger.warning("SOAP fault occurred: %s", response.text)
+                    retries += 1
+                    time.sleep(retry_delay)
+                    continue
+
+                self.logger.error("Unexpected error during sync: %s", response.text)
+                time.sleep(retry_delay)
                 retries += 1
-            logger.error(response.text)
-            return None
+
+            except requests.RequestException:
+                self.logger.error("Sync failed with error. Proceeding with retry...")
+                time.sleep(retry_delay)
+                retries += 1
+
+        self.logger.error(
+            "Synchronization failed for workspace -> '%s' after %d retries.",
+            workspace_name,
+            retries,
+        )
+        return None
 
     # end method definition
 
     def publish_project(
-            self,
-            workspace_name: str,
-            project_name: str,
-            workspace_id: str,
-            project_id: str
-        ) -> dict | bool:
-        """
-        Publish the workspace project.
+        self,
+        workspace_name: str,
+        project_name: str,
+        workspace_id: str,
+        project_id: str,
+    ) -> dict | bool:
+        """Publish the workspace project.
 
         Args:
             workspace_name (str): The name of the workspace.
@@ -650,9 +1010,10 @@ class OTAWP:
 
         Returns:
             dict | bool: Request response (dictionary) if successful, False if it fails after retries.
+
         """
 
-        logger.info(
+        self.logger.info(
             "Publish project -> '%s' in workspace -> '%s'...",
             project_name,
             workspace_name,
@@ -674,54 +1035,57 @@ class OTAWP:
         success_indicator = "deployObjectResponse"
 
         while retries < max_retries:
-            response = requests.post(
-                url=self.gateway_url(),
-                data=project_publish,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-
-            # Check if the response is successful
-            if response.ok:
-                # Check if the response contains the success indicator
-                if success_indicator in response.text:
-                    logger.info(
-                        "Successfully published project -> '%s' in workspace -> '%s'",
-                        project_name,
-                        workspace_name,
-                    )
-                    return True
-
-                # If success indicator is not found, retry
-                logger.warning(
-                    "Expected success indicator -> '%s' but it was not found in response. Retrying in 30 seconds... (Attempt %d of %d)",
-                    success_indicator,
-                    retries + 1,
-                    max_retries,
+            try:
+                response = requests.post(
+                    url=self.gateway_url(),
+                    data=project_publish,
+                    headers=REQUEST_HEADERS,
+                    cookies=self.cookie(),
+                    timeout=SYNC_PUBLISH_REQUEST_TIMEOUT,
                 )
+
+                # Check if the response is successful
+                if response.ok:
+                    if success_indicator in response.text:
+                        self.logger.info(
+                            "Successfully published project -> '%s' in workspace -> '%s'",
+                            project_name,
+                            workspace_name,
+                        )
+                        return True
+                    else:
+                        self.logger.warning(
+                            "Expected success indicator -> '%s' but it was not found in response. Retrying in 30 seconds... (Attempt %d of %d)",
+                            success_indicator,
+                            retries + 1,
+                            max_retries,
+                        )
+                elif response.status_code == 401:
+                    # Check for session expiry and retry authentication
+                    self.logger.warning("Session has expired - re-authenticating...")
+                    self.authenticate(revalidate=True)
+                else:
+                    self.logger.error(
+                        "Unexpected error (status code %d). Retrying in 30 seconds... (Attempt %d of %d)",
+                        response.status_code,
+                        retries + 1,
+                        max_retries,
+                    )
+                    self.logger.error(
+                        "Error details: %s",
+                        response.text,
+                    )
+                self.sync_workspace(workspace_name, workspace_id)
+                retries += 1
                 time.sleep(30)
-                retries += 1
-                continue
 
-            # Check for session expiry and retry authentication (only once)
-            if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - re-authenticating...")
-                self.authenticate(revalidate=True)
+            except requests.RequestException:
+                self.logger.error("Sync failed with error. Proceeding with retry...")
                 retries += 1
-                continue
-
-            # Log any other error and break the loop
-            logger.error(
-                "Error publishing project -> '%s' in workspace -> '%s'; response -> %s",
-                project_name,
-                workspace_name,
-                response.text,
-            )
-            break
+                time.sleep(30)
 
         # After reaching the maximum number of retries, log failure and return False
-        logger.error(
+        self.logger.error(
             "Max retries reached. Failed to publish project -> '%s' in workspace -> '%s'.",
             project_name,
             workspace_name,
@@ -730,27 +1094,21 @@ class OTAWP:
 
     # end method definition
 
-    def create_priority(
-        self,
-        name: str,
-        description: str,
-        status: int
-    ) -> dict | None:
-        """ Create Priority entity instances.
+    def create_priority(self, name: str, description: str, status: int) -> dict | None:
+        """Create Priority entity instances.
 
         Args:
             name (str): name
             description (str): description
             status (int): status
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails
+
         """
         create_priority = {
-            "Properties": {
-                "Name": name,
-                "Description": description,
-                "Status": status
-            }
+            "Properties": {"Name": name, "Description": description, "Status": status},
         }
         retries = 0
         while True:
@@ -759,51 +1117,58 @@ class OTAWP:
                 json=create_priority,
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info("Priority created successfully")
+                self.logger.info("Priority created successfully")
                 return self.parse_request_response(
-                    response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def get_all_priorities(
-        self
-    ) -> dict | None:
-        """ Get all priorities from entity
+    def get_all_priorities(self) -> dict | None:
+        """Get all priorities from entity.
+
         Args:
             None
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         retries = 0
         while True:
             response = requests.get(
                 url=self.get_all_priorities_url(),
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
                 if not authenticate_dict:
                     return None
                 return authenticate_dict
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
@@ -812,23 +1177,30 @@ class OTAWP:
         self,
         customer_name: str,
         legal_business_name: str,
-        trading_name: str
+        trading_name: str,
     ) -> dict | None:
-        """ Create customer entity instance
+        """Create customer entity instance.
 
         Args:
-            customer_name (str): customer_name
-            legal_business_name (str): legal_business_name
-            trading_name (str): trading_name
+            customer_name (str):
+                The name of the customer.
+            legal_business_name (str):
+                The legal business name.
+            trading_name (str):
+                The trading name.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         create_customer = {
             "Properties": {
-            "CustomerName": customer_name,
-            "LegalBusinessName": legal_business_name,
-            "TradingName": trading_name
-            }
+                "CustomerName": customer_name,
+                "LegalBusinessName": legal_business_name,
+                "TradingName": trading_name,
+            },
         }
         retries = 0
         while True:
@@ -837,29 +1209,34 @@ class OTAWP:
                 json=create_customer,
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info("Customer record created successfully")
-                return  self.parse_request_response(response, "This can be normal during restart", False)
+                self.logger.info("Customer record created successfully")
+                return self.parse_request_response(
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
+                )
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def get_all_customers(
-        self
-    ) -> dict | None:
-        """get all customer entity imstances
+    def get_all_customers(self) -> dict | None:
+        """Get all customer entity imstances.
 
         Args:
             None
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails
+
         """
 
         retries = 0
@@ -868,45 +1245,44 @@ class OTAWP:
                 url=self.get_all_customeres_url(),
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
                 if not authenticate_dict:
                     return None
-                return  authenticate_dict
+                return authenticate_dict
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def create_case_type(
-        self,
-        name: str,
-        description: str,
-        status: int
-    ) -> dict | None:
-        """create case_type entity instances
+    def create_case_type(self, name: str, description: str, status: int) -> dict | None:
+        """Create case type entity instances.
 
         Args:
-            name (str): name
-            description (str): description
+            name (str):
+                The name of the case type.
+            description (str):
+                The description of the case type.
             status (str): status
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         create_case_type = {
-            "Properties": {
-            "Name": name,
-            "Description": description,
-            "Status": status
-            }
+            "Properties": {"Name": name, "Description": description, "Status": status},
         }
         retries = 0
         while True:
@@ -915,52 +1291,58 @@ class OTAWP:
                 json=create_case_type,
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info("Case type created successfully")
+                self.logger.info("Case type created successfully")
                 return self.parse_request_response(
-                    response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def get_all_case_type(
-        self
-    ) -> dict | None:
-        """get all case type entty instances
+    def get_all_case_type(self) -> dict | None:
+        """Get all case type entty instances.
 
         Args:
             None
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         retries = 0
         while True:
             response = requests.get(
                 url=self.get_all_case_types_url(),
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
                 if not authenticate_dict:
                     return None
                 return authenticate_dict
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
@@ -970,25 +1352,33 @@ class OTAWP:
         case_prefix: str,
         description: str,
         name: str,
-        status: int
+        status: int,
     ) -> dict | None:
-        """create category entity instance
+        """Create category entity instance.
 
         Args:
-            case_prefix (str): workspace_name
-            description (str): description
-            name (str): name
-            status (str): status
+            case_prefix (str):
+                The prefix for the case.
+            description (str):
+                The description for the category.
+            name (str):
+                The name of the case.
+            status (int):
+                The status code.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         create_categoty = {
             "Properties": {
-            "CasePrefix": case_prefix,
-            "Description": description,
-            "Name": name,
-            "Status": status
-            }
+                "CasePrefix": case_prefix,
+                "Description": description,
+                "Name": name,
+                "Status": status,
+            },
         }
         retries = 0
         while True:
@@ -997,29 +1387,33 @@ class OTAWP:
                 json=create_categoty,
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info("Category created successfully")
-                return  self.parse_request_response(response, "This can be normal during restart", False)
+                self.logger.info("Category created successfully")
+                return self.parse_request_response(
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
+                )
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def get_all_categories(
-        self
-    ) -> dict | None:
-        """Get all categories entity intances
+    def get_all_categories(self) -> dict | None:
+        """Get all categories entity intances.
 
         Args:
             None
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
         retries = 0
@@ -1028,20 +1422,22 @@ class OTAWP:
                 url=self.get_all_categories_url(),
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
                 if not authenticate_dict:
                     return None
-                return  authenticate_dict
+                return authenticate_dict
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
@@ -1051,24 +1447,28 @@ class OTAWP:
         name: str,
         description: str,
         status: int,
-        parentid: int
+        parent_id: int,
     ) -> dict | None:
-        """ create sub_categoy entity istances
+        """Create sub categoy entity instances.
 
         Args:
-            name (str): name
-            description (str): description
-            status (int): status
-            parentid (int): parentid
+            name (str):
+                The name of the sub-category.
+            description (str):
+                The description for the sub-category.
+            status (int):
+                The status ID.
+            parent_id (int):
+                The parent ID of the category.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         create_sub_categoty = {
-            "Properties": {
-            "Name": name,
-            "Description": description,
-            "Status": status
-            }
+            "Properties": {"Name": name, "Description": description, "Status": status},
         }
         retries = 0
         while True:
@@ -1076,60 +1476,66 @@ class OTAWP:
             endpoint = "/app/entityRestService/api/OpentextCaseManagement/entities/Category/items/"
             child_path = "/childEntities/SubCategory?defaultinst_ct=abcd"
             response = requests.post(
-                url=base_url + endpoint + str(parentid) + child_path,
+                url=base_url + endpoint + str(parent_id) + child_path,
                 json=create_sub_categoty,
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info("Sub category created successfully")
+                self.logger.info("Sub category created successfully")
                 return self.parse_request_response(
-                    response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def get_all_sub_categeries(
-        self,
-        parentid: int
-    ) -> dict | None:
-        """Get all sub categeries entity instances
+    def get_all_sub_categeries(self, parent_id: int) -> dict | None:
+        """Get all sub categeries entity instances.
 
         Args:
-            parentid (int): parentid
+            parent_id (int):
+                The parent ID of the sub categories.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
+
         retries = 0
         while True:
             base_url = self.baseurl()
             endpoint = "/app/entityRestService/api/OpentextCaseManagement/entities/Category/items/"
             child_path = "/childEntities/SubCategory"
             response = requests.get(
-                url=base_url + endpoint + str(parentid) + child_path,
+                url=base_url + endpoint + str(parent_id) + child_path,
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
                 if not authenticate_dict:
                     return None
-                return  authenticate_dict
+                return authenticate_dict
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
@@ -1142,12 +1548,11 @@ class OTAWP:
         loan_duration_in_months: str,
         category: str,
         subcategory: str,
-        piority: str,
+        priority: str,
         service: str,
-        customer: str
-
+        customer: str,
     ) -> dict | None:
-        """create loan entity instance
+        """Create loan entity instance.
 
         Args:
             subject (str): subject
@@ -1156,12 +1561,14 @@ class OTAWP:
             loan_duration_in_months (str): loan_duration_in_months
             category (str): category
             subcategory (str): subcategory
-            piority (str): piority
+            priority (str): priority
             service (str): service
             customer (str): customer
         Returns:
             dict: Request response (dictionary) or None if the REST call fails
+
         """
+
         create_loan = f"""<SOAP:Envelope xmlns:SOAP=\"http://schemas.xmlsoap.org/soap/envelope/\">\r\n
   <SOAP:Body>\r\n
     <CreateCase xmlns=\"http://schemas/OpentextCaseManagement/Case/operations\">\r\n
@@ -1192,7 +1599,7 @@ class OTAWP:
         \r\n
         <ns0:Priority>\r\n
           <ns3:Priority-id xmlns:ns3=\"http://schemas/OpentextCaseManagement/Priority\">\r\n
-            <ns3:Id>{piority}</ns3:Id>\r\n
+            <ns3:Id>{priority}</ns3:Id>\r\n
           </ns3:Priority-id>\r\n
         </ns0:Priority>\r\n
 \r\n
@@ -1214,29 +1621,30 @@ class OTAWP:
                 data=create_loan,
                 headers=REQUEST_HEADERS,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
-                logger.info("Loan created successfully")
-                return  self.parse_xml(response.text)
+                self.logger.info("Loan created successfully")
+                return self.parse_xml(response.text)
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
-            logger.error(response.text)
+            self.logger.error(response.text)
             return None
 
     # end method definition
 
-    def get_all_loan(
-        self
-    ) -> dict | None:
-        """get all loan entity instances
+    def get_all_loan(self) -> dict | None:
+        """Get all loan entity instances.
 
         Args:
            None
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
         retries = 0
@@ -1245,32 +1653,29 @@ class OTAWP:
                 url=self.get_all_loans_url(),
                 headers=REQUEST_HEADERS_JSON,
                 cookies=self.cookie(),
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.ok:
                 authenticate_dict = self.parse_request_response(
-                response, "This can be normal during restart", False
+                    response_object=response,
+                    additional_error_message="This can be normal during restart",
+                    show_error=False,
                 )
                 if not authenticate_dict:
                     return None
                 return authenticate_dict
             if response.status_code == 401 and retries == 0:
-                logger.warning("Session has expired - try to re-authenticate...")
+                self.logger.warning("Session has expired - try to re-authenticate...")
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
-                logger.error(response.text)
+                self.logger.error(response.text)
                 return None
 
     # end method definition
 
-    def validate_workspace_response(
-            self,
-            response: str,
-            workspace_name: str
-        ) -> bool:
-        """
-        Verify if the workspace exists or was created successfully.
+    def validate_workspace_response(self, response: str, workspace_name: str) -> bool:
+        """Verify if the workspace exists or was created successfully.
 
         Args:
             response (str): response to validate
@@ -1278,16 +1683,17 @@ class OTAWP:
 
         Returns:
             bool: True if the workspace exists or was created successfully, else False.
+
         """
 
         if "Object already exists" in response or "createWorkspaceResponse" in response:
-            logger.info(
+            self.logger.info(
                 "The workspace already exists or was created with the name -> '%s'",
                 workspace_name,
             )
             return True
 
-        logger.info(
+        self.logger.info(
             "The workspace -> '%s' does not exist or was not created. Please verify configurtion!",
             workspace_name,
         )
@@ -1295,41 +1701,61 @@ class OTAWP:
 
     # end method definition
 
-    def is_workspace_already_exists(
-        self,
-        response: str,
-        workspace_name: str
-    ) -> bool:
-        """verify is workspace exists
+    def is_workspace_already_exists(self, response: str, workspace_name: str) -> bool:
+        """Verify if workspace exists.
+
         Args:
-            workspace_name (str): workspace_name
+            response (str):
+                The response.
+            workspace_name (str):
+                The name of the workspace.
+
         Returns:
-            bool: return true if workspace exist else return false
+            bool:
+                Return True if workspace exist else return false.
+
         """
 
         if "Object already exists" in response:
-            logger.info(
-                "The workspace already exists with the name -> '%s'", workspace_name
+            self.logger.info(
+                "The workspace already exists with the name -> '%s'",
+                workspace_name,
             )
             return True
-        logger.info(
-            "The Workspace has been created with the name -> '%s'", workspace_name
+        self.logger.info(
+            "The Workspace has been created with the name -> '%s'",
+            workspace_name,
         )
         return False
 
     # end method definition
 
-    def create_workspace_with_retry(self, workspace_name: str, workspace_gui_id: str) -> dict | None:
-        """
-        Calls create_workspace and retries if the response contains specific error messages.
+    def create_workspace_with_retry(
+        self,
+        workspace_name: str,
+        workspace_gui_id: str,
+    ) -> dict | None:
+        """Call create_workspace and retries if the response contains specific error messages.
+
         Retries until the response does not contain the errors or a max retry limit is reached.
+
+        Args:
+            workspace_name (str):
+                The workspace name.
+            workspace_gui_id (str):
+                The workspace GUI ID.
+
+        Returns:
+            dict | None:
+                The response of the workspace creation or None in case an error occured.
+
         """
 
         max_retries = 20  # Define the maximum number of retries
         retries = 0
         error_messages = [
             "Collaborative Workspace Service Container is not able to handle the SOAP request",
-            "Service Group Lookup failure"
+            "Service Group Lookup failure",
         ]
 
         while retries < max_retries:
@@ -1337,15 +1763,19 @@ class OTAWP:
 
             # Check if any error message is in the response
             if any(error_message in response for error_message in error_messages):
-                logger.info("Workspace service error, waiting 60 seconds to retry... (Retry %d of %d)", retries + 1, max_retries)
+                self.logger.info(
+                    "Workspace service error, waiting 60 seconds to retry... (Retry %d of %d)",
+                    retries + 1,
+                    max_retries,
+                )
                 time.sleep(60)
                 retries += 1
             else:
-                logger.info("Collaborative Workspace Service Container is ready")
+                self.logger.info("Collaborative Workspace Service Container is ready")
                 return response
 
         # After max retries, log and return the response or handle as needed
-        logger.error(
+        self.logger.error(
             "Max retries reached for workspace -> '%s', unable to create successfully.",
             workspace_name,
         )
@@ -1354,367 +1784,474 @@ class OTAWP:
     # end method definition
 
     def loan_management_runtime(self) -> dict | None:
-        """it will create all runtime objects for loan management application
+        """Create all runtime objects for loan management application.
+
         Args:
             None
         Returns:
             None
+
         """
 
-        logger.debug(" RUNTIME -->> Category instance creation started ........ ")
+        self.logger.debug(" RUNTIME -->> Category instance creation started ........ ")
         category_resp_dict = []
         if not self.verify_category_exists("Short Term Loan"):
-            self.create_category("LOAN","Short Term Loan","Short Term Loan",1)
+            self.create_category("LOAN", "Short Term Loan", "Short Term Loan", 1)
         if not self.verify_category_exists("Long Term Loan"):
-            self.create_category("LOAN","Long Term Loan","Long Term Loan",1)
+            self.create_category("LOAN", "Long Term Loan", "Long Term Loan", 1)
         if not self.verify_category_exists("Flexi Loan"):
-            self.create_category("LOAN","Flexi Loan","Flexi Loan",1)
+            self.create_category("LOAN", "Flexi Loan", "Flexi Loan", 1)
         category_resp_dict = self.get_category_lists()
-        logger.debug(" RUNTIME -->> Category instance creation ended")
+        self.logger.debug(" RUNTIME -->> Category instance creation ended")
 
         ############################# Sub category
-        logger.debug(" RUNTIME -->> Sub Category instance creation started ........")
+        self.logger.debug(
+            " RUNTIME -->> Sub Category instance creation started ........",
+        )
         stl = 0
         ltl = 0
         fl = 0
-        if not self.verify_sub_category_exists("Business",0,category_resp_dict):
-            response_dict =  self.create_sub_categoy("Business","Business",1,category_resp_dict[0])
+        if not self.verify_sub_category_exists("Business", 0, category_resp_dict):
+            response_dict = self.create_sub_categoy(
+                "Business",
+                "Business",
+                1,
+                category_resp_dict[0],
+            )
             stl = response_dict["Identity"]["Id"]
-            logger.info("Sub category id stl:  %s ", stl)
+            self.logger.info("Sub category id stl:  %s ", stl)
         else:
-            stl = self.return_sub_category_exists_id("Business",0,category_resp_dict)
-            logger.info("Sub category id stl -> %s ", stl)
+            stl = self.return_sub_category_exists_id("Business", 0, category_resp_dict)
+            self.logger.info("Sub category id stl -> %s ", stl)
 
-        if not self.verify_sub_category_exists("Business",1,category_resp_dict):
-            response_dict=self.create_sub_categoy("Business","Business",1,category_resp_dict[1])
+        if not self.verify_sub_category_exists("Business", 1, category_resp_dict):
+            response_dict = self.create_sub_categoy(
+                "Business",
+                "Business",
+                1,
+                category_resp_dict[1],
+            )
             ltl = response_dict["Identity"]["Id"]
-            logger.info("Sub category id ltl -> %s ", ltl)
+            self.logger.info("Sub category id ltl -> %s ", ltl)
         else:
-            ltl = self.return_sub_category_exists_id("Business",1,category_resp_dict)
-            logger.info("Sub category id ltl -> %s ", ltl)
-        if not self.verify_sub_category_exists("Business",2,category_resp_dict):
-            response_dict= self.create_sub_categoy("Business","Business",1,category_resp_dict[2])
+            ltl = self.return_sub_category_exists_id(name="Business", index=1, category_resp_dict=category_resp_dict)
+            self.logger.info("Sub category id ltl -> %s ", ltl)
+        if not self.verify_sub_category_exists(name="Business", index=2, category_resp_dict=category_resp_dict):
+            response_dict = self.create_sub_categoy(
+                "Business",
+                "Business",
+                1,
+                category_resp_dict[2],
+            )
             fl = response_dict["Identity"]["Id"]
-            logger.info("Sub category id fl -> %s ", fl)
+            self.logger.info("Sub category id fl -> %s ", fl)
         else:
-            fl = self.return_sub_category_exists_id("Business",2,category_resp_dict)
-            logger.info("Sub category id fl -> %s ", fl)
-        logger.debug(" RUNTIME -->> Sub Category instance creation ended")
+            fl = self.return_sub_category_exists_id(name="Business", index=2, category_resp_dict=category_resp_dict)
+            self.logger.info("Sub category id fl -> %s ", fl)
+        self.logger.debug(" RUNTIME -->> Sub Category instance creation ended")
 
         ############################# Case Types
-        logger.debug(" RUNTIME -->> Case Types instance creation started ........")
+        self.logger.debug(" RUNTIME -->> Case Types instance creation started ........")
         case_type_list = []
 
         if not self.vverify_case_type_exists("Query"):
-            self.create_case_type("Query","Query",1)
+            self.create_case_type("Query", "Query", 1)
         if not self.vverify_case_type_exists("Help"):
-            self.create_case_type("Help","Help",1)
+            self.create_case_type("Help", "Help", 1)
         if not self.vverify_case_type_exists("Update Contact Details"):
-            self.create_case_type("Update Contact Details","Update Contact Details",1)
+            self.create_case_type("Update Contact Details", "Update Contact Details", 1)
         if not self.vverify_case_type_exists("New Loan Request"):
-            self.create_case_type("New Loan Request","New Loan Request",1)
+            self.create_case_type("New Loan Request", "New Loan Request", 1)
         if not self.vverify_case_type_exists("Loan Closure"):
-            self.create_case_type("Loan Closure","Loan Closure",1)
+            self.create_case_type("Loan Closure", "Loan Closure", 1)
         case_type_list = self.get_case_type_lists()
-        logger.debug(" RUNTIME -->> Case Types instance creation ended")
+        self.logger.debug(" RUNTIME -->> Case Types instance creation ended")
 
         ############################# CUSTMOR
-        logger.debug(" RUNTIME -->> Customer instance creation stated ........")
+        self.logger.debug(" RUNTIME -->> Customer instance creation stated ........")
         customer_list = []
         if not self.verify_customer_exists("InaPlex Limited"):
-            self.create_customer("InaPlex Limited","InaPlex Limited","InaPlex Limited")
+            self.create_customer(
+                "InaPlex Limited",
+                "InaPlex Limited",
+                "InaPlex Limited",
+            )
 
         if not self.verify_customer_exists("Interwoven, Inc"):
-            self.create_customer("Interwoven, Inc","Interwoven, Inc","Interwoven, Inc")
+            self.create_customer(
+                "Interwoven, Inc",
+                "Interwoven, Inc",
+                "Interwoven, Inc",
+            )
 
         if not self.verify_customer_exists("Jones Lang LaSalle"):
-            self.create_customer("Jones Lang LaSalle","Jones Lang LaSalle","Jones Lang LaSalle")
+            self.create_customer(
+                "Jones Lang LaSalle",
+                "Jones Lang LaSalle",
+                "Jones Lang LaSalle",
+            )
 
         if not self.verify_customer_exists("Key Point Consulting"):
-            self.create_customer("Key Point Consulting","Key Point Consulting","Key Point Consulting")
+            self.create_customer(
+                "Key Point Consulting",
+                "Key Point Consulting",
+                "Key Point Consulting",
+            )
 
         customer_list = self.get_customer_lists()
-        logger.debug(" RUNTIME -->> Customer instance creation ended")
+        self.logger.debug(" RUNTIME -->> Customer instance creation ended")
 
         ######################################## PRIORITY
-        logger.debug(" RUNTIME -->> priority instance creation started ........")
+        self.logger.debug(" RUNTIME -->> priority instance creation started ........")
         prioity_list = []
         if not self.verify_priority_exists("High"):
-            self.create_priority("High","High",1)
+            self.create_priority("High", "High", 1)
         if not self.verify_priority_exists("Medium"):
-            self.create_priority("Medium","Medium",1)
+            self.create_priority("Medium", "Medium", 1)
         if not self.verify_priority_exists("Low"):
-            self.create_priority("Low","Low",1)
+            self.create_priority("Low", "Low", 1)
         prioity_list = self.get_priority_lists()
-        logger.debug(" RUNTIME -->> priority instance creation ended")
+        self.logger.debug(" RUNTIME -->> priority instance creation ended")
 
         ############################# LOAN
         loan_for_business = "Loan for Business1"
         loan_for_corporate_business = "Loan for Corporate Business1"
         loan_for_business_loan_request = "Loan for Business Loan Request1"
 
-        logger.debug(" RUNTIME -->> loan instance creation started ........")
+        self.logger.debug(" RUNTIME -->> loan instance creation started ........")
         loan_resp_dict = self.get_all_loan()
         names = [item["Properties"]["Subject"] for item in loan_resp_dict["_embedded"]["AllCasesList"]]
         if loan_for_business in names:
-            logger.info("Customer record Loan_for_business exists")
+            self.logger.info("Customer record Loan_for_business exists")
         else:
-            logger.info("Creating customer Record with Loan_for_business ")
+            self.logger.info("Creating customer Record with Loan_for_business ")
             response_dict = self.create_loan(
-                loan_for_business,
-                loan_for_business,
-                1,
-                2,
-                category_resp_dict[0],
-                stl,
-                prioity_list[0],
-                case_type_list[0],
-                customer_list[0],
+                subject=loan_for_business,
+                description=loan_for_business,
+                loan_amount=1,
+                loan_duration_in_months=2,
+                category=category_resp_dict[0],
+                subcategory=stl,
+                priority=prioity_list[0],
+                service=case_type_list[0],
+                customer=customer_list[0],
             )
 
         if loan_for_corporate_business in names:
-            logger.info("Customer record Loan_for_Corporate_Business exists")
+            self.logger.info("Customer record Loan_for_Corporate_Business exists")
         else:
-            logger.info("Creating customer Record with Loan_for_Corporate_Business ")
+            self.logger.info(
+                "Creating customer Record with Loan_for_Corporate_Business ",
+            )
             response_dict = self.create_loan(
-                loan_for_corporate_business,
-                loan_for_corporate_business,
-                1,
-                2,
-                category_resp_dict[1],
-                ltl,
-                prioity_list[1],
-                case_type_list[1],
-                customer_list[1],
+                subject=loan_for_corporate_business,
+                description=loan_for_corporate_business,
+                loan_amount=1,
+                loan_duration_in_months=2,
+                category=category_resp_dict[1],
+                subcategory=ltl,
+                priority=prioity_list[1],
+                service=case_type_list[1],
+                customer=customer_list[1],
             )
 
         if loan_for_business_loan_request in names:
-            logger.info("Customer record Loan_for_business_Loan_Request exists")
+            self.logger.info("Customer record Loan_for_business_Loan_Request exists")
         else:
-            logger.info("Creating customer Record with loan_for_business_loan_request")
-            response_dict = self.create_loan(
-                loan_for_business_loan_request,
-                loan_for_business_loan_request,
-                1,
-                2,
-                category_resp_dict[2],
-                fl,
-                prioity_list[2],
-                case_type_list[2],
-                customer_list[2],
+            self.logger.info(
+                "Creating customer Record with loan_for_business_loan_request",
             )
-        logger.debug(" RUNTIME -->> loan instance creation ended")
+            response_dict = self.create_loan(
+                subject=loan_for_business_loan_request,
+                description=loan_for_business_loan_request,
+                loan_amount=1,
+                loan_duration_in_months=2,
+                category=category_resp_dict[2],
+                subcategory=fl,
+                priority=prioity_list[2],
+                service=case_type_list[2],
+                customer=customer_list[2],
+            )
+        self.logger.debug(" RUNTIME -->> loan instance creation ended")
 
     # end method definition
 
     def get_category_lists(self) -> list:
-        """get All category entty instances id's
+        """Get All category entty instances id's.
+
         Args:
             None
         Returns:
             list: list of category IDs
+
         """
 
         category_resp_dict = []
         categoy_resp_dict = self.get_all_categories()
         for item in categoy_resp_dict["_embedded"]["CategoryList"]:
             first_item_href = item["_links"]["item"]["href"]
-            integer_value = int(re.search(r'\d+', first_item_href).group())
-            logger.info("Category created with ID -> %d", integer_value)
+            integer_value = int(re.search(r"\d+", first_item_href).group())
+            self.logger.info("Category created with ID -> %d", integer_value)
             category_resp_dict.append(integer_value)
-        logger.info("All extracted category IDs -> %s", category_resp_dict)
+        self.logger.info("All extracted category IDs -> %s", category_resp_dict)
 
         return category_resp_dict
 
     # end method definition
 
     def get_case_type_lists(self) -> list:
-        """Get All CaseType entity instances IDs
+        """Get All CaseType entity instances IDs.
+
         Args:
             None
+
         Returns:
-            list: list contains CaseType IDs
+            list:
+                List of all case type IDs.
+
         """
 
         case_type_list = []
         casetype_resp_dict = self.get_all_case_type()
         for item in casetype_resp_dict["_embedded"]["AllCaseTypes"]:
             first_item_href = item["_links"]["item"]["href"]
-            integer_value = int(re.search(r'\d+', first_item_href).group())
-            logger.info("Case type created with ID -> %d", integer_value)
+            integer_value = int(re.search(r"\d+", first_item_href).group())
+            self.logger.info("Case type created with ID -> %d", integer_value)
             case_type_list.append(integer_value)
-        logger.info("All extracted case type IDs -> %s", case_type_list)
+        self.logger.info("All extracted case type IDs -> %s", case_type_list)
 
         return case_type_list
 
     # end method definition
 
     def get_customer_lists(self) -> list:
-        """Get all customer entity instances id's
+        """Get all customer entity instances id's.
+
         Args:
             None
         Returns:
-            list: list of customer IDs
+            list:
+                A list of all customer IDs.
+
         """
 
         customer_list = []
         customer_resp_dict = self.get_all_customers()
         for item in customer_resp_dict["_embedded"]["CustomerList"]:
             first_item_href = item["_links"]["item"]["href"]
-            integer_value = int(re.search(r'\d+', first_item_href).group())
-            logger.info("Customer created with ID -> %d", integer_value)
+            integer_value = int(re.search(r"\d+", first_item_href).group())
+            self.logger.info("Customer created with ID -> %d", integer_value)
             customer_list.append(integer_value)
-        logger.info("All extracted Customer IDs -> %s ", customer_list)
+        self.logger.info("All extracted Customer IDs -> %s ", customer_list)
+
         return customer_list
 
     # end method definition
 
     def get_priority_lists(self) -> list:
-        """get all priority entity instances IDs
+        """Get all priority entity instances IDs.
+
         Args:
             None
         Returns:
-            list: list contains priority IDs
+            list:
+                A list with all priority IDs.
+
         """
 
         prioity_list = []
         authenticate_dict = self.get_all_priorities()
         for item in authenticate_dict["_embedded"]["PriorityList"]:
             first_item_href = item["_links"]["item"]["href"]
-            integer_value = int(re.search(r'\d+', first_item_href).group())
-            logger.info("Priority created with ID -> %d", integer_value)
+            integer_value = int(re.search(r"\d+", first_item_href).group())
+            self.logger.info("Priority created with ID -> %d", integer_value)
             prioity_list.append(integer_value)
-        logger.info("All extracted priority IDs -> %s  ", prioity_list)
+        self.logger.info("All extracted priority IDs -> %s  ", prioity_list)
 
         return prioity_list
 
     # end method definition
 
     def verify_category_exists(self, name: str) -> bool:
-        """verify category entity instance already exists
+        """Verify category entity instance already exists.
+
         Args:
-            name (str): name of the category
+            name (str):
+                The name of the category.
+
         Returns:
-            bool: returns True if already record exists with same name, else returns False
+            bool:
+                Returns True if already record exists with same name, else returns False.
+
         """
 
         categoy_resp_dict = self.get_all_categories()
         names = [item["Properties"]["Name"] for item in categoy_resp_dict["_embedded"]["CategoryList"]]
         if name in names:
-            logger.info("Category record -> '%s' already exists", name)
+            self.logger.info("Category record -> '%s' already exists", name)
             return True
-        logger.info("Creating category record -> '%s'", name)
+        self.logger.info("Creating category record -> '%s'", name)
 
         return False
 
     # end method definition
 
     def vverify_case_type_exists(self, name: str) -> bool:
-        """verify case type entity instance already exists
+        """Verify case type entity instance already exists.
+
         Args:
-            name (str): name of the case type
+            name (str):
+                The name of the case type.
+
         Returns:
-            bool: returns True if already record exists with same name, else returns False
+            bool:
+                Returns True if already record exists with same name, else returns False.
+
         """
 
         casetype_resp_dict = self.get_all_case_type()
         names = [item["Properties"]["Name"] for item in casetype_resp_dict["_embedded"]["AllCaseTypes"]]
         if name in names:
-            logger.info("Case type record -> '%s' already exists", name)
+            self.logger.info("Case type record -> '%s' already exists", name)
             return True
-        logger.info("Creating case type record -> '%s'", name)
+        self.logger.info("Creating case type record -> '%s'", name)
 
         return False
 
     # end method definition
 
     def verify_customer_exists(self, name: str) -> bool:
-        """verify cusomer entty instance already exists
+        """Verify cusomer entty instance already exists.
+
         Args:
-            name (str): name of the customer
+            name (str):
+                The name of the customer.
+
         Returns:
-            bool: returns True if already record exists with same name, else returns False
+            bool:
+                Returns True if already record exists with same name, else returns False
+
         """
+
         customer_resp_dict = self.get_all_customers()
         names = [item["Properties"]["CustomerName"] for item in customer_resp_dict["_embedded"]["CustomerList"]]
         if name in names:
-            logger.info("Customer -> '%s' already exists", name)
+            self.logger.info("Customer -> '%s' already exists", name)
             return True
-        logger.info("Creating customer -> '%s'", name)
+        self.logger.info("Creating customer -> '%s'", name)
         return False
 
     # end method definition
 
     def verify_priority_exists(self, name: str) -> bool:
-        """verify piority entity instance already exists
+        """Verify priority entity instance already exists.
+
         Args:
-            name (str): name of the priority
+            name (str):
+                The name of the priority.
+
         Returns:
-            bool: returns True if already record exists with same name, else returns False
+            bool:
+                Returns True if already record exists with same name, else returns False
+
         """
 
         authenticate_dict = self.get_all_priorities()
         names = [item["Properties"]["Name"] for item in authenticate_dict["_embedded"]["PriorityList"]]
         if name in names:
-            logger.info("Priority -> '%s' already exists", name)
+            self.logger.info("Priority -> '%s' already exists", name)
             return True
-        logger.info("Creating priority -> '%s'", name)
+        self.logger.info("Creating priority -> '%s'", name)
 
         return False
 
     # end method definition
 
-    def verify_sub_category_exists(self, name: str, index: int, category_resp_dict: list) -> bool:
-        """verify sub category entity instance already exists
+    def verify_sub_category_exists(
+        self,
+        name: str,
+        index: int,
+        category_resp_dict: list,
+    ) -> bool:
+        """Verify sub category entity instance already exists.
+
         Args:
-            name (str): name of the sub category
+            name (str):
+                The name of the sub category.
+            index (int):
+                The index of the sub category.
+            category_resp_dict (list):
+                TODO: add description
+
         Returns:
-            bool: returns true if record already exists with same name, else returns false
+            bool:
+                Returns true if record already exists with same name, else returns false.
+
         """
 
         subcategoy_resp_dict = self.get_all_sub_categeries(category_resp_dict[index])
         names = [item["Properties"]["Name"] for item in subcategoy_resp_dict["_embedded"]["SubCategory"]]
-        stl=0
+        stl = 0
         if name in names:
-            logger.info("Sub category -> '%s' already exists", name)
+            self.logger.info("Sub category -> '%s' already exists", name)
             for item in subcategoy_resp_dict["_embedded"]["SubCategory"]:
                 stl = item["Identity"]["Id"]
-                logger.info("Sub category created with ID -> %s", stl)
+                self.logger.info("Sub category created with ID -> %s", stl)
                 return True
-        logger.info("Creating sub category -> '%s'", name)
+        self.logger.info("Creating sub category -> '%s'", name)
 
         return False
 
     # end method definition
 
-    def return_sub_category_exists_id(self, name: str, index: int, category_resp_dict: list) -> int:
-        """verify sub category entity instance id already exists
+    def return_sub_category_exists_id(
+        self,
+        name: str,
+        index: int,
+        category_resp_dict: list,
+    ) -> int:
+        """Verify sub category entity instance id already exists.
+
         Args:
-            name (str): name of the sub-category
+            name (str):
+                The name of the sub-category.
+            index (int):
+                TODO: add description
+            category_resp_dict (list):
+                TODO: add description!
+
         Returns:
-            bool: returns true if record already exists with same name, else returns false
+            bool:
+                Returns true if record already exists with same name, else returns false.
+
         """
 
         subcategoy_resp_dict = self.get_all_sub_categeries(category_resp_dict[index])
         names = [item["Properties"]["Name"] for item in subcategoy_resp_dict["_embedded"]["SubCategory"]]
-        stl=0
-        if  name in names:
-            logger.info("Sub category record -> '%s' already exists", name)
+        stl = 0
+        if name in names:
+            self.logger.info("Sub category record -> '%s' already exists", name)
             for item in subcategoy_resp_dict["_embedded"]["SubCategory"]:
                 stl = item["Identity"]["Id"]
-                logger.info("Sub category created with ID -> %s", stl)
+                self.logger.info("Sub category created with ID -> %s", stl)
                 return stl
 
         return None
 
     # end method definition
 
-    def create_users_from_config_file(self, otawpsection: str, _otds: OTDS):
-        """read user information from customizer file and call create user method
+    def create_users_from_config_file(self, otawpsection: str, _otds: OTDS) -> None:
+        """Read user information from customizer file and call create user method.
+
         Args:
-            otawpsection (str): yaml bock related to appworks
+            otawpsection (str):
+                YAML block related to appworks
+            _otds:
+                The OTDS object.
+
         Returns:
             None
+
         """
 
         otds = otawpsection.get("otds", {})
@@ -1735,29 +2272,35 @@ class OTAWP:
                         for role in roles:
                             _otds.add_user_to_group(
                                 user.get("name") + "@" + user.get("partition"),
-                                # user.get('name'),
                                 role.get("name"),
                             )
                     else:
-                        logger.error(
-                            "Verifying Users section: roles section not presented in yaml for otds users"
+                        self.logger.error(
+                            "Verifying Users section: roles section not presented in yaml for otds users",
                         )
             else:
-                logger.error(
-                    "Verifying Users section: user section not presented in yaml"
+                self.logger.error(
+                    "Verifying Users section: user section not presented in yaml",
                 )
         else:
-            logger.error("Verifying Users section: otds section not presented in yaml")
+            self.logger.error(
+                "Verifying Users section: otds section not presented in yaml",
+            )
 
     # end method definition
 
-    def create_roles_from_config_file(self, otawpsection: str, _otds: OTDS):
-        """read grop information from customizer file and call create grop method
+    def create_roles_from_config_file(self, otawpsection: str, _otds: OTDS) -> None:
+        """Read grop information from customizer file and call create grop method.
+
         Args:
-            otawpsection (str): yaml bock related to appworks
-            _otds (object): the OTDS object used to access the OTDS REST API
+            otawpsection (str):
+                YAML block related to appworks.
+            _otds (object):
+                The OTDS object used to access the OTDS REST API.
+
         Returns:
             None
+
         """
 
         otds = otawpsection.get("otds", {})
@@ -1773,20 +2316,26 @@ class OTAWP:
                             role.get("description"),
                         )
             else:
-                logger.error(
-                    "Verifying roles section: roles section not presented in yaml"
+                self.logger.error(
+                    "Verifying roles section: roles section not presented in yaml",
                 )
         else:
-            logger.error("Verifying roles section: otds section not presented in yaml")
+            self.logger.error(
+                "Verifying roles section: otds section not presented in yaml",
+            )
 
     # end method definition
 
-    def create_loanruntime_from_config_file(self, platform: str):
-        """verify flag and call loan_management_runtime()
+    def create_loanruntime_from_config_file(self, platform: str) -> None:
+        """Verify flag and call loan_management_runtime().
+
         Args:
-            platform (str): yaml bock related to platform
+            platform (str):
+                YAML block related to platform.
+
         Returns:
             None
+
         """
 
         runtime = platform.get("runtime", {})
@@ -1797,14 +2346,344 @@ class OTAWP:
                     if app_name == "loanManagement":
                         self.loan_management_runtime()
                     else:
-                        logger.error(
-                            "Verifying runtime section: loanManagement not exits in yaml entry"
+                        self.logger.error(
+                            "Verifying runtime section: loanManagement not exits in yaml entry",
                         )
             else:
-                logger.error(
-                    "Verifying runtime section: App name section is empty in yaml"
+                self.logger.error(
+                    "Verifying runtime section: App name section is empty in yaml",
                 )
         else:
-            logger.error("Verifying runtime section: Runtime section is empty in yaml")
+            self.logger.error(
+                "Verifying runtime section: Runtime section is empty in yaml",
+            )
 
     # end method definition
+    def create_cws_config(
+        self,
+        partition: str,
+        resource_name: str,
+        otcs_url: str,
+    ) -> dict | None:
+        """Create a workspace configuration in CWS.
+
+        Args:
+            partition (str): The partition name for the workspace.
+            resource_name (str): The resource name.
+            otcs_url (str): The OTCS endpoint URL.
+
+        Returns:
+            dict | None: Response dictionary if successful, or None if the request fails.
+
+        """
+        self.logger.info("Creating CWS config for partition '%s' and resource '%s'...", partition, resource_name)
+
+        # Construct the SOAP request body
+        cws_config_req_xml = f"""
+        <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP:Header>
+                <header xmlns="http://schemas.cordys.com/General/1.0/">
+                    <Logger/>
+                </header>
+                <i18n:international xmlns:i18n="http://www.w3.org/2005/09/ws-i18n">
+                    <i18n:locale>en-US</i18n:locale>
+                </i18n:international>
+            </SOAP:Header>
+            <SOAP:Body>
+                <UpdateXMLObject xmlns="http://schemas.cordys.com/1.0/xmlstore">
+                    <tuple lastModified="{int(time.time() * 1000)}"
+                           key="/com/ot-ps/csws/otcs_ws_config.xml"
+                           level="organization"
+                           name="otcs_ws_config.xml"
+                           original="/com/ot-ps/csws/otcs_ws_config.xml"
+                           version="organization">
+                        <new>
+                            <CSWSConfig>
+                                <Partition>{partition}</Partition>
+                                <EndPointUrl>{otcs_url}/cws/services/Authentication</EndPointUrl>
+                                <Resources>
+                                    <Resource type="Cordys">
+                                        <Name>__OTDS#Shared#Platform#Resource__</Name>
+                                        <Space>shared</Space>
+                                    </Resource>
+                                    <Resource type="OTCS">
+                                        <Name>{resource_name}</Name>
+                                        <Space>shared</Space>
+                                    </Resource>
+                                </Resources>
+                            </CSWSConfig>
+                        </new>
+                    </tuple>
+                </UpdateXMLObject>
+            </SOAP:Body>
+        </SOAP:Envelope>
+        """
+
+        retries = 0
+        max_retries = 20  # Maximum retry limit
+        error_messages = [
+            "Collaborative Workspace Service Container is not able to handle the SOAP request",
+            "Service Group Lookup failure",
+        ]
+
+        while retries < max_retries:
+            try:
+                response = requests.post(
+                    url=self.gateway_url(),
+                    data=cws_config_req_xml,
+                    headers=REQUEST_HEADERS,
+                    cookies=self.cookie(),
+                    timeout=None,
+                )
+
+                # Handle successful response
+                if response.ok:
+                    if any(error_message in response.text for error_message in error_messages):
+                        self.logger.warning(
+                            "Service error detected, retrying in 60 seconds... (Retry %d of %d)",
+                            retries + 1,
+                            max_retries,
+                        )
+                        time.sleep(60)
+                        retries += 1
+                    else:
+                        self.logger.info("CWS config created successfully.")
+                        return response.text
+
+                # Handle session expiration
+                if response.status_code == 401 and retries == 0:
+                    self.logger.warning("Session expired. Re-authenticating...")
+                    self.authenticate(revalidate=True)
+                    retries += 1
+                    continue
+
+                # Handle case where object has been changed by another user
+                if "Object has been changed by other user" in response.text:
+                    self.logger.info("CWS config already exists")
+                    return response.text
+
+                # Log errors for failed requests
+                self.logger.error("Failed to create CWS config: %s", response.text)
+                time.sleep(60)
+                retries += 1
+
+            except requests.RequestException:
+                self.logger.error("Request failed during CWS config creation")
+                retries += 1
+
+        # Log when retries are exhausted
+        self.logger.error("Retry limit exceeded. CWS config creation failed.")
+        return None
+
+    # end method definition
+    def verify_user_having_role(self, organization: str, user_name: str, role_name: str) -> bool:
+        """Verify if the user has the specified role.
+
+        Args:
+            organization(str): organization name
+            user_name (str): The username to verify.
+            role_name (str): The role to check for the user.
+
+        Returns:
+            bool: True if the user has the role, False if not, or None if request fails.
+
+        """
+        self.logger.info("Verifying user '%s' has role '%s' started.", user_name, role_name)
+
+        # Construct the SOAP request body
+        cws_config_req_xml = f"""
+        <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP:Header xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+                <header xmlns="http://schemas.cordys.com/General/1.0/">
+                    <Logger xmlns="http://schemas.cordys.com/General/1.0/"/>
+                </header>
+                <i18n:international xmlns:i18n="http://www.w3.org/2005/09/ws-i18n">
+                    <i18n:locale>en-US</i18n:locale>
+                </i18n:international>
+            </SOAP:Header>
+            <SOAP:Body>
+                <SearchLDAP xmlns:xfr="http://schemas.cordys.com/1.0/xforms/runtime" xmlns="http://schemas.cordys.com/1.0/ldap">
+                    <dn xmlns="http://schemas.cordys.com/1.0/ldap">cn=organizational users,o={organization},cn=cordys,cn=defaultInst,o=opentext.net</dn>
+                    <scope xmlns="http://schemas.cordys.com/1.0/ldap">1</scope>
+                    <filter xmlns="http://schemas.cordys.com/1.0/ldap">&amp;(objectclass=busorganizationaluser)(&amp;(!(cn=SYSTEM))(!(cn=anonymous))(!(cn=wcpLicUser)))(|(description=*{user_name}*)(&amp;(!(description=*))(cn=*{user_name}*)))</filter>
+                    <sort xmlns="http://schemas.cordys.com/1.0/ldap">ascending</sort>
+                    <sortBy xmlns="http://schemas.cordys.com/1.0/ldap"/>
+                    <returnValues xmlns="http://schemas.cordys.com/1.0/ldap">false</returnValues>
+                    <return xmlns="http://schemas.cordys.com/1.0/ldap"/>
+                </SearchLDAP>
+            </SOAP:Body>
+        </SOAP:Envelope>
+        """
+
+        retries = 0
+        max_retries = 6  # Maximum retry limit
+        while retries < max_retries:
+            try:
+                response = requests.post(
+                    url=self.gateway_url(),
+                    data=cws_config_req_xml,
+                    headers=REQUEST_HEADERS,
+                    cookies=self.cookie(),
+                    timeout=None,
+                )
+
+                # Handle successful response
+                if response.ok:
+                    if (
+                        role_name in response.text
+                    ):  # Corrected syntax for checking if 'Developer' is in the response text
+                        self.logger.info("Verifyied user '%s' already has the role '%s'.", user_name, role_name)
+                        return True  # Assuming the user has the role if the response contains 'Developer'
+                    else:
+                        self.logger.info("Verifyied User '%s' not having  role '%s'.", user_name, role_name)
+                        return False
+                # Handle session expiration
+                if response.status_code == 401 and retries == 0:
+                    self.logger.warning("Session expired. Re-authenticating...")
+                    self.authenticate(revalidate=True)
+                    retries += 1
+                    continue
+
+                # Log errors for failed requests
+                self.logger.error("Failed to verify user role: %s", response.text)
+                time.sleep(60)
+                retries += 1
+
+            except requests.RequestException:
+                self.logger.error("Request failed during user role verification")
+                retries += 1
+
+        # Log when retries are exhausted
+        self.logger.error("Retry limit exceeded. User role verification failed.")
+        return False  # Return False if the retries limit is exceeded
+
+    # end method definition
+
+    def assign_developer_role_to_user(self, organization: str, user_name: str, role_name: str) -> bool:
+        """Assign the 'Developer' role to the user and verify the role assignment.
+
+        Args:
+            organization (str): The organization name.
+            user_name (str): The username to verify.
+            role_name (str): The role to be assigned.
+
+        Returns:
+            bool: True if the user has the 'Developer' role, False otherwise.
+
+        """
+        self.logger.info("Assigning 'Developer' role to user '%s' in organization '%s'...", user_name, organization)
+
+        # Check if user already has the role before making the request
+        if self.verify_user_having_role(organization, user_name, role_name):
+            return True
+
+        # Construct the SOAP request body
+        cws_config_req_xml = f"""\
+        <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP:Header xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+                <header xmlns="http://schemas.cordys.com/General/1.0/">
+                    <Logger xmlns="http://schemas.cordys.com/General/1.0/"/>
+                </header>
+                <i18n:international xmlns:i18n="http://www.w3.org/2005/09/ws-i18n">
+                    <i18n:locale>en-US</i18n:locale>
+                </i18n:international>
+            </SOAP:Header>
+            <SOAP:Body>
+                <Update xmlns="http://schemas.cordys.com/1.0/ldap">
+                    <tuple>
+                        <old>
+                            <entry dn="cn=sysadmin,cn=organizational users,o={organization},cn=cordys,cn=defaultInst,o=opentext.net">
+                                <role>
+                                    <string>cn=everyoneIn{organization},cn=organizational roles,o={organization},cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                    <string>cn=Administrator,cn=Cordys@Work,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                    <string>cn=OTDS Push Service,cn=OpenText OTDS Platform Push Connector,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                </role>
+                                <description>
+                                    <string>{user_name}</string>
+                                </description>
+                                <cn>
+                                    <string>{user_name}</string>
+                                </cn>
+                                <objectclass>
+                                    <string>top</string>
+                                    <string>busorganizationalobject</string>
+                                    <string>busorganizationaluser</string>
+                                </objectclass>
+                                <authenticationuser>
+                                    <string>cn={user_name},cn=authenticated users,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                </authenticationuser>
+                            </entry>
+                        </old>
+                        <new>
+                            <entry dn="cn={user_name},cn=organizational users,o={organization},cn=cordys,cn=defaultInst,o=opentext.net">
+                                <role>
+                                    <string>cn=everyoneIn{organization},cn=organizational roles,o={organization},cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                    <string>cn=Administrator,cn=Cordys@Work,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                    <string>cn=OTDS Push Service,cn=OpenText OTDS Platform Push Connector,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                    <string>cn=Developer,cn=Cordys@Work,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                </role>
+                                <description>
+                                    <string>{user_name}</string>
+                                </description>
+                                <cn>
+                                    <string>{user_name}</string>
+                                </cn>
+                                <objectclass>
+                                    <string>top</string>
+                                    <string>busorganizationalobject</string>
+                                    <string>busorganizationaluser</string>
+                                </objectclass>
+                                <authenticationuser>
+                                    <string>cn={user_name},cn=authenticated users,cn=cordys,cn=defaultInst,o=opentext.net</string>
+                                </authenticationuser>
+                            </entry>
+                        </new>
+                    </tuple>
+                </Update>
+            </SOAP:Body>
+        </SOAP:Envelope>
+        """
+        retries = 0
+        max_retries = 6
+        retry_delay = 30  # Time in seconds
+
+        while retries < max_retries:
+            try:
+                response = requests.post(
+                    url=self.gateway_url(),
+                    data=cws_config_req_xml,
+                    headers=REQUEST_HEADERS,
+                    cookies=self.cookie(),
+                    timeout=30,
+                )
+
+                if response.ok and role_name in response.text:
+                    self.logger.info("User '%s' successfully assigned the '%s' role.", user_name, role_name)
+                    return True
+
+                # Handle session expiration
+                if response.status_code == 401 and retries == 0:
+                    self.logger.warning("Session expired. Re-authenticating...")
+                    self.authenticate(revalidate=True)
+                    retries += 1
+                    continue  # Retry immediately after re-authentication
+
+                # Log failure response
+                self.logger.error(
+                    "Failed to assign role to user '%s': HTTP %s - %s",
+                    user_name,
+                    response.status_code,
+                    response.text,
+                )
+
+            except requests.RequestException:
+                self.logger.error("Request failed:")
+
+            retries += 1
+            self.logger.info("Retrying... Attempt %d/%d", retries, max_retries)
+            time.sleep(retry_delay)
+
+        self.logger.error("Retry limit exceeded. Role assignment failed for user '%s'.", user_name)
+        return False
+
+        # end method definition

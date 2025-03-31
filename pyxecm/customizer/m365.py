@@ -1,98 +1,10 @@
-"""
-M365 Module to interact with the MS Graph API
-See also https://learn.microsoft.com/en-us/graph/ 
+"""M365 Module to interact with the MS Graph API.
 
-Class: M365
-Methods:
-
-__init__ : class initializer
-config : Returns config data set
-credentials: Returns the token data
-credentials_user: In some cases MS Graph APIs cannot be called via
-                  application permissions (client_id, client_secret)
-                  but requires a token of a user authenticated
-                  with username + password
-
-request_header: Returns the request header for MS Graph API calls
-request_header_user: Returns the request header used for user specific calls
-do_request: Call an M365 Graph API in a safe way
-parse_request_response: Parse the REST API responses and convert
-                        them to Python dict in a safe way
-exist_result_item: Check if an dict item is in the response
-                   of the Graph REST API call
-get_result_value: Check if a defined value (based on a key) is in the Graph API response
-
-authenticate : Authenticates at M365 Graph API
-authenticate_user: Authenticate at M365 Graph API with username and password
-
-get_users: Get list all all users in M365 tenant 
-get_user: Get a M365 User based on its email
-add_user: Add a M365 User
-update_user: Update selected properties of an M365 user
-get_user_licenses: Get the assigned license SKUs of a user
-assign_license_to_user: Add an M365 license to a user (e.g. to use Office 365)
-get_user_photo: Get the photo of a M365 user
-download_user_photo: Download the M365 user photo and save it to the local file system
-update_user_photo: Update a user with a profile photo (which must be in local file system)
-
-get_groups: Get list all all groups in M365 tenant
-get_group: Get a M365 Group based on its name
-add_group: Add a M365 Group
-get_group_members: Get members (users and groups) of the specified group
-add_group_member: Add a user or group to a target group
-is_member: Check whether a M365 user is already in a M365 group
-get_group_owners: Get owners (users) of the specified group
-add_group_owner: Add a user as owner to a group
-
-purge_deleted_items: Purge all deleted users and groups in the organization
-purge_deleted_item: Help function that purges a single user or group
-
-has_team: Check if a M365 Group has a M365 Team connected or not
-get_team: get a M365 Team based on its name
-add_team: Add a M365 Team (based on an existing group)
-delete_team: delete a single M365 Team witha given ID
-delete_teams: Delete MS teams with a given name
-delete_all_teams: Delete all teams (groups) that are NOT on the exception list AND
-                  that are matching at least one of the patterns in the provided pattern list
-get_team_channels: get a list of channels for a M365 Team
-get_team_channel_tabs: get tabs of an M365 Team channel based on the team and channel names
-
-get_teams_apps: Get a list of MS Teams apps in catalog that match a given filter criterium
-get_teams_app: get a specific app from the catalog based on its (known) ID
-get_teams_apps_of_user: Get a list of MS Teams apps of a user that match a given filter criterium
-get_teams_apps_of_team: Get a list of MS Teams apps of a M365 team that match a given filter criterium
-extract_version_from_app_manifest: Extract the version number from the MS Teams app manifest file
-upload_teams_app: Upload a new app package to the catalog of MS Teams apps
-remove_teams_app: Remove MS Teams App for the app catalog
-assign_teams_app_to_user: Assign (add) a MS Teams app to a M365 user.
-upgrade_teams_app_of_user: Upgrade a MS teams app for a user.
-remove_teams_app_from_user: Remove a M365 Teams app from a M365 user.
-assign_teams_app_to_team: Assign (add) a MS Teams app to a M365 team
-                          (so that it afterwards can be added as a Tab in a M365 Teams Channel)
-upgrade_teams_app_of_team: Upgrade a MS teams app for a specific team.
-add_teams_app_to_channel: Add tab for Extended ECM app to an M365 Team channel
-update_teams_app_of_channel: Update in existing teams app (e.g. to change the URLs with new node ID)
-delete_teams_app_from_channel: Delete an app (and its tab) from a M365 Teams channel
-
-add_sensitivity_label: Assign a existing sensitivity label to a user.
-                       THIS IS CURRENTLY NOT WORKING!
-assign_sensitivity_label_to_user: Create a new sensitivity label in M365
-                                  THIS IS CURRENTLY NOT WORKING!
-
-upload_outlook_app: Upload the M365 Outlook Add-In as "Integrated" App to M365 Admin Center. (NOT WORKING)
-get_app_registration: Find an Azure App Registration based on its name
-add_app_registration: Add an Azure App Registration
-update_app_registration: Update an Azure App Registration
-
-get_mail: Get email from inbox of a given user and a given sender (from)
-get_mail_body: Get full email body for a given email ID
-extract_url_from_message_body: Parse the email body to extract (a potentially multi-line) URL from the body.
-delete_mail: Delete email from inbox of a given user and a given email ID.
-email_verification: Process email verification
+See also https://learn.microsoft.com/en-us/graph/
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
@@ -104,16 +16,16 @@ import re
 import time
 import urllib.parse
 import zipfile
-from datetime import datetime
-
-from urllib.parse import quote
+from datetime import datetime, timezone
 from http import HTTPStatus
+from urllib.parse import quote
+
 import requests
 
-from pyxecm.helper.web import HTTP
 from pyxecm.customizer.browser_automation import BrowserAutomation
+from pyxecm.helper import HTTP
 
-logger = logging.getLogger("pyxecm.customizer.m365")
+default_logger = logging.getLogger("pyxecm.customizer.m365")
 
 request_login_headers = {
     "Content-Type": "application/x-www-form-urlencoded",
@@ -124,8 +36,11 @@ REQUEST_TIMEOUT = 60
 REQUEST_RETRY_DELAY = 20
 REQUEST_MAX_RETRIES = 3
 
-class M365(object):
+
+class M365:
     """Used to automate stettings in Microsoft 365 via the Graph API."""
+
+    logger: logging.Logger = default_logger
 
     _config: dict
     _access_token = None
@@ -141,18 +56,43 @@ class M365(object):
         sku_id: str,
         teams_app_name: str,
         teams_app_external_id: str,
-    ):
-        """Initialize the M365 object
+        sharepoint_app_root_site: str = "",
+        sharepoint_app_client_id: str = "",
+        sharepoint_app_client_secret: str = "",
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the M365 object.
 
         Args:
-            tenant_id (str): M365 Tenant ID
-            client_id (str): M365 Client ID
-            client_secret (str): M365 Client Secret
-            domain (str): M365 domain
-            sku_id (str): License SKU for M365 users
-            teams_app_name (str): name of the Extended ECM app for MS Teams
-            teams_app_external_id (str): external ID of the Extended ECM app for MS Teams
+            tenant_id (str):
+                The M365 Tenant ID.
+            client_id (str):
+                The M365 Client ID.
+            client_secret (str):
+                The M365 Client Secret.
+            domain (str):
+                The M365 domain.
+            sku_id (str):
+                License SKU for M365 users.
+            teams_app_name (str):
+                The name of the Extended ECM app for MS Teams.
+            teams_app_external_id (str):
+                The external ID of the Extended ECM app for MS Teams
+            sharepoint_app_root_site (str):
+                The URL to the SharePoint root site.
+            sharepoint_app_client_id (str):
+                The SharePoint App client ID.
+            sharepoint_app_client_secret (str):
+                The SharePoint App client secret.
+            logger (logging.Logger, optional):
+                The logging object to use for all log messages. Defaults to default_logger.
+
         """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("m365")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         m365_config = {}
 
@@ -163,13 +103,12 @@ class M365(object):
         m365_config["domain"] = domain
         m365_config["skuId"] = sku_id
         m365_config["teamsAppName"] = teams_app_name
-        m365_config["teamsAppExternalId"] = (
-            teams_app_external_id  # this is the external App ID
-        )
+        m365_config["teamsAppExternalId"] = teams_app_external_id  # this is the external App ID
         m365_config["teamsAppInternalId"] = None  # will be set later...
-        m365_config[
-            "authenticationUrl"
-        ] = "https://login.microsoftonline.com/{}/oauth2/v2.0/token".format(tenant_id)
+        m365_config["sharepointAppRootSite"] = sharepoint_app_root_site
+        m365_config["sharepointAppClientId"] = sharepoint_app_client_id
+        m365_config["sharepointAppClientSecret"] = sharepoint_app_client_secret
+        m365_config["authenticationUrl"] = "https://login.microsoftonline.com/{}/oauth2/v2.0/token".format(tenant_id)
         m365_config["graphUrl"] = "https://graph.microsoft.com/v1.0/"
         m365_config["betaUrl"] = "https://graph.microsoft.com/beta/"
         m365_config["directoryObjects"] = m365_config["graphUrl"] + "directoryObjects"
@@ -182,6 +121,7 @@ class M365(object):
             "grant_type": "client_credentials",
         }
 
+        m365_config["meUrl"] = m365_config["graphUrl"] + "me"
         m365_config["groupsUrl"] = m365_config["graphUrl"] + "groups"
         m365_config["usersUrl"] = m365_config["graphUrl"] + "users"
         m365_config["teamsUrl"] = m365_config["graphUrl"] + "teams"
@@ -191,38 +131,53 @@ class M365(object):
         m365_config["securityUrl"] = m365_config["betaUrl"] + "security"
         m365_config["applicationsUrl"] = m365_config["graphUrl"] + "applications"
 
+        m365_config["sitesUrl"] = m365_config["betaUrl"] + "sites"
+
         self._config = m365_config
-        self._http_object = HTTP()
+        self._http_object = HTTP(logger=self.logger)
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
             dict: Configuration dictionary
+
         """
+
         return self._config
 
     def credentials(self) -> dict:
-        """Return the login credentials
+        """Return the login credentials.
 
         Returns:
-            dict: dictionary with login credentials for M365
+            dict:
+                A dictionary with (admin) login credentials for M365.
+
         """
+
         return self.config()["tokenData"]
 
     def credentials_user(self, username: str, password: str) -> dict:
-        """In some cases MS Graph APIs cannot be called via
-            application permissions (client_id, client_secret)
-            but requires a token of a user authenticated
-            with username + password. This is e.g. the case
-            to upload a MS teams app to the catalog.
-            See https://learn.microsoft.com/en-us/graph/api/teamsapp-publish
+        """Get user credentials.
+
+        In some cases MS Graph APIs cannot be called via
+        application permissions (client_id, client_secret)
+        but requires a token of a user authenticated
+        with username + password. This is e.g. the case
+        to upload a MS teams app to the catalog.
+
+        See https://learn.microsoft.com/en-us/graph/api/teamsapp-publish
 
         Args:
-            username (str): username
-            password (str): password
+            username (str):
+                The M365 username.
+            password (str):
+                The password of the M365 user.
+
         Returns:
-            dict: user credentials for M365
+            dict:
+                A dictionary with the (user) credentials for M365.
+
         """
 
         credentials = {
@@ -233,42 +188,55 @@ class M365(object):
             "username": username,
             "password": password,
         }
+
         return credentials
 
     # end method definition
 
     def request_header(self, content_type: str = "application/json") -> dict:
-        """Returns the request header used for Application calls.
-           Consists of Bearer access token and Content Type
+        """Return the request header used for Application calls.
+
+        Consists of Bearer access token and Content Type.
 
         Args:
-            content_type (str, optional): content type for the request
-        Return:
-            dict: request header values
+            content_type (str, optional):
+                The content type for the request. Default is "application/json".
+
+        Returns:
+            dict:
+                The request header values.
+
         """
 
         request_header = {
             "Authorization": "Bearer {}".format(self._access_token),
             "Content-Type": content_type,
         }
+
         return request_header
 
     # end method definition
 
     def request_header_user(self, content_type: str = "application/json") -> dict:
-        """Returns the request header used for user specific calls.
-           Consists of Bearer access token and Content Type
+        """Return the request header used for user specific calls.
+
+        Consists of Bearer access token and Content Type.
 
         Args:
-            content_type (str, optional): content type for the request
-        Return:
-            dict: request header values
+            content_type (str, optional):
+                The content type for the request.
+
+        Returns:
+            dict:
+                The request header values.
+
         """
 
         request_header = {
             "Authorization": "Bearer {}".format(self._user_access_token),
             "Content-Type": content_type,
         }
+
         return request_header
 
     # end method definition
@@ -293,35 +261,62 @@ class M365(object):
         parse_request_response: bool = True,
         stream: bool = False,
     ) -> dict | None:
-        """Call an M365 Graph API in a safe way
+        """Call an M365 Graph API in a safe way.
 
         Args:
-            url (str): URL to send the request to.
-            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
-            headers (dict | None, optional): Request Headers. Defaults to None.
-            data (dict | None, optional): Request payload. Defaults to None
-            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
-                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            params (dict | None, optional): Add key-value pairs to the query string of the URL.
-                                            When you use the params parameter, requests automatically appends
-                                            the key-value pairs to the URL as part of the query string
-            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
-            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
-                                         If False, then only a warning is logged. Defaults to True.
-            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
-            failure_message (str, optional): Specific error message. Defaults to "".
-            success_message (str, optional): Specific success message. Defaults to "".
-            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
-            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
-            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
-            stream (bool, optional): parameter is used to control whether the response content should be immediately downloaded or streamed incrementally
+            url (str):
+                URL to send the request to.
+            method (str, optional):
+                HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional):
+                Request Headers. Defaults to None.
+            data (dict | None, optional):
+                Request payload. Defaults to None.
+            json_data (dict | None, optional):
+                Request payload for the JSON parameter. Defaults to None.
+            files (dict | None, optional):
+                Dictionary of {"name": file-tuple} for multipart encoding upload.
+                file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            params (dict | None, optional):
+                Add key-value pairs to the query string of the URL.
+                When you use the params parameter, requests automatically appends
+                the key-value pairs to the URL as part of the query string
+            timeout (int | None, optional):
+                Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            show_warning (bool, optional):
+                Whether or not an warning should be logged in case of a
+                failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional):
+                Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional):
+                Specific error message. Defaults to "".
+            success_message (str, optional):
+                Specific success message. Defaults to "".
+            max_retries (int, optional):
+                How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional):
+                Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional):
+                Defines whether the response.text should be interpreted as json and loaded into a dictionary.
+                True is the default.
+            stream (bool, optional):
+                This parameter is used to control whether the response content should be immediately
+                downloaded or streamed incrementally.
 
         Returns:
-            dict | None: Response of OTDS REST API or None in case of an error.
+            dict | None:
+                Response of M365 Graph REST API or None in case of an error.
+
         """
 
         if headers is None:
-            logger.error("Missing request header. Cannot send request to Core Share!")
+            self.logger.error(
+                "Missing request header. Cannot send request to Microsoft M365 Graph API!",
+            )
             return None
 
         # In case of an expired session we reauthenticate and
@@ -345,22 +340,19 @@ class M365(object):
 
                 if response.ok:
                     if success_message:
-                        logger.info(success_message)
+                        self.logger.info(success_message)
                     if parse_request_response:
                         return self.parse_request_response(response)
                     else:
                         return response
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
-                    logger.debug("Session has expired - try to re-authenticate...")
+                    self.logger.debug("Session has expired - try to re-authenticate...")
                     self.authenticate(revalidate=True)
                     headers = self.request_header()
                     retries += 1
-                elif (
-                    response.status_code in [502, 503, 504]
-                    and retries < REQUEST_MAX_RETRIES
-                ):
-                    logger.warning(
+                elif response.status_code in [502, 503, 504] and retries < REQUEST_MAX_RETRIES:
+                    self.logger.warning(
                         "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
                         response.status_code,
                         (retries + 1) * 60,
@@ -370,13 +362,12 @@ class M365(object):
                 else:
                     # Handle plain HTML responses to not pollute the logs
                     content_type = response.headers.get("content-type", None)
-                    if content_type == "text/html":
-                        response_text = "HTML content (only printed in debug log)"
-                    else:
-                        response_text = response.text
+                    response_text = (
+                        "HTML content (only printed in debug log)" if content_type == "text/html" else response.text
+                    )
 
                     if show_error:
-                        logger.error(
+                        self.logger.error(
                             "%s; status -> %s/%s; error -> %s",
                             failure_message,
                             response.status_code,
@@ -384,7 +375,7 @@ class M365(object):
                             response_text,
                         )
                     elif show_warning:
-                        logger.warning(
+                        self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
                             warning_message if warning_message else failure_message,
                             response.status_code,
@@ -392,7 +383,7 @@ class M365(object):
                             response_text,
                         )
                     if content_type == "text/html":
-                        logger.debug(
+                        self.logger.debug(
                             "%s; status -> %s/%s; warning -> %s",
                             failure_message,
                             response.status_code,
@@ -402,45 +393,45 @@ class M365(object):
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Request timed out. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; timeout error",
+                    self.logger.error(
+                        "%s; timeout error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                     else:
                         return None
             except requests.exceptions.ConnectionError:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Connection error. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; connection error",
+                    self.logger.error(
+                        "%s; connection error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                         time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                     else:
                         return None
             # end try
-            logger.debug(
+            self.logger.debug(
                 "Retrying REST API %s call -> %s... (retry = %s)",
                 method,
                 url,
@@ -456,43 +447,46 @@ class M365(object):
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Converts the request response (JSon) to a Python dict in a safe way
-           that also handles exceptions. It first tries to load the response.text
-           via json.loads() that produces a dict output. Only if response.text is
-           not set or is empty it just converts the response_object to a dict using
-           the vars() built-in method.
+        """Convert the request response (JSon) to a Python dict in a safe way.
+
+        It first tries to load the response.text via json.loads() that produces a
+        dict output. Only if response.text is not set or is empty it just converts the
+        response_object to a dict using the vars() built-in method.
 
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str, optional): use a more specific error message
-                                                      in case of an error
-            show_error (bool): True: write an error to the log file
-                               False: write a warning to the log file
+            response_object (object):
+                This is reponse object delivered by the request call.
+            additional_error_message (str, optional):
+                Use a more specific error message in case of an error.
+            show_error (bool, optional):
+                True: write an error to the log file
+                False: write a warning to the log file
+
         Returns:
-            dict: response information or None in case of an error
+            dict:
+                API response information or None in case of an error.
+
         """
 
         if not response_object:
             return None
 
         try:
-            if response_object.text:
-                dict_object = json.loads(response_object.text)
-            else:
-                dict_object = vars(response_object)
+            dict_object = json.loads(response_object.text) if response_object.text else vars(response_object)
         except json.JSONDecodeError as exception:
             if additional_error_message:
                 message = "Cannot decode response as JSon. {}; error -> {}".format(
-                    additional_error_message, exception
+                    additional_error_message,
+                    exception,
                 )
             else:
                 message = "Cannot decode response as JSon; error -> {}".format(
-                    exception
+                    exception,
                 )
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.warning(message)
+                self.logger.warning(message)
             return None
         else:
             return dict_object
@@ -500,25 +494,35 @@ class M365(object):
     # end method definition
 
     def exist_result_item(
-        self, response: dict, key: str, value: str, sub_dict_name: str = ""
+        self,
+        response: dict,
+        key: str,
+        value: str,
+        sub_dict_name: str = "",
     ) -> bool:
         """Check existence of key / value pair in the response properties of an MS Graph API call.
 
         Args:
-            response (dict): REST response from an MS Graph REST Call
-            key (str): property name (key)
-            value (str): value to find in the item with the matching key
-            sub_dict_name (str): some MS Graph API calls include nested
-                                 dict structures that can be requested
-                                 with an "expand" query parameter. In such
-                                 a case we use the sub_dict_name to access it.
+            response (dict):
+                REST response from an MS Graph REST Call.
+            key (str):
+                The property name (key).
+            value (str):
+                The value to find in the item with the matching key
+            sub_dict_name (str, optional):
+                Some MS Graph API calls include nested dict structures that can be requested
+                with an "expand" query parameter. In such a case we use the sub_dict_name to
+                access it.
+
         Returns:
-            bool: True if the value was found, False otherwise
+            bool:
+                True if the value was found, False otherwise
+
         """
 
         if not response:
             return False
-        if not "value" in response:
+        if "value" not in response:
             return False
 
         values = response["value"]
@@ -531,37 +535,46 @@ class M365(object):
                     return True
         else:
             for item in values:
-                if not sub_dict_name in item:
+                if sub_dict_name not in item:
                     return False
                 if value == item[sub_dict_name][key]:
                     return True
+
         return False
 
     # end method definition
 
     def get_result_value(
-        self, response: dict, key: str, index: int = 0, sub_dict_name: str = ""
+        self,
+        response: dict,
+        key: str,
+        index: int = 0,
+        sub_dict_name: str = "",
     ) -> str | None:
         """Get value of a result property with a given key of an MS Graph API call.
 
         Args:
-            response (dict): REST response from an MS Graph REST Call
-            key (str): property name (key)
-            index (int, optional): Index to use (1st element has index 0).
-                                   Defaults to 0.
-            sub_dict_name (str): some MS Graph API calls include nested
-                                 dict structures that can be requested
-                                 with an "expand" query parameter. In such
-                                 a case we use the sub_dict_name to access it.
+            response (dict):
+                REST response from an MS Graph REST Call.
+            key (str):
+                The property name (key).
+            index (int, optional):
+                Index to use (1st element has index 0).
+                Defaults to 0.
+            sub_dict_name (str):
+                Some MS Graph API calls include nested dict structures that can
+                be requested with an "expand" query parameter. In such
+                a case we use the sub_dict_name to access it.
+
         Returns:
-            str: value for the key, None otherwise
+            str:
+                The value for the key, None otherwise.
+
         """
 
         if not response:
             return None
-        if (
-            not "value" in response
-        ):  # If Graph APIs are called with specific IDs (and not name lookups)
+        if "value" not in response:  # If Graph APIs are called with specific IDs (and not name lookups)
             # they may not return a list of dicts calles "values" but a single dict directly
             if sub_dict_name and sub_dict_name in response:
                 sub_structure = response[sub_dict_name]
@@ -592,19 +605,87 @@ class M365(object):
 
     # end method definition
 
+    def lookup_result_value(
+        self,
+        response: dict,
+        key: str,
+        value: str,
+        return_key: str,
+        sub_dict_name: str = "",
+    ) -> str | None:
+        """Look up a property value for a provided key-value pair of a REST response.
+
+        Args:
+            response (dict):
+                The REST response from an OTCS REST call, containing property data.
+            key (str):
+                Property name (key) to match in the response.
+            value (str):
+                Value to find in the item with the matching key.
+            return_key (str):
+                Name of the dictionary key whose value should be returned.
+            sub_dict_name (str):
+                Some MS Graph API calls include nested dict structures that can
+                be requested with an "expand" query parameter. In such
+                a case we use the sub_dict_name to access it.
+
+        Returns:
+            str | None:
+                The value of the property specified by "return_key" if found,
+                or None if the lookup fails.
+
+        """
+
+        if not response:
+            return None
+
+        results = response.get("value", response)
+
+        # check if results is a list or a dict (both is possible -
+        # dependent on the actual REST API):
+        if isinstance(results, dict):
+            # result is a dict - we don't need index value:
+            if sub_dict_name and sub_dict_name in results:
+                results = results[sub_dict_name]
+            if key in results and results[key] == value and return_key in results:
+                return results[return_key]
+            else:
+                return None
+        elif isinstance(results, list):
+            # result is a list - we need index value
+            for result in results:
+                if sub_dict_name and sub_dict_name in result:
+                    result = result[sub_dict_name]
+                if key in result and result[key] == value and return_key in result:
+                    return result[return_key]
+            return None
+        else:
+            self.logger.error(
+                "Result needs to be a list or dict but it is of type -> %s",
+                str(type(results)),
+            )
+            return None
+
+    # end method definition
+
     def authenticate(self, revalidate: bool = False) -> str | None:
         """Authenticate at M365 Graph API with client ID and client secret.
 
         Args:
-            revalidate (bool, optional): determinse if a re-athentication is enforced
-                                         (e.g. if session has timed out with 401 error)
+            revalidate (bool, optional):
+                Determins if a re-athentication is enforced.
+                (e.g. if session has timed out with 401 error)
+
         Returns:
-            str: Access token. Also stores access token in self._access_token. None in case of error
+            str | None:
+                The access token. Also stores access token in self._access_token.
+                None in case of error.
+
         """
 
         # Already authenticated and session still valid?
         if self._access_token and not revalidate:
-            logger.debug(
+            self.logger.debug(
                 "Session still valid - return existing access token -> %s",
                 str(self._access_token),
             )
@@ -613,7 +694,7 @@ class M365(object):
         request_url = self.config()["authenticationUrl"]
         request_header = request_login_headers
 
-        logger.debug("Requesting M365 Access Token from -> %s", request_url)
+        self.logger.debug("Requesting M365 Access Token from -> %s", request_url)
 
         authenticate_post_body = self.credentials()
         authenticate_response = None
@@ -626,7 +707,7 @@ class M365(object):
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.ConnectionError as exception:
-            logger.warning(
+            self.logger.warning(
                 "Unable to connect to -> %s : %s",
                 self.config()["authenticationUrl"],
                 exception,
@@ -639,9 +720,9 @@ class M365(object):
                 return None
             else:
                 access_token = authenticate_dict["access_token"]
-                logger.debug("Access Token -> %s", access_token)
+                self.logger.debug("Access Token -> %s", access_token)
         else:
-            logger.error(
+            self.logger.error(
                 "Failed to request an M365 Access Token; error -> %s",
                 authenticate_response.text,
             )
@@ -658,16 +739,31 @@ class M365(object):
         """Authenticate at M365 Graph API with username and password.
 
         Args:
-            username (str): name (emails) of the M365 user
-            password (str): password of the M365 user
+            username (str):
+                The name (email) of the M365 user.
+            password (str):
+                The password of the M365 user.
+
         Returns:
-            str: Access token. Also stores access token in self._access_token
+            str | None:
+                The access token for the user. Also stores access token in self._access_token.
+
         """
 
         request_url = self.config()["authenticationUrl"]
         request_header = request_login_headers
 
-        logger.debug(
+        if not username:
+            self.logger.error("Missing user name - cannot authenticate at M365!")
+            return None
+        if not password:
+            self.logger.error(
+                "Missing password for user -> '%s' - cannot authenticate at M365!",
+                username,
+            )
+            return None
+
+        self.logger.debug(
             "Requesting M365 Access Token for user -> %s from -> %s",
             username,
             request_url,
@@ -684,7 +780,7 @@ class M365(object):
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.ConnectionError as exception:
-            logger.warning(
+            self.logger.warning(
                 "Unable to connect to -> %s with username -> %s: %s",
                 self.config()["authenticationUrl"],
                 username,
@@ -697,9 +793,9 @@ class M365(object):
             if not authenticate_dict:
                 return None
             access_token = authenticate_dict["access_token"]
-            logger.debug("User Access Token -> %s", access_token)
+            self.logger.debug("User Access Token -> %s", access_token)
         else:
-            logger.error(
+            self.logger.error(
                 "Failed to request an M365 Access Token for user -> '%s'; error -> %s",
                 username,
                 authenticate_response.text,
@@ -713,39 +809,109 @@ class M365(object):
 
     # end method definition
 
-    def get_users(self) -> dict | None:
-        """Get list all all users in M365 tenant
+    def get_users(self, max_number: int = 250, next_page_url: str | None = None) -> dict | None:
+        """Get list all all users in M365 tenant.
+
+        Args:
+            max_number (int, optional):
+                The maximum result values (limit).
+            next_page_url (str, optional):
+                The MS Graph URL to retrieve the next page of M365 users (pagination).
+                This is used for the iterator get_users_iterator() below.
 
         Returns:
-            dict: Dictionary of all M365 users.
+            dict | None:
+                Dictionary of all M365 users.
+
         """
 
-        request_url = self.config()["usersUrl"]
+        request_url = next_page_url if next_page_url else self.config()["usersUrl"]
         request_header = self.request_header()
 
-        logger.debug("Get list of all M365 users; calling -> %s", request_url)
+        self.logger.debug(
+            "Get list of all M365 users%s; calling -> %s",
+            " (paged)" if next_page_url else "",
+            request_url,
+        )
 
-        return self.do_request(
+        response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
+            params={"$top": str(max_number)} if not next_page_url else None,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get list of M365 users!",
         )
 
+        return response
+
     # end method definition
 
-    def get_user(self, user_email: str, show_error: bool = False) -> dict | None:
-        """Get a M365 User based on its email
+    def get_users_iterator(
+        self,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all M365 users.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of users.
+
+        Example usage:
+            users = m365_object.get_users_iterator()
+            for user in users:
+                logger.info("Traversing M365 user -> '%s'...", user.get("displayName", "<undefined name>"))
+
+        Returns:
+            iter:
+                A generator yielding one M365 user per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_url = None
+
+        while True:
+            response = self.get_users(
+                next_page_url=next_page_url,
+            )
+            if not response or "value" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield users one at a time:
+            yield from response["value"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_url = response.get("@odata.nextLink", None)
+            if not next_page_url:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+    # end method definition
+
+    def get_user(self, user_email: str, user_id: str | None = None, show_error: bool = False) -> dict | None:
+        """Get a M365 User based on its email or ID.
 
         Args:
-            user_email (str): M365 user email
-            show_error (bool): whether or not an error should be displayed if the
-                               user is not found.
+            user_email (str):
+                The M365 user email.
+            user_id (str | None, optional):
+                The ID of the M365 user (alternatively to user_email). Optional.
+            show_error (bool):
+                Whether or not an error should be displayed if the
+                user is not found.
+
         Returns:
-            dict: User information or None if the user couldn't be retrieved (e.g. because it doesn't exist
-                  or if there is a permission problem).
-            Example return data:
+            dict:
+                User information or None if the user couldn't be retrieved (e.g. because it doesn't exist
+                or if there is a permission problem).
+
+        Example:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#users/$entity',
                 'businessPhones': [],
@@ -760,17 +926,21 @@ class M365(object):
                 'surname': 'Davis',
                 'userPrincipalName': 'bdavis@M365x61936377.onmicrosoft.com'
             }
+
         """
 
         # Some sanity checks:
-        if not "@" in user_email or not "." in user_email:
-            logger.error("User email -> %s is not a valid email address", user_email)
+        if user_email and ("@" not in user_email or "." not in user_email):
+            self.logger.error(
+                "User email -> %s is not a valid email address",
+                user_email,
+            )
             return None
 
         # if there's an alias in the E-Mail Adress we remove it as
         # MS Graph seems to not support an alias to lookup a user object.
-        if "+" in user_email:
-            logger.info(
+        if user_email and "+" in user_email:
+            self.logger.info(
                 "Removing Alias from email address -> %s to determine M365 principal name...",
                 user_email,
             )
@@ -782,22 +952,26 @@ class M365(object):
 
             # Construct the email address without the alias
             user_email = user_email[:alias_index] + user_email[domain_index:]
-            logger.info(
+            self.logger.info(
                 "M365 user principal name -> %s",
                 user_email,
             )
 
-        request_url = self.config()["usersUrl"] + "/" + user_email
+        request_url = self.config()["usersUrl"] + "/" + str(user_email if user_email else user_id)
         request_header = self.request_header()
 
-        logger.debug("Get M365 user -> %s; calling -> %s", user_email, request_url)
+        self.logger.debug(
+            "Get M365 user -> '%s'; calling -> %s",
+            str(user_email if user_email else user_id),
+            request_url,
+        )
 
         return self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to get M365 user -> '{}'".format(user_email),
+            failure_message="Failed to get M365 user -> '{}'".format(user_email if user_email else user_id),
             show_error=show_error,
         )
 
@@ -816,16 +990,26 @@ class M365(object):
         """Add a M365 user.
 
         Args:
-            email (str): email address of the user. This is also the unique identifier
-            password (str): password of the user
-            first_name (str): first name of the user
-            last_name (str): last name of the user
-            location (str, optional): country ISO 3166-1 alpha-2 format (e.g. US, CA, FR, DE, CN, ...)
-            department (str, optional): department of the user
-            company_name (str): name of the company
+            email (str):
+                The email address of the user. This is also the unique identifier.
+            password (str):
+                The password of the user.
+            first_name (str):
+                The first name of the user.
+            last_name (str):
+                The last name of the user.
+            location (str, optional):
+                The country ISO 3166-1 alpha-2 code (e.g. US, CA, FR, DE, CN, ...)
+            department (str, optional):
+                The department of the user.
+            company_name (str):
+                The name of the company the user works for.
+
         Returns:
-            dict: User information or None if the user couldn't be created (e.g. because it exisits already
-                  or if a permission problem occurs).
+            dict | None:
+                User information or None if the user couldn't be created (e.g. because it exisits already
+                or if a permission problem occurs).
+
         """
 
         user_post_body = {
@@ -849,7 +1033,7 @@ class M365(object):
         request_url = self.config()["usersUrl"]
         request_header = self.request_header()
 
-        logger.debug("Adding M365 user -> %s; calling -> %s", email, request_url)
+        self.logger.debug("Adding M365 user -> %s; calling -> %s", email, request_url)
 
         return self.do_request(
             url=request_url,
@@ -863,20 +1047,26 @@ class M365(object):
     # end method definition
 
     def update_user(self, user_id: str, updated_settings: dict) -> dict | None:
-        """Update selected properties of an M365 user. Documentation
-           on user properties is here: https://learn.microsoft.com/en-us/graph/api/user-update
+        """Update selected properties of an M365 user.
+
+        Documentation on user properties is here: https://learn.microsoft.com/en-us/graph/api/user-update
 
         Args:
-            user_id (str): ID of the user (can also be email). This is also the unique identifier
-            updated_settings (dict): new data to update the user with
+            user_id (str):
+                The ID of the user (can also be email). This is also the unique identifier.
+            updated_settings (dict):
+                The new data to update the user with.
+
         Returns:
-            dict | None: Response of the M365 Graph API  or None if the call fails.
+            dict | None:
+                Response of the M365 Graph API  or None if the call fails.
+
         """
 
         request_url = self.config()["usersUrl"] + "/" + user_id
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Updating M365 user with ID -> %s with -> %s; calling -> %s",
             user_id,
             str(updated_settings),
@@ -890,21 +1080,25 @@ class M365(object):
             json_data=updated_settings,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update M365 user -> '{}' with -> {}".format(
-                user_id, updated_settings
+                user_id,
+                updated_settings,
             ),
         )
 
     # end method definition
 
     def get_user_licenses(self, user_id: str) -> dict | None:
-        """Get the assigned license SKUs of a user
+        """Get the assigned license SKUs of a user.
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-        Returns:
-            dict: List of user licenses or None if request fails.
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
 
-            Example return data:
+        Returns:
+            dict:
+                A list of user licenses or None if request fails.
+
+        Example:
             {
                 '@odata.context': "https://graph.microsoft.com/v1.0/$metadata#users('a5875311-f0a5-486d-a746-bd7372b91115')/licenseDetails",
                 'value': [
@@ -916,6 +1110,7 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
         request_url = self.config()["usersUrl"] + "/" + user_id + "/licenseDetails"
@@ -926,22 +1121,26 @@ class M365(object):
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to get M365 licenses of user -> {}".format(user_id),
+            failure_message="Failed to get M365 licenses of M365 user -> {}".format(user_id),
         )
 
     # end method definition
 
     def assign_license_to_user(self, user_id: str, sku_id: str) -> dict | None:
-        """Add an M365 license to a user (e.g. to use Office 365)
+        """Add an M365 license to a user (e.g. to use Office 365).
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            sku_id (str): M365 GUID of the SKU
-                          (e.g. c7df2760-2c81-4ef7-b578-5b5392b571df for E5 and
-                                6fd2c87f-b296-42f0-b197-1e91e994b900 for E3)
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user)
+            sku_id (str):
+                M365 GUID of the SKU.
+                (e.g. c7df2760-2c81-4ef7-b578-5b5392b571df for E5 and
+                6fd2c87f-b296-42f0-b197-1e91e994b900 for E3)
 
         Returns:
-            dict: response or None if request fails
+            dict:
+                The API response or None if request fails.
+
         """
 
         request_url = self.config()["usersUrl"] + "/" + user_id + "/assignLicense"
@@ -953,12 +1152,12 @@ class M365(object):
                 {
                     "disabledPlans": [],
                     "skuId": sku_id,  # "c42b9cae-ea4f-4a69-9ca5-c53bd8779c42"
-                }
+                },
             ],
             "removeLicenses": [],
         }
 
-        logger.debug(
+        self.logger.debug(
             "Assign M365 license -> %s to M365 user -> %s; calling -> %s",
             sku_id,
             user_id,
@@ -971,29 +1170,39 @@ class M365(object):
             headers=request_header,
             json_data=license_post_body,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to add M365 license -> {} to M365 user -> {}".format(
-                sku_id, user_id
+            failure_message="Failed to assign M365 license -> {} to M365 user -> {}".format(
+                sku_id,
+                user_id,
             ),
         )
 
     # end method definition
 
     def get_user_photo(self, user_id: str, show_error: bool = True) -> bytes | None:
-        """Get the photo of a M365 user
+        """Get the photo of a M365 user.
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            show_error (bool): whether or not an error should be logged if the user
-                                  does not have a photo in M365
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
+            show_error (bool, optional):
+                Whether or not an error should be logged if the user
+                does not have a photo in M365.
+
         Returns:
-            bytes: Image of the user photo or None if the user photo couldn't be retrieved.
+            bytes:
+                Image of the user photo or None if the user photo couldn't be retrieved.
+
         """
 
         request_url = self.config()["usersUrl"] + "/" + user_id + "/photo/$value"
         # Set image as content type:
         request_header = self.request_header("image/*")
 
-        logger.debug("Get photo of user -> %s; calling -> %s", user_id, request_url)
+        self.logger.debug(
+            "Get photo of user -> %s; calling -> %s",
+            user_id,
+            request_url,
+        )
 
         response = self.do_request(
             url=request_url,
@@ -1002,7 +1211,7 @@ class M365(object):
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get photo of M365 user -> {}".format(user_id),
             warning_message="M365 User -> {} does not yet have a photo.".format(
-                user_id
+                user_id,
             ),
             show_error=show_error,
             parse_request_response=False,  # the response is NOT JSON!
@@ -1016,20 +1225,25 @@ class M365(object):
     # end method definition
 
     def download_user_photo(self, user_id: str, photo_path: str) -> str | None:
-        """Download the M365 user photo and save it to the local file system
+        """Download the M365 user photo and save it to the local file system.
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            photo_path (str): Directory where the photo should be saved
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
+            photo_path (str):
+                The directory where the photo should be saved.
+
         Returns:
-            str: name of the photo file in the file system (with full path) or None if
-                 the call of the REST API fails.
+            str:
+                The name of the photo file in the file system (with full path) or None if
+                the call of the REST API fails.
+
         """
 
         request_url = self.config()["usersUrl"] + "/" + user_id + "/photo/$value"
         request_header = self.request_header("application/json")
 
-        logger.debug(
+        self.logger.debug(
             "Downloading photo for M365 user with ID -> %s; calling -> %s",
             user_id,
             request_url,
@@ -1040,8 +1254,8 @@ class M365(object):
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to download photo for user with ID -> {}".format(
-                user_id
+            failure_message="Failed to download photo for M365 user with ID -> {}".format(
+                user_id,
             ),
             stream=True,
             parse_request_response=False,
@@ -1056,38 +1270,44 @@ class M365(object):
             else:
                 file_extension = "img"  # Default extension if type is unknown
             file_path = os.path.join(
-                photo_path, "{}.{}".format(user_id, file_extension)
+                photo_path,
+                "{}.{}".format(user_id, file_extension),
             )
 
             try:
                 with open(file_path, "wb") as file:
                     for chunk in response.iter_content(chunk_size=8192):
                         file.write(chunk)
-                logger.info(
+            except OSError:
+                self.logger.error(
+                    "Error saving photo for user with ID -> %s!",
+                    user_id,
+                )
+            else:
+                self.logger.info(
                     "Photo for M365 user with ID -> %s saved to -> '%s'",
                     user_id,
                     file_path,
                 )
                 return file_path
-            except OSError as exception:
-                logger.error(
-                    "Error saving photo for user with ID -> %s; error -> %s",
-                    user_id,
-                    exception,
-                )
 
         return None
 
     # end method definition
 
     def update_user_photo(self, user_id: str, photo_path: str) -> dict | None:
-        """Update the M365 user photo
+        """Update the M365 user photo.
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            photo_path (str): file system path with the location of the photo
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
+            photo_path (str):
+                The file system path with the location of the photo file.
+
         Returns:
-            dict: Response of Graph REST API or None if the user photo couldn't be updated.
+            dict | None:
+                Response of Graph REST API or None if the user photo couldn't be updated.
+
         """
 
         request_url = self.config()["usersUrl"] + "/" + user_id + "/photo/$value"
@@ -1096,23 +1316,24 @@ class M365(object):
 
         # Check if the photo file exists
         if not os.path.isfile(photo_path):
-            logger.error("Photo file -> %s not found!", photo_path)
+            self.logger.error("Photo file -> %s not found!", photo_path)
             return None
 
         try:
             # Read the photo file as binary data
             with open(photo_path, "rb") as image_file:
                 photo_data = image_file.read()
-        except OSError as exception:
+        except OSError:
             # Handle any errors that occurred while reading the photo file
-            logger.error(
-                "Error reading photo file -> %s; error -> %s", photo_path, exception
+            self.logger.error(
+                "Error reading photo file -> %s!",
+                photo_path,
             )
             return None
 
         data = photo_data
 
-        logger.debug(
+        self.logger.debug(
             "Update M365 user with ID -> %s with photo -> %s; calling -> %s",
             user_id,
             photo_path,
@@ -1126,47 +1347,116 @@ class M365(object):
             data=data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update M365 user with ID -> {} with photo -> '{}'".format(
-                user_id, photo_path
+                user_id,
+                photo_path,
             ),
         )
 
     # end method definition
 
-    def get_groups(self, max_number: int = 250) -> dict | None:
-        """Get list all all groups in M365 tenant
+    def get_groups(
+        self,
+        max_number: int = 250,
+        next_page_url: str | None = None,
+    ) -> dict | None:
+        """Get list all all groups in M365 tenant.
 
         Args:
-            max_number (int, optional): maximum result values (limit)
+            max_number (int, optional):
+                The maximum result values (limit).
+            next_page_url (str, optional):
+                The MS Graph URL to retrieve the next page of M365 groups (pagination).
+                This is used for the iterator get_groups_iterator() below.
+
         Returns:
-            dict: dictionary of all groups or None in case of an error.
+            dict:
+                A dictionary of all groups or None in case of an error.
+
         """
 
-        request_url = self.config()["groupsUrl"]
+        request_url = next_page_url if next_page_url else self.config()["groupsUrl"]
         request_header = self.request_header()
 
-        logger.debug("Get list of all M365 groups; calling -> %s", request_url)
+        self.logger.debug(
+            "Get list of all M365 groups%s; calling -> %s",
+            " (paged)" if next_page_url else "",
+            request_url,
+        )
 
-        return self.do_request(
+        response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
-            params={"$top": str(max_number)},
+            params={"$top": str(max_number)} if not next_page_url else None,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get list of M365 groups",
         )
 
+        return response
+
+    # end method definition
+
+    def get_groups_iterator(
+        self,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all M365 groups.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of groups.
+
+        Example usage:
+            groups = m365_object.get_groups_iterator()
+            for group in groups:
+                logger.info("Traversing M365 group -> '%s'...", group.get("displayName", "<undefined name>"))
+
+        Returns:
+            iter:
+                A generator yielding one M365 group per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_url = None
+
+        while True:
+            response = self.get_groups(
+                next_page_url=next_page_url,
+            )
+            if not response or "value" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield users one at a time:
+            yield from response["value"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_url = response.get("@odata.nextLink", None)
+            if not next_page_url:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
     # end method definition
 
     def get_group(self, group_name: str, show_error: bool = False) -> dict | None:
-        """Get a M365 Group based on its name
+        """Get a M365 Group based on its name.
 
         Args:
-            group_name (str): M365 Group name
-            show_error (bool): should an error be logged if group is not found.
-        Returns:
-            dict: Group information or None if the group doesn't exist.
+            group_name (str):
+                The M365 Group name.
+            show_error (bool):
+                Should an error be logged if group is not found.
 
-            Example return data:
+        Returns:
+            dict:
+                Group information or None if the group doesn't exist.
+
+        Example:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#groups',
                 'value': [
@@ -1194,7 +1484,7 @@ class M365(object):
                         'onPremisesSyncEnabled': None,
                         'preferredDataLocation': None,
                         'preferredLanguage': None,
-                        'proxyAddresses': ['SPO:SPO_d9deb3e7-c72f-4e8d-80fb-5d9411ca1458@SPO_604f34f0-ba72-4321-ab6b-e36ae8bd00ec', 'SMTP:Engineering&Construction@M365x61936377.onmicrosoft.com'],
+                        'proxyAddresses': ['SPO:SPO_d9deb3e7-c72f-4e8d-80fb-5d9411ca1458@SPO_604f34f0-ba72-4321-ab6b-e36ae8bd00ec', ...],
                         'renewedDateTime': '2023-04-01T13:46:26Z',
                         'resourceBehaviorOptions': [],
                         'resourceProvisioningOptions': [],
@@ -1210,6 +1500,7 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
         query = {"$filter": "displayName eq '" + group_name + "'"}
@@ -1218,7 +1509,11 @@ class M365(object):
         request_url = self.config()["groupsUrl"] + "?" + encoded_query
         request_header = self.request_header()
 
-        logger.debug("Get M365 group -> '%s'; calling -> %s", group_name, request_url)
+        self.logger.debug(
+            "Get M365 group -> '%s'; calling -> %s",
+            group_name,
+            request_url,
+        )
 
         return self.do_request(
             url=request_url,
@@ -1232,18 +1527,26 @@ class M365(object):
     # end method definition
 
     def add_group(
-        self, name: str, security_enabled: bool = False, mail_enabled: bool = True
+        self,
+        name: str,
+        security_enabled: bool = False,
+        mail_enabled: bool = True,
     ) -> dict | None:
         """Add a M365 Group.
 
         Args:
-            name (str): name of the group
-            security_enabled (bool, optional): whether or not this group is used for permission management
-            mail_enabled (bool, optional): whether or not this group is email enabled
-        Returns:
-            dict: Group information or None if the group couldn't be created (e.g. because it exisits already).
+            name (str):
+                The name of the group.
+            security_enabled (bool, optional):
+                Whether or not this group is used for permission management.
+            mail_enabled (bool, optional):
+                Whether or not this group is email enabled.
 
-            Example return data:
+        Returns:
+            dict | None:
+                Group information or None if the group couldn't be created (e.g. because it exisits already).
+
+        Example:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#groups/$entity',
                 'id': '28906460-a69c-439e-84ca-c70becf37655',
@@ -1279,6 +1582,7 @@ class M365(object):
                 'theme': None,
                 'visibility': 'Public'
             }
+
         """
 
         group_post_body = {
@@ -1292,8 +1596,8 @@ class M365(object):
         request_url = self.config()["groupsUrl"]
         request_header = self.request_header()
 
-        logger.debug("Adding M365 group -> '%s'; calling -> %s", name, request_url)
-        logger.debug("M365 group attributes -> %s", str(group_post_body))
+        self.logger.debug("Adding M365 group -> '%s'; calling -> %s", name, request_url)
+        self.logger.debug("M365 group attributes -> %s", str(group_post_body))
 
         return self.do_request(
             url=request_url,
@@ -1310,15 +1614,19 @@ class M365(object):
         """Get members (users and groups) of the specified group.
 
         Args:
-            group_name (str): name of the group
+            group_name (str):
+                The name of the group.
+
         Returns:
-            dict: Response of Graph REST API or None if the REST call fails.
+            dict | None:
+                Response of Graph REST API or None if the REST call fails.
+
         """
 
-        response = self.get_group(group_name)
-        group_id = self.get_result_value(response, "id", 0)
+        response = self.get_group(group_name=group_name)
+        group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
-            logger.error(
+            self.logger.error(
                 "M365 Group -> %s does not exist! Cannot retrieve group members.",
                 group_name,
             )
@@ -1327,12 +1635,10 @@ class M365(object):
         query = {"$select": "id,displayName,mail,userPrincipalName"}
         encoded_query = urllib.parse.urlencode(query, doseq=True)
 
-        request_url = (
-            self.config()["groupsUrl"] + "/" + group_id + "/members?" + encoded_query
-        )
+        request_url = self.config()["groupsUrl"] + "/" + group_id + "/members?" + encoded_query
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Get members of M365 group -> %s (%s); calling -> %s",
             group_name,
             group_id,
@@ -1345,30 +1651,36 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get members of M365 group -> '{}' ({})".format(
-                group_name, group_id
+                group_name,
+                group_id,
             ),
         )
 
     # end method definition
 
     def add_group_member(self, group_id: str, member_id: str) -> dict | None:
-        """Add a member (user or group) to a (parent) group
+        """Add a member (user or group) to a (parent) group.
 
         Args:
-            group_id (str): M365 GUID of the group
-            member_id (str): M365 GUID of the new member
+            group_id (str):
+                The M365 GUID of the group.
+            member_id (str):
+                The M365 GUID of the new member.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
         """
 
         request_url = self.config()["groupsUrl"] + "/" + group_id + "/members/$ref"
         request_header = self.request_header()
 
         group_member_post_body = {
-            "@odata.id": self.config()["directoryObjects"] + "/" + member_id
+            "@odata.id": self.config()["directoryObjects"] + "/" + member_id,
         }
 
-        logger.debug(
+        self.logger.debug(
             "Adding member -> %s to group -> %s; calling -> %s",
             member_id,
             group_id,
@@ -1382,32 +1694,36 @@ class M365(object):
             data=json.dumps(group_member_post_body),
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add member -> {} to M365 group -> {}".format(
-                member_id, group_id
+                member_id,
+                group_id,
             ),
         )
 
     # end method definition
 
     def is_member(self, group_id: str, member_id: str, show_error: bool = True) -> bool:
-        """Checks whether a M365 user is already in a M365 group
+        """Check whether a M365 user is already in a M365 group.
 
         Args:
-            group_id (str): M365 GUID of the group
-            member_id (str): M365 GUID of the user (member)
-            show_error (bool): whether or not an error should be logged if the user
-                                  is not a member of the group
+            group_id (str):
+                The M365 GUID of the group.
+            member_id (str):
+                The M365 GUID of the user (member).
+            show_error (bool):
+                Whether or not an error should be logged if the user
+                is not a member of the group.
+
         Returns:
-            bool: True if the user is in the group. False otherwise.
+            bool:
+                True if the user is in the group. False otherwise.
+
         """
 
         # don't encode this URL - this has not been working!!
-        request_url = (
-            self.config()["groupsUrl"]
-            + f"/{group_id}/members?$filter=id eq '{member_id}'"
-        )
+        request_url = self.config()["groupsUrl"] + f"/{group_id}/members?$filter=id eq '{member_id}'"
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Check if user -> %s is in group -> %s; calling -> %s",
             member_id,
             group_id,
@@ -1419,16 +1735,14 @@ class M365(object):
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to check if user -> {} is in group -> {}".format(
-                member_id, group_id
+            failure_message="Failed to check if M365 user -> {} is in M365 group -> {}".format(
+                member_id,
+                group_id,
             ),
             show_error=show_error,
         )
 
-        if not response or not "value" in response or len(response["value"]) == 0:
-            return False
-
-        return True
+        return bool(response and response.get("value"))
 
     # end method definition
 
@@ -1436,15 +1750,19 @@ class M365(object):
         """Get owners (users) of the specified group.
 
         Args:
-            group_name (str): name of the group
+            group_name (str):
+                The name of the group.
+
         Returns:
-            dict: Response of Graph REST API or None if the REST call fails.
+            dict | None:
+                Response of Graph REST API or None if the REST call fails.
+
         """
 
-        response = self.get_group(group_name)
-        group_id = self.get_result_value(response, "id", 0)
+        response = self.get_group(group_name=group_name)
+        group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
-            logger.error(
+            self.logger.error(
                 "M365 Group -> %s does not exist! Cannot retrieve group owners.",
                 group_name,
             )
@@ -1453,12 +1771,10 @@ class M365(object):
         query = {"$select": "id,displayName,mail,userPrincipalName"}
         encoded_query = urllib.parse.urlencode(query, doseq=True)
 
-        request_url = (
-            self.config()["groupsUrl"] + "/" + group_id + "/owners?" + encoded_query
-        )
+        request_url = self.config()["groupsUrl"] + "/" + group_id + "/owners?" + encoded_query
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Get owners of M365 group -> %s (%s); calling -> %s",
             group_name,
             group_id,
@@ -1471,30 +1787,36 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get owners of M365 group -> '{}' ({})".format(
-                group_name, group_id
+                group_name,
+                group_id,
             ),
         )
 
     # end method definition
 
     def add_group_owner(self, group_id: str, owner_id: str) -> dict | None:
-        """Add an owner (user) to a group
+        """Add an owner (user) to a group.
 
         Args:
-            group_id (str): M365 GUID of the group
-            owner_id (str): M365 GUID of the new member
+            group_id (str):
+                The M365 GUID of the group.
+            owner_id (str):
+                The M365 GUID of the new member.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                The response of the MS Graph API call or None if the call fails.
+
         """
 
         request_url = self.config()["groupsUrl"] + "/" + group_id + "/owners/$ref"
         request_header = self.request_header()
 
         group_member_post_body = {
-            "@odata.id": self.config()["directoryObjects"] + "/" + owner_id
+            "@odata.id": self.config()["directoryObjects"] + "/" + owner_id,
         }
 
-        logger.debug(
+        self.logger.debug(
             "Adding owner -> %s to M365 group -> %s; calling -> %s",
             owner_id,
             group_id,
@@ -1508,25 +1830,27 @@ class M365(object):
             data=json.dumps(group_member_post_body),
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add owner -> {} to M365 group -> {}".format(
-                owner_id, group_id
+                owner_id,
+                group_id,
             ),
         )
 
     # end method definition
 
-    def purge_deleted_items(self):
+    def purge_deleted_items(self) -> None:
         """Purge all deleted users and groups.
+
         Purging users and groups requires administrative rights that typically
         are not provided in Contoso example org.
         """
 
         request_header = self.request_header()
 
-        request_url = (
-            self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.group"
-        )
+        request_url = self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.group"
         response = requests.get(
-            request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            request_url,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
         )
         deleted_groups = self.parse_request_response(response)
 
@@ -1534,11 +1858,11 @@ class M365(object):
             group_id = group["id"]
             response = self.purge_deleted_item(group_id)
 
-        request_url = (
-            self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.user"
-        )
+        request_url = self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.user"
         response = requests.get(
-            request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            request_url,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
         )
         deleted_users = self.parse_request_response(response)
 
@@ -1549,20 +1873,29 @@ class M365(object):
     # end method definition
 
     def purge_deleted_item(self, item_id: str) -> dict | None:
-        """Helper method to purge a single deleted user or group.
-           This requires elevated permissions that are typically
-           not available via Graph API.
+        """Purge a single deleted user or group.
+
+        This requires elevated permissions that are typically
+        not available via Graph API.
 
         Args:
-            item_id (str): M365 GUID of the user or group to purge
+            item_id (str):
+                The M365 GUID of the item to purge.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
         """
 
         request_url = self.config()["directoryUrl"] + "/deletedItems/" + item_id
         request_header = self.request_header()
 
-        logger.debug("Purging deleted item -> %s; calling -> %s", item_id, request_url)
+        self.logger.debug(
+            "Purging deleted item -> %s; calling -> %s",
+            item_id,
+            request_url,
+        )
 
         return self.do_request(
             url=request_url,
@@ -1575,18 +1908,22 @@ class M365(object):
     # end method definition
 
     def has_team(self, group_name: str) -> bool:
-        """Check if a M365 Group has a M365 Team connected or not
+        """Check if a M365 Group has a M365 Team connected or not.
 
         Args:
-            group_name (str): name of the M365 group
+            group_name (str):
+                The name of the M365 group.
+
         Returns:
-            bool: Returns True if a Team is assigned and False otherwise
+            bool:
+                Returns True if a Team is assigned and False otherwise.
+
         """
 
-        response = self.get_group(group_name)
-        group_id = self.get_result_value(response, "id", 0)
+        response = self.get_group(group_name=group_name)
+        group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
-            logger.error(
+            self.logger.error(
                 "M365 Group -> %s not found. Cannot check if it has a M365 Team.",
                 group_name,
             )
@@ -1595,7 +1932,7 @@ class M365(object):
         request_url = self.config()["groupsUrl"] + "/" + group_id + "/team"
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Check if M365 Group -> %s has a M365 Team connected; calling -> %s",
             group_name,
             request_url,
@@ -1607,18 +1944,17 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to check if M365 Group -> '{}' has a M365 Team connected".format(
-                group_name
+                group_name,
             ),
             parse_request_response=False,
+            show_error=False,
         )
 
         if response and response.status_code == 200:  # Group has a Team assigned!
-            logger.debug("Group -> %s has a M365 Team connected.", group_name)
+            self.logger.debug("Group -> '%s' has a M365 Team connected.", group_name)
             return True
-        elif (
-            not response or response.status_code == 404
-        ):  # Group does not have a Team assigned!
-            logger.debug("Group -> %s has no M365 Team connected.", group_name)
+        elif not response or response.status_code == 404:  # Group does not have a Team assigned!
+            self.logger.debug("Group -> '%s' has no M365 Team connected.", group_name)
             return False
 
         return False
@@ -1626,14 +1962,17 @@ class M365(object):
     # end method definition
 
     def get_team(self, name: str) -> dict | None:
-        """Get a M365 Team based on its name
+        """Get a M365 Team based on its name.
 
         Args:
-            name (str): name of the M365 Team
-        Returns:
-            dict: teams data structure (dictionary) or None if the request fails.
+            name (str):
+                The name of the M365 Team.
 
-            Example return data:
+        Returns:
+            dict | None:
+                Teams data structure (dictionary) or None if the request fails.
+
+        Example:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#teams',
                 '@odata.count': 1,
@@ -1657,15 +1996,16 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
         # The M365 Teams API has an issues with ampersand characters in team names (like "Engineering & Construction")
         # So we do a work-around here to first get the Team ID via the Group endpoint of the Graph API and
         # then fetch the M365 Team via its ID (which is identical to the underlying M365 Group ID)
-        response = self.get_group(name)
-        team_id = self.get_result_value(response, "id", 0)
+        response = self.get_group(group_name=name)
+        team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
-            logger.error(
+            self.logger.error(
                 "Failed to get the ID of the M365 Team -> %s via the M365 Group API",
                 name,
             )
@@ -1675,7 +2015,7 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Lookup Microsoft 365 Teams with name -> '%s'; calling -> %s",
             name,
             request_url,
@@ -1695,25 +2035,30 @@ class M365(object):
         """Add M365 Team based on an existing M365 Group.
 
         Args:
-            name (str): name of the team. It is assumed that a group with the same name does already exist!
-            template_name (str, optional): name of the team template. "standard" is the default value.
+            name (str):
+                The name of the team. It is assumed that a group with the same name does already exist!
+            template_name (str, optional):
+                The name of the team template. "standard" is the default value.
+
         Returns:
-            dict: Team information (json - empty text!) or None if the team couldn't be created
-                  (e.g. because it exisits already).
+            dict:
+                Team information (json - empty text!) or None if the team couldn't be created
+                (e.g. because it exisits already).
+
         """
 
-        response = self.get_group(name)
-        group_id = self.get_result_value(response, "id", 0)
+        response = self.get_group(group_name=name)
+        group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
-            logger.error(
+            self.logger.error(
                 "M365 Group -> '%s' not found. It is required for creating a corresponding M365 Team.",
                 name,
             )
             return None
 
-        response = self.get_group_owners(name)
-        if response is None or not "value" in response or not response["value"]:
-            logger.warning(
+        response = self.get_group_owners(group_name=name)
+        if response is None or "value" not in response or not response["value"]:
+            self.logger.warning(
                 "M365 Group -> '%s' has no owners. This is required for creating a corresponding M365 Team.",
                 name,
             )
@@ -1721,7 +2066,8 @@ class M365(object):
 
         team_post_body = {
             "template@odata.bind": "{}('{}')".format(
-                self.config()["teamsTemplatesUrl"], template_name
+                self.config()["teamsTemplatesUrl"],
+                template_name,
             ),
             "group@odata.bind": "{}('{}')".format(self.config()["groupsUrl"], group_id),
         }
@@ -1729,8 +2075,8 @@ class M365(object):
         request_url = self.config()["teamsUrl"]
         request_header = self.request_header()
 
-        logger.debug("Adding M365 Team -> '%s'; calling -> %s", name, request_url)
-        logger.debug("M365 Team attributes -> %s", str(team_post_body))
+        self.logger.debug("Adding M365 Team -> '%s'; calling -> %s", name, request_url)
+        self.logger.debug("M365 Team attributes -> %s", str(team_post_body))
 
         return self.do_request(
             url=request_url,
@@ -1747,16 +2093,20 @@ class M365(object):
         """Delete Microsoft 365 Team with a specific ID.
 
         Args:
-            team_id (str): ID of the Microsoft 365 Team to delete
+            team_id (str):
+                The ID of the Microsoft 365 Team to delete.
+
         Returns:
-            dict | None: Response dictionary if the team has been deleted, False otherwise.
+            dict | None:
+                Response dictionary if the team has been deleted, False otherwise.
+
         """
 
         request_url = self.config()["groupsUrl"] + "/" + team_id
 
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Delete Microsoft 365 Teams with ID -> %s; calling -> %s",
             team_id,
             request_url,
@@ -1773,27 +2123,30 @@ class M365(object):
     # end method definition
 
     def delete_teams(self, name: str) -> bool:
-        """Delete Microsoft 365 Teams with a specific name. Microsoft 365 allows
-            to have multiple teams with the same name. So this method may delete
-            multiple teams if the have the same name. The Graph API we use here
-            is the M365 Group API as deleting the group also deletes the associated team.
+        """Delete Microsoft 365 Teams with a specific name.
+
+        Microsoft 365 allows to have multiple teams with the same name. So this method may delete
+        multiple teams if the have the same name. The Graph API we use here
+        is the M365 Group API as deleting the group also deletes the associated team.
 
         Args:
-            name (str): name of the Microsoft 365 Team
+            name (str):
+                The name of the Microsoft 365 Team.
+
         Returns:
-            bool: True if teams have been deleted, False otherwise.
+            bool:
+                True if teams have been deleted, False otherwise.
+
         """
 
         # We need a special handling of team names with single quotes:
         escaped_group_name = name.replace("'", "''")
         encoded_group_name = quote(escaped_group_name, safe="")
-        request_url = self.config()[
-            "groupsUrl"
-        ] + "?$filter=displayName eq '{}'".format(encoded_group_name)
+        request_url = self.config()["groupsUrl"] + "?$filter=displayName eq '{}'".format(encoded_group_name)
 
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Delete all Microsoft 365 Teams with name -> '%s'; calling -> %s",
             name,
             request_url,
@@ -1816,59 +2169,67 @@ class M365(object):
                     response = self.delete_team(team_id)
 
                     if not response:
-                        logger.error(
-                            "Failed to delete M365 Team -> '%s' (%s)", name, team_id
+                        self.logger.error(
+                            "Failed to delete M365 Team -> '%s' (%s)",
+                            name,
+                            team_id,
                         )
                         continue
                     counter += 1
 
-                logger.info(
+                self.logger.info(
                     "%s M365 Teams with name -> '%s' have been deleted.",
                     str(counter),
                     name,
                 )
                 return True
             else:
-                logger.info("No M365 Teams with name -> '%s' found.", name)
+                self.logger.info("No M365 Teams with name -> '%s' found.", name)
                 return False
         else:
-            logger.error("Failed to retrieve M365 Teams with name -> '%s'", name)
+            self.logger.error("Failed to retrieve M365 Teams with name -> '%s'", name)
             return False
 
     # end method definition
 
     def delete_all_teams(self, exception_list: list, pattern_list: list) -> bool:
-        """Delete all teams (groups) that are NOT on the exception list AND
-           that are matching at least one of the patterns in the provided pattern list.
-           This method is used for general cleanup of teams. Be aware that deleted teams
-           are still listed under https://admin.microsoft.com/#/deletedgroups
+        """Delete all teams (groups) based on patterns and exceptions.
+
+        Only delete MS Teams that are NOT on the exception list AND
+        that are matching at least one of the patterns in the provided pattern list.
+
+        This method is used for general cleanup of teams. Be aware that deleted teams
+        are still listed under https://admin.microsoft.com/#/deletedgroups and it
+        may take some days until M365 finally deletes them.
 
         Args:
-            exception_list (list): list of group names that should not be deleted
-            pattern_list (list): list of patterns for group names to be deleted
-                                 (regular expression)
+            exception_list (list):
+                A list of group names that should not be deleted.
+            pattern_list (list):
+                A list of patterns for group names to be deleted
+                (regular expression).
+
         Returns:
-            bool: True if teams have been deleted, False otherwise.
+            bool:
+                True if teams have been deleted, False otherwise.
+
         """
 
-        # Get list of all existing M365 groups/teams:
-        response = self.get_groups(max_number=500)
-        if not "value" in response or not response["value"]:
-            return False
-        groups = response["value"]
-
-        logger.info(
-            "Found -> %s existing M365 groups. Checking which ones should be deleted...",
-            len(groups),
+        self.logger.info(
+            "Delete existing M365 groups/teams matching delete pattern and not on exception list...",
         )
 
-        # Process all groups and check if they should be
-        # deleted:
+        # Get list of all existing M365 groups/teams:
+        groups = self.get_groups_iterator()
+
+        # Process all groups and check if they should be deleted:
         for group in groups:
-            group_name = group["displayName"]
+            group_name = group.get("displayName", None)
+            if not group_name:
+                continue
             # Check if group is in exception list:
             if group_name in exception_list:
-                logger.info(
+                self.logger.info(
                     "M365 Group name -> '%s' is on the exception list. Skipping...",
                     group_name,
                 )
@@ -1877,15 +2238,15 @@ class M365(object):
             for pattern in pattern_list:
                 result = re.search(pattern, group_name)
                 if result:
-                    logger.info(
-                        "M365 Group name -> '%s' is matching pattern -> %s. Delete it now...",
+                    self.logger.info(
+                        "M365 Group name -> '%s' is matching pattern -> '%s'. Delete it now...",
                         group_name,
                         pattern,
                     )
-                    self.delete_teams(group_name)
+                    self.delete_teams(name=group_name)
                     break
             else:
-                logger.info(
+                self.logger.info(
                     "M365 Group name -> '%s' is not matching any delete pattern. Skipping...",
                     group_name,
                 )
@@ -1894,14 +2255,17 @@ class M365(object):
     # end method definition
 
     def get_team_channels(self, name: str) -> dict | None:
-        """Get channels of a M365 Team based on the team name
+        """Get channels of a M365 Team based on the team name.
 
         Args:
-            name (str): name of the team
-        Returns:
-            dict: channel data structure (dictionary) or None if the request fails.
+            name (str):
+                The name of the M365 team.
 
-            Example return data:
+        Returns:
+            dict:
+                The channel data structure (dictionary) or None if the request fails.
+
+        Example:
             {
                 '@odata.context': "https://graph.microsoft.com/v1.0/$metadata#teams('951bd036-c6fc-4da4-bb80-1860f5472a2f')/channels",
                 '@odata.count': 1,
@@ -1919,10 +2283,11 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
-        response = self.get_team(name)
-        team_id = self.get_result_value(response, "id", 0)
+        response = self.get_team(name=name)
+        team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
             return None
 
@@ -1930,7 +2295,7 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Retrieve channels of Microsoft 365 Team -> '%s'; calling -> %s",
             name,
             request_url,
@@ -1942,22 +2307,27 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get Channels for M365 Team -> '{}' ({})".format(
-                name, team_id
+                name,
+                team_id,
             ),
         )
 
     # end method definition
 
     def get_team_channel_tabs(self, team_name: str, channel_name: str) -> dict | None:
-        """Get tabs of an M365 Team channel based on the team and channel names
+        """Get tabs of an M365 Team channel based on the team and channel names.
 
         Args:
-            team_name (str): name of the M365 Team
-            channel_name (str): name of the channel
-        Returns:
-            dict: tabs data structure (dictionary) or None if the request fails.
+            team_name (str):
+                The name of the M365 Team.
+            channel_name (str):
+                The name of the M365 Team channel.
 
-            Example return data:
+        Returns:
+            dict | None:
+                Tabs data structure (dictionary) or None if the request fails.
+
+        Example:
             {
                 '@odata.context': "https://graph.microsoft.com/v1.0/$metadata#teams('951bd036-c6fc-4da4-bb80-1860f5472a2f')/channels('19%3AyPmPnXoFtvs5jmgL7fG-iXNENVMLsB_WSrxYK-zKakY1%40thread.tacv2')/tabs",
                 '@odata.count': 1,
@@ -1977,15 +2347,16 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
-        response = self.get_team(team_name)
-        team_id = self.get_result_value(response, "id", 0)
+        response = self.get_team(name=team_name)
+        team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
             return None
 
         # Get the channels of the M365 Team:
-        response = self.get_team_channels(team_name)
+        response = self.get_team_channels(name=team_name)
         if not response or not response["value"] or not response["value"][0]:
             return None
 
@@ -1995,24 +2366,19 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.error(
-                "Cannot find Channel -> %s on M365 Team -> %s", channel_name, team_name
+            self.logger.error(
+                "Cannot find Channel -> %s on M365 Team -> %s",
+                channel_name,
+                team_name,
             )
             return None
         channel_id = channel["id"]
 
-        request_url = (
-            self.config()["teamsUrl"]
-            + "/"
-            + str(team_id)
-            + "/channels/"
-            + str(channel_id)
-            + "/tabs"
-        )
+        request_url = self.config()["teamsUrl"] + "/" + str(team_id) + "/channels/" + str(channel_id) + "/tabs"
 
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Retrieve Tabs of Microsoft 365 Teams -> %s and Channel -> %s; calling -> %s",
             team_name,
             channel_name,
@@ -2025,21 +2391,27 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get Tabs for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
-                team_name, team_id, channel_name, channel_id
+                team_name,
+                team_id,
+                channel_name,
+                channel_id,
             ),
         )
 
     # end method definition
 
     def get_teams_apps(self, filter_expression: str = "") -> dict | None:
-        """Get a list of MS Teams apps in catalog that match a given filter criterium
+        """Get a list of MS Teams apps in catalog that match a given filter criterium.
 
         Args:
-            filter_expression (str, optional): filter string see https://learn.microsoft.com/en-us/graph/filter-query-parameter
-        Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            filter_expression (str, optional):
+                Filter string see https://learn.microsoft.com/en-us/graph/filter-query-parameter
 
-            Example return data:
+        Returns:
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
+        Example:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps(appDefinitions())',
                 '@odata.count': 1,
@@ -2069,6 +2441,7 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
         query = {"$expand": "AppDefinitions"}
@@ -2080,18 +2453,19 @@ class M365(object):
         request_url = self.config()["teamsAppsUrl"] + "?" + encoded_query
 
         if filter_expression:
-            logger.debug(
+            self.logger.debug(
                 "Get list of MS Teams Apps using filter -> %s; calling -> %s",
                 filter_expression,
                 request_url,
             )
-            failure_message = (
-                "Failed to get list of M365 Teams apps using filter -> {}".format(
-                    filter_expression
-                )
+            failure_message = "Failed to get list of M365 Teams apps using filter -> {}".format(
+                filter_expression,
             )
         else:
-            logger.debug("Get list of all MS Teams Apps; calling -> %s", request_url)
+            self.logger.debug(
+                "Get list of all MS Teams Apps; calling -> %s",
+                request_url,
+            )
             failure_message = "Failed to get list of M365 Teams apps"
 
         request_header = self.request_header()
@@ -2107,14 +2481,17 @@ class M365(object):
     # end method definition
 
     def get_teams_app(self, app_id: str) -> dict | None:
-        """Get a specific MS Teams app in catalog based on the known (internal) app ID
+        """Get a specific MS Teams app in catalog based on the known (internal) app ID.
 
         Args:
-            app_id (str): ID of the app (this is NOT the external ID but the internal ID)
-        Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            app_id (str):
+                ID of the app (this is NOT the external ID but the internal ID).
 
-            Examle response:
+        Returns:
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
+        Examle:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps(appDefinitions())/$entity',
                 'id': 'ccabe3fb-316f-40e0-a486-1659682cb8cd',
@@ -2137,19 +2514,22 @@ class M365(object):
                     }
                 ]
             }
+
         """
 
         query = {"$expand": "AppDefinitions"}
         encoded_query = urllib.parse.urlencode(query, doseq=True)
         request_url = self.config()["teamsAppsUrl"] + "/" + app_id + "?" + encoded_query
 
-        logger.debug(
-            "Get M365 Teams App with ID -> %s; calling -> %s", app_id, request_url
+        self.logger.debug(
+            "Get M365 Teams App with ID -> %s; calling -> %s",
+            app_id,
+            request_url,
         )
 
         request_header = self.request_header()
 
-        return self.do_request(
+        response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
@@ -2157,18 +2537,27 @@ class M365(object):
             failure_message="Failed to get M365 Teams app with ID -> {}".format(app_id),
         )
 
+        return response
+
     # end method definition
 
     def get_teams_apps_of_user(
-        self, user_id: str, filter_expression: str = ""
+        self,
+        user_id: str,
+        filter_expression: str = "",
     ) -> dict | None:
-        """Get a list of MS Teams apps of a user that match a given filter criterium
+        """Get a list of MS Teams apps of a user that match a given filter criterium.
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            filter_expression (str, optional): filter string see https://learn.microsoft.com/en-us/graph/filter-query-parameter
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user)
+            filter_expression (str, optional):
+                Filter string see https://learn.microsoft.com/en-us/graph/filter-query-parameter
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
         """
 
         query = {"$expand": "teamsAppDefinition"}
@@ -2176,15 +2565,9 @@ class M365(object):
             query["$filter"] = filter_expression
 
         encoded_query = urllib.parse.urlencode(query, doseq=True)
-        request_url = (
-            self.config()["usersUrl"]
-            + "/"
-            + user_id
-            + "/teamwork/installedApps?"
-            + encoded_query
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_id + "/teamwork/installedApps?" + encoded_query
 
-        logger.debug(
+        self.logger.debug(
             "Get list of M365 Teams Apps for user -> %s using query -> %s; calling -> %s",
             user_id,
             query,
@@ -2193,28 +2576,37 @@ class M365(object):
 
         request_header = self.request_header()
 
-        return self.do_request(
+        response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get M365 Teams apps for user -> {}".format(
-                user_id
+                user_id,
             ),
         )
+
+        return response
 
     # end method definition
 
     def get_teams_apps_of_team(
-        self, team_id: str, filter_expression: str = ""
+        self,
+        team_id: str,
+        filter_expression: str = "",
     ) -> dict | None:
-        """Get a list of MS Teams apps of a M365 team that match a given filter criterium
+        """Get a list of MS Teams apps of a M365 team that match a given filter criterium.
 
         Args:
-            team_id (str): M365 ID of the team
-            filter_expression (str, optional): filter string see https://learn.microsoft.com/en-us/graph/filter-query-parameter
+            team_id (str):
+                The M365 ID of the team.
+            filter_expression (str, optional):
+                Filter string see https://learn.microsoft.com/en-us/graph/filter-query-parameter
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
         """
 
         query = {"$expand": "teamsAppDefinition"}
@@ -2222,15 +2614,9 @@ class M365(object):
             query["$filter"] = filter_expression
 
         encoded_query = urllib.parse.urlencode(query, doseq=True)
-        request_url = (
-            self.config()["teamsUrl"]
-            + "/"
-            + team_id
-            + "/installedApps?"
-            + encoded_query
-        )
+        request_url = self.config()["teamsUrl"] + "/" + team_id + "/installedApps?" + encoded_query
 
-        logger.debug(
+        self.logger.debug(
             "Get list of M365 Teams Apps for M365 Team -> %s using query -> %s; calling -> %s",
             team_id,
             query,
@@ -2245,7 +2631,7 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get list of M365 Teams apps for M365 Team -> {}".format(
-                team_id
+                team_id,
             ),
         )
 
@@ -2253,14 +2639,19 @@ class M365(object):
 
     def extract_version_from_app_manifest(self, app_path: str) -> str | None:
         """Extract the version number from the MS Teams app manifest file.
-           This can be used to check if the app package includes a newer
-           app version then the already installed one.
+
+        This can be used to check if the app package includes a newer
+        app version then the already installed one.
 
         Args:
-            app_path (str): file path (with directory) to the app package to extract
-                            the version from
+            app_path (str):
+                The file path (with directory) to the app package to extract
+                the version from.
+
         Returns:
-            str: version number or None in case of an error
+            str | None:
+                The version number or None in case of an error.
+
         """
 
         with zipfile.ZipFile(app_path, "r") as zip_ref:
@@ -2273,28 +2664,36 @@ class M365(object):
     # end method definition
 
     def upload_teams_app(
-        self, app_path: str, update_existing_app: bool = False, app_catalog_id: str = ""
+        self,
+        app_path: str,
+        update_existing_app: bool = False,
+        app_catalog_id: str = "",
     ) -> dict | None:
         """Upload a new app package to the catalog of MS Teams apps.
-            This is not possible with client secret credentials
-            but requires a token of a user authenticated with username + password.
-            See https://learn.microsoft.com/en-us/graph/api/teamsapp-publish
-            (permissions table on that page)
-            For updates see: https://learn.microsoft.com/en-us/graph/api/teamsapp-update?view=graph-rest-1.0&tabs=http
+
+        This is not possible with client secret credentials
+        but requires a token of a user authenticated with username + password.
+        See https://learn.microsoft.com/en-us/graph/api/teamsapp-publish
+        (permissions table on that page).
+
+        For updates see: https://learn.microsoft.com/en-us/graph/api/teamsapp-update?view=graph-rest-1.0&tabs=http
 
         Args:
-            app_path (str): file path (with directory) to the app package to upload
-            update_existing_app (bool): whether or not to update an existing app with
-                                        the same name
-            app_catalog_id (str): the unique ID of the app. It is the ID the app has in
-                                  the catalog - which is different from ID an app gets
-                                  after installation (which is tenant specific)
+            app_path (str):
+                The file path (with directory) to the app package to upload.
+            update_existing_app (bool, optional):
+                Whether or not to update an existing app with the same name.
+            app_catalog_id (str, optional):
+                The unique ID of the app. It is the ID the app has in
+                the catalog - which is different from ID an app gets
+                after installation (which is tenant specific).
+
         Returns:
-            dict: Response of the MS GRAPH API REST call or None if the request fails
+            dict:
+                Response of the MS GRAPH API REST call or None if the request fails
+                The responses are different depending if it is an install or upgrade!!
 
-            The responses are different depending if it is an install or upgrade!!
-
-            Example return for upgrades ("teamsAppId" is the "internal" ID of the app):
+        Example return for upgrades ("teamsAppId" is the "internal" ID of the app):
             {
                 '@odata.context': "https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps('3f749cca-8cb0-4925-9fa0-ba7aca2014af')/appDefinitions/$entity",
                 'id': 'M2Y3NDljY2EtOGNiMC00OTI1LTlmYTAtYmE3YWNhMjAxNGFmIyMyNC4yLjAjI1B1Ymxpc2hlZA==',
@@ -2319,21 +2718,22 @@ class M365(object):
                 'displayName': 'OpenText Extended ECM',
                 'distributionMethod': 'organization'
             }
+
         """
 
         if update_existing_app and not app_catalog_id:
-            logger.error(
-                "To update an existing M365 Teams app in the app catalog you need to provide the existing App catalog ID!"
+            self.logger.error(
+                "To update an existing M365 Teams app in the app catalog you need to provide the existing App catalog ID!",
             )
             return None
 
         if not os.path.exists(app_path):
-            logger.error("M365 Teams app file -> %s does not exist!", app_path)
+            self.logger.error("M365 Teams app file -> %s does not exist!", app_path)
             return None
 
         # Ensure that the app file is a zip file
         if not app_path.endswith(".zip"):
-            logger.error("M365 Teams app file -> %s must be a zip file!", app_path)
+            self.logger.error("M365 Teams app file -> %s must be a zip file!", app_path)
             return None
 
         request_url = self.config()["teamsAppsUrl"]
@@ -2352,13 +2752,13 @@ class M365(object):
         with zipfile.ZipFile(app_path) as z:
             # Ensure that the app file contains a manifest.json file
             if "manifest.json" not in z.namelist():
-                logger.error(
+                self.logger.error(
                     "M365 Teams app file -> '%s' does not contain a manifest.json file!",
                     app_path,
                 )
                 return None
 
-        logger.debug(
+        self.logger.debug(
             "Upload M365 Teams app -> '%s' to the MS Teams catalog; calling -> %s",
             app_path,
             request_url,
@@ -2371,17 +2771,19 @@ class M365(object):
             data=app_data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update existing M365 Teams app -> '{}' (may be because it is not a new version)".format(
-                app_path
+                app_path,
             ),
         )
 
     # end method definition
 
-    def remove_teams_app(self, app_id: str):
-        """Remove MS Teams App from the app catalog
+    def remove_teams_app(self, app_id: str) -> None:
+        """Remove MS Teams App from the app catalog.
 
         Args:
-            app_id (str): Microsoft 365 GUID of the MS Teams app
+            app_id (str):
+                The Microsoft 365 GUID of the MS Teams app.
+
         """
 
         request_url = self.config()["teamsAppsUrl"] + "/" + app_id
@@ -2391,17 +2793,19 @@ class M365(object):
 
         # Make the DELETE request to remove the app from the app catalog
         response = requests.delete(
-            request_url, headers=request_header, timeout=REQUEST_TIMEOUT
+            request_url,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
         )
 
         # Check the status code of the response
         if response.status_code == 204:
-            logger.debug(
+            self.logger.debug(
                 "The M365 Teams app with ID -> %s has been successfully removed from the app catalog.",
                 app_id,
             )
         else:
-            logger.error(
+            self.logger.error(
                 "An error occurred while removing the M365 Teams app from the M365 app catalog. Status code -> %s. Error message -> %s",
                 response.status_code,
                 response.text,
@@ -2416,51 +2820,57 @@ class M365(object):
         app_internal_id: str = "",
         show_error: bool = False,
     ) -> dict | None:
-        """Assigns (adds) a M365 Teams app to a M365 user.
+        """Assign (add) a M365 Teams app to a M365 user.
 
-           See: https://learn.microsoft.com/en-us/graph/api/userteamwork-post-installedapps?view=graph-rest-1.0&tabs=http
+        See: https://learn.microsoft.com/en-us/graph/api/userteamwork-post-installedapps?view=graph-rest-1.0&tabs=http
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            app_name (str, optional): exact name of the app. Not needed if app_internal_id is provided
-            app_internal_id (str, optional): internal ID of the app. If not provided it will be derived from app_name
-            show_error (bool): whether or not an error should be displayed if the
-                               user is not found.
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
+            app_name (str, optional):
+                The exact name of the app. Not needed if app_internal_id is provided.
+            app_internal_id (str, optional):
+                The internal ID of the app. If not provided it will be derived from app_name.
+            show_error (bool, optional):
+                Whether or not an error should be displayed if the user is not found.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                The response of the MS Graph API call or None if the call fails.
+
         """
 
         if not app_internal_id and not app_name:
-            logger.error(
-                "Either the internal App ID or the App name need to be provided!"
+            self.logger.error(
+                "Either the internal App ID or the App name need to be provided!",
             )
             return None
 
         if not app_internal_id:
             response = self.get_teams_apps(
-                filter_expression="contains(displayName, '{}')".format(app_name)
+                filter_expression="contains(displayName, '{}')".format(app_name),
             )
             app_internal_id = self.get_result_value(
-                response=response, key="id", index=0
+                response=response,
+                key="id",
+                index=0,
             )
             if not app_internal_id:
-                logger.error(
+                self.logger.error(
                     "M365 Teams App -> '%s' not found! Cannot assign App to user -> %s.",
                     app_name,
                     user_id,
                 )
                 return None
 
-        request_url = (
-            self.config()["usersUrl"] + "/" + user_id + "/teamwork/installedApps"
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_id + "/teamwork/installedApps"
         request_header = self.request_header()
 
         post_body = {
-            "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_internal_id
+            "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_internal_id,
         }
 
-        logger.debug(
+        self.logger.debug(
             "Assign M365 Teams app -> '%s' (%s) to M365 user -> %s; calling -> %s",
             app_name,
             app_internal_id,
@@ -2475,10 +2885,14 @@ class M365(object):
             json_data=post_body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 user -> {}".format(
-                app_name, app_internal_id, user_id
+                app_name,
+                app_internal_id,
+                user_id,
             ),
-            warning_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 user -> {} (could be because the app is assigned organization-wide)".format(
-                app_name, app_internal_id, user_id
+            warning_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 user -> {} (could be the app is assigned organization-wide)".format(
+                app_name,
+                app_internal_id,
+                user_id,
             ),
             show_error=show_error,
         )
@@ -2486,33 +2900,44 @@ class M365(object):
     # end method definition
 
     def upgrade_teams_app_of_user(
-        self, user_id: str, app_name: str, app_installation_id: str | None = None
+        self,
+        user_id: str,
+        app_name: str,
+        app_installation_id: str | None = None,
     ) -> dict | None:
-        """Upgrade a MS teams app for a user. The call will fail if the user does not
-            already have the app assigned. So this needs to be checked before
-            calling this method.
-            See: https://learn.microsoft.com/en-us/graph/api/userteamwork-teamsappinstallation-upgrade?view=graph-rest-1.0&tabs=http
+        """Upgrade a MS teams app for a user.
+
+        The call will fail if the user does not already have the app assigned.
+        So this needs to be checked before calling this method.
+
+        See: https://learn.microsoft.com/en-us/graph/api/userteamwork-teamsappinstallation-upgrade?view=graph-rest-1.0&tabs=http
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            app_name (str): exact name of the app
-            app_installation_id (str): ID of the app installation for the user. This is neither the internal nor
-                                       external app ID. It is specific for each user and app.
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
+            app_name (str):
+                The exact name of the app.
+            app_installation_id (str | None, optional):
+                The ID of the app installation for the user. This is neither the internal nor
+                external app ID. It is specific for each user and app.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict | None:
+                Response of the MS Graph API call or None if the call fails.
+
         """
 
         if not app_installation_id:
             response = self.get_teams_apps_of_user(
                 user_id=user_id,
                 filter_expression="contains(teamsAppDefinition/displayName, '{}')".format(
-                    app_name
+                    app_name,
                 ),
             )
             # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
-            app_installation_id = self.get_result_value(response, "id", 0)
+            app_installation_id = self.get_result_value(response=response, key="id", index=0)
         if not app_installation_id:
-            logger.error(
+            self.logger.error(
                 "M365 Teams app -> '%s' not found for user with ID -> %s. Cannot upgrade app for this user!",
                 app_name,
                 user_id,
@@ -2520,16 +2945,11 @@ class M365(object):
             return None
 
         request_url = (
-            self.config()["usersUrl"]
-            + "/"
-            + user_id
-            + "/teamwork/installedApps/"
-            + app_installation_id
-            + "/upgrade"
+            self.config()["usersUrl"] + "/" + user_id + "/teamwork/installedApps/" + app_installation_id + "/upgrade"
         )
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Upgrade M365 Teams app -> '%s' (%s) of M365 user with ID -> %s; calling -> %s",
             app_name,
             app_installation_id,
@@ -2543,53 +2963,59 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to upgrade M365 Teams app -> '{}' ({}) of M365 user -> {}".format(
-                app_name, app_installation_id, user_id
+                app_name,
+                app_installation_id,
+                user_id,
             ),
         )
 
     # end method definition
 
     def remove_teams_app_from_user(
-        self, user_id: str, app_name: str, app_installation_id: str | None = None
+        self,
+        user_id: str,
+        app_name: str,
+        app_installation_id: str | None = None,
     ) -> dict | None:
         """Remove a M365 Teams app from a M365 user.
 
            See: https://learn.microsoft.com/en-us/graph/api/userteamwork-delete-installedapps?view=graph-rest-1.0&tabs=http
 
         Args:
-            user_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            app_name (str): exact name of the app
+            user_id (str):
+                The M365 GUID of the user (can also be the M365 email of the user).
+            app_name (str):
+                The exact name of the app.
+            app_installation_id (str | None):
+                The installation ID of the app. Default is None.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict:
+                Response of the MS Graph API call or None if the call fails.
+
         """
 
         if not app_installation_id:
             response = self.get_teams_apps_of_user(
                 user_id=user_id,
                 filter_expression="contains(teamsAppDefinition/displayName, '{}')".format(
-                    app_name
+                    app_name,
                 ),
             )
             # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
-            app_installation_id = self.get_result_value(response, "id", 0)
+            app_installation_id = self.get_result_value(response=response, key="id", index=0)
         if not app_installation_id:
-            logger.error(
+            self.logger.error(
                 "M365 Teams app -> '%s' not found for user with ID -> %s. Cannot remove app from this user!",
                 app_name,
                 user_id,
             )
             return None
 
-        request_url = (
-            self.config()["usersUrl"]
-            + "/"
-            + user_id
-            + "/teamwork/installedApps/"
-            + app_installation_id
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_id + "/teamwork/installedApps/" + app_installation_id
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Remove M365 Teams app -> '%s' (%s) from M365 user with ID -> %s; calling -> %s",
             app_name,
             app_installation_id,
@@ -2603,32 +3029,39 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to remove M365 Teams app -> '{}' ({}) from M365 user -> {}".format(
-                app_name, app_installation_id, user_id
+                app_name,
+                app_installation_id,
+                user_id,
             ),
         )
 
     # end method definition
 
     def assign_teams_app_to_team(self, team_id: str, app_id: str) -> dict | None:
-        """Assign (add) a MS Teams app to a M365 team
-           (so that it afterwards can be added as a Tab in a M365 Teams Channel)
+        """Assign (add) a MS Teams app to a M365 team.
+
+        Afterwards the app can be added as a Tab in a M365 Teams Channel).
 
         Args:
-            team_id (str): ID of the Microsoft 365 Team
-            app_id (str): ID of the M365 Team App
+            team_id (str):
+                The ID of the Microsoft 365 Team.
+            app_id (str):
+                The ID of the M365 Team App.
 
         Returns:
-            dict | None: API response or None if the Graph API call fails.
+            dict | None:
+                API response or None if the Graph API call fails.
+
         """
 
         request_url = self.config()["teamsUrl"] + "/" + team_id + "/installedApps"
         request_header = self.request_header()
 
         post_body = {
-            "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_id
+            "teamsApp@odata.bind": self.config()["teamsAppsUrl"] + "/" + app_id,
         }
 
-        logger.debug(
+        self.logger.debug(
             "Assign M365 Teams app -> '%s' (%s) to M365 Team -> %s; calling -> %s",
             self.config()["teamsAppName"],
             app_id,
@@ -2643,49 +3076,52 @@ class M365(object):
             json_data=post_body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to assign M365 Teams app -> '{}' ({}) to M365 Team -> {}".format(
-                self.config()["teamsAppName"], app_id, team_id
+                self.config()["teamsAppName"],
+                app_id,
+                team_id,
             ),
         )
 
     # end method definition
 
     def upgrade_teams_app_of_team(self, team_id: str, app_name: str) -> dict | None:
-        """Upgrade a MS teams app for a specific team. The call will fail if the team does not
-            already have the app assigned. So this needs to be checked before
-            calling this method.
-            THIS IS CURRENTLY NOT WORKING AS EXPECTED.
+        """Upgrade a MS teams app for a specific team.
+
+        The call will fail if the team does not already have the app assigned.
+        So this needs to be checked before calling this method.
+
+        THIS IS CURRENTLY NOT WORKING AS EXPECTED.
 
         Args:
-            team_id (str): M365 GUID of the user (can also be the M365 email of the user)
-            app_name (str): exact name of the app
+            team_id (str):
+                M365 GUID of the user (can also be the M365 email of the user).
+            app_name (str):
+                The exact name of the app.
+
         Returns:
-            dict: response of the MS Graph API call or None if the call fails.
+            dict:
+                The response of the MS Graph API call or None if the call fails.
+
         """
 
         response = self.get_teams_apps_of_team(
-            team_id, "contains(teamsAppDefinition/displayName, '{}')".format(app_name)
+            team_id=team_id,
+            filter_expression="contains(teamsAppDefinition/displayName, '{}')".format(app_name),
         )
         # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
-        app_installation_id = self.get_result_value(response, "id", 0)
+        app_installation_id = self.get_result_value(response=response, key="id", index=0)
         if not app_installation_id:
-            logger.error(
+            self.logger.error(
                 "M365 Teams app -> '%s' not found for M365 Team with ID -> %s. Cannot upgrade app for this team!",
                 app_name,
                 team_id,
             )
             return None
 
-        request_url = (
-            self.config()["teamsUrl"]
-            + "/"
-            + team_id
-            + "/installedApps/"
-            + app_installation_id
-            + "/upgrade"
-        )
+        request_url = self.config()["teamsUrl"] + "/" + team_id + "/installedApps/" + app_installation_id + "/upgrade"
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Upgrade app -> '%s' (%s) of M365 team with ID -> %s; calling -> %s",
             app_name,
             app_installation_id,
@@ -2699,7 +3135,9 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to upgrade M365 Teams app -> '{}' ({}) of M365 team with ID -> {}".format(
-                app_name, app_installation_id, team_id
+                app_name,
+                app_installation_id,
+                team_id,
             ),
         )
 
@@ -2714,29 +3152,37 @@ class M365(object):
         app_url: str,
         cs_node_id: int,
     ) -> dict | None:
-        """Add tab for Extended ECM app to an M365 Team channel
+        """Add tab for Extended ECM app to an M365 Team channel.
 
         Args:
-            team_name (str): name of the M365 Team
-            channel_name (str): name of the channel
-            app_id (str): ID of the MS Teams Application (e.g. the Extended ECM Teams App)
-            tab_name (str): name of the tab
-            app_url (str) web URL of the app
-            cs_node_id (int): node ID of the target workspace or container in Extended ECM
+            team_name (str):
+                The name of the M365 Team
+            channel_name (str):
+                The name of the channel.
+            app_id (str):
+                ID of the MS Teams Application (e.g. the Extended ECM Teams App).
+            tab_name (str):
+                The name of the tab.
+            app_url (str):
+                The web URL of the app.
+            cs_node_id (int):
+                The node ID of the target workspace or container in Extended ECM.
+
         Returns:
-            dict: return data structure (dictionary) or None if the request fails.
+            dict:
+                Return data structure (dictionary) or None if the request fails.
 
             Example return data:
 
         """
 
-        response = self.get_team(team_name)
-        team_id = self.get_result_value(response, "id", 0)
+        response = self.get_team(name=team_name)
+        team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
             return None
 
         # Get the channels of the M365 Team:
-        response = self.get_team_channels(team_name)
+        response = self.get_team_channels(name=team_name)
         if not response or not response["value"] or not response["value"][0]:
             return None
 
@@ -2746,7 +3192,7 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.error(
+            self.logger.error(
                 "Cannot find Channel -> '%s' on M365 Team -> '%s'",
                 channel_name,
                 team_name,
@@ -2754,14 +3200,7 @@ class M365(object):
             return None
         channel_id = channel["id"]
 
-        request_url = (
-            self.config()["teamsUrl"]
-            + "/"
-            + str(team_id)
-            + "/channels/"
-            + str(channel_id)
-            + "/tabs"
-        )
+        request_url = self.config()["teamsUrl"] + "/" + str(team_id) + "/channels/" + str(channel_id) + "/tabs"
 
         request_header = self.request_header()
 
@@ -2777,7 +3216,7 @@ class M365(object):
             },
         }
 
-        logger.debug(
+        self.logger.debug(
             "Add Tab -> '%s' with App ID -> %s to Channel -> '%s' of Microsoft 365 Team -> '%s'; calling -> %s",
             tab_name,
             app_id,
@@ -2793,7 +3232,10 @@ class M365(object):
             json_data=tab_config,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add Tab for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
-                team_name, team_id, channel_name, channel_id
+                team_name,
+                team_id,
+                channel_name,
+                channel_id,
             ),
         )
 
@@ -2807,28 +3249,33 @@ class M365(object):
         app_url: str,
         cs_node_id: int,
     ) -> dict | None:
-        """Update an existing tab for Extended ECM app in an M365 Team channel
+        """Update an existing tab for Extended ECM app in an M365 Team channel.
 
         Args:
-            team_name (str): name of the M365 Team
-            channel_name (str): name of the channel
-            tab_name (str): name of the tab
-            app_url (str) web URL of the app
-            cs_node_id (int): node ID of the target workspace or container in Extended ECM
-        Returns:
-            dict: return data structure (dictionary) or None if the request fails.
+            team_name (str):
+                The name of the M365 Team.
+            channel_name (str):
+                The name of the channel.
+            tab_name (str):
+                The name of the tab.
+            app_url (str):
+                The web URL of the app.
+            cs_node_id (int):
+                The node ID of the target workspace or container in Content Server.
 
-            Example return data:
+        Returns:
+            dict:
+                Return data structure (dictionary) or None if the request fails.
 
         """
 
-        response = self.get_team(team_name)
-        team_id = self.get_result_value(response, "id", 0)
+        response = self.get_team(name=team_name)
+        team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
             return None
 
         # Get the channels of the M365 Team:
-        response = self.get_team_channels(team_name)
+        response = self.get_team_channels(name=team_name)
         if not response or not response["value"] or not response["value"][0]:
             return None
 
@@ -2838,7 +3285,7 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.error(
+            self.logger.error(
                 "Cannot find Channel -> '%s' for M365 Team -> '%s'",
                 channel_name,
                 team_name,
@@ -2847,7 +3294,7 @@ class M365(object):
         channel_id = channel["id"]
 
         # Get the tabs of the M365 Team channel:
-        response = self.get_team_channel_tabs(team_name, channel_name)
+        response = self.get_team_channel_tabs(team_name=team_name, channel_name=channel_name)
         if not response or not response["value"] or not response["value"][0]:
             return None
 
@@ -2857,7 +3304,7 @@ class M365(object):
             None,
         )
         if not tab:
-            logger.error(
+            self.logger.error(
                 "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)",
                 tab_name,
                 team_name,
@@ -2869,13 +3316,7 @@ class M365(object):
         tab_id = tab["id"]
 
         request_url = (
-            self.config()["teamsUrl"]
-            + "/"
-            + str(team_id)
-            + "/channels/"
-            + str(channel_id)
-            + "/tabs/"
-            + str(tab_id)
+            self.config()["teamsUrl"] + "/" + str(team_id) + "/channels/" + str(channel_id) + "/tabs/" + str(tab_id)
         )
 
         request_header = self.request_header()
@@ -2890,7 +3331,7 @@ class M365(object):
             },
         }
 
-        logger.debug(
+        self.logger.debug(
             "Update Tab -> '%s' (%s) of Channel -> '%s' (%s) for Microsoft 365 Teams -> '%s' (%s) with configuration -> %s; calling -> %s",
             tab_name,
             tab_id,
@@ -2909,7 +3350,12 @@ class M365(object):
             json_data=tab_config,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to update Tab -> '{}' ({}) for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
-                tab_name, tab_id, team_name, team_id, channel_name, channel_id
+                tab_name,
+                tab_id,
+                team_name,
+                team_id,
+                channel_name,
+                channel_id,
             ),
         )
 
@@ -2921,18 +3367,24 @@ class M365(object):
         channel_name: str,
         tab_name: str,
     ) -> bool:
-        """Delete an existing tab for Extended ECM app from an M365 Team channel
+        """Delete an existing tab for Extended ECM app from an M365 Team channel.
 
         Args:
-            team_name (str): name of the M365 Team
-            channel_name (str): name of the channel
-            tab_name (str): name of the tab
+            team_name (str):
+                The name of the M365 Team.
+            channel_name (str):
+                The name of the channel.
+            tab_name (str):
+                The name of the tab.
+
         Returns:
-            bool: True = success, False = Error.
+            bool:
+                True = success, False = Error.
+
         """
 
-        response = self.get_team(team_name)
-        team_id = self.get_result_value(response, "id", 0)
+        response = self.get_team(name=team_name)
+        team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
             return False
 
@@ -2947,7 +3399,7 @@ class M365(object):
             None,
         )
         if not channel:
-            logger.error(
+            self.logger.error(
                 "Cannot find Channel -> '%s' for M365 Team -> '%s'",
                 channel_name,
                 team_name,
@@ -2956,17 +3408,15 @@ class M365(object):
         channel_id = channel["id"]
 
         # Get the tabs of the M365 Team channel:
-        response = self.get_team_channel_tabs(team_name, channel_name)
+        response = self.get_team_channel_tabs(team_name=team_name, channel_name=channel_name)
         if not response or not response["value"] or not response["value"][0]:
             return False
 
         # Lookup the tabs by name and then retrieve their IDs (in worst case it can
         # be multiple tabs / apps with same name if former cleanups did not work):
-        tab_list = [
-            item for item in response["value"] if item["displayName"] == tab_name
-        ]
+        tab_list = [item for item in response["value"] if item["displayName"] == tab_name]
         if not tab_list:
-            logger.error(
+            self.logger.error(
                 "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)",
                 tab_name,
                 team_name,
@@ -2980,18 +3430,12 @@ class M365(object):
             tab_id = tab["id"]
 
             request_url = (
-                self.config()["teamsUrl"]
-                + "/"
-                + str(team_id)
-                + "/channels/"
-                + str(channel_id)
-                + "/tabs/"
-                + str(tab_id)
+                self.config()["teamsUrl"] + "/" + str(team_id) + "/channels/" + str(channel_id) + "/tabs/" + str(tab_id)
             )
 
             request_header = self.request_header()
 
-            logger.debug(
+            self.logger.debug(
                 "Delete Tab -> '%s' (%s) from Channel -> '%s' (%s) of Microsoft 365 Teams -> '%s' (%s); calling -> %s",
                 tab_name,
                 tab_id,
@@ -3008,15 +3452,19 @@ class M365(object):
                 headers=request_header,
                 timeout=REQUEST_TIMEOUT,
                 failure_message="Failed to delete Tab -> '{}' ({}) for M365 Team -> '{}' ({}) and Channel -> '{}' ({})".format(
-                    tab_name, tab_id, team_name, team_id, channel_name, channel_id
+                    tab_name,
+                    tab_id,
+                    team_name,
+                    team_id,
+                    channel_name,
+                    channel_id,
                 ),
                 parse_request_response=False,
             )
 
             if response and response.ok:
                 break
-            else:
-                return False
+            return False
         # end for tab in tab_list
 
         return True
@@ -3034,23 +3482,34 @@ class M365(object):
         user_description: str = "",
         enable_encryption: bool = False,
         enable_marking: bool = False,
-    ):
-        """Create a new sensitivity label in M365
-            THIS IS CURRENTLY NOT WORKING!
+    ) -> dict | None:
+        """Create a new sensitivity label in M365.
+
+        TODO: THIS IS CURRENTLY NOT WORKING!
 
         Args:
-            name (str): name of the label
-            display_name (str): display name of the label
-            description (str, optional): Description of the label. Defaults to "".
-            color (str, optional): Color of the label. Defaults to "red".
-            enabled (bool, optional): Whether this label is enabled. Defaults to True.
-            admin_description (str, optional): Description for administrators. Defaults to "".
-            user_description (str, optional): Description for users. Defaults to "".
-            enable_encryption (bool, optional): Enable encryption. Defaults to False.
-            enable_marking (bool, optional): _description_. Defaults to False.
+            name (str):
+                The name of the label.
+            display_name (str):
+                The display name of the label.
+            description (str, optional):
+                Description of the label. Defaults to "".
+            color (str, optional):
+                Color of the label. Defaults to "red".
+            enabled (bool, optional):
+                Whether this label is enabled. Defaults to True.
+            admin_description (str, optional):
+                Description for administrators. Defaults to "".
+            user_description (str, optional):
+                Description for users. Defaults to "".
+            enable_encryption (bool, optional):
+                Enable encryption. Defaults to False.
+            enable_marking (bool, optional):
+                Enable marking. Defaults to False.
 
         Returns:
             Request reponse or None if the request fails.
+
         """
 
         # Prepare the request body
@@ -3068,8 +3527,10 @@ class M365(object):
         request_url = self.config()["securityUrl"] + "/sensitivityLabels"
         request_header = self.request_header()
 
-        logger.debug(
-            "Create M365 sensitivity label -> '%s'; calling -> %s", name, request_url
+        self.logger.debug(
+            "Create M365 sensitivity label -> '%s'; calling -> %s",
+            name,
+            request_url,
         )
 
         # Send the POST request to create the label
@@ -3082,10 +3543,10 @@ class M365(object):
 
         # Check the response status code
         if response.status_code == 201:
-            logger.debug("Label -> '%s' has been created successfully!", name)
+            self.logger.debug("Label -> '%s' has been created successfully!", name)
             return response
         else:
-            logger.error(
+            self.logger.error(
                 "Failed to create the M365 label -> '%s'! Response status code -> %s",
                 name,
                 response.status_code,
@@ -3094,27 +3555,30 @@ class M365(object):
 
     # end method definition
 
-    def assign_sensitivity_label_to_user(self, user_email: str, label_name: str):
-        """Assigns a existing sensitivity label to a user.
-            THIS IS CURRENTLY NOT WORKING!
+    def assign_sensitivity_label_to_user(self, user_email: str, label_name: str) -> dict | None:
+        """Assign a existing sensitivity label to a user.
+
+        TODO: THIS IS CURRENTLY NOT WORKING!
 
         Args:
-            user_email (str): email address of the user (as unique identifier)
-            label_name (str): name of the label (need to exist)
+            user_email (str):
+                The email address of the user (as unique identifier).
+            label_name (str):
+                The name of the label (need to exist).
 
         Returns:
-            Return the request response or None if the request fails.
+            dict | None:
+                Return the request response or None if the request fails.
+
         """
 
         # Set up the request body with the label name
         body = {"labelName": label_name}
 
-        request_url = (
-            self.config()["usersUrl"] + "/" + user_email + "/assignSensitivityLabels"
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_email + "/assignSensitivityLabels"
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Assign label -> '%s' to user -> '%s'; calling -> %s",
             label_name,
             user_email,
@@ -3128,7 +3592,8 @@ class M365(object):
             json_data=body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to assign label -> '{}' to M365 user -> '{}'".format(
-                label_name, user_email
+                label_name,
+                user_email,
             ),
         )
 
@@ -3139,23 +3604,26 @@ class M365(object):
         app_path: str,
     ) -> dict | None:
         """Upload the M365 Outlook Add-In as "Integrated" App to M365 Admin Center.
-           THIS IS CURRENTLY NOT IMPLEMENTED DUE TO MISSING MS GRAPH API SUPPORT!
 
-           https://admin.microsoft.com/#/Settings/IntegratedApps
+        TODO: THIS IS CURRENTLY NOT IMPLEMENTED DUE TO MISSING MS GRAPH API SUPPORT!
+
+        https://admin.microsoft.com/#/Settings/IntegratedApps
 
         Args:
-            app_path (str): path to manifest file in local file system. Needs to be
-                            downloaded before.
+            app_path (str):
+                Path to manifest file in local file system. Needs to be
+                downloaded before.
 
         Returns:
-            dict | None: response of the MS Graph API or None if the request fails.
+            dict | None:
+                Response of the MS Graph API or None if the request fails.
+
         """
 
-        #        request_url = self.config()["teamsAppsUrl"]
-
-        #        request_header = self.request_header()
-
-        logger.debug("Install Outlook Add-in from -> '%s' (NOT IMPLEMENTED)", app_path)
+        self.logger.debug(
+            "Install Outlook Add-in from -> '%s' (NOT IMPLEMENTED)",
+            app_path,
+        )
 
         response = None
 
@@ -3166,22 +3634,23 @@ class M365(object):
     def get_app_registration(
         self,
         app_registration_name: str,
-    ) -> dict:
-        """Find an Azure App Registration based on its name
+    ) -> dict | None:
+        """Find an Azure App Registration based on its name.
 
         Args:
-            app_registration_name (str): name of the App Registration
+            app_registration_name (str):
+                Name of the App Registration.
 
         Returns:
-            dict: App Registration data or None of the request fails.
+            dict | None:
+                App Registration data or None of the request fails.
+
         """
 
-        request_url = self.config()[
-            "applicationsUrl"
-        ] + "?$filter=displayName eq '{}'".format(app_registration_name)
+        request_url = self.config()["applicationsUrl"] + "?$filter=displayName eq '{}'".format(app_registration_name)
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Get Azure App Registration -> '%s'; calling -> %s",
             app_registration_name,
             request_url,
@@ -3193,7 +3662,7 @@ class M365(object):
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Cannot find Azure App Registration -> '{}'".format(
-                app_registration_name
+                app_registration_name,
             ),
         )
 
@@ -3206,16 +3675,22 @@ class M365(object):
         api_permissions: list | None = None,
         supported_account_type: str = "AzureADMyOrg",
     ) -> dict:
-        """Add an Azure App Registration
+        """Add an Azure App Registration.
 
         Args:
-            app_registration_name (str): name of the App Registration
-            api_permissions (list): API permissions
-            supported_account_type (str): type of account that is supposed to use
-                                          the App Registration
+            app_registration_name (str):
+                The name of the App Registration.
+            description (str, optional):
+                The description of the app.
+            api_permissions (list | None, optional):
+                The API permissions.
+            supported_account_type (str, optional):
+                The type of account that is supposed to use
+                the App Registration.
 
         Returns:
-            dict: App Registration data or None of the request fails.
+            dict:
+                App Registration data or None of the request fails.
 
             Example data:
             {
@@ -3251,6 +3726,7 @@ class M365(object):
                     },
                 ]
             }
+
         """
 
         # Define the request body to create the App Registration
@@ -3273,7 +3749,7 @@ class M365(object):
             json_data=app_registration_data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Cannot add App Registration -> '{}'".format(
-                app_registration_name
+                app_registration_name,
             ),
         )
 
@@ -3286,17 +3762,23 @@ class M365(object):
         api_permissions: list,
         supported_account_type: str = "AzureADMyOrg",
     ) -> dict:
-        """Update an Azure App Registration
+        """Update an Azure App Registration.
 
         Args:
-            app_registration_id (str): ID of the existing App Registration
-            app_registration_name (str): name of the App Registration
-            api_permissions (list): API permissions
-            supported_account_type (str): type of account that is supposed to use
-                                          the App Registration
+            app_registration_id (str):
+                The ID of the existing App Registration.
+            app_registration_name (str):
+                The name of the App Registration.
+            api_permissions (list):
+                The API permissions.
+            supported_account_type (str, optional):
+                The type of account that is supposed to use
+                the App Registration.
 
         Returns:
-            dict: App Registration data or None of the request fails.
+            dict:
+                App Registration data or None of the request fails.
+
         """
 
         # Define the request body to create the App Registration
@@ -3309,7 +3791,7 @@ class M365(object):
         request_url = self.config()["applicationsUrl"] + "/" + app_registration_id
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Update App Registration -> '%s' (%s); calling -> %s",
             app_registration_name,
             app_registration_id,
@@ -3323,7 +3805,8 @@ class M365(object):
             json_data=app_registration_data,
             timeout=REQUEST_TIMEOUT,
             failure_message="Cannot update App Registration -> '{}' ({})".format(
-                app_registration_name, app_registration_id
+                app_registration_name,
+                app_registration_id,
             ),
         )
 
@@ -3337,17 +3820,27 @@ class M365(object):
         num_emails: int | None = None,
         show_error: bool = False,
     ) -> dict | None:
-        """Get email from inbox of a given user and a given sender (from)
-           This requires Mail.Read Application permissions for the Azure App being used.
+        """Get email from inbox of a given user and a given sender (from).
+
+        This requires Mail.Read Application permissions for the Azure App being used.
 
         Args:
-            user_id (str): M365 ID of the user
-            sender (str): sender email address to filter for
-            num_emails (int, optional): number of matching emails to retrieve
-            show_error (bool): whether or not an error should be displayed if the
-                               user is not found.
+            user_id (str):
+                The M365 ID of the user.
+            sender (str):
+                The sender email address to filter for.
+            subject (str):
+                The subject to filter for.
+            num_emails (int, optional):
+                The number of matching emails to retrieve.
+            show_error (bool, optional):
+                Whether or not an error should be displayed if the
+                user is not found.
+
         Returns:
-            dict: Email or None of the request fails.
+            dict:
+                Email or None of the request fails.
+
         """
 
         # Attention: you  can easily run in limitation of the MS Graph API. If selection + filtering
@@ -3366,7 +3859,7 @@ class M365(object):
 
         request_header = self.request_header()
 
-        logger.debug(
+        self.logger.debug(
             "Get mails for user -> %s from -> '%s' with subject -> '%s'; calling -> %s",
             user_id,
             sender,
@@ -3379,7 +3872,7 @@ class M365(object):
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Cannot retrieve emails for user -> {}".format(user_id),
+            failure_message="Cannot retrieve emails for M365 user -> {}".format(user_id),
             show_error=show_error,
         )
 
@@ -3401,24 +3894,23 @@ class M365(object):
     # end method definition
 
     def get_mail_body(self, user_id: str, email_id: str) -> str | None:
-        """Get full email body for a given email ID
-           This requires Mail.Read Application permissions for the Azure App being used.
+        """Get full email body for a given email ID.
+
+        This requires Mail.Read Application permissions for the Azure App being used.
 
         Args:
-            user_id (str): M365 ID of the user
-            email_id (str): M365 ID of the email
+            user_id (str):
+                The M365 ID of the user.
+            email_id (str):
+                The M365 ID of the email.
+
         Returns:
-            str | None: Email body or None of the request fails.
+            str | None:
+                Email body or None of the request fails.
+
         """
 
-        request_url = (
-            self.config()["usersUrl"]
-            + "/"
-            + user_id
-            + "/messages/"
-            + email_id
-            + "/$value"
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_id + "/messages/" + email_id + "/$value"
 
         request_header = self.request_header()
 
@@ -3427,7 +3919,7 @@ class M365(object):
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Cannot get email body for user -> {} and email with ID -> {}".format(
+            failure_message="Cannot get email body for M365 user -> {} and email with ID -> {}".format(
                 user_id,
                 email_id,
             ),
@@ -3453,15 +3945,25 @@ class M365(object):
         """Parse the email body to extract (a potentially multi-line) URL from the body.
 
         Args:
-            message_body (str): Text of the Email body
-            search_pattern (str): Pattern thatneeds to be in first line of the URL. This
-                                  makes sure it is the right URL we are looking for.
-            multi_line (bool, optional): Is the URL spread over multiple lines?. Defaults to False.
-            multi_line_end_marker (str, optional): If it is a multi-line URL, what marks the end
-                                                   of the URL in the last line? Defaults to "%3D".
-            line_end_marker (str, optional): What makrs the end of lines 1-(n-1)? Defaults to "=".
+            message_body (str):
+                Text of the Email body.
+            search_pattern (str):
+                Pattern that needs to be in first line of the URL. This
+                makes sure it is the right URL we are looking for.
+            multi_line (bool, optional):
+                Is the URL spread over multiple lines?. Defaults to False.
+            multi_line_end_marker (str, optional):
+                If it is a multi-line URL, what marks the end
+                of the URL in the last line? Defaults to "%3D".
+            line_end_marker (str, optional):
+                What marks the end of lines 1-(n-1)? Defaults to "=".
+            replacements (list, optional):
+                A list of replacements.
+
         Returns:
-            str: URL text thathas been extracted.
+            str | None:
+                The URL text that has been extracted. None in case of an error.
+
         """
 
         if not message_body:
@@ -3488,7 +3990,7 @@ class M365(object):
                 url += line
             if multi_line and line.endswith(multi_line_end_marker):
                 break
-            if not search_pattern in line:
+            if search_pattern not in line:
                 continue
             # Fine https:// in the current line:
             index = line.find("https://")
@@ -3512,18 +4014,22 @@ class M365(object):
 
     def delete_mail(self, user_id: str, email_id: str) -> dict | None:
         """Delete email from inbox of a given user and a given email ID.
-           This requires Mail.ReadWrite Application permissions for the Azure App being used.
+
+        This requires Mail.ReadWrite Application permissions for the Azure App being used.
 
         Args:
-            user_id (str): M365 ID of the user
-            email_id (str): M365 ID of the email
+            user_id (str):
+                The M365 ID of the user.
+            email_id (str):
+                The M365 ID of the email.
+
         Returns:
-            dict: Email or None of the request fails.
+            dict | None:
+                Email or None of the request fails.
+
         """
 
-        request_url = (
-            self.config()["usersUrl"] + "/" + user_id + "/messages/" + email_id
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_id + "/messages/" + email_id
 
         request_header = self.request_header()
 
@@ -3532,8 +4038,9 @@ class M365(object):
             method="DELETE",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Cannot delete email with ID -> {} from inbox of user -> {}".format(
-                email_id, user_id
+            failure_message="Cannot delete email with ID -> {} from inbox of M365 user -> {}".format(
+                email_id,
+                user_id,
             ),
         )
 
@@ -3557,25 +4064,53 @@ class M365(object):
         password_submit_xpath: str = "",
         terms_of_service_xpath: str = "",
     ) -> bool:
-        """Process email verification
+        """Process email verification.
 
         Args:
-            user_email (str): Email address of user recieving the verification mail.
-            sender (str): Email sender (address)
-            subject (str): Email subject to look for (can be substring)
-            url_search_pattern (str): String the URL needs to contain to identify it.
-            multi_line_end_marker (str): If the URL spans multiple lines this is the "end" marker for the last line.
-            replacements (list): if the URL needs some treatment these replacements can be applied.
-        Result:
-            bool: True = Success, False = Failure
+            user_email (str):
+                Email address of user recieving the verification mail.
+            sender (str):
+                Email sender (address)
+            subject (str):
+                Email subject to look for (can be substring)
+            url_search_pattern (str):
+                String the URL needs to contain to identify it.
+            line_end_marker (str, optional):
+                The character that marks line ends in the mail.
+            multi_line (bool, optional):
+                Whether or not this is a multi-line mail.
+            multi_line_end_marker (str, optional):
+                If the URL spans multiple lines this is the "end" marker for the last line.
+            replacements (list, optional):
+                If the URL needs some treatment these replacements can be applied.
+            max_retries (int, optional):
+                The number of retries in case of an error.
+            use_browser_automation (bool, optional):
+                If Selenium-based browser automation should be used or not. Default = False.
+            password (str, optional):
+                In case a password is required for browser automation. Default = "",
+            password_field_id (str, optional):
+                The password field name in the HTML page of a confirmation dialog. Default = "",
+            password_confirmation_field_id (str, optional):
+                The password confirmation field name in the HTML page of a confirmation dialog.
+                Default = "".
+            password_submit_xpath (str, optional):
+                Default = "".
+            terms_of_service_xpath (str, optional):
+                Default = "".
+
+        Returns:
+            bool:
+                True = Success, False = Failure.
+
         """
 
         # Determine the M365 user for the current user by
         # the email address:
         m365_user = self.get_user(user_email=user_email)
-        m365_user_id = self.get_result_value(m365_user, "id")
+        m365_user_id = self.get_result_value(response=m365_user, key="id")
         if not m365_user_id:
-            logger.warning("Cannot find M365 user -> %s", user_email)
+            self.logger.warning("Cannot find M365 user -> %s", user_email)
             return False
 
         if replacements is None:
@@ -3597,12 +4132,12 @@ class M365(object):
                 # Extract just the date:
                 latest_email_date = latest_email["receivedDateTime"].split("T")[0]
                 # Get the current date (today):
-                today_date = datetime.today().strftime("%Y-%m-%d")
+                today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 # We do a sanity check here: the verification mail should be from today,
                 # otherwise we assume it is an old mail and we need to wait for the
                 # new verification mail to yet arrive:
                 if latest_email_date != today_date:
-                    logger.info(
+                    self.logger.info(
                         "Verification email not yet received (latest mail from -> %s). Waiting %s seconds...",
                         latest_email_date,
                         10 * (retries + 1),
@@ -3626,7 +4161,9 @@ class M365(object):
                 else:
                     url = ""
                 if not url:
-                    logger.warning("Cannot find verification link in the email body!")
+                    self.logger.warning(
+                        "Cannot find verification link in the email body!",
+                    )
                     return False
                 # Simulate a "click" on this URL:
                 if use_browser_automation:
@@ -3634,28 +4171,30 @@ class M365(object):
                     browser_automation_object = BrowserAutomation(
                         take_screenshots=True,
                         automation_name="email-verification",
+                        logger=self.logger,
                     )
-                    logger.info(
+                    self.logger.info(
                         "Open URL -> %s to verify account or email change (using browser automation)",
                         url,
                     )
                     success = browser_automation_object.get_page(url)
                     if success:
                         user_interaction_required = False
-                        logger.info(
+                        self.logger.info(
                             "Successfully opened URL. Browser title is -> '%s'.",
                             browser_automation_object.get_title(),
                         )
                         if password_field_id:
                             password_field = browser_automation_object.find_elem(
-                                find_elem=password_field_id, show_error=False
+                                find_elem=password_field_id,
+                                show_error=False,
                             )
                             if password_field:
                                 # The subsequent processing is only required if
                                 # the returned page requests a password change:
                                 user_interaction_required = True
-                                logger.info(
-                                    "Found password field on returned page - it seems email verification requests password entry!"
+                                self.logger.info(
+                                    "Found password field on returned page - it seems email verification requests password entry!",
                                 )
                                 result = browser_automation_object.find_elem_and_set(
                                     find_elem=password_field_id,
@@ -3663,25 +4202,23 @@ class M365(object):
                                     is_sensitive=True,
                                 )
                                 if not result:
-                                    logger.error(
+                                    self.logger.error(
                                         "Failed to enter password in field -> '%s'",
                                         password_field_id,
                                     )
                                     success = False
                             else:
-                                logger.info(
-                                    "No user interaction required (no password change or terms of service acceptance)."
+                                self.logger.info(
+                                    "No user interaction required (no password change or terms of service acceptance).",
                                 )
                         if user_interaction_required and password_confirmation_field_id:
-                            password_confirm_field = (
-                                browser_automation_object.find_elem(
-                                    find_elem=password_confirmation_field_id,
-                                    show_error=False,
-                                )
+                            password_confirm_field = browser_automation_object.find_elem(
+                                find_elem=password_confirmation_field_id,
+                                show_error=False,
                             )
                             if password_confirm_field:
-                                logger.info(
-                                    "Found password confirmation field on returned page - it seems email verification requests consecutive password entry!"
+                                self.logger.info(
+                                    "Found password confirmation field on returned page - it seems email verification requests consecutive password!",
                                 )
                                 result = browser_automation_object.find_elem_and_set(
                                     find_elem=password_confirmation_field_id,
@@ -3689,30 +4226,29 @@ class M365(object):
                                     is_sensitive=True,
                                 )
                                 if not result:
-                                    logger.error(
+                                    self.logger.error(
                                         "Failed to enter password in field -> '%s'",
                                         password_confirmation_field_id,
                                     )
                                     success = False
                         if user_interaction_required and password_submit_xpath:
-                            password_submit_button = (
-                                browser_automation_object.find_elem(
-                                    find_elem=password_submit_xpath,
-                                    find_method="xpath",
-                                    show_error=False,
-                                )
+                            password_submit_button = browser_automation_object.find_elem(
+                                find_elem=password_submit_xpath,
+                                find_method="xpath",
+                                show_error=False,
                             )
                             if password_submit_button:
-                                logger.info(
+                                self.logger.info(
                                     "Submit password change dialog with button -> '%s' (found with XPath -> %s)",
                                     password_submit_button.text,
                                     password_submit_xpath,
                                 )
                                 result = browser_automation_object.find_elem_and_click(
-                                    find_elem=password_submit_xpath, find_method="xpath"
+                                    find_elem=password_submit_xpath,
+                                    find_method="xpath",
                                 )
                                 if not result:
-                                    logger.error(
+                                    self.logger.error(
                                         "Failed to press submit button -> %s",
                                         password_submit_xpath,
                                     )
@@ -3726,7 +4262,7 @@ class M365(object):
                                 show_error=False,
                             )
                             if terms_accept_button:
-                                logger.info(
+                                self.logger.info(
                                     "Accept terms of service with button -> '%s' (found with XPath -> %s)",
                                     terms_accept_button.text,
                                     terms_of_service_xpath,
@@ -3736,39 +4272,47 @@ class M365(object):
                                     find_method="xpath",
                                 )
                                 if not result:
-                                    logger.error(
+                                    self.logger.error(
                                         "Failed to accept terms of service with button -> '%s'",
                                         terms_accept_button.text,
                                     )
                                     success = False
                             else:
-                                logger.info("No Terms of Service acceptance required.")
+                                self.logger.info(
+                                    "No Terms of Service acceptance required.",
+                                )
                 # end if use_browser_automation
                 else:
                     # Salesforce (other than Core Share) is OK with the simple HTTP GET request:
-                    logger.info("Open URL -> %s to verify account or email change", url)
+                    self.logger.info(
+                        "Open URL -> %s to verify account or email change",
+                        url,
+                    )
                     response = self._http_object.http_request(url=url, method="GET")
                     success = response and response.ok
 
                 if success:
-                    logger.info("Remove email from inbox of user -> %s...", user_email)
+                    self.logger.info(
+                        "Remove email from inbox of user -> %s...",
+                        user_email,
+                    )
                     response = self.delete_mail(user_id=m365_user_id, email_id=email_id)
                     if not response:
-                        logger.warning(
+                        self.logger.warning(
                             "Couldn't remove the mail from the inbox of user -> %s",
                             user_email,
                         )
                     # We have success now and can break from the while loop
                     return True
                 else:
-                    logger.error(
+                    self.logger.error(
                         "Failed to process e-mail verification for user -> %s",
                         user_email,
                     )
                     return False
             # end if response and response["value"]
             else:
-                logger.info(
+                self.logger.info(
                     "Verification email not yet received (no mails with sender -> %s and subject -> '%s' found). Waiting %s seconds...",
                     sender,
                     subject,
@@ -3778,10 +4322,1424 @@ class M365(object):
                 retries += 1
         # end while
 
-        logger.warning(
-            "Verification mail for user -> %s has not arrived in time.", user_email
+        self.logger.warning(
+            "Verification mail for user -> %s has not arrived in time.",
+            user_email,
         )
 
         return False
+
+    # end method definition
+
+    def get_sharepoint_sites(
+        self,
+        search: str | None = None,
+        filter_expression: str | None = None,
+        select: str | None = None,
+        limit: int = 50,
+        next_page_url: str | None = None,
+    ) -> dict | None:
+        """Retrieve a list of SharePoint sites.
+
+        Args:
+            search (str, optional):
+                A string to search for to filter the results. Default is None = no filtering.
+            filter_expression (str | None, optional):
+                Filter string to filter the results. Default is None = no filtering.
+            select (str | None, optional):
+                Fields to select. Make sure that all fields are selected that are used in filters.
+                Otherwise you will get no results.
+            limit (int, optional):
+                The maximum number of sites to return in one call.
+                Default is set to 50.
+            next_page_url (str | None, optional):
+                The MS Graph URL to retrieve the next page of SharePoint sites (pagination).
+                This is used for the iterator get_sharepoint_sites_iterator() below.
+
+        Returns:
+            dict | None:
+                A list of SharePoint sites embedded in a "value" key in the dictionary.
+
+        Example response:
+        {
+            '@odata.context': 'https://graph.microsoft.com/beta/$metadata#sites',
+            '@odata.nextLink': 'https://graph.microsoft.com/beta/sites?$top=50&$skiptoken=UGFnZWQ9VFJVRSZwX1RpbWVEZWxldGVkPSZwX0lEPTE5MDM4',
+            'value': [
+                {
+                    'createdDateTime': '2025-02-11T12:11:49Z',
+                    'id': 'ideatedev-my.sharepoint.com,eeed2961-91ba-46c1-abc2-159f0277130f,5aa8a98d-659d-4a52-8701-6b9a728092d8',
+                    'name': 'Diane Conner',
+                    'webUrl': 'https://ideatedev-my.sharepoint.com/personal/dconner_dev_idea-te_eimdemo_com',
+                    'displayName': 'Diane Conner',
+                    'isPersonalSite': True,
+                    'siteCollection': {
+                        'hostname': 'ideatedev-my.sharepoint.com'
+                    },
+                    'root': {}
+                },
+                {
+                    'createdDateTime': '2025-02-06T07:44:44Z',
+                    'id': 'ideatedev.sharepoint.com,570e67bc-1e69-4a62-89ea-994be9642b93,a1462b54-26f9-4a24-9660-2bc7859ce9af',
+                    'name': 'SG325B - SEMI325B,ECM,PD,ExternalProcurement',
+                    'webUrl': 'https://ideatedev.sharepoint.com/sites/SG325B-SEMI325BECMPDExternalProcurement698',
+                    'displayName': 'SG325B - SEMI325B,ECM,PD,ExternalProcurement',
+                    'isPersonalSite': False,
+                    'siteCollection': {
+                        'hostname': 'ideatedev.sharepoint.com'
+                    },
+                    'root': {}
+                },
+                ...
+            ]
+        ]
+
+        """
+
+        if not next_page_url:
+            query = {}
+            if select:
+                query["$select"] = select
+            if filter_expression:
+                query["$filter"] = filter_expression
+            if search:
+                query["search"] = search
+            if limit:
+                query["$top"] = limit
+
+            encoded_query = "?" + urllib.parse.urlencode(query, doseq=True) if query else ""
+            request_url = self.config()["sitesUrl"] + encoded_query
+        else:
+            request_url = next_page_url
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get SharePoint sites",
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_root_sites(self) -> dict | None:
+        """Get all SharePoint root sites.
+
+        Returns:
+            dict | None:
+                Dictionary that includes a list of root sites in the "value" key.
+
+        """
+
+        response = self.get_sharepoint_sites(
+            select="siteCollection,webUrl",
+            filter_expression="siteCollection/root ne null",
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_sites_iterator(
+        self,
+        search: str | None = None,
+        filter_expression: str | None = None,
+        select: str | None = None,
+        limit: int = 50,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all SharePoint sites matching the filter.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of SharePoint sites.
+
+        Example usage:
+            sites = m365_object.get_sharepoint_sites_iterator(limit=10)
+            for site in sites:
+                logger.info("Traversing SharePoint site -> '%s'...", site.get("name", "<undefined name>"))
+
+        Args:
+            search (str | None, optional):
+                A string to search for to filter the results. Default is None = no filtering.
+            filter_expression (str | None, optional):
+                Filter string to filter the results. Default is None = no filtering.
+            select (str | None, optional):
+                Fields to select. Make sure that all fields are selected that are used in filters.
+                Otherwise you will get no results.
+            limit (int, optional):
+                The maximum number of sites to return in one call.
+                Default is set to 50.
+
+        Returns:
+            iter:
+                A generator yielding one SharePoint site per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_url = None
+
+        while True:
+            response = self.get_sharepoint_sites(
+                search=search,
+                filter_expression=filter_expression,
+                select=select,
+                limit=limit,
+                next_page_url=next_page_url,
+            )
+            if not response or "value" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield users one at a time:
+            yield from response["value"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_url = response.get("@odata.nextLink", None)
+            if not next_page_url:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+    # end method definition
+
+    def get_sharepoint_site(self, site_id: str) -> dict | None:
+        """Retrieve a SharePoint site by its ID.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site the to retrieve.
+
+        Returns:
+            dict | None:
+                The data of the SharePoint site.
+
+        Example:
+        {
+            '@odata.context': 'https://graph.microsoft.com/beta/$metadata#sites/$entity',
+            'createdDateTime': '2025-02-06T07:41:53.41Z',
+            'description': '',
+            'id': 'ideatedev.sharepoint.com,9b203cbe-27ca-45b2-944a-663cc99e5e8f,a1462b54-26f9-4a24-9660-2bc7859ce9af',
+            'lastModifiedDateTime': '2025-02-10T20:37:11Z',
+            'name': 'TG11-Trad.Good11PDReg.Trading795',
+            'webUrl': 'https://ideatedev.sharepoint.com/sites/TG11-Trad.Good11PDReg.Trading795',
+            'displayName': 'TG11 - Trad.Good 11,PD,Reg.Trading',
+            'root': {},
+            'siteCollection': {
+                'hostname': 'ideatedev.sharepoint.com'
+            }
+        }
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "/" + site_id
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get SharePoint site with ID -> '{}'".format(site_id),
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_site_by_name(self, site_name: str) -> dict | None:
+        """Retrieve a SharePoint site by its name.
+
+        Args:
+            site_name (str):
+                The name of the SharePoint site to retrieve.
+
+        Returns:
+            dict | None:
+                The data of the SharePoint site.
+
+        Example:
+        {
+            '@odata.context': 'https://graph.microsoft.com/beta/$metadata#sites/$entity',
+            'createdDateTime': '2025-02-06T07:41:53.41Z',
+            'description': '',
+            'id': 'ideatedev.sharepoint.com,9b203cbe-27ca-45b2-944a-663cc99e5e8f,a1462b54-26f9-4a24-9660-2bc7859ce9af',
+            'lastModifiedDateTime': '2025-02-10T20:37:11Z',
+            'name': 'TG11-Trad.Good11PDReg.Trading795',
+            'webUrl': 'https://ideatedev.sharepoint.com/sites/TG11-Trad.Good11PDReg.Trading795',
+            'displayName': 'TG11 - Trad.Good 11,PD,Reg.Trading',
+            'root': {},
+            'siteCollection': {
+                'hostname': 'ideatedev.sharepoint.com'
+            }
+        }
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "?search={}".format(site_name)
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get SharePoint site -> '{}'".format(site_name),
+        )
+
+        # As we lookup the site by search we could have multiple results.
+        # The Graph API does not do an exact match. So we check the results
+        # for an exact match:
+        if response:
+            results = response.get("value", [])
+            for result in results:
+                if result["displayName"] == site_name:
+                    return result
+
+        return None
+
+    # end method definition
+
+    def get_sharepoint_site_for_group(self, group_id: str) -> dict:
+        """Retrieve a SharePoint site for a M365 group.
+
+        Args:
+            group_id (str):
+                The ID of the M365 group the site should be retrieved for.
+
+        Returns:
+            dict:
+                The data of the SharePoint site.
+
+        Example:
+        {
+            '@odata.context': 'https://graph.microsoft.com/beta/$metadata#sites/$entity',
+            'createdDateTime': '2025-02-06T07:41:53.41Z',
+            'description': '',
+            'id': 'ideatedev.sharepoint.com,9b203cbe-27ca-45b2-944a-663cc99e5e8f,a1462b54-26f9-4a24-9660-2bc7859ce9af',
+            'lastModifiedDateTime': '2025-02-10T20:37:11Z',
+            'name': 'TG11-Trad.Good11PDReg.Trading795',
+            'webUrl': 'https://ideatedev.sharepoint.com/sites/TG11-Trad.Good11PDReg.Trading795',
+            'displayName': 'TG11 - Trad.Good 11,PD,Reg.Trading',
+            'root': {},
+            'siteCollection': {
+                'hostname': 'ideatedev.sharepoint.com'
+            }
+        }
+
+        """
+
+        request_url = self.config()["groupsUrl"] + "/" + group_id + "/sites/root"
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get SharePoint site for group with ID -> '{}'".format(group_id),
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_pages(self, site_id: str) -> dict:
+        """Retrieve a list of SharePoint site pages accessible to the authenticated user.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site the pages should be retrieved for.
+
+        Returns:
+            dict:
+                A dictionary including the list of SharePoint pages for a given page.
+                The actual list is included inside the "value" key of the dictionary.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C61c0f9cb-39d3-4c04-b60c-31576954a2ab%2Ca678aeab-68ac-46a1-bd95-28020c12de26')/pages",
+            'value': [
+                {
+                    '@odata.type': '#microsoft.graph.sitePage',
+                    '@odata.etag': '"{A546CE61-21E6-431D-B2CD-67D1F722BE5F},4"',
+                    'createdDateTime': '2025-01-26T00:03:24Z',
+                    'eTag': '"{A546CE61-21E6-431D-B2CD-67D1F722BE5F},4"',
+                    'id': 'a546ce61-21e6-431d-b2cd-67d1f722be5f',
+                    'lastModifiedDateTime': '2025-01-26T00:03:24Z',
+                    'name': 'Home.aspx',
+                    'webUrl': 'https://ideatedev.sharepoint.com/sites/TG11-Trad.Good11PDReg.Trading795/SitePages/Home.aspx',
+                    'title': 'Home',
+                    'pageLayout': 'home',
+                    'promotionKind': 'page',
+                    'showComments': False,
+                    'showRecommendedPages': False,
+                    'contentType': {
+                        'id': '0x0101009D1CB255DA76424F860D91F20E6C411800813863BBF9FE6A408AE59965D98FE3DA',
+                        'name': 'Site Page'
+                    },
+                    'createdBy': {'user': {'displayName': 'System Account'}},
+                    'lastModifiedBy': {'user': {'displayName': 'Terrarium Admin', 'email': 'admin@dev.idea-te.eimdemo.com'}},
+                    'parentReference': {'siteId': '61c0f9cb-39d3-4c04-b60c-31576954a2ab'},
+                    'publishingState': {'level': 'published', 'versionId': '4.0'},
+                    'reactions': {}
+                },
+                ...
+            ]
+        }
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "/" + str(site_id) + "/pages"
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get pages of SharePoint site with ID -> '{}'".format(site_id),
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_page(self, site_id: str, page_id: str) -> dict | None:
+        """Retrieve a page of a SharePoint site accessible to the authenticated user.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site the page should be get for.
+            page_id (str):
+                The ID of the page to be retrieved.
+
+        Returns:
+            dict | None:
+                A SharePoint site page.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C9b203cbe-27ca-45b2-944a-663cc99e5e8f%2Ca1462b54-26f9-4a24-9660-2bc7859ce9af')/pages/$entity",
+            '@odata.type': '#microsoft.graph.sitePage',
+            '@odata.etag': '"{A546CE61-21E6-431D-B2CD-67D1F722BE5F},4"',
+            'createdDateTime': '2025-01-26T00:03:24Z',
+            'eTag': '"{A546CE61-21E6-431D-B2CD-67D1F722BE5F},4"',
+            'id': 'a546ce61-21e6-431d-b2cd-67d1f722be5f',
+            'lastModifiedDateTime': '2025-01-26T00:03:24Z',
+            'name': 'Home.aspx',
+            'webUrl': 'https://ideatedev.sharepoint.com/sites/TG11-Trad.Good11PDReg.Trading795/SitePages/Home.aspx',
+            'title': 'Home',
+            'pageLayout': 'home',
+            'promotionKind': 'page',
+            'showComments': False,
+            'showRecommendedPages': False,
+            'contentType': {
+                'id': '0x0101009D1CB255DA76424F860D91F20E6C4118003CD261A156017A45BA0F28B5923AE8F6',
+                'name': 'Site Page'
+            },
+            'createdBy': {
+                'user': {...}
+            },
+            'lastModifiedBy': {
+                'user': {...}
+            },
+            'parentReference': {
+                'siteId': '9b203cbe-27ca-45b2-944a-663cc99e5e8f'
+            },
+            'publishingState': {
+                'level': 'published',
+                'versionId': '1.0'
+            },
+            'reactions': {}
+        }
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "/" + site_id + "/pages/" + page_id
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get SharePoint page -> '{}' for site -> '{}'".format(page_id, site_id),
+        )
+
+        return response
+
+    # end method definition
+
+    def add_sharepoint_page(self, site_id: str, page_name: str, publish: bool = True) -> dict:
+        """Add a new SharePoint site page using Microsoft Graph API.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site the page should be created on.
+            page_name (str):
+                The name/title of the new page.
+            publish (bool, optional):
+                If True, the page is immediately published.
+
+        Returns:
+            dict:
+                Details of the created SharePoint page or an error response.
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "/" + site_id + "/pages"
+        request_headers = self.request_header()
+
+        # Page payload for a basic site page
+        payload = {
+            "@odata.type": "#microsoft.graph.sitePage",
+            "name": page_name + ".aspx",
+            "title": page_name,
+            "publishingState": {
+                "level": "published",
+            },
+        }
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_headers,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create SharePoint page -> '{}' in SharePoint site -> '{}'".format(
+                page_name,
+                site_id,
+            ),
+        )
+
+        # Check if the page should be directly published:
+        if response and publish:
+            page_id = self.get_result_value(response=response, key="id")
+            self.publish_sharepoint_page(site_id=site_id, page_id=page_id)
+
+        return response
+
+    # end method definition
+
+    def publish_sharepoint_page(self, site_id: str, page_id: str) -> bool:
+        """Publish a page of a SharePoint site.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site the page should be published on.
+            page_id (str):
+                The ID of the page to be published.
+
+        Returns:
+            bool:
+                True = Success, False = Error.
+
+        """
+
+        request_url = (
+            self.config()["sitesUrl"] + "/" + site_id + "/pages/" + page_id + "/microsoft.graph.sitePage/publish"
+        )
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot publish SharePoint page -> '{}' on SharePoint site -> '{}'".format(
+                page_id,
+                site_id,
+            ),
+            parse_request_response=False,
+        )
+
+        return bool(response.ok)
+
+    # end method definition
+
+    def get_sharepoint_sections(
+        self,
+        site_id: str,
+        page_id: str,
+        section_type: str = "horizontalSections",
+        section_id: str | int | None = None,
+        show_error: bool = True,
+    ) -> dict:
+        """Retrieve all sections SharePoint site page.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the sections.
+            section_type (str, optional):
+                "horizontalSections" (note the plural!)
+                "verticalSection" (note the singular!)
+            section_id (str | int | None):
+                The ID of the section. Only relevant for horizontal sections.
+                Simple values like 1,2,3...
+                Should be None for vertical section.
+            show_error (bool, optional):
+                Whether or not an error should be displayed if the
+                section is not found.
+
+        Returns:
+            dict:
+                A dictionary including the list of SharePoint sections for a given page.
+                The actual list is included inside the "value" key of the dictionary.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C61c0f9cb-39d3-4c04-b60c-31576954a2ab%2Ca678aeab-68ac-46a1-bd95-28020c12de26')/pages('ac7675ee-8891-43b9-b1b2-2d2ced8eb17e')/microsoft.graph.sitePage/canvasLayout/horizontalSections",
+            'value': [
+                {
+                    'layout': 'fullWidth',
+                    'id': '1',
+                    'emphasis': 'none'
+                },
+                {
+                    'layout': 'twoColumns',
+                    'id': '2',
+                    'emphasis': 'none'
+                }
+            ]
+        }
+
+        """
+
+        request_url = (
+            self.config()["sitesUrl"]
+            + "/"
+            + site_id
+            + "/pages/"
+            + page_id
+            + "/microsoft.graph.sitePage/canvasLayout/"
+            + section_type
+        )
+
+        if section_id is not None:
+            request_url += "/" + str(section_id)
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            warning_message="Cannot find section{} for SharePoint page -> '{}' of SharePoint site -> '{}'".format(
+                "s" if not section_id else " -> {}".format(section_id),
+                page_id,
+                site_id,
+            ),
+            failure_message="Cannot get section{} for SharePoint page -> '{}' of SharePoint site -> '{}'".format(
+                "s" if not section_id else " -> {}".format(section_id),
+                page_id,
+                site_id,
+            ),
+            show_error=show_error,
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_section(
+        self,
+        site_id: str,
+        page_id: str,
+        section_type: str = "horizontalSections",
+        section_id: int | str = 1,
+        show_error: bool = True,
+    ) -> dict:
+        """Retrieve a section of a SharePoint site page.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the section.
+            section_type (str, optional):
+                "horizontalSections" (note the plural!)
+                "verticalSection" (note the singular!)
+            section_id (int | str):
+                The ID of the section. Only relevant for horizontal sections.
+                Simple values like 1,2,3...
+            show_error (bool, optional):
+                Whether or not an error should be displayed if the
+                section is not found.
+
+        Returns:
+            dict:
+                A SharePoint site page section.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C61c0f9cb-39d3-4c04-b60c-31576954a2ab%2Ca678aeab-68ac-46a1-bd95-28020c12de26')/pages('ac7675ee-8891-43b9-b1b2-2d2ced8eb17e')/microsoft.graph.sitePage/canvasLayout/horizontalSections/$entity",
+            'layout': 'fullWidth',
+            'id': '1',
+            'emphasis': 'none'
+        }
+
+        """
+
+        response = self.get_sharepoint_sections(
+            site_id=site_id,
+            page_id=page_id,
+            section_type=section_type,
+            section_id=section_id,
+            show_error=show_error,
+        )
+
+        return response
+
+    # end method definition
+
+    def add_sharepoint_section(
+        self,
+        site_id: str,
+        page_id: str,
+        section_type: str = "horizontalSections",
+        section_id: int | str = 1,
+        columns: str = "oneColumn",
+        emphasis: str = "none",
+        republish: bool = True,
+    ) -> dict | None:
+        """Create a specific section (horizontal or vertical) on a SharePoint page.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the web part.
+            section_type (str, optional):
+                "horizontalSections" (note the plural!)
+                "verticalSection" (note the singular!)
+            section_id (int | str):
+                The ID of the section. Only relevant for horizontal sections.
+                Simple values like 1,2,3...
+            columns (str, optional):
+                "fullWidth"
+                "oneColumn"
+                "twoColumns"
+                "threeColumns"
+            emphasis (str, optional):
+                The emphasis for the section. Possible values:
+                "none" (default)
+                "neutral"
+                "soft"
+                "strong"
+            republish (bool, optional):
+                If True, the page is republished to make the section active.
+
+        Returns:
+            dict:
+                The horizontal or vertical section.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C61c0f9cb-39d3-4c04-b60c-31576954a2ab%2Ca678aeab-68ac-46a1-bd95-28020c12de26')/pages('ac7675ee-8891-43b9-b1b2-2d2ced8eb17e')/microsoft.graph.sitePage/canvasLayout/horizontalSections/$entity",
+            'layout': 'fullWidth',
+            'id': '2',
+            'emphasis': 'none'
+        }
+
+        """
+
+        request_url = (
+            self.config()["sitesUrl"]
+            + "/"
+            + site_id
+            + "/pages/"
+            + page_id
+            + "/microsoft.graph.sitePage/canvasLayout/"
+            + section_type
+        )
+        request_header = self.request_header()
+
+        # Construct the payload to update the specific property
+        payload = {
+            "@odata.type": "#microsoft.graph.{}".format(
+                section_type.rstrip("s"),
+            ),
+        }
+        if section_type == "horizontalSections":
+            payload["layout"] = columns
+            payload["emphasis"] = emphasis
+            payload["id"] = str(section_id)
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create SharePoint section of type -> '{}' ({}) on SharePoint page -> '{}' in SharePoint site -> '{}'".format(
+                section_type,
+                columns,
+                page_id,
+                site_id,
+            ),
+        )
+
+        # Check if the page should be republished:
+        if response and republish:
+            self.publish_sharepoint_page(site_id=site_id, page_id=page_id)
+
+        return response
+
+    # end method definition
+
+    def delete_sharepoint_section(
+        self,
+        site_id: str,
+        page_id: str,
+        section_type: str = "horizontalSections",
+        section_id: int | str = 1,
+    ) -> dict | None:
+        """Delete a specific section (horizontal or vertical) on a SharePoint page.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the web part.
+            section_type (str, optional):
+                "horizontalSections" (note the plural!)
+                "verticalSection" (note the singular!)
+            section_id (int | str):
+                The ID of the section. Only relevant for horizontal sections.
+                Simple values like 1,2,3...
+
+        Returns:
+            dict:
+                Empty response.
+
+        Example:
+        {
+            '_content': b'',
+            '_content_consumed': True,
+            '_next': None,
+            'status_code': 204,
+            'headers': {
+                'Cache-Control': 'no-store, no-cache',
+                'Strict-Transport-Security': 'max-age=31536000',
+                'request-id': 'bd21c7fa-751c-43ca-b290-12c30f50d7e1',
+                'client-request-id': 'bd21c7fa-751c-43ca-b290-12c30f50d7e1',
+                'x-ms-ags-diagnostic': '{"ServerInfo":{"DataCenter":"Germany West Central","Slice":"E","Ring":"4","ScaleUnit":"004","RoleInstance":"FR2PEPF00000393"}}', 'Date': 'Fri, 14 Feb 2025 20:40:06 GMT'},
+                'raw': <urllib3.response.HTTPResponse object at 0x10f210d90>,
+                'url': 'https://graph.microsoft.com/beta/sites/ideatedev.sharepoint.com,61c0f9cb-39d3-4c04-b60c-31576954a2ab,a678aeab-68ac-46a1-bd95-28020c12de26/pages/ac7675ee-8891-43b9-b1b2-2d2ced8eb17e/microsoft.graph.sitePage/canvasLayout/horizontalSections/1',
+                'encoding': None,
+                'history': [],
+                'reason': 'No Content',
+                'cookies': <RequestsCookieJar[]>,
+                'elapsed': datetime.timedelta(microseconds=514597),
+                'request': <PreparedRequest [DELETE]>,
+                'connection': <requests.adapters.HTTPAdapter object at 0x11841d700>
+            }
+
+        """
+
+        request_url = (
+            self.config()["sitesUrl"]
+            + "/"
+            + site_id
+            + "/pages/"
+            + page_id
+            + "/microsoft.graph.sitePage/canvasLayout/"
+            + section_type
+        )
+
+        if section_type == "horizontalSections":
+            request_url += "/" + str(section_id)
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete SharePoint section of type -> '{}' on SharePoint page -> '{}' in Sharepoint site -> '{}', ".format(
+                section_type,
+                page_id,
+                site_id,
+            ),
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_webparts(
+        self,
+        site_id: str,
+        page_id: str,
+        section_type: str | None = None,
+        section_id: str | int = 1,
+        column_id: int | str = 1,
+    ) -> dict | None:
+        """Retrieve the configured webparts on a SharePoint site page.
+
+        Can retrieve all webparts on the page or the ones in a defined
+        page section (like horizontal section or vertical section).
+
+        OpenText WebPart Type IDs:
+            Content Browser: 'cecfdba4-2e82-4538-9436-dbd1c4c01a80'
+            Related Workspaces: 'e24d7154-4554-4db6-a44f-d306b6b3a5d4'
+            Team members of Workspace: '635a2800-8833-410d-b1f1-f209b28ea2ad'
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the web part.
+            section_type (str, optional):
+                "horizontalSections" (note the plural!)
+                "verticalSection" (note the singular!)
+                Use None if you want to retrieve all webparts on page.
+            section_id (str | int | None):
+                The ID of the section. Only relevant for horizontal sections.
+                Simple values like 1,2,3...
+                Not relevant for vertical section or if you want to retrieve
+                all webparts on the page.
+            column_id (int | str, optional):
+                For horizontalSections the column ID has to be provided.
+                Defaults to 1.
+
+
+        Returns:
+            dict | None:
+                A dictionary including the SharePoint webparts of a given page for a given site.
+                The actual list is included inside the "value" key of the dictionary.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C61c0f9cb-39d3-4c04-b60c-31576954a2ab%2Ca678aeab-68ac-46a1-bd95-28020c12de26')/pages('561c65b4-3418-4698-a4c3-7ca7f04812bb')/microsoft.graph.sitePage/webParts",
+            'value': [
+                {
+                    '@odata.type': '#microsoft.graph.standardWebPart',
+                    'id': '405b669e-3c09-45fe-822f-ff60ac7fffce',
+                    'webPartType': 'c4bd7b2f-7b6e-4599-8485-16504575f590',
+                    'data': {
+                        'audiences': [],
+                        'dataVersion': '1.5',
+                        'description': 'Prominently display up to 5 pieces of content with links, images, pictures, videos, or photos in a highly visual layout.',
+                        'title': 'Hero',
+                        'properties': {
+                            'heroLayoutThreshold': 640,
+                            'carouselLayoutMaxWidth': 639,
+                            'layoutCategory': 1,
+                            'layout': 5,
+                            'content@odata.type': '#Collection(graph.Json)',
+                            'content': [
+                                {
+                                    'id': '20cb6611-c7cc-4ba7-91e1-65a6cb576025',
+                                    'type': 'UrlLink',
+                                    'color': 4,
+                                    'description': '',
+                                    'title': '',
+                                    'showDescription': False,
+                                    'showTitle': True,
+                                    'alternateText': '',
+                                    'imageDisplayOption': 1,
+                                    'isDefaultImage': False,
+                                    'showCallToAction': True,
+                                    'isDefaultImageLoaded': False,
+                                    'isCustomImageLoaded': False,
+                                    'showFeatureText': False,
+                                    'previewImage': {...}
+                                },
+                                {
+                                    'id': '83133733-960b-4139-a73f-17ce2ca5f71c',
+                                    'type': 'Image',
+                                    'color': 4,
+                                    'description': '',
+                                    'title': '',
+                                    'showDescription': False,
+                                    'showTitle': True,
+                                    'alternateText': '',
+                                    'imageDisplayOption': 0,
+                                    'isDefaultImage': False,
+                                    'showCallToAction': False,
+                                    'isDefaultImageLoaded': False,
+                                    'isCustomImageLoaded': False,
+                                    'showFeatureText': False
+                                },
+                                ...
+                            ]
+                        },
+                        'serverProcessedContent': {
+                            'htmlStrings': [...],
+                            'searchablePlainTexts': [...],
+                            'links': [...],
+                            'imageSources': [...],
+                            'componentDependencies': [...],
+                            'customMetadata': [...]
+                        }
+                    }
+                },
+                {
+                    '@odata.type': '#microsoft.graph.standardWebPart',
+                    'id': 'f7bfdec9-09c5-4fb6-bc97-3ba225d35ad4',
+                    'webPartType': '8c88f208-6c77-4bdb-86a0-0c47b4316588',
+                    'data': {...}
+                },
+                {
+                    '@odata.type': '#microsoft.graph.standardWebPart',
+                    'id': 'f2a8650b-5ea0-4ac2-9cde-56e0fd0279b0',
+                    'webPartType': 'eb95c819-ab8f-4689-bd03-0c2d65d47b1f',
+                    'data': {...}
+                },
+                {
+                    '@odata.type': '#microsoft.graph.standardWebPart',
+                    'id': '418ba70b-4cf7-410a-a5fd-ea38386915ac',
+                    'webPartType': 'c70391ea-0b10-4ee9-b2b4-006d3fcad0cd',
+                    'data': {...}
+                },
+                {
+                    '@odata.type': '#microsoft.graph.standardWebPart',
+                    'id': '416a4c58-61fc-4166-aa19-1099fad50545',
+                    'webPartType': 'f92bf067-bc19-489e-a556-7fe95f508720',
+                    'data': {...}
+                }
+            ]
+        }
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "/" + site_id + "/pages/" + page_id + "/microsoft.graph.sitePage"
+        if section_type:
+            request_url += "/canvasLayout/" + section_type
+        if section_type == "horizontalSections":
+            request_url += "/" + str(section_id)
+            request_url += "/columns/" + str(column_id)
+        request_url += "/webparts"
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get webparts for page -> '{}' of SharePoint site -> '{}'".format(
+                page_id,
+                site_id,
+            ),
+        )
+
+        return response
+
+    # end method definition
+
+    def get_sharepoint_webpart(self, site_id: str, page_id: str, webpart_id: str) -> dict | None:
+        """Retrieve a page of a SharePoint site accessible to the authenticated user.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the web part.
+            webpart_id (str):
+                The ID of the SharePoint web part to retrieve.
+
+        Returns:
+            dict | None:
+                The data of the SharePoint web part.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C9b203cbe-27ca-45b2-944a-663cc99e5e8f%2Ca1462b54-26f9-4a24-9660-2bc7859ce9af')/pages('a546ce61-21e6-431d-b2cd-67d1f722be5f')/microsoft.graph.sitePage/webParts/$entity",
+            '@odata.type': '#microsoft.graph.standardWebPart',
+            'id': '405b669e-3c09-45fe-822f-ff60ac7fffce',
+            'webPartType': 'c4bd7b2f-7b6e-4599-8485-16504575f590',
+            'data': {
+                'audiences': [...],
+                'dataVersion': '1.5',
+                'description': 'Prominently display up to 5 pieces of content with links, images, pictures, videos, or photos in a highly visual layout.',
+                'title': 'Hero',
+                'properties': {
+                    'heroLayoutThreshold': 640,
+                    'carouselLayoutMaxWidth': 639,
+                    'layoutCategory': 1,
+                    'layout': 5,
+                    'content@odata.type': '#Collection(graph.Json)',
+                    'content': [
+                        {
+                            'id': '20cb6611-c7cc-4ba7-91e1-65a6cb576025',
+                            'type': 'UrlLink',
+                            'color': 4,
+                            'description': '',
+                            'title': '',
+                            'showDescription': False,
+                            'showTitle': True,
+                            'alternateText': '',
+                            'imageDisplayOption': 1,
+                            'isDefaultImage': False,
+                            'showCallToAction': True,
+                            'isDefaultImageLoaded': False,
+                            'isCustomImageLoaded': False,
+                            'showFeatureText': False,
+                            'previewImage': {
+                                '@odata.type': '#graph.Json',
+                                'zoomRatio': 1,
+                                'resolvedUrl': '',
+                                'imageUrl': '',
+                                'widthFactor': 0.5,
+                                'minCanvasWidth': 1
+                            }
+                        },
+                        {...}
+                    ]
+                },
+                'serverProcessedContent': {...}
+            }
+        }
+
+        """
+
+        request_url = (
+            self.config()["sitesUrl"]
+            + "/"
+            + site_id
+            + "/pages/"
+            + page_id
+            + "/microsoft.graph.sitePage/webparts/"
+            + webpart_id
+        )
+
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get SharePoint webpart -> '{}' on SharePoint page -> '{}' in SharePoint site -> '{}'".format(
+                webpart_id,
+                page_id,
+                site_id,
+            ),
+        )
+
+        return response
+
+    # end method definition
+
+    def add_sharepoint_webpart(
+        self,
+        site_id: str,
+        page_id: str,
+        webpart_type_id: str,
+        create_data: dict,
+        section_type: str = "horizontalSections",
+        section_id: int | str = 1,
+        column_id: int | str = 1,
+        republish: bool = True,
+    ) -> dict | None:
+        """Create a specific web part on a SharePoint page.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the web part.
+            webpart_type_id (str):
+                The ID of the web part to create.
+                Content Browser: 'cecfdba4-2e82-4538-9436-dbd1c4c01a80'
+                Related Workspaces: 'e24d7154-4554-4db6-a44f-d306b6b3a5d4'
+                Team members of Workspace: '635a2800-8833-410d-b1f1-f209b28ea2ad'
+            create_data (dict):
+                A dictionary with the webpart data items that will be used
+                to update the "data" structure of the webpart.
+            section_type (str, optional):
+                "horizontalSections" (note the plural!)
+                "verticalSection" (note the singular!)
+            section_id (str | int):
+                The ID of the section.Only relevant for horizontal sections.
+                Simple values like 1,2,3...
+                Defaults to 1.
+            column_id (int | str, optional):
+                For horizontalSections the column ID has to be provided.
+                Defaults to 1.
+            republish (bool, optional):
+                If True, the page is republished to make the section active.
+
+        Returns:
+            dict:
+                The updated web part.
+
+        Example:
+        {
+            '@odata.context': "https://graph.microsoft.com/beta/$metadata#sites('ideatedev.sharepoint.com%2C61c0f9cb-39d3-4c04-b60c-31576954a2ab%2Ca678aeab-68ac-46a1-bd95-28020c12de26')/pages('ac7675ee-8891-43b9-b1b2-2d2ced8eb17e')/microsoft.graph.sitePage/canvasLayout/horizontalSections('1')/columns('1')/webparts/$entity",
+            '@odata.type': '#microsoft.graph.standardWebPart',
+            'id': '3df7fe9a-a1e0-4212-968c-73bd70ca3e31',
+            'webPartType': 'eb95c819-ab8f-4689-bd03-0c2d65d47b1f',
+            'data': {
+                'audiences': [...],
+                'dataVersion': '1.0',
+                'title': 'Site activity',
+                'properties': {'maxItems': 9},
+                'serverProcessedContent': {
+                    'htmlStrings': [],
+                    'searchablePlainTexts': [],
+                    'links': [],
+                    'imageSources': []
+                }
+            }
+        }
+
+        """
+
+        request_url = (
+            self.config()["sitesUrl"]
+            + "/"
+            + site_id
+            + "/pages/"
+            + page_id
+            + "/microsoft.graph.sitePage/canvasLayout/"
+            + section_type
+        )
+        if section_type == "horizontalSections":
+            request_url += "/" + str(section_id)
+            request_url += "/columns/" + str(column_id)
+        request_url += "/webparts"
+
+        request_header = self.request_header()
+
+        # Construct the payload to update the specific property
+        payload = {
+            "@odata.type": "#microsoft.graph.standardWebPart",  # likle "#microsoft.graph.standardWebPart" - this is mandatory!
+            "webPartType": webpart_type_id,  # this is mandatory!
+            "data": create_data,
+        }
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create SharePoint webpart of type -> '{}' on SharePoint page -> '{}'{} in SharePoint site -> '{}', ".format(
+                webpart_type_id,
+                page_id,
+                " (horizontal section -> {}, column -> {})".format(section_id, column_id)
+                if section_type == "horizontalSections"
+                else " (vertical section)",
+                site_id,
+            ),
+        )
+
+        # Check if the page should be republished:
+        if response and republish:
+            self.publish_sharepoint_page(site_id=site_id, page_id=page_id)
+
+        return response
+
+    # end method definition
+
+    def update_sharepoint_webpart(
+        self,
+        site_id: str,
+        page_id: str,
+        webpart_id: str,
+        update_data: dict,
+        republish: bool = True,
+    ) -> dict | None:
+        """Update a data of a specific web part on a SharePoint page.
+
+        Any data elements not provided for the update will remain unchanged!
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            page_id (str):
+                The ID of the SharePoint page containing the web part.
+            webpart_id (str):
+                The ID of the web part to update.
+            update_data (dict):
+                A dictionary with the updated data items that will be used
+                to update the "data" structure of the webpart.
+            republish (bool, optional):
+                If True, the page is republished to make the section active.
+
+        Returns:
+            dict | None:
+                The updated web part. None in case of an error.
+
+        """
+
+        def deep_merge(source: dict, destination: dict) -> dict:
+            """Recursively merges source dictionary into destination dictionary.
+
+            If a key exists in both, the value from destination is kept unless
+            both values are dictionaries, in which case they are merged recursively.
+
+            Args:
+                source (dict):
+                    The dictionary with the current data values. Will be
+                    used if not updated data is in update_data for the particular key.
+                destination (dict):
+                    The dictionary to merge into, which takes precedence.
+
+            Returns:
+                dict: The merged dictionary.
+
+            """
+            for key, value in source.items():
+                if isinstance(value, dict) and key in destination and isinstance(destination[key], dict):
+                    # Recursively merge dictionaries if both values are dictionaries
+                    destination[key] = deep_merge(value, destination[key])
+                else:
+                    # If key does not exist in destination, use value from source
+                    destination.setdefault(key, value)
+            return destination
+
+        # end deep_merge()
+
+        webpart = self.get_sharepoint_webpart(site_id=site_id, page_id=page_id, webpart_id=webpart_id)
+        if not webpart:
+            self.logger.error(
+                "Cannot find web part for site ID -> '%s', page -> '%s', webpart ID -> '%s'",
+                site_id,
+                page_id,
+                webpart_id,
+            )
+            return None
+        webpart_type_id = webpart.get("webPartType")
+        webpart_type_name = webpart.get("@odata.type")
+        data = webpart.get("data")
+
+        # Fill update_data with missing keys from data
+        update_data = deep_merge(data, update_data)  # Merges, giving precedence to update_data
+
+        # Construct the payload to update the specific property
+        payload = {
+            "@odata.type": webpart_type_name,  # likle "#microsoft.graph.standardWebPart" - this is mandatory!
+            "webPartType": webpart_type_id,  # this is mandatory!
+            "data": update_data,
+        }
+
+        request_url = (
+            self.config()["sitesUrl"]
+            + "/"
+            + site_id
+            + "/pages/"
+            + page_id
+            + "/microsoft.graph.sitePage/webparts/"
+            + webpart_id
+        )
+        request_header = self.request_header()
+
+        response = self.do_request(
+            url=request_url,
+            method="PATCH",
+            json_data=payload,
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot update SharePoint webpart -> '{}' on SharePoint page -> '{}' for Sharepoint site -> '{}', ".format(
+                webpart_id,
+                page_id,
+                site_id,
+            ),
+        )
+        # Check if the page should be republished:
+        if response and republish:
+            self.publish_sharepoint_page(site_id=site_id, page_id=page_id)
+
+        return response
+
+    # end method definition
+
+    def follow_sharepoint_site(
+        self,
+        site_id: str,
+        username: str | None = None,
+        user_id: str | None = None,
+    ) -> dict | None:
+        """Let a user follow a particular SharePoint site.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+            username (str):
+                The login name of the user. Only relevant if the user ID
+                is not provided.
+            user_id (str):
+                The user ID. If it is not provied it will be derived from
+                the username.
+
+        Returns:
+            dict:
+                The Graph API response or None in case an error occured..
+
+        Example:
+        {
+            '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#sites',
+            'value': [
+                {
+                    'id': 'ideateqa.sharepoint.com,c605327f-8531-47da-8c85-9bb63845dda6,34b48533-af41-4743-8b41-185a21f0b80f',
+                    'webUrl': 'https://ideateqa.sharepoint.com/sites/Procurement',
+                    'displayName': 'Procurement',
+                    'sharepointIds': {
+                        'siteId': 'c605327f-8531-47da-8c85-9bb63845dda6',
+                        'siteUrl': 'https://ideateqa.sharepoint.com/sites/Procurement',
+                        'webId': '34b48533-af41-4743-8b41-185a21f0b80f'
+                    },
+                    'siteCollection': {
+                        'hostname': 'ideateqa.sharepoint.com'
+                    }
+                }
+            ]
+        }
+
+        """
+
+        if not user_id and not username:
+            self.logger.error("User missing to follow. Provide the user ID or its email address!")
+            return None
+
+        user = self.get_user(user_email=username, user_id=user_id)
+        if not user_id:
+            user_id = self.get_result_value(user, "id")
+        if not username:
+            username = self.get_result_value(user, "userPrincipalName")
+
+        request_url = self.config()["usersUrl"] + "/" + str(user_id) + "/followedSites/add"
+        request_header = self.request_header()
+
+        # Construct the payload to update the specific property
+        payload = {
+            "value": [{"id": site_id}],
+        }
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=payload,
+            timeout=REQUEST_TIMEOUT,
+            warning_message="Failed to follow SharePoint site -> '{}' as user -> '{}'".format(
+                site_id,
+                username if username else user_id,
+            ),
+            show_error=False,
+            show_warning=True,
+        )
+
+        return response
 
     # end method definition

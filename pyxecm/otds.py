@@ -1,130 +1,57 @@
-"""
-OTDS Module to implement functions to read / write OTDS objects
-such as Ressources, Users, Groups, Licenses, Trusted Sites, OAuth Clients, ...
+"""OTDS Module to implement functions to read / write OTDS objects.
 
-Important: userIDs consists of login name + "@" + partition name 
+This includes Ressources, Users, Groups, Licenses, Trusted Sites, OAuth Clients, ...
 
-Class: OTDS
-Methods:
+The documentation for the used REST APIs can be found here:
+    - [https://developer.opentext.com](https://developer.opentext.com/ce/products/opentext-directory-services)
 
-__init__ : class initializer
-config : returns config data set
-cookie : returns cookie information
-credentials: returns set of username and password
 
-base_url : returns OTDS base URL
-rest_url : returns OTDS REST base URL
-credential_url : returns the OTDS Credentials REST URL
-authHandler_url : returns the OTDS Authentication Handler REST URL
-partition_url : returns OTDS Partition REST URL
-access_role_url : returns OTDS Access Role REST URL
-oauth_client_url : returns OTDS OAuth Client REST URL
-resource_url : returns OTDS Resource REST URL
-license_url : returns OTDS License REST URL
-token_url : returns OTDS Token REST URL
-users_url : returns OTDS Users REST URL
-groups_url : returns OTDS Groups REST URL
-system_config_url : returns OTDS System Config REST URL
-consolidation_url: returns OTDS consolidation URL
-
-do_request: call an OTDS REST API in a safe way.
-parse_request_response: Converts the request response to a Python dict in a safe way
-
-authenticate : authenticates at OTDS server
-
-add_synchronized_partition: Add a Synchronized partition to OTDS 
-add_partition : Add an OTDS partition
-get_partition : Get a partition with a specific name
-
-add_user : Add a user to a partion
-get_user : Get a user with a specific user ID (= login name @ partition)
-get_users: get all users (with option to filter)
-update_user : Update attributes of on OTDS user
-delete_user : Delete a user with a specific ID in a specific partition
-reset_user_password : Reset a password of a specific user ID
-
-add_group: Add an OTDS group
-get_group: Get a OTDS group by its name
-add_user_to_group : Add an OTDS user to a OTDS group
-add_group_to_parent_group : Add on OTDS group to a parent group
-
-add_resource : Add a new resource to OTDS
-get_resource : Get an OTDS resource with a specific name
-update_resource: Update an existing OTDS resource
-activate_resource : Activate an OTDS resource
-
-get_access_roles : Get all OTDS Access Roles
-get_access_role: Get an OTDS Access Role with a specific name
-add_partition_to_access_role : Add an OTDS Partition to to an OTDS Access Role
-add_user_to_access_role : Add an OTDS user to to an OTDS Access Role
-add_group_to_access_role : Add an OTDS group to to an OTDS Access Role
-update_access_role_attributes: Update attributes of an existing access role
-
-add_license_to_resource : Add (or update) a product license to OTDS
-get_license_for_resource : Get list of licenses for a resource
-delete_license_from_resource : Delete a license from a resource
-assign_user_to_license : Assign an OTDS user to a product license (feature) in OTDS.
-assign_partition_to_license: Assign an OTDS user partition to a license (feature) in OTDS.
-get_licensed_objects: Return the licensed objects (users, groups, partitions) an OTDS for a
-                      license + license feature associated with an OTDS resource (like "cs").
-is_user_licensed: Check if a user is licensed for a license and license feature associated
-                  with a particular OTDS resource.
-is_group_licensed: Check if a group is licensed for a license and license feature associated
-                   with a particular OTDS resource.
-is_partition_licensed: Check if a user partition is licensed for a license and license feature
-                       associated with a particular OTDS resource.
-
-add_system_attribute : Add an OTDS System Attribute
-
-get_trusted_sites : Get OTDS Trusted Sites
-add_trusted_site : Add a new trusted site to OTDS
-
-enable_audit: enable OTDS audit
-
-add_oauth_client : Add a new OAuth client to OTDS
-get_oauth_client : Get an OAuth client with a specific client ID
-update_oauth_client : Update an OAuth client
-add_oauth_clients_to_access_role : Add an OTDS OAuth Client to an OTDS Access Role
-get_access_token : Get an OTDS Access Token
-
-get_auth_handler: Gen an auth handler with a given name
-add_auth_handler_saml: Add an authentication handler for SAML (e.g. for SuccessFactors)
-add_auth_handler_sap: Add an authentication handler for SAP
-add_auth_handler_oauth: Add an authentication handler for OAuth (used for Salesforce)
-
-consolidate: Consolidate an OTDS resource
-impersonate_resource: Configure impersonation for an OTDS resource
-impersonate_oauth_client: Configure impersonation for an OTDS OAuth Client
-
-get_password_policy: get the global password policy
-update_password_policy: updates the global password policy
-
+!!! tip
+    Important: userIDs consists of login name + "@" + partition name
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
-__credits__ = ["Kai-Philip Gatzweiler", "Jim Bennett"]
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
+__credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
-import os
-import logging
-import json
-import urllib.parse
 import base64
+import json
+import logging
+import os
+import platform
+import sys
+import tempfile
 import time
-
+import urllib.parse
 from http import HTTPStatus
+from importlib.metadata import version
+
 import requests
 
-logger = logging.getLogger("pyxecm.otds")
+APP_NAME = "pyxecm"
+APP_VERSION = version("pyxecm")
+MODULE_NAME = APP_NAME + ".otds"
+
+PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+OS_INFO = f"{platform.system()} {platform.release()}"
+ARCH_INFO = platform.machine()
+REQUESTS_VERSION = requests.__version__
+
+USER_AGENT = (
+    f"{APP_NAME}/{APP_VERSION} ({MODULE_NAME}/{APP_VERSION}; "
+    f"Python/{PYTHON_VERSION}; {OS_INFO}; {ARCH_INFO}; Requests/{REQUESTS_VERSION})"
+)
 
 REQUEST_HEADERS = {
+    "User-Agent": USER_AGENT,
     "accept": "application/json;charset=utf-8",
     "Content-Type": "application/json",
 }
 
 REQUEST_FORM_HEADERS = {
+    "User-Agent": USER_AGENT,
     "accept": "application/json;charset=utf-8",
     "Content-Type": "application/x-www-form-urlencoded",
 }
@@ -133,9 +60,13 @@ REQUEST_TIMEOUT = 60
 REQUEST_RETRY_DELAY = 20
 REQUEST_MAX_RETRIES = 2
 
+default_logger = logging.getLogger(MODULE_NAME)
+
 
 class OTDS:
-    """Used to automate stettings in OpenText Directory Services (OTDS)."""
+    """Class OTDS is used to automate stettings in OpenText Directory Services (OTDS)."""
+
+    logger: logging.Logger = default_logger
 
     _config = None
     _cookie = None
@@ -149,18 +80,34 @@ class OTDS:
         username: str | None = None,
         password: str | None = None,
         otds_ticket: str | None = None,
-        bindPassword:str | None = None,
-    ):
-        """Initialize the OTDS object
+        bind_password: str | None = None,
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the OTDS object.
 
         Args:
-            protocol (str): either http or https
-            hostname (str): hostname of otds
-            port (int): port number - typically 80 or 443
-            username (str, optional): otds user name. Optional if otds_ticket is provided.
-            password (str, optional): otds password. Optional if otds_ticket is provided.
-            otds_ticket (str, optional): Authentication ticket of OTDS
+            protocol (str):
+                This is either http or https.
+            hostname (str):
+                The hostname of OTDS.
+            port (int):
+                The port number - typically 80 or 443.
+            username (str, optional):
+                The OTDS user name. Optional if otds_ticket is provided.
+            password (str, optional):
+                The OTDS password. Optional if otds_ticket is provided.
+            otds_ticket (str | None, optional):
+                Authentication ticket of OTDS.
+            bind_password (str | None, optional): TODO
+            logger (logging.Logger, optional):
+                The logging object to use for all log messages. Defaults to default_logger.
+
         """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("otds")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         # Initialize otdsConfig as an empty dictionary
         otds_config = {}
@@ -189,67 +136,99 @@ class OTDS:
             otds_config["password"] = password
         else:
             otds_config["password"] = ""
-        
-        if bindPassword:
-            otds_config["bindPassword"] = bindPassword
+
+        if bind_password:
+            otds_config["bindPassword"] = bind_password
         else:
             otds_config["bindPassword"] = ""
 
         if otds_ticket:
             self._cookie = {"OTDSTicket": otds_ticket}
 
-        otdsBaseUrl = protocol + "://" + otds_config["hostname"]
+        otds_base_url = protocol + "://" + otds_config["hostname"]
         if str(port) not in ["80", "443"]:
-            otdsBaseUrl += ":{}".format(port)
-        otdsBaseUrl += "/otdsws"
-        otds_config["baseUrl"] = otdsBaseUrl
+            otds_base_url += ":{}".format(port)
+        otds_base_url += "/otdsws"
+        otds_config["baseUrl"] = otds_base_url
 
-        otdsRestUrl = otdsBaseUrl + "/rest"
-        otds_config["restUrl"] = otdsRestUrl
+        otds_rest_url = otds_base_url + "/rest"
+        otds_config["restUrl"] = otds_rest_url
 
-        otds_config["partitionUrl"] = otdsRestUrl + "/partitions"
-        otds_config["identityproviderprofiles"] = otdsRestUrl + "/identityproviderprofiles"
-        otds_config["accessRoleUrl"] = otdsRestUrl + "/accessroles"
-        otds_config["credentialUrl"] = otdsRestUrl + "/authentication/credentials"
-        otds_config["oauthClientUrl"] = otdsRestUrl + "/oauthclients"
-        otds_config["tokenUrl"] = otdsBaseUrl + "/oauth2/token"
-        otds_config["resourceUrl"] = otdsRestUrl + "/resources"
-        otds_config["licenseUrl"] = otdsRestUrl + "/licensemanagement/licenses"
-        otds_config["usersUrl"] = otdsRestUrl + "/users"
-        otds_config["groupsUrl"] = otdsRestUrl + "/groups"
-        otds_config["systemConfigUrl"] = otdsRestUrl + "/systemconfig"
-        otds_config["authHandlerUrl"] = otdsRestUrl + "/authhandlers"
-        otds_config["consolidationUrl"] = otdsRestUrl + "/consolidation"
+        otds_config["partitionUrl"] = otds_rest_url + "/partitions"
+        otds_config["identityproviderprofiles"] = otds_rest_url + "/identityproviderprofiles"
+        otds_config["accessRoleUrl"] = otds_rest_url + "/accessroles"
+        otds_config["credentialUrl"] = otds_rest_url + "/authentication/credentials"
+        otds_config["ticketforuserUrl"] = otds_rest_url + "/authentication/ticketforuser"
+        otds_config["oauthClientUrl"] = otds_rest_url + "/oauthclients"
+        otds_config["tokenUrl"] = otds_base_url + "/oauth2/token"
+        otds_config["resourceUrl"] = otds_rest_url + "/resources"
+        otds_config["licenseUrl"] = otds_rest_url + "/licensemanagement/licenses"
+        otds_config["usersUrl"] = otds_rest_url + "/users"
+        otds_config["currentUserUrl"] = otds_rest_url + "/currentuser"
+        otds_config["groupsUrl"] = otds_rest_url + "/groups"
+        otds_config["systemConfigUrl"] = otds_rest_url + "/systemconfig"
+        otds_config["authHandlerUrl"] = otds_rest_url + "/authhandlers"
+        otds_config["consolidationUrl"] = otds_rest_url + "/consolidation"
+        otds_config["rolesUrl"] = otds_rest_url + "/roles"
 
         self._config = otds_config
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
-            dict: Configuration dictionary
+            dict:
+                The configuration dictionary.
+
         """
         return self._config
 
     # end method definition
 
     def cookie(self) -> dict:
-        """Returns the login cookie of OTDS.
-           This is set by the authenticate() method
+        """Return the login cookie of OTDS.
+
+        This is set by the authenticate() method
 
         Returns:
-            dict: OTDS cookie
+            dict:
+                The OTDS cookie.
+
         """
         return self._cookie
 
     # end method definition
 
-    def credentials(self) -> dict:
-        """Returns the credentials (username + password)
+    def set_cookie(self, ticket: str) -> dict:
+        """Return the login cookie of OTDS.
+
+        This is set by the authenticate() method
+
+        Args:
+            ticket (str):
+                The new ticket value for the cookie.
 
         Returns:
-            dict: dictionary with username and password
+            dict:
+                The updated OTDS cookie.
+
         """
+
+        self._cookie["OTDSTicket"] = ticket
+
+        return self._cookie
+
+    # end method definition
+
+    def credentials(self) -> dict:
+        """Return the credentials (username + password).
+
+        Returns:
+            dict:
+                The dictionary with username and password.
+
+        """
+
         return {
             "userName": self.config()["username"],
             "password": self.config()["password"],
@@ -258,149 +237,208 @@ class OTDS:
     # end method definition
 
     def base_url(self) -> str:
-        """Returns the base URL of OTDS
+        """Return the base URL of OTDS.
 
         Returns:
-            str: base URL
+            str:
+                The base URL.
+
         """
+
         return self.config()["baseUrl"]
 
     # end method definition
 
     def rest_url(self) -> str:
-        """Returns the REST URL of OTDS
+        """Return the REST URL of OTDS.
 
         Returns:
-            str: REST URL
+            str:
+                The REST URL.
+
         """
+
         return self.config()["restUrl"]
 
     # end method definition
 
     def credential_url(self) -> str:
-        """Returns the Credentials URL of OTDS
+        """Return the Credentials URL of OTDS.
 
         Returns:
-            str: Credentials URL
+            str:
+                The credentials URL.
+
         """
+
         return self.config()["credentialUrl"]
 
     # end method definition
 
     def auth_handler_url(self) -> str:
-        """Returns the Auth Handler URL of OTDS
+        """Return the Auth Handler URL of OTDS.
 
         Returns:
-            str: Auth Handler URL
+            str:
+                The auth handler URL.
+
         """
+
         return self.config()["authHandlerUrl"]
 
     # end method definition
     def synchronized_partition_url(self) -> str:
-        """Returns the Partition URL of OTDS
+        """Return the Partition URL of OTDS.
 
         Returns:
-            str: synchronized partition url
+            str:
+                The synchronized partition URL.
+
         """
+
         return self.config()["identityproviderprofiles"]
-    # end of method definition   
+
+    # end of method definition
 
     def partition_url(self) -> str:
-        """Returns the Partition URL of OTDS
+        """Return the partition URL of OTDS.
 
         Returns:
-            str: Partition URL
+            str:
+                The partition URL.
+
         """
+
         return self.config()["partitionUrl"]
 
     # end method definition
 
     def access_role_url(self) -> str:
-        """Returns the Access Role URL of OTDS
+        """Return the access role URL of OTDS.
 
         Returns:
-            str: Access Role URL
+            str:
+                The access role URL.
+
         """
+
         return self.config()["accessRoleUrl"]
 
     # end method definition
 
     def oauth_client_url(self) -> str:
-        """Returns the OAuth Client URL of OTDS
+        """Return the OAuth client URL of OTDS.
 
         Returns:
-            str: OAuth Client URL
+            str:
+                The OAuth client URL.
+
         """
+
         return self.config()["oauthClientUrl"]
 
     # end method definition
 
     def resource_url(self) -> str:
-        """Returns the Resource URL of OTDS
+        """Return the resource URL of OTDS.
 
         Returns:
-            str: Resource URL
+            str:
+                The resource URL.
+
         """
+
         return self.config()["resourceUrl"]
 
     # end method definition
 
     def license_url(self) -> str:
-        """Returns the License URL of OTDS
+        """Return the License URL of OTDS.
 
         Returns:
-            str: License URL
+            str:
+                The license URL.
+
         """
+
         return self.config()["licenseUrl"]
 
     # end method definition
 
     def token_url(self) -> str:
-        """Returns the Token URL of OTDS
+        """Return the token URL of OTDS.
 
         Returns:
-            str: Token URL
+            str:
+                The token URL.
+
         """
+
         return self.config()["tokenUrl"]
 
     # end method definition
 
     def users_url(self) -> str:
-        """Returns the Users URL of OTDS
+        """Return the users URL of OTDS.
 
         Returns:
-            str: Users URL
+            str:
+                The users URL.
+
         """
+
         return self.config()["usersUrl"]
 
     # end method definition
 
-    def groups_url(self) -> str:
-        """Returns the Groups URL of OTDS
+    def current_user_url(self) -> str:
+        """Return the current user URL of OTDS.
 
         Returns:
-            str: Groups URL
+            str:
+                The current user URL.
+
         """
+
+        return self.config()["currentUserUrl"]
+
+    # end method definition
+
+    def groups_url(self) -> str:
+        """Return the groups URL of OTDS.
+
+        Returns:
+            str:
+                The groups URL.
+
+        """
+
         return self.config()["groupsUrl"]
 
     # end method definition
 
     def system_config_url(self) -> str:
-        """Returns the System Config URL of OTDS
+        """Return the system config URL of OTDS.
 
         Returns:
-            str: System Config URL
+            str:
+                The system config URL.
+
         """
+
         return self.config()["systemConfigUrl"]
 
     # end method definition
 
     def consolidation_url(self) -> str:
-        """Returns the Consolidation URL of OTDS
+        """Return the consolidation URL of OTDS.
 
         Returns:
-            str: Consolidation URL
+            str:
+                The consolidation URL.
+
         """
+
         return self.config()["consolidationUrl"]
 
     # end method definition
@@ -423,27 +461,49 @@ class OTDS:
         retry_forever: bool = False,
         parse_request_response: bool = True,
     ) -> dict | None:
-        """Call an OTDS REST API in a safe way
+        """Call an OTDS REST API in a safe way.
 
         Args:
-            url (str): URL to send the request to.
-            method (str, optional): HTTP method (GET, POST, etc.). Defaults to "GET".
-            headers (dict | None, optional): Request Headers. Defaults to None.
-            data (dict | None, optional): Request payload. Defaults to None
-            files (dict | None, optional): Dictionary of {"name": file-tuple} for multipart encoding upload.
-                                           file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional): Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
-            show_error (bool, optional): Whether or not an error should be logged in case of a failed REST call.
-                                         If False, then only a warning is logged. Defaults to True.
-            warning_message (str, optional): Specific warning message. Defaults to "". If not given the error_message will be used.
-            failure_message (str, optional): Specific error message. Defaults to "".
-            success_message (str, optional): Specific success message. Defaults to "".
-            max_retries (int, optional): How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
-            retry_forever (bool, optional): Eventually wait forever - without timeout. Defaults to False.
-            parse_request_response (bool, optional): should the response.text be interpreted as json and loaded into a dictionary. True is the default.
+            url (str):
+                The URL to send the request to.
+            method (str, optional):
+                The HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional):
+                The request headers. Defaults to None.
+            data (dict | None, optional):
+                Request payload. Defaults to None
+            json_data (dict | None, optional):
+                Request payload for the JSON parameter. Defaults to None.
+            files (dict | None, optional):
+                Dictionary of {"name": file-tuple} for multipart encoding upload.
+                File-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            timeout (int | None, optional):
+                The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            show_warning (bool, optional):
+                Whether or not an warning should be logged in case of a
+                failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional):
+                Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional):
+                Specific error message. Defaults to "".
+            success_message (str, optional):
+                Specific success message. Defaults to "".
+            max_retries (int, optional):
+                How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional):
+                Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional):
+                Defines if the response.text should be interpreted as json and loaded into a dictionary.
+                True is the default.
 
         Returns:
-            dict | None: Response of OTDS REST API or None in case of an error.
+            dict | None:
+                Response of OTDS REST API or None in case of an error.
+
         """
 
         if headers is None:
@@ -469,26 +529,33 @@ class OTDS:
 
                 if response.ok:
                     if success_message:
-                        logger.info(success_message)
+                        self.logger.info(success_message)
                     if parse_request_response:
                         return self.parse_request_response(response)
                     else:
                         return response
                 # Check if Session has expired - then re-authenticate and try once more
-                elif response.status_code == 401 and retries == 0:
-                    logger.debug("Session has expired - try to re-authenticate...")
+                elif (
+                    (response.status_code == 401 and retries == 0)
+                    or (
+                        response.status_code == 400
+                        and retries == 0
+                        and "Expired OTDS SSO ticket"
+                        in response.text  # OTDS seems to return 400 and not 401 for token expiry (in some cases like impersonation)
+                    )
+                ):
+                    self.logger.debug("Session has expired - try to re-authenticate...")
                     self.authenticate(revalidate=True)
                     retries += 1
                 else:
                     # Handle plain HTML responses to not pollute the logs
                     content_type = response.headers.get("content-type", None)
-                    if content_type == "text/html":
-                        response_text = "HTML content (only printed in debug log)"
-                    else:
-                        response_text = response.text
+                    response_text = (
+                        "HTML content (only printed in debug log)" if content_type == "text/html" else response.text
+                    )
 
                     if show_error:
-                        logger.error(
+                        self.logger.error(
                             "%s; status -> %s/%s; error -> %s",
                             failure_message,
                             response.status_code,
@@ -496,7 +563,7 @@ class OTDS:
                             response_text,
                         )
                     elif show_warning:
-                        logger.warning(
+                        self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
                             warning_message if warning_message else failure_message,
                             response.status_code,
@@ -504,7 +571,7 @@ class OTDS:
                             response_text,
                         )
                     if content_type == "text/html":
-                        logger.debug(
+                        self.logger.debug(
                             "%s; status -> %s/%s; warning -> %s",
                             failure_message,
                             response.status_code,
@@ -514,45 +581,45 @@ class OTDS:
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Request timed out. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; timeout error",
+                    self.logger.error(
+                        "%s; timeout error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                     else:
                         return None
             except requests.exceptions.ConnectionError:
                 if retries <= max_retries:
-                    logger.warning(
+                    self.logger.warning(
                         "Connection error. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
-                    logger.error(
-                        "%s; connection error",
+                    self.logger.error(
+                        "%s; connection error.",
                         failure_message,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
-                        logger.warning("Turn timeouts off and wait forever...")
+                        self.logger.warning("Turn timeouts off and wait forever...")
                         timeout = None
                         time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                     else:
                         return None
             # end try
-            logger.debug(
+            self.logger.debug(
                 "Retrying REST API %s call -> %s... (retry = %s, cookie -> %s)",
                 method,
                 url,
@@ -569,22 +636,27 @@ class OTDS:
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Converts the request response to a Python dict in a safe way
-           that also handles exceptions.
+        """Convert the request response to a dict in a safe way that also handles exceptions.
 
         Args:
-            response_object (object): this is reponse object delivered by the request call
-            additional_error_message (str): print a custom error message
-            show_error (bool): if True log an error, if False log a warning
+            response_object (object):
+                This is reponse object delivered by the request call.
+            additional_error_message (str, optional):
+                Print a custom error message.
+            show_error (bool, optional):
+                If True, log an error, if False log a warning.
+
         Returns:
-            dict: response dictionary or None in case of an error
+            dict | None:
+                Response dictionary or None in case of an error.
+
         """
 
         if not response_object:
             return None
 
         if not response_object.text:
-            logger.warning("Response text is empty. Cannot decode response.")
+            self.logger.warning("Response text is empty. Cannot decode response.")
             return None
 
         try:
@@ -592,14 +664,15 @@ class OTDS:
         except json.JSONDecodeError as e:
             if additional_error_message:
                 message = "Cannot decode response as JSon. {}; error -> {}".format(
-                    additional_error_message, e
+                    additional_error_message,
+                    e,
                 )
             else:
                 message = "Cannot decode response as JSon; error -> {}".format(e)
             if show_error:
-                logger.error(message)
+                self.logger.error(message)
             else:
-                logger.warning(message)
+                self.logger.warning(message)
             return None
         else:
             return dict_object
@@ -607,18 +680,22 @@ class OTDS:
     # end method definition
 
     def authenticate(self, revalidate: bool = False) -> dict | None:
-        """Authenticate at Directory Services and retrieve OTCS Ticket.
+        """Authenticate at Directory Services and retrieve OTDS ticket.
 
         Args:
-            revalidate (bool, optional): determine if a re-athentication is enforced
-                                         (e.g. if session has timed out with 401 error)
+            revalidate (bool, optional):
+                Determine if a re-athentication is enforced.
+                (e.g. if session has timed out with 401 error)
+
         Returns:
-            dict: Cookie information. Also stores cookie information in self._cookie
+            dict | None:
+                Cookie information. Also stores cookie information in self._cookie
+
         """
 
         # Already authenticated and session still valid?
         if self._cookie and not revalidate:
-            logger.debug(
+            self.logger.debug(
                 "Session still valid - return existing cookie -> %s",
                 str(self._cookie),
             )
@@ -626,7 +703,7 @@ class OTDS:
 
         otds_ticket = "NotSet"
 
-        logger.debug("Requesting OTDS ticket from -> %s", self.credential_url())
+        self.logger.debug("Requesting OTDS ticket from -> %s", self.credential_url())
 
         response = None
         try:
@@ -634,15 +711,14 @@ class OTDS:
                 url=self.credential_url(),
                 json=self.credentials(),
                 headers=REQUEST_HEADERS,
-                timeout=None,
+                timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.RequestException as exception:
-            logger.warning(
-                "Unable to connect to -> %s; error -> %s",
+            self.logger.warning(
+                "Unable to connect to OTDS authentication endpoint -> %s%s. OTDS service may not be ready yet.",
                 self.credential_url(),
-                exception.strerror,
+                "; error -> {}".format(str(exception)) if str(exception) else "",
             )
-            logger.warning("OTDS service may not be ready yet.")
             return None
 
         if response.ok:
@@ -651,9 +727,12 @@ class OTDS:
                 return None
             else:
                 otds_ticket = authenticate_dict["ticket"]
-                logger.debug("Ticket -> %s", otds_ticket)
+                self.logger.debug("Ticket -> %s", otds_ticket)
         else:
-            logger.error("Failed to request an OTDS ticket; error -> %s", response.text)
+            self.logger.error(
+                "Failed to request an OTDS ticket; error -> %s",
+                response.text,
+            )
             return None
 
         # Store authentication ticket:
@@ -664,21 +743,349 @@ class OTDS:
 
     # end method definition
 
-    def add_partition(self, name: str, description: str) -> dict | None:
-        """Add a new user partition to OTDS
+    def impersonate_user(
+        self,
+        user_id: str,
+        partition: str = "Content Server Members",
+        ticket: str = "",
+    ) -> dict | None:
+        """Impersonate as a user.
 
         Args:
-            name (str): name of the new partition
-            description (str): description of the new partition
+            partition (str):
+                The partition of the user.
+            user_id (str):
+                The ID (= login) of the user.
+            ticket (str, optional):
+                Optional, if the ticket to impersonate with is already known.
+                Defaults to "".
+
         Returns:
-            dict: Request response or None if the creation fails.
+            dict | None:
+                Information about the impersonated user.
+
+        Example:
+        {
+            'token': None,
+            'userId': 'nwheeler@Content Server Members',
+            'ticket': '*OTDSSSO*Adh...*',
+            'resourceID': None,
+            'failureReason': None,
+            'passwordExpirationTime': 0,
+            'continuation': False,
+            'continuationContext': None,
+            'continuationData': None
+        }
+
+        """
+
+        if not ticket:
+            ticket = self._otds_ticket
+
+        request_url = self.config()["ticketforuserUrl"]
+
+        impersonate_post_body = {
+            "userName": user_id + "@" + partition,
+            "ticket": ticket,
+        }
+
+        self.logger.debug(
+            "Impersonate user -> '%s' ; calling -> %s",
+            user_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=impersonate_post_body,
+            timeout=None,
+            failure_message="Failed to impersonate as user -> '{}'".format(user_id),
+        )
+
+    # end method definition
+
+    def add_application_role(
+        self,
+        name: str,
+        partition_id: str = "OAuthClients",
+        description: str = "",
+        values: list | None = None,
+        custom_attributes: list | None = None,
+    ) -> dict | None:
+        """Add a new application role to partition.
+
+        Args:
+            name (str):
+                The name of the new partition.
+            partition_id (str, optional):
+                ID of the partition to add the role to, defaults to "OAuthClients".
+            description (str):
+                The description of the new partition.
+            values (list, optional):
+                List of optional values to pass with the create request.
+            custom_attributes (list, optional):
+                List of optional custom attributes to pass with the create request.
+
+        Returns:
+            dict | None:
+                Request response or None if the creation fails.
+
+        """
+
+        if values is None:
+            values = []
+        role_post_body_json = {
+            "name": name,
+            "description": description,
+            "userPartitionID": partition_id,
+            "values": values if values else [],
+            "customAttributes": custom_attributes if custom_attributes else [],
+        }
+
+        request_url = self.config()["rolesUrl"]
+
+        self.logger.debug(
+            "Adding application role -> '%s' (%s) to partition -> '%s' ; calling -> %s",
+            name,
+            description,
+            partition_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=role_post_body_json,
+            timeout=None,
+            failure_message="Failed to add application role -> '{}'".format(name),
+        )
+
+    # end method definition
+
+    def get_application_role(self, name: str, partition: str = "OAuthClients", show_error: bool = True) -> dict | None:
+        """Get an existing application role from OTDS.
+
+        Args:
+            name (str):
+                The name of the application role to retrieve.
+            partition (str):
+                Partition of the application role.
+            show_error (bool, optional):
+                Defines whether or not we want to log an error
+                if the partition is not found.
+
+        Returns:
+            dict | None:
+                Request response or None if the REST call fails.
+
+        """
+
+        request_url = "{}?where_filter={}".format(self.config()["rolesUrl"], name)
+
+        self.logger.debug(
+            "Get application Roles -> '%s'; calling -> %s",
+            name,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get user partition -> '{}'".format(name),
+            show_error=show_error,
+        )
+
+        role = next(
+            (role for role in response.get("roles") if role["name"] == name and role["userPartitionID"] == partition),
+            None,
+        )
+
+        return role
+
+    # end method definition
+
+    def assign_user_to_application_role(
+        self,
+        user_id: str,
+        user_partition: str,
+        role_name: str,
+        role_partition: str = "OAuthClients",
+    ) -> bool:
+        """Assign an OTDS user to an application role in OTDS.
+
+        Args:
+            user_id (str):
+                The ID of the user (= login name) to assign to the license.
+            user_partition (str):
+                The user partition in OTDS, e.g. "Content Server Members".
+            role_name (str):
+                Name of the application role to be assigned.
+            role_partition (str):
+                The name of the partition of the Role, defaults to "OAuthClients".
+
+        Returns:
+            bool:
+                True if successful or False if the REST call fails or the license is not found.
+
+        """
+
+        user = self.get_user(user_partition, user_id)
+        if user:
+            user_location = user["location"]
+        else:
+            self.logger.error("Cannot find location for user -> '%s'", user_id)
+            return False
+
+        role = self.get_application_role(role_name, role_partition)
+        if role:
+            rolelocation = role.get("location")
+        else:
+            self.logger.warning("Cannot find application role -> '%s' (%s)", role_name, role_partition)
+            return False
+
+        role_post_body_json = {
+            "stringList": [
+                rolelocation,
+            ],
+        }
+
+        request_url = self.users_url() + "/" + user_location + "/roles"
+
+        self.logger.debug(
+            "Assign application role -> '%s' (%s) to user -> '%s' (%s); calling -> %s",
+            role_name,
+            role_partition,
+            user_id,
+            user_partition,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=role_post_body_json,
+            timeout=None,
+            failure_message="Failed to assign application role -> '{}' to user -> '{}'".format(
+                role_name,
+                user_id,
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            self.logger.debug(
+                "Added application role -> '%s' to user -> '%s'",
+                role_name,
+                user_id,
+            )
+            return True
+
+        return False
+
+    # end method definition
+
+    def assign_group_to_application_role(
+        self,
+        group_id: str,
+        group_partition: str,
+        role_name: str,
+        role_partition: str = "OAuthClients",
+    ) -> bool:
+        """Assign an OTDS group to an application role in OTDS.
+
+        Args:
+            group_id (str):
+                The ID of the group to assign to the application role.
+            group_partition (str):
+                The group partition in OTDS, e.g. "Content Server Members".
+            role_name (str):
+                Name of the application role to be assigned.
+            role_partition (str):
+                The name of the partition of the Role, defaults to "OAuthClients".
+
+        Returns:
+            bool:
+                True if successful or False if the REST call fails or the license is not found.
+
+        """
+
+        group = self.get_group(group_id)
+        if group:
+            group_location = group["location"]
+        else:
+            self.logger.error("Cannot find location for group -> '%s'", group_id)
+            return False
+
+        role = self.get_application_role(role_name, role_partition)
+        if role:
+            rolelocation = role.get("location")
+        else:
+            self.logger.warning("Cannot find application role -> '%s' (%s)", role_name, role_partition)
+            return False
+
+        role_post_body_json = {
+            "stringList": [
+                rolelocation,
+            ],
+        }
+
+        request_url = self.groups_url() + "/" + group_location + "/roles"
+
+        self.logger.debug(
+            "Assign application role -> '%s' (%s) to group -> '%s' (%s); calling -> %s",
+            role_name,
+            role_partition,
+            group_id,
+            group_partition,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=role_post_body_json,
+            timeout=None,
+            failure_message="Failed to assign application role -> '{}' to group -> '{}'".format(
+                role_name,
+                group_id,
+            ),
+            parse_request_response=False,
+        )
+
+        if response and response.ok:
+            self.logger.debug(
+                "Added application role -> '%s' to group -> '%s'",
+                role_name,
+                group_id,
+            )
+            return True
+
+        return False
+
+    # end method definition
+
+    def add_partition(self, name: str, description: str) -> dict | None:
+        """Add a new user partition to OTDS.
+
+        Args:
+            name (str):
+                The name of the new partition.
+            description (str):
+                The description of the new partition.
+
+        Returns:
+            dict | None:
+                Request response or None if the creation fails.
+
         """
 
         partition_post_body_json = {"name": name, "description": description}
 
         request_url = self.partition_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding user partition -> '%s' (%s); calling -> %s",
             name,
             description,
@@ -696,19 +1103,28 @@ class OTDS:
     # end method definition
 
     def get_partition(self, name: str, show_error: bool = True) -> dict | None:
-        """Get an existing user partition from OTDS
+        """Get an existing user partition from OTDS.
 
         Args:
-            name (str): name of the partition to retrieve
-            show_error (bool, optional): whether or not we want to log an error
-                                         if partion is not found
+            name (str):
+                The name of the partition to retrieve.
+            show_error (bool, optional):
+                Defines whether or not we want to log an error
+                if the partition is not found.
+
         Returns:
-            dict: Request response or None if the REST call fails.
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         request_url = "{}/{}".format(self.config()["partitionUrl"], name)
 
-        logger.debug("Get user partition -> '%s'; calling -> %s", name, request_url)
+        self.logger.debug(
+            "Get user partition -> '%s'; calling -> %s",
+            name,
+            request_url,
+        )
 
         return self.do_request(
             url=request_url,
@@ -729,17 +1145,26 @@ class OTDS:
         last_name: str = "",
         email: str = "",
     ) -> dict | None:
-        """Add a new user to a user partition in OTDS
+        """Add a new user to a user partition in OTDS.
 
         Args:
-            partition (str): name of the OTDS user partition (needs to exist)
-            name (str): login name of the new user
-            description (str, optional): description of the new user
-            first_name (str, optional): first name of the new user
-            last_name (str, optional): last name of the new user
-            email (str, optional): email address of the new user
+            partition (str):
+                The name of the OTDS user partition (needs to exist).
+            name (str):
+                The login name of the new user.
+            description (str, optional):
+                The description of the new user. Default is empty string.
+            first_name (str, optional):
+                The optional first name of the new user.
+            last_name (str, optional):
+                The optional last name of the new user.
+            email (str, optional):
+                The email address of the new user.
+
         Returns:
-            dict: Request response or None if the creation fails.
+            dict | None:
+                Request response or None if the creation fails.
+
         """
 
         user_post_body_json = {
@@ -755,13 +1180,13 @@ class OTDS:
 
         request_url = self.users_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding user -> '%s' to partition -> '%s'; calling -> %s",
             name,
             partition,
             request_url,
         )
-        logger.debug("User Attributes -> %s", str(user_post_body_json))
+        self.logger.debug("User Attributes -> %s", str(user_post_body_json))
 
         return self.do_request(
             url=request_url,
@@ -774,18 +1199,23 @@ class OTDS:
     # end method definition
 
     def get_user(self, partition: str, user_id: str) -> dict | None:
-        """Get a user by its partition and user ID
+        """Get an existing user by its partition and user ID.
 
         Args:
-            partition (str): name of the partition
-            user_id (str): ID of the user (= login name)
+            partition (str):
+                The name of the partition the user is in.
+            user_id (str):
+                The ID of the user (= login name).
+
         Returns:
-            dict: Request response or None if the user was not found.
+            dict | None:
+                Request response or None if the user was not found.
+
         """
 
         request_url = self.users_url() + "/" + user_id + "@" + partition
 
-        logger.debug(
+        self.logger.debug(
             "Get user -> '%s' in partition -> '%s'; calling -> %s",
             user_id,
             partition,
@@ -801,22 +1231,141 @@ class OTDS:
 
     # end method definition
 
-    def get_users(self, partition: str = "", limit: int | None = None) -> dict | None:
-        """Get all users in a partition partition
+    def get_users(
+        self,
+        partition: str = "",
+        where_filter: str | None = None,
+        where_location: str | None = None,
+        where_state: str | None = None,
+        limit: int | None = None,
+        page_size: int | None = None,
+        attributes_as_keys: bool = True,
+        next_page_cookie: str | None = None,
+    ) -> dict | None:
+        """Get all users in a partition. Additional filters can be applied.
 
         Args:
-            partition (str, optional): name of the partition
-            limit (int): maximum number of users to return
+            partition (str, optional):
+                The name of the partition.
+            where_filter (str | None, optional):
+                Filter returned users. This is a string filter.
+                If None, no filtering applies.
+            where_location (str | None, optional):
+                Filter based on the DN of the Organizational Unit.
+            where_state (str | None, optional):
+                Filter returned users by their state. Possible values are 'enabled' and 'disabled'.
+                If None, no filtering based on state applies.
+            limit (int, optional):
+                The maximum number of users to return. None = unlimited.
+            page_size (int, optional):
+                The chunk size for the number of users returned by one
+                REST API call. If None, then a default of 250 is used.
+            attributes_as_keys (bool, optional):
+                If True, it creates a much simpler to parse result structure
+                per user that includes the user attributes in a "attributes"
+                dictionary where the keys are the attribute names and the
+                values the attribute values.
+                'attributes': {
+                    'schemaType' = ['3']
+                    'cn' = ['psopentext.com']
+                    ...
+                }
+                If False a "values" list with "name" and "values" elements is created:
+                'values': [
+                        {
+                            'name': 'schemaType',
+                            'values': ['3']
+                        },
+                        {
+                            'name': 'cn',
+                            'values': ['xyz@opentext.com']
+                        },
+                        ...
+                ]
+                Default is True (= attributes as keys).
+            next_page_cookie (str, optional):
+                A key returned by a former call to this method in with
+                a return key 'nextPageCookie' (see example below). This
+                can be used to get the next page of result items.
+
         Returns:
-            dict: Request response or None if the user was not found.
+            dict | None:
+                Request response or None if the user was not found.
+
+        Example:
+        {
+            'actualPageSize': 21,
+            'users': [
+                {
+                    'userPartitionID': 'Content Server Members',
+                    'name': 'ps@opentext.com',
+                    'location': 'oTPerson=04f2d12b-b7aa-4797-b4eb-1b6e6bd5ce2e,orgunit=users,partition=Content Server Members,dc=identity,dc=opentext,dc=net',
+                    'id': 'ps@opentext.com',
+                    'attributes': {
+                        'oTExternalID3': ['ps@opentext.com'],
+                        'entryUUID': ['04f2d12b-b7aa-4797-b4eb-1b6e6bd5ce2e'],
+                        'oTExternalID4': ['Content Server Membersps@opentext.com'],
+                        'mail': ['ps@opentext.com'],
+                        'displayName': ['Paul Smith'],
+                        'oTMemberOf': ['oTGroup=6381fcfe-7b30-4bbb-b849-2cbd8f3a0a48,dc=identity,dc=opentext,dc=net'],
+                        'description': ['test description'],
+                        'title': ['Lead Systems Analyst'],
+                        'oTExternalID1': ['ps@opentext.com'],
+                        'modifyTimestamp': ['2025-01-24T10:19:22Z'],
+                        'oTExternalID2': ['ps@opentext.com@Content Server Members'],
+                        'createTimestamp': ['2025-01-24T10:18:53Z'],
+                        'passwordChangedTime': ['2025-01-24T10:18:53Z'],
+                        'UserMustChangePasswordAtNextSignIn': ['false'],
+                        'sn': ['Smith'],
+                        'entryDN': ['oTPerson=04f2d12b-b7aa-4797-b4eb-1b6e6bd5ce2e,orgunit=users,partition=Content Server Members,dc=identity,dc=opentext,dc=net'],
+                        'oTObjectGUID': ['BPLRK7eqR5e06xtua9XOLg=='],
+                        'UserCannotChangePassword': ['true'],
+                        'oTLastLoginTimestamp': ['2025-01-24T10:19:21Z'],
+                        'oTSource': ['cs'],
+                        'PasswordNeverExpires': ['true'],
+                        'givenName': ['Paul'],
+                        'cn': ['ps@opentext.com'],
+                        'pwdReset': ['true'],
+                        'oTObjectIDInResource': ['3b461d9f-ed1d-4be3-859a-316d8eb35aa5:6650'],
+                        'accountLockedOut': ['false'],
+                        'schemaType': ['3'],
+                        'accountDisabled': ['false']
+                    }
+                    'values': [], # empty because this example is with attrAsKeys = True
+                    'customAttributes': None,
+                    'objectClass': 'oTPerson',
+                    'uuid': '04f2d12b-b7aa-4797-b4eb-1b6e6bd5ce2e',
+                    'description': 'test description',
+                    'originUUID': None,
+                    'urlId': 'xyz@opentext.com',
+                    'urlLocation': 'oTPerson=04f2d12b-b7aa-4797-b4eb-1b6e6bd5ce2e,orgunit=users,partition=Content Server Members,dc=identity,dc=opentext,dc=net'
+                },
+                ...
+            ],
+            'nextPageCookie': 'JIHw2CLHSoeTOmo7Ng/bPw==',
+            'requestedPageSize': 250
+        }
+
         """
 
         # Add query parameters (these are NOT passed via JSon body!)
         query = {}
-        if limit:
-            query["limit"] = limit
         if partition:
             query["where_partition_name"] = partition
+        if where_filter:
+            query["where_filter"] = where_filter
+        if where_location:
+            query["where_location"] = where_location
+        if where_state:
+            query["where_state"] = where_state
+        if limit:
+            query["limit"] = limit
+        if page_size:
+            query["page_size"] = page_size
+        if attributes_as_keys:
+            query["attrsAsKeys"] = attributes_as_keys
+        if next_page_cookie:
+            query["next_page_cookie"] = next_page_cookie
 
         encoded_query = urllib.parse.urlencode(query, doseq=True)
 
@@ -825,17 +1374,17 @@ class OTDS:
             request_url += "?{}".format(encoded_query)
 
         if partition:
-            logger.debug(
+            self.logger.debug(
                 "Get all users in partition -> '%s' (limit -> %s); calling -> %s",
                 partition,
                 limit,
                 request_url,
             )
             failure_message = "Failed to get all users in partition -> '{}'".format(
-                partition
+                partition,
             )
         else:
-            logger.debug(
+            self.logger.debug(
                 "Get all users (limit -> %s); calling -> %s",
                 limit,
                 request_url,
@@ -843,23 +1392,140 @@ class OTDS:
             failure_message = "Failed to get all users"
 
         return self.do_request(
-            url=request_url, method="GET", timeout=None, failure_message=failure_message
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message=failure_message,
+        )
+
+    # end method definition
+
+    def get_users_iterator(
+        self,
+        partition: str = "",
+        where_state: str | None = None,
+        where_filter: str | None = None,
+        where_location: str | None = None,
+        page_size: int | None = None,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all members for a given users partition.
+
+        Filters such as user state, location, etc. can be applied.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of related workspaces.
+
+        Example usage:
+            users = otds_object.get_users_iterator(partition="Content Server Members", page_size=10)
+            for user in users:
+                logger.info("Traversing user -> %s", user["name"])
+
+        Args:
+            partition (str, optional):
+                The name of the partition.
+            where_filter (str | None, optional):
+                Filter returned users. This is a string filter.
+                If None, no filtering applies.
+            where_location (str | None, optional):
+                Filter based on the DN of the Organizational Unit.
+            where_state (str | None, optional):
+                Filter returned users by their state. Possible values are 'enabled' and 'disabled'.
+                If None, no filtering based on state applies.
+            page_size (int, optional):
+                The chunk size for the number of users returned by one
+                REST API call. If None, then a default of 250 is used.
+            next_page_cookie (str, optional):
+                A key returned by a former call to this method in with
+                a return key 'nextPageCookie' (see example below). This
+                can be used to get the next page of result items.
+
+        Returns:
+            iter:
+                A generator yielding one OTDS user per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_cookie = None
+
+        while True:
+            response = self.get_users(
+                partition=partition,
+                where_filter=where_filter,
+                where_location=where_location,
+                where_state=where_state,
+                page_size=page_size,
+                next_page_cookie=next_page_cookie,
+            )
+            if not response or "users" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield users one at a time:
+            yield from response["users"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_cookie = response["nextPageCookie"]
+            if not next_page_cookie:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+    # end method definition
+
+    def get_current_user(self) -> dict | None:
+        """Get the currently logged in user.
+
+        Returns:
+            dict | None:
+                Request response or None if the user was not found.
+
+        """
+
+        request_url = self.current_user_url()
+
+        self.logger.debug(
+            "Get current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get current user",
         )
 
     # end method definition
 
     def update_user(
-        self, partition: str, user_id: str, attribute_name: str, attribute_value: str
+        self,
+        partition: str,
+        user_id: str,
+        attribute_name: str,
+        attribute_value: str,
     ) -> dict | None:
-        """Update a user attribute with a new value
+        """Update a user attribute with a new value.
 
         Args:
-            partition (str): name of the partition
-            user_id (str): ID of the user (= login name)
-            attribute_name (str): name of the attribute
-            attribute_value (str): new value of the attribute
-        Return:
-            dict: Request response or None if the update fails.
+            partition (str):
+                The name of the partition the user is in.
+            user_id (str):
+                The ID of the user (= login name).
+            attribute_name (str):
+                The name of the attribute.
+            attribute_value (str):
+                The new (updated) value of the attribute.
+
+        Returns:
+            dict | None:
+                Request response or None if the update fails.
+
         """
 
         if attribute_name in ["description"]:
@@ -875,7 +1541,7 @@ class OTDS:
 
         request_url = self.users_url() + "/" + user_id
 
-        logger.debug(
+        self.logger.debug(
             "Update user -> '%s' attribute -> '%s' to value -> '%s'; calling -> %s",
             user_id,
             attribute_name,
@@ -894,18 +1560,23 @@ class OTDS:
     # end method definition
 
     def delete_user(self, partition: str, user_id: str) -> bool:
-        """Delete an existing user
+        """Delete an existing user.
 
         Args:
-            partition (str): name of the partition
-            user_id (str): Id (= login name) of the user
+            partition (str):
+                The name of the partition the user is in.
+            user_id (str):
+                The ID (= login name) of the user to delete.
+
         Returns:
-            bool: True = success, False = error
+            bool:
+                True = success, False = error
+
         """
 
         request_url = self.users_url() + "/" + user_id + "@" + partition
 
-        logger.debug(
+        self.logger.debug(
             "Delete user -> '%s' in partition -> '%s'; calling -> %s",
             user_id,
             partition,
@@ -920,29 +1591,33 @@ class OTDS:
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        bool(response and response.ok)
 
     # end method definition
 
     def reset_user_password(self, user_id: str, password: str) -> bool:
-        """Reset a password of an existing user
+        """Reset a password of an existing user.
 
         Args:
-            user_id (str): Id (= login name) of the user
-            password (str): new password of the user
+            user_id (str):
+                The Id (= login name) of the user.
+            password (str):
+                The new password of the user.
+
         Returns:
-            bool: True = success, False = error.
+            bool:
+                True = success, False = error.
+
         """
 
         user_post_body_json = {"newPassword": password}
 
         request_url = "{}/{}/password".format(self.users_url(), user_id)
 
-        logger.debug(
-            "Resetting password for user -> '%s'; calling -> %s", user_id, request_url
+        self.logger.debug(
+            "Resetting password for user -> '%s'; calling -> %s",
+            user_id,
+            request_url,
         )
 
         response = self.do_request(
@@ -954,22 +1629,25 @@ class OTDS:
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        bool(response and response.ok)
 
     # end method definition
 
     def add_group(self, partition: str, name: str, description: str) -> dict | None:
-        """Add a new user group to a user partition in OTDS
+        """Add a new user group to a user partition in OTDS.
 
         Args:
-            partition (str): name of the OTDS user partition (needs to exist)
-            name (str): name of the new group
-            description (str): description of the new group
+            partition (str):
+                The name of the OTDS user partition (needs to exist).
+            name (str):
+                The name of the new group.
+            description (str):
+                The description of the new group.
+
         Returns:
-            dict: Request response (json) or None if the creation fails.
+            dict | None:
+                Request response (json) or None if the creation fails.
+
         """
 
         group_post_body_json = {
@@ -980,13 +1658,13 @@ class OTDS:
 
         request_url = self.groups_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding group -> '%s' to partition -> '%s'; calling -> %s",
             name,
             partition,
             request_url,
         )
-        logger.debug("Group Attributes -> %s", str(group_post_body_json))
+        self.logger.debug("Group Attributes -> %s", str(group_post_body_json))
 
         return self.do_request(
             url=request_url,
@@ -999,14 +1677,19 @@ class OTDS:
     # end method definition
 
     def get_group(self, group: str, show_error: bool = True) -> dict | None:
-        """Get a OTDS group by its group name
+        """Get a OTDS group by its group name.
 
         Args:
-            group (str): ID of the group (= group name)
-            show_error (bool, optional): treat as error if resource is not found
-        Return:
-            dict: Request response or None if the group was not found.
-            Example values:
+            group (str):
+                The ID of the group (= group name).
+            show_error (bool, optional):
+                If True, log an error if resource is not found. Otherwise log a warning.
+
+        Returns:
+            dict | None:
+                Request response or None if the group was not found.
+
+        Example:
             {
                 'numMembers': 7,
                 'userPartitionID': 'Content Server Members',
@@ -1022,11 +1705,12 @@ class OTDS:
                 'urlId': 'Sales@Content Server Members',
                 'urlLocation': 'oTGroup=3f921294-b92a-4c9e-bf7c-b50df16bb937,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net'
             }
+
         """
 
         request_url = self.groups_url() + "/" + group
 
-        logger.debug("Get group -> '%s'; calling -> %s", group, request_url)
+        self.logger.debug("Get group -> '%s'; calling -> %s", group, request_url)
 
         return self.do_request(
             url=request_url,
@@ -1038,21 +1722,275 @@ class OTDS:
 
     # end method definition
 
-    def add_user_to_group(self, user: str, group: str) -> bool:
-        """Add an existing user to an existing group in OTDS
+    def get_groups(
+        self,
+        partition: str = "",
+        where_filter: str | None = None,
+        where_location: str | None = None,
+        limit: int | None = None,
+        page_size: int | None = None,
+        attributes_as_keys: bool = True,
+        next_page_cookie: str | None = None,
+    ) -> dict | None:
+        """Get all groups in a partition. Additional filters can be applied.
 
         Args:
-            user (str): name of the OTDS user (needs to exist)
-            group (str): name of the OTDS group (needs to exist)
+            partition (str, optional):
+                The name of the partition.
+            where_filter (str | None, optional):
+                Filter returned groups. This is a string filter.
+                If None, no filtering applies.
+            where_location (str | None, optional):
+                Filter based on the DN of the Organizational Unit.
+            limit (int, optional):
+                The maximum number of groups to return. None = unlimited.
+            page_size (int, optional):
+                The chunk size for the number of groups returned by one
+                REST API call. If None, then a default of 250 is used.
+            attributes_as_keys (bool, optional):
+                If True, it creates a much simpler to parse result structure
+                per group that includes the group attributes in a "attributes"
+                dictionary where the keys are the attribute names and the
+                values the attribute values.
+                'attributes': {
+                    'schemaType' = ['3']
+                    'cn' = [...]
+                    ...
+                }
+                If False a "values" list with "name" and "values" elements is created:
+                'values': [
+                        {
+                            'name': 'schemaType',
+                            'values': ['3']
+                        },
+                        {
+                            'name': 'cn',
+                            'values': ['...']
+                        },
+                        ...
+                ]
+                Default is True (= attributes as keys).
+            next_page_cookie (str, optional):
+                A key returned by a former call to this method in with
+                a return key 'nextPageCookie' (see example below). This
+                can be used to get the next page of result items.
+
         Returns:
-            bool: True, if request is successful, False otherwise.
+            dict | None:
+                Request response or None if the user was not found.
+
+        Example:
+        {
+            'groups': [
+                {
+                    'numMembers': 0,
+                    'userPartitionID': 'Content Server Members',
+                    'name': 'Unified_ArchiveLink',
+                    'location': 'oTGroup=050a3c27-7636-4406-a94e-dcc4947fa21f,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net',
+                    'id': 'Unified_ArchiveLink@Content Server Members',
+                    'attributes': {
+                        'oTExternalID3': [...],
+                        'entryUUID': [...],
+                        'oTExternalID4': [...],
+                        'oTObjectIDInResource': [...],
+                        'oTSource': [...],
+                        'schemaType': [...],
+                        'cn': [...],
+                        'oTObjectGUID': [...],
+                        'oTExternalID1': [...],
+                        'entryDN': [...],
+                        'oTExternalID2': [...],
+                        'createTimestamp': [...]
+                    },
+                    'values': None,
+                    'customAttributes': None,
+                    'objectClass': 'oTGroup',
+                    'uuid': '050a3c27-7636-4406-a94e-dcc4947fa21f',
+                    'description': None,
+                    'originUUID': None,
+                    'urlId': 'Unified_ArchiveLink@Content Server Members',
+                    'urlLocation': 'oTGroup=050a3c27-7636-4406-a94e-dcc4947fa21f,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net'
+                },
+                {
+                    'numMembers': 0,
+                    'userPartitionID': 'Content Server Members',
+                    'name': 'R&D',
+                    'location': 'oTGroup=24356f83-5636-47f0-9ac3-9646d3b34804,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net',
+                    'id': 'R&D@Content Server Members',
+                    'attributes': {
+                        'oTExternalID3': [...],
+                        'entryUUID': [...],
+                        'oTExternalID4': [...],
+                        'oTObjectIDInResource': [...],
+                        'oTSource': [...],
+                        'schemaType': [...],
+                        'cn': [...],
+                        'oTObjectGUID': [...],
+                        'oTExternalID1': [...],
+                        'entryDN': [...],
+                        'oTExternalID2': [...],
+                        'createTimestamp': [...]
+                    },
+                    'values': None,
+                    'customAttributes': None,
+                    'objectClass': 'oTGroup',
+                    'uuid': '24356f83-5636-47f0-9ac3-9646d3b34804',
+                    'description': None,
+                    'originUUID': None,
+                    'urlId': 'R&D@Content Server Members',
+                    'urlLocation': 'oTGroup=24356f83-5636-47f0-9ac3-9646d3b34804,orgunit=groups,partition=Content Server Members,dc=identity,dc=opentext,dc=net'
+                },
+                ...
+            ],
+            'actualPageSize': 5,
+            'nextPageCookie': 'JIHw2CLHSoeTOmo7Ng/bPw==',
+            'requestedPageSize': 5
+        }
+
+        """
+
+        # Add query parameters (these are NOT passed via request body!)
+        query = {}
+        if partition:
+            query["where_partition_name"] = partition
+        if where_filter:
+            query["where_filter"] = where_filter
+        if where_location:
+            query["where_location"] = where_location
+        if limit:
+            query["limit"] = limit
+        if page_size:
+            query["page_size"] = page_size
+        if attributes_as_keys:
+            query["attrsAsKeys"] = attributes_as_keys
+        if next_page_cookie:
+            query["next_page_cookie"] = next_page_cookie
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.groups_url()
+        if query:
+            request_url += "?{}".format(encoded_query)
+
+        if partition:
+            self.logger.debug(
+                "Get all groups in partition -> '%s' (limit -> %s, page size -> %s); calling -> %s",
+                partition,
+                str(limit),
+                str(page_size),
+                request_url,
+            )
+            failure_message = "Failed to get all groups in partition -> '{}'".format(
+                partition,
+            )
+        else:
+            self.logger.debug(
+                "Get all groups (limit -> %s); calling -> %s",
+                limit,
+                request_url,
+            )
+            failure_message = "Failed to get all groups"
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message=failure_message,
+        )
+
+    # end method definition
+
+    def get_groups_iterator(
+        self,
+        partition: str = "",
+        where_filter: str | None = None,
+        where_location: str | None = None,
+        page_size: int | None = None,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all groups for a given users partition.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of related workspaces.
+
+        Example usage:
+            groups = otds_object.get_groups_iterator(partition="Content Server Members", page_size=10)
+            for group in groups:
+                logger.info("Traversing group -> %s", group["name"])
+
+        Args:
+            partition (str, optional):
+                The name of the partition.
+            where_filter (str | None, optional):
+                Filter returned groups. This is a string filter.
+                If None, no filtering applies.
+            where_location (str | None, optional):
+                Filter based on the DN of the Organizational Unit.
+            page_size (int, optional):
+                The chunk size for the number of groups returned by one
+                REST API call. If None, then a default of 250 is used.
+            next_page_cookie (str, optional):
+                A key returned by a former call to this method in with
+                a return key 'nextPageCookie' (see example below). This
+                can be used to get the next page of result items.
+
+        Returns:
+            iter:
+                A generator yielding one OTDS group per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_cookie = None
+
+        while True:
+            response = self.get_groups(
+                partition=partition,
+                where_filter=where_filter,
+                where_location=where_location,
+                page_size=page_size,
+                next_page_cookie=next_page_cookie,
+            )
+            if not response or "groups" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield users one at a time:
+            yield from response["groups"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_cookie = response["nextPageCookie"]
+            if not next_page_cookie:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+    # end method definition
+
+    def add_user_to_group(self, user: str, group: str) -> bool:
+        """Add an existing user to an existing group in OTDS.
+
+        Args:
+            user (str):
+                The name of the OTDS user (needs to exist).
+            group (str):
+                The name of the OTDS group (needs to exist).
+
+        Returns:
+            bool:
+                True, if the request is successful, False otherwise.
+
         """
 
         user_to_group_post_body_json = {"stringList": [group]}
 
         request_url = self.users_url() + "/" + user + "/memberof"
 
-        logger.debug(
+        self.logger.debug(
             "Adding user -> '%s' to group -> '%s'; calling -> %s",
             user,
             group,
@@ -1066,33 +2004,36 @@ class OTDS:
             json_data=user_to_group_post_body_json,
             timeout=None,
             failure_message="Failed to add user -> '{}' to group -> '{}'".format(
-                user, group
+                user,
+                group,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
     def add_group_to_parent_group(self, group: str, parent_group: str) -> bool:
-        """Add an existing group to an existing parent group in OTDS
+        """Add an existing group to an existing parent group in OTDS.
 
         Args:
-            group (str): name of the OTDS group (needs to exist)
-            parent_group (str): name of the OTDS parent group (needs to exist)
+            group (str):
+                The name of the OTDS group (needs to exist).
+            parent_group (str):
+                The name of the OTDS parent group (needs to exist).
+
         Returns:
-            bool: True, if request is successful, False otherwise.
+            bool:
+                True, if the request is successful, False otherwise.
+
         """
 
         group_to_parent_group_post_body_json = {"stringList": [parent_group]}
 
         request_url = self.groups_url() + "/" + group + "/memberof"
 
-        logger.debug(
+        self.logger.debug(
             "Adding group -> '%s' to parent group -> '%s'; calling -> %s",
             group,
             parent_group,
@@ -1106,15 +2047,13 @@ class OTDS:
             json_data=group_to_parent_group_post_body_json,
             timeout=None,
             failure_message="Failed to add group -> '{}' to parent group -> '{}'".format(
-                group, parent_group
+                group,
+                parent_group,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -1128,15 +2067,29 @@ class OTDS:
         secret: str | None = None,  # needs to be 16 bytes!
         additional_payload: dict | None = None,
     ) -> dict | None:
-        """Add an OTDS resource
+        """Add an OTDS resource.
 
         Args:
-            name (str): name of the new OTDS resource
-            description (str): description of the new OTDS resource
-            display_name (str): display name of the OTDS resource
-            additional_payload (dict, optional): additional values for the json payload
+            name (str):
+                The name of the new OTDS resource.
+            description (str):
+                The optional description of the new OTDS resource.
+            display_name (str, optional):
+                The optional display name of the OTDS resource.
+            allow_impersonation (bool):
+                Defines whether or not the resource allows impersonation.
+            resource_id (str | None, optional):
+                Allows to set a predefined resource ID. This requires the
+                secret parameter in additon.
+            secret (str):
+                A 24 charcters secret key. Required to set a predefined resource ID.
+            additional_payload (dict, optional):
+                Additional values for the JSON payload.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails.
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
         resource_post_body = {
@@ -1147,8 +2100,8 @@ class OTDS:
         }
 
         if resource_id and not secret:
-            logger.error(
-                "A resource ID can only be specified if a secret value is also provided!"
+            self.logger.error(
+                "A resource ID can only be specified if a secret value is also provided!",
             )
             return None
 
@@ -1156,8 +2109,8 @@ class OTDS:
             resource_post_body["resourceID"] = resource_id
         if secret:
             if len(secret) != 24 or not secret.endswith("=="):
-                logger.warning(
-                    "The secret should by 24 characters long and should end with '=='"
+                self.logger.warning(
+                    "The secret should by 24 characters long and should end with '=='",
                 )
             resource_post_body["secretKey"] = secret
 
@@ -1168,7 +2121,7 @@ class OTDS:
 
         request_url = self.config()["resourceUrl"]
 
-        logger.debug(
+        self.logger.debug(
             "Adding resource -> '%s' ('%s'); calling -> %s",
             name,
             description,
@@ -1186,15 +2139,19 @@ class OTDS:
     # end method definition
 
     def get_resource(self, name: str, show_error: bool = False) -> dict | None:
-        """Get an existing OTDS resource
+        """Get an existing OTDS resource.
 
         Args:
-            name (str): name of the new OTDS resource
-            show_error (bool, optional): treat as error if resource is not found
-        Returns:
-            dict: Request response or None if the REST call fails.
+            name (str):
+                The name of the new OTDS resource.
+            show_error (bool, optional):
+                If True, log an error if resource is not found. Else log just a warning.
 
-            Example:
+        Returns:
+            dict | None:
+                Request response or None if the REST call fails.
+
+        Example:
             {
                 'resourceName': 'cs',
                 'id': 'cs',
@@ -1223,11 +2180,12 @@ class OTDS:
                 'logonStyle': None,
                 'logonUXVersion': 0
             }
+
         """
 
         request_url = "{}/{}".format(self.config()["resourceUrl"], name)
 
-        logger.debug("Get resource -> '%s'; calling -> %s", name, request_url)
+        self.logger.debug("Get resource -> '%s'; calling -> %s", name, request_url)
 
         return self.do_request(
             url=request_url,
@@ -1240,21 +2198,30 @@ class OTDS:
     # end method definition
 
     def update_resource(
-        self, name: str, resource: object, show_error: bool = True
+        self,
+        name: str,
+        resource: object,
+        show_error: bool = True,
     ) -> dict | None:
-        """Update an existing OTDS resource
+        """Update an existing OTDS resource.
 
         Args:
-            name (str): name of the new OTDS resource
-            resource (object): updated resource object of get_resource called before
-            show_error (bool, optional): treat as error if resource is not found
+            name (str):
+                The name of the OTDS resource to update.
+            resource (object):
+                updated resource object of get_resource called before
+            show_error (bool, optional):
+                If True, log an error if resource is not found. Else just log a warning.
+
         Returns:
-            dict: Request response (json) or None if the REST call fails.
+            dict | None:
+                Request response (json) or None if the REST call fails.
+
         """
 
         request_url = "{}/{}".format(self.config()["resourceUrl"], name)
 
-        logger.debug("Updating resource -> '%s'; calling -> %s", name, request_url)
+        self.logger.debug("Updating resource -> '%s'; calling -> %s", name, request_url)
 
         return self.do_request(
             url=request_url,
@@ -1268,20 +2235,26 @@ class OTDS:
     # end method definition
 
     def activate_resource(self, resource_id: str) -> dict | None:
-        """Activate an OTDS resource
+        """Activate an OTDS resource.
 
         Args:
-            resource_id (str): ID of the OTDS resource
+            resource_id (str):
+                The ID of the OTDS resource to update.
+
         Returns:
-            dict: Request response (json) or None if the REST call fails.
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         resource_post_body_json = {}
 
         request_url = "{}/{}/activate".format(self.config()["resourceUrl"], resource_id)
 
-        logger.debug(
-            "Activating resource -> '%s'; calling -> %s", resource_id, request_url
+        self.logger.debug(
+            "Activating resource -> '%s'; calling -> %s",
+            resource_id,
+            request_url,
         )
 
         return self.do_request(
@@ -1295,17 +2268,20 @@ class OTDS:
     # end method definition
 
     def get_access_roles(self) -> dict | None:
-        """Get a list of all OTDS access roles
+        """Get a list of all OTDS access roles.
 
         Args:
             None
+
         Returns:
-            dict: Request response or None if the REST call fails.
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         request_url = self.config()["accessRoleUrl"]
 
-        logger.debug("Retrieving access roles; calling -> %s", request_url)
+        self.logger.debug("Retrieving access roles; calling -> %s", request_url)
 
         return self.do_request(
             url=request_url,
@@ -1317,17 +2293,25 @@ class OTDS:
     # end method definition
 
     def get_access_role(self, access_role: str) -> dict | None:
-        """Get an OTDS access role
+        """Get an OTDS access role.
 
         Args:
-            name (str): name of the access role
+            access_role (str):
+                The name of the access role.
+
         Returns:
-            dict: Request response (json) or None if the REST call fails.
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         request_url = self.config()["accessRoleUrl"] + "/" + access_role
 
-        logger.debug("Get access role -> '%s'; calling -> %s", access_role, request_url)
+        self.logger.debug(
+            "Get access role -> '%s'; calling -> %s",
+            access_role,
+            request_url,
+        )
 
         return self.do_request(
             url=request_url,
@@ -1339,29 +2323,39 @@ class OTDS:
     # end method definition
 
     def add_partition_to_access_role(
-        self, access_role: str, partition: str, location: str = ""
+        self,
+        access_role: str,
+        partition: str,
+        location: str = "",
     ) -> bool:
-        """Add an OTDS partition to an OTDS access role
+        """Add an OTDS partition to an OTDS access role.
 
         Args:
-            access_role (str): name of the OTDS access role
-            partition (str): name of the partition
-            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
-                                      most of the times you will want to keep it to empty string ("")
+            access_role (str):
+                The name of the OTDS access role.
+            partition (str):
+                The name of the partition.
+            location (str, optional):
+                This is kind of a unique identifier DN (Distinguished Name)
+                most of the times you will want to keep it to empty string ("")
+
         Returns:
-            bool: True if partition is in access role or has been successfully added.
-                  False if partition has been not been added (error)
+            bool:
+                True if partition is in access role or has been successfully added.
+                False if partition has been not been added (error)
+
         """
 
         access_role_post_body_json = {
-            "userPartitions": [{"name": partition, "location": location}]
+            "userPartitions": [{"name": partition, "location": location}],
         }
 
         request_url = "{}/{}/members".format(
-            self.config()["accessRoleUrl"], access_role
+            self.config()["accessRoleUrl"],
+            access_role,
         )
 
-        logger.debug(
+        self.logger.debug(
             "Add user partition -> '%s' to access role -> '%s'; calling -> %s",
             partition,
             access_role,
@@ -1374,31 +2368,38 @@ class OTDS:
             json_data=access_role_post_body_json,
             timeout=None,
             failure_message="Failed to add partition -> '{}' to access role -> '{}'".format(
-                partition, access_role
+                partition,
+                access_role,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
     def add_user_to_access_role(
-        self, access_role: str, user_id: str, location: str = ""
+        self,
+        access_role: str,
+        user_id: str,
+        location: str = "",
     ) -> bool:
-        """Add an OTDS user to an OTDS access role
+        """Add an OTDS user to an OTDS access role.
 
         Args:
-            access_role (str): name of the OTDS access role
-            user_id (str): ID of the user (= login name)
-            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
-                                      most of the times you will want to keep it to empty string ("")
+            access_role (str):
+                The name of the OTDS access role.
+            user_id (str):
+                The ID of the user (= login name) to add to the access role.
+            location (str, optional):
+                This is kind of a unique identifier DN (Distinguished Name)
+                most of the times you will want to keep it to empty string ("").
+
         Returns:
-            bool: True if user is in access role or has been successfully added.
-                  False if user has not been added (error)
+            bool:
+                True if user is in access role or has been successfully added.
+                False if user has not been added (error).
+
         """
 
         # get existing members to check if user is already a member:
@@ -1407,17 +2408,17 @@ class OTDS:
             return False
 
         # Checking if user already added to access role
-        accessRoleUsers = access_roles_get_response["accessRoleMembers"]["users"]
-        for user in accessRoleUsers:
+        access_role_users = access_roles_get_response["accessRoleMembers"]["users"]
+        for user in access_role_users:
             if user["displayName"] == user_id:
-                logger.debug(
+                self.logger.debug(
                     "User -> '%s' already added to access role -> '%s'",
                     user_id,
                     access_role,
                 )
                 return True
 
-        logger.debug(
+        self.logger.debug(
             "User -> '%s' is not yet in access role -> '%s' - adding...",
             user_id,
             access_role,
@@ -1425,14 +2426,15 @@ class OTDS:
 
         # create payload for REST call:
         access_role_post_body_json = {
-            "users": [{"name": user_id, "location": location}]
+            "users": [{"name": user_id, "location": location}],
         }
 
         request_url = "{}/{}/members".format(
-            self.config()["accessRoleUrl"], access_role
+            self.config()["accessRoleUrl"],
+            access_role,
         )
 
-        logger.debug(
+        self.logger.debug(
             "Add user -> %s to access role -> %s; calling -> %s",
             user_id,
             access_role,
@@ -1445,31 +2447,38 @@ class OTDS:
             json_data=access_role_post_body_json,
             timeout=None,
             failure_message="Failed to add user -> '{}' to access role -> '{}'".format(
-                user_id, access_role
+                user_id,
+                access_role,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
     def add_group_to_access_role(
-        self, access_role: str, group: str, location: str = ""
+        self,
+        access_role: str,
+        group: str,
+        location: str = "",
     ) -> bool:
-        """Add an OTDS group to an OTDS access role
+        """Add an OTDS group to an OTDS access role.
 
         Args:
-            access_role (str): name of the OTDS access role
-            group (str): name of the group
-            location (str, optional): this is kind of a unique identifier DN (Distinguished Name)
-                                      most of the times you will want to keep it to empty string ("")
+            access_role (str):
+                The name of the OTDS access role.
+            group (str):
+                The name of the group to add to the access role.
+            location (str, optional):
+                This is kind of a unique identifier DN (Distinguished Name)
+                most of the times you will want to keep it to empty string ("").
+
         Returns:
-            bool: True if group is in access role or has been successfully added.
-                  False if group has been not been added (error)
+            bool:
+                True if group is in access role or has been successfully added.
+                False if group has been not been added (error)
+
         """
 
         # get existing members to check if user is already a member:
@@ -1481,14 +2490,14 @@ class OTDS:
         access_role_groups = access_roles_get_response["accessRoleMembers"]["groups"]
         for access_role_group in access_role_groups:
             if access_role_group["name"] == group:
-                logger.debug(
+                self.logger.debug(
                     "Group -> '%s' already added to access role -> '%s'",
                     group,
                     access_role,
                 )
                 return True
 
-        logger.debug(
+        self.logger.debug(
             "Group -> '%s' is not yet in access role -> '%s' - adding...",
             group,
             access_role,
@@ -1498,10 +2507,11 @@ class OTDS:
         access_role_post_body_json = {"groups": [{"name": group, "location": location}]}
 
         request_url = "{}/{}/members".format(
-            self.config()["accessRoleUrl"], access_role
+            self.config()["accessRoleUrl"],
+            access_role,
         )
 
-        logger.debug(
+        self.logger.debug(
             "Add group -> '%s' to access role -> '%s'; calling -> %s",
             group,
             access_role,
@@ -1514,30 +2524,41 @@ class OTDS:
             json_data=access_role_post_body_json,
             timeout=None,
             failure_message="Failed to add group -> '{}' to access role -> '{}'".format(
-                group, access_role
+                group,
+                access_role,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
     def update_access_role_attributes(
-        self, name: str, attribute_list: list
+        self,
+        name: str,
+        attribute_list: list,
     ) -> dict | None:
-        """Update some attributes of an existing OTDS Access Role
+        """Update some attributes of an existing OTDS access role.
 
         Args:
-            name (str): name of the existing access role
-            attribute_list (list): list of attribute name and attribute value pairs
-                                   The values need to be a list as well. Example:
-                                   [{name: "pushAllGroups", values: ["True"]}]
+            name (str):
+                The name of the existing access role.
+            attribute_list (list):
+                A list of attribute name and attribute value pairs.
+                The values need to be a list as well.
+                Example values:
+                [
+                    {
+                        name: "pushAllGroups",
+                        values: ["True"]
+                    }
+                ]
+
         Returns:
-            dict: Request response (json) or None if the REST call fails.
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         # Return if list is empty:
@@ -1547,14 +2568,14 @@ class OTDS:
         # create payload for REST call:
         access_role = self.get_access_role(name)
         if not access_role:
-            logger.error("Failed to get access role -> '%s'", name)
+            self.logger.error("Failed to get access role -> '%s'", name)
             return None
 
         access_role_put_body_json = {"attributes": attribute_list}
 
         request_url = "{}/{}/attributes".format(self.config()["accessRoleUrl"], name)
 
-        logger.debug(
+        self.logger.debug(
             "Update access role -> '%s' with attributes -> %s; calling -> %s",
             name,
             str(access_role_put_body_json),
@@ -1582,24 +2603,31 @@ class OTDS:
         """Add a product license to an OTDS resource.
 
         Args:
-            path_to_license_file (str): fully qualified filename of the license file
-            product_name (str): product name
-            product_description (str): product description
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            update (bool, optional): whether or not an existing license should be updated (default = True)
+            path_to_license_file (str):
+                A fully qualified filename of the license file.
+            product_name (str):
+                The product name.
+            product_description (str):
+                The product description.
+            resource_id (str):
+                OTDS resource ID (this is ID not the resource name!).
+            update (bool, optional):
+                Whether or not an existing license should be updated (default = True).
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
-        logger.debug("Reading license file -> '%s'...", path_to_license_file)
+        self.logger.debug("Reading license file -> '%s'...", path_to_license_file)
         try:
-            with open(path_to_license_file, "rt", encoding="UTF-8") as license_file:
+            with open(path_to_license_file, encoding="UTF-8") as license_file:
                 license_content = license_file.read()
-        except IOError as exception:
-            logger.error(
-                "Error opening license file -> '%s'; error -> %s",
+        except OSError:
+            self.logger.error(
+                "Error opening license file -> '%s'!",
                 path_to_license_file,
-                exception.strerror,
             )
             return None
 
@@ -1620,14 +2648,14 @@ class OTDS:
             if existing_license:
                 request_url += "/" + existing_license[0]["id"]
             else:
-                logger.debug(
+                self.logger.debug(
                     "No existing license found for resource -> '%s' - adding a new license...",
                     resource_id,
                 )
                 # change strategy to create a new license:
                 update = False
 
-        logger.debug(
+        self.logger.debug(
             "Adding product license -> '%s' for product -> '%s' to resource ->'%s'; calling -> %s",
             path_to_license_file,
             product_description,
@@ -1643,7 +2671,8 @@ class OTDS:
                 json_data=license_post_body_json,
                 timeout=None,
                 failure_message="Failed to update product license -> '{}' for product -> '{}'".format(
-                    path_to_license_file, product_description
+                    path_to_license_file,
+                    product_description,
                 ),
             )
         else:
@@ -1654,43 +2683,45 @@ class OTDS:
                 json_data=license_post_body_json,
                 timeout=None,
                 failure_message="Failed to add product license -> '{}' for product -> '{}'".format(
-                    path_to_license_file, product_description
+                    path_to_license_file,
+                    product_description,
                 ),
             )
 
     # end method definition
 
-    def get_license_for_resource(self, resource_id: str):
+    def get_license_for_resource(self, resource_id: str) -> dict | None:
         """Get a product license for a resource in OTDS.
 
         Args:
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-        Returns:
-            Licenses for a resource or None if the REST call fails
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
 
-        licenses have this format:
-        {
-          '_oTLicenseType': 'NON-PRODUCTION',
-          '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
-          '_oTLicenseResourceName': 'cs',
-          '_oTLicenseProduct': 'EXTENDED_ECM',
-          'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
-          'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
-          'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
-          'description': 'CS license',
-          'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
-        }
+        Returns:
+            dict | None:
+                Licenses for a resource or None if the REST call fails.
+
+        Example:
+            {
+                '_oTLicenseType': 'NON-PRODUCTION',
+                '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
+                '_oTLicenseResourceName': 'cs',
+                '_oTLicenseProduct': 'EXTENDED_ECM',
+                'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
+                'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+                'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+                'description': 'CS license',
+                'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
+            }
+
         """
 
-        request_url = (
-            self.license_url()
-            + "/assignedlicenses?resourceID="
-            + resource_id
-            + "&validOnly=false"
-        )
+        request_url = self.license_url() + "/assignedlicenses?resourceID=" + resource_id + "&validOnly=false"
 
-        logger.debug(
-            "Get license for resource -> %s; calling -> %s", resource_id, request_url
+        self.logger.debug(
+            "Get license for resource -> %s; calling -> %s",
+            resource_id,
+            request_url,
         )
 
         response = self.do_request(
@@ -1698,7 +2729,7 @@ class OTDS:
             method="GET",
             timeout=None,
             failure_message="Failed to get license for resource -> '{}'".format(
-                resource_id
+                resource_id,
             ),
         )
 
@@ -1713,15 +2744,20 @@ class OTDS:
         """Delete a product license for a resource in OTDS.
 
         Args:
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_id (str): OTDS license ID (this is the ID not the license name!)
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_id (str):
+                The OTDS license ID (this is the ID not the license name!).
+
         Returns:
-            bool: True if successful or False if the REST call fails
+            bool:
+                True if successful or False if the REST call fails
+
         """
 
         request_url = "{}/{}".format(self.license_url(), license_id)
 
-        logger.debug(
+        self.logger.debug(
             "Deleting product license -> '%s' from resource -> '%s'; calling -> %s",
             license_id,
             resource_id,
@@ -1733,15 +2769,13 @@ class OTDS:
             method="DELETE",
             timeout=None,
             failure_message="Failed to delete license -> '{}' for resource -> '{}'".format(
-                license_id, resource_id
+                license_id,
+                resource_id,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -1756,27 +2790,53 @@ class OTDS:
     ) -> bool:
         """Assign an OTDS user to a product license (feature) in OTDS.
 
+        licenses have this format:
+        {
+          '_oTLicenseType': 'NON-PRODUCTION',
+          '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
+          '_oTLicenseResourceName': 'cs',
+          '_oTLicenseProduct': 'EXTENDED_ECM',
+          'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
+          'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+          'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+          'description': 'CS license',
+          'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
+        }
+
         Args:
-            partition (str): user partition in OTDS, e.g. "Content Server Members"
-            user_id (str): ID of the user (= login name)
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_feature (str): name of the license feature
-            license_name (str): name of the license to assign
-            license_type (str, optional): deault is "Full", Extended ECM also has "Occasional"
+            partition (str):
+                The user partition in OTDS, e.g. "Content Server Members".
+            user_id (str):
+                The ID of the user (= login name) to assign to the license.
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_feature (str):
+                The name of the license feature.
+            license_name (str):
+                The name of the license to assign.
+            license_type (str, optional):
+                The type of the license. Default is "Full", Extended ECM also has "Occasional".
+
         Returns:
-            bool: True if successful or False if the REST call fails or the license is not found
+            bool:
+                True if successful or False if the REST call fails or the license is not found.
+
         """
 
         licenses = self.get_license_for_resource(resource_id)
+        if not licenses:
+            self.logger.error(
+                "Resource with ID -> '%s' does not exist or has no licenses",
+                resource_id,
+            )
+            return False
 
         for lic in licenses:
             if lic["_oTLicenseProduct"] == license_name:
-                license_location = lic["id"]
-
-        try:
-            license_location
-        except UnboundLocalError:
-            logger.error(
+                license_id = lic["id"]
+                break
+        else:
+            self.logger.error(
                 "Cannot find license -> '%s' for resource -> %s",
                 license_name,
                 resource_id,
@@ -1787,7 +2847,7 @@ class OTDS:
         if user:
             user_location = user["location"]
         else:
-            logger.error("Cannot find location for user -> '%s'", user_id)
+            self.logger.error("Cannot find location for user -> '%s'", user_id)
             return False
 
         license_post_body_json = {
@@ -1797,12 +2857,12 @@ class OTDS:
             "values": [{"name": "counter", "values": [license_feature]}],
         }
 
-        request_url = self.license_url() + "/object/" + license_location
+        request_url = self.license_url() + "/object/" + license_id
 
-        logger.debug(
+        self.logger.debug(
             "Assign license feature -> '%s' of license -> '%s' associated with resource -> '%s' to user -> '%s'; calling -> %s",
             license_feature,
-            license_location,
+            license_id,
             resource_id,
             user_id,
             request_url,
@@ -1814,13 +2874,15 @@ class OTDS:
             json_data=license_post_body_json,
             timeout=None,
             failure_message="Failed to add license feature -> '{}' associated with resource -> '{}' to user -> '{}'".format(
-                license_feature, resource_id, user_id
+                license_feature,
+                resource_id,
+                user_id,
             ),
             parse_request_response=False,
         )
 
         if response and response.ok:
-            logger.debug(
+            self.logger.debug(
                 "Added license feature -> '%s' to user -> '%s'",
                 license_feature,
                 user_id,
@@ -1841,44 +2903,51 @@ class OTDS:
     ) -> bool:
         """Assign an OTDS partition to a product license (feature).
 
+        licenses have this format:
+        {
+          '_oTLicenseType': 'NON-PRODUCTION',
+          '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
+          '_oTLicenseResourceName': 'cs',
+          '_oTLicenseProduct': 'EXTENDED_ECM',
+          'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
+          'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+          'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+          'description': 'CS license',
+          'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
+        }
+
         Args:
-            partition_name (str): user partition in OTDS, e.g. "Content Server Members"
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_feature (str): name of the license feature, e.g. "X2" or "ADDON_ENGINEERING"
-            license_name (str): name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG"
-            license_type (str, optional): deault is "Full", Extended ECM also has "Occasional"
+            partition_name (str):
+                The user partition in OTDS, e.g. "Content Server Members".
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_feature (str):
+                The name of the license feature, e.g. "X2" or "ADDON_ENGINEERING".
+            license_name (str):
+                The name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG".
+            license_type (str, optional):
+                The license type. Default is "Full", Extended ECM also has "Occasional"
+
         Returns:
-            bool: True if successful or False if the REST call fails or the license is not found
+            bool:
+                True if successful or False if the REST call fails or the license is not found.
+
         """
 
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
-            logger.error(
+            self.logger.error(
                 "Resource with ID -> '%s' does not exist or has no licenses",
                 resource_id,
             )
             return False
 
-        # licenses have this format:
-        # {
-        #   '_oTLicenseType': 'NON-PRODUCTION',
-        #   '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
-        #   '_oTLicenseResourceName': 'cs',
-        #   '_oTLicenseProduct': 'EXTENDED_ECM',
-        #   'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
-        #   'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
-        #   'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
-        #   'description': 'CS license',
-        #   'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
-        # }
         for lic in licenses:
             if lic["_oTLicenseProduct"] == license_name:
-                license_location = lic["id"]
-
-        try:
-            license_location
-        except UnboundLocalError:
-            logger.error(
+                license_id = lic["id"]
+                break
+        else:
+            self.logger.error(
                 "Cannot find license -> %s for resource -> %s",
                 license_name,
                 resource_id,
@@ -1892,12 +2961,12 @@ class OTDS:
             "values": [{"name": "counter", "values": [license_feature]}],
         }
 
-        request_url = self.license_url() + "/object/" + license_location
+        request_url = self.license_url() + "/object/" + license_id
 
-        logger.debug(
+        self.logger.debug(
             "Assign license feature -> '%s' of license -> '%s' associated with resource -> '%s' to partition -> '%s'; calling -> %s",
             license_feature,
-            license_location,
+            license_id,
             resource_id,
             partition_name,
             request_url,
@@ -1909,13 +2978,15 @@ class OTDS:
             json_data=license_post_body_json,
             timeout=None,
             failure_message="Failed to add license feature -> '{}' associated with resource -> '{}' to partition -> '{}'".format(
-                license_feature, resource_id, partition_name
+                license_feature,
+                resource_id,
+                partition_name,
             ),
             parse_request_response=False,
         )
 
         if response and response.ok:
-            logger.debug(
+            self.logger.debug(
                 "Added license feature -> '%s' to partition -> '%s'",
                 license_feature,
                 partition_name,
@@ -1932,73 +3003,89 @@ class OTDS:
         license_feature: str,
         license_name: str,
     ) -> dict | None:
-        """Return the licensed objects (users, groups, partitions) in OTDS for a license + license feature
-           associated with an OTDS resource (like "cs").
+        """Return the licensed objects for a license + license feature associated with an OTDS resource (like "cs").
+
+        Licensed objects can be users, groups, or partitions.
+
+        licenses have this format:
+        {
+          '_oTLicenseType': 'NON-PRODUCTION',
+          '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
+          '_oTLicenseResourceName': 'cs',
+          '_oTLicenseProduct': 'EXTENDED_ECM',
+          'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
+          'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+          'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
+          'description': 'CS license',
+          'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
+        }
 
         Args:
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_feature (str): name of the license feature, e.g. "X2" or "ADDON_ENGINEERING"
-            license_name (str): name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG"
-        Returns:
-            dict: data structure of licensed objects
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_feature (str):
+                The name of the license feature, e.g. "X2" or "ADDON_ENGINEERING".
+            license_name (str):
+                The name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG".
 
-            Example return value:
+        Returns:
+            dict | None:
+                The data structure of licensed objects or None in case of an error.
+
+        Example:
             {
                 'status': 0,
                 'displayString': 'Success',
                 'exceptions': None,
                 'retValue': 0,
-                'listGroupsResults': {'groups': [...], 'actualPageSize': 0, 'nextPageCookie': None, 'requestedPageSize': 250},
-                'listUsersResults': {'users': [...], 'actualPageSize': 53, 'nextPageCookie': None, 'requestedPageSize': 250},
-                'listUserPartitionResult': {'_userPartitions': [...], 'warningMessage': None, 'actualPageSize': 0, 'nextPageCookie': None, 'requestedPageSize': 250},
+                'listGroupsResults': {
+                    'groups': [...],
+                    'actualPageSize': 0,
+                    'nextPageCookie': None,
+                    'requestedPageSize': 250
+                },
+                'listUsersResults': {
+                    'users': [...],
+                    'actualPageSize': 53,
+                    'nextPageCookie': None,
+                    'requestedPageSize': 250
+                },
+                'listUserPartitionResult': {
+                    '_userPartitions': [...],
+                    'warningMessage': None,
+                    'actualPageSize': 0,
+                    'nextPageCookie': None,
+                    'requestedPageSize': 250
+                },
                 'version': 1
             }
+
         """
 
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
-            logger.error(
+            self.logger.error(
                 "Resource with ID -> '%s' does not exist or has no licenses",
                 resource_id,
             )
             return False
 
-        # licenses have this format:
-        # {
-        #   '_oTLicenseType': 'NON-PRODUCTION',
-        #   '_oTLicenseResource': '7382094f-a434-4714-9696-82864b6803da',
-        #   '_oTLicenseResourceName': 'cs',
-        #   '_oTLicenseProduct': 'EXTENDED_ECM',
-        #   'name': 'EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da',
-        #   'location': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
-        #   'id': 'cn=EXTENDED_ECM¹7382094f-a434-4714-9696-82864b6803da,ou=Licenses,dc=identity,dc=opentext,dc=net',
-        #   'description': 'CS license',
-        #   'values': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...]
-        # }
         for lic in licenses:
             if lic["_oTLicenseProduct"] == license_name:
                 license_location = lic["location"]
-
-        try:
-            license_location
-        except UnboundLocalError:
-            logger.error(
+                break
+        else:
+            self.logger.error(
                 "Cannot find license -> %s for resource -> %s",
                 license_name,
                 resource_id,
             )
             return False
 
-        request_url = (
-            self.license_url()
-            + "/object/"
-            + license_location
-            + "?counter="
-            + license_feature
-        )
+        request_url = self.license_url() + "/object/" + license_location + "?counter=" + license_feature
 
-        logger.debug(
-            "Get licensed objects for license -> %s and license feature -> %s associated with resource -> %s; calling -> %s",
+        self.logger.debug(
+            "Get licensed objects for license -> '%s' and license feature -> '%s' associated with resource -> '%s'; calling -> %s",
             license_name,
             license_feature,
             resource_id,
@@ -2010,25 +3097,37 @@ class OTDS:
             method="GET",
             timeout=None,
             failure_message="Failed to get licensed objects for license -> '{}' and license feature -> '{}' associated with resource -> '{}'".format(
-                license_name, license_feature, resource_id
+                license_name,
+                license_feature,
+                resource_id,
             ),
         )
 
     # end method definition
 
     def is_user_licensed(
-        self, user_name: str, resource_id: str, license_feature: str, license_name: str
+        self,
+        user_name: str,
+        resource_id: str,
+        license_feature: str,
+        license_name: str,
     ) -> bool:
         """Check if a user is licensed for a license and license feature associated with a particular OTDS resource.
 
         Args:
-            user_name (str): login name of the OTDS user
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_feature (str): name of the license feature, e.g. "X2" or "ADDON_ENGINEERING"
-            license_name (str): name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG"
+            user_name (str):
+                The login name of the OTDS user.
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_feature (str):
+                The name of the license feature, e.g. "X2" or "ADDON_ENGINEERING".
+            license_name (str):
+                The name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG".
 
         Returns:
-            bool: True if the user is licensed and False otherwise
+            bool:
+                True if the user is licensed and False otherwise.
+
         """
 
         response = self.get_licensed_objects(
@@ -2050,26 +3149,33 @@ class OTDS:
             None,
         )
 
-        if user:
-            return True
-
-        return False
+        return bool(user)
 
     # end method definition
 
     def is_group_licensed(
-        self, group_name: str, resource_id: str, license_feature: str, license_name: str
+        self,
+        group_name: str,
+        resource_id: str,
+        license_feature: str,
+        license_name: str,
     ) -> bool:
         """Check if a group is licensed for a license and license feature associated with a particular OTDS resource.
 
         Args:
-            group_name (str): name of the OTDS user group
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_feature (str): name of the license feature, e.g. "X2" or "ADDON_ENGINEERING"
-            license_name (str): name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG"
+            group_name (str):
+                The name of the OTDS user group.
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_feature (str):
+                The name of the license feature, e.g. "X2" or "ADDON_ENGINEERING".
+            license_name (str):
+                The name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG".
 
         Returns:
-            bool: True if the group is licensed and False otherwise
+            bool:
+                True if the group is licensed and False otherwise.
+
         """
 
         response = self.get_licensed_objects(
@@ -2091,10 +3197,7 @@ class OTDS:
             None,
         )
 
-        if group:
-            return True
-
-        return False
+        return bool(group)
 
     # end method definition
 
@@ -2105,16 +3208,22 @@ class OTDS:
         license_feature: str,
         license_name: str,
     ) -> bool:
-        """Check if a partition is licensed for a license and license feature associated with a particular OTDS resource.
+        """Check if a partition is licensed for a license feature associated with a particular OTDS resource.
 
         Args:
-            partition_name (str): name of the OTDS user partition, e.g. "Content Server Members"
-            resource_id (str): OTDS resource ID (this is ID not the resource name!)
-            license_feature (str): name of the license feature, e.g. "X2" or "ADDON_ENGINEERING"
-            license_name (str): name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG"
+            partition_name (str):
+                The name of the OTDS user partition, e.g. "Content Server Members".
+            resource_id (str):
+                The OTDS resource ID (this is ID not the resource name!).
+            license_feature (str):
+                The name of the license feature, e.g. "X2" or "ADDON_ENGINEERING".
+            license_name (str):
+                The name of the license to assign, e.g. "EXTENDED_ECM" or "INTELLGENT_VIEWIMG".
 
         Returns:
-            bool: True if the partition is licensed and False otherwise
+            bool:
+                True if the partition is licensed and False otherwise.
+
         """
 
         response = self.get_licensed_objects(
@@ -2136,124 +3245,117 @@ class OTDS:
             None,
         )
 
-        if partition:
-            return True
-
-        return False
+        return bool(partition)
 
     # end method definition
-    
-    def import_synchronized_partition_members(self, name: str) -> dict:
-        """Import users and groups to partition
+
+    def import_synchronized_partition_members(self, name: str) -> bool:
+        """Import users and groups to partition.
 
         Args:
-            name (str): name of the partition in which users need to be imported
+            name (str):
+                The name of the partition in which users need to be imported.
+
         Returns:
-            dict: Request response or None if the creation fails.
+            bool:
+                True = Success, False = Error.
+
         """
+
         command = {"command": "import"}
-        request_url = self.synchronized_partition_url() + f'/{name}/command'
-        logger.debug(
-            "Importing users and groups in to partition -> %s; calling -> %s",
+        request_url = self.synchronized_partition_url() + f"/{name}/command"
+
+        self.logger.debug(
+            "Importing users and groups into partition -> '%s'; calling -> %s",
             name,
             request_url,
         )
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=command,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.status_code == 204:
-                return True
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to Import users and groups to synchronized partition -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-        
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=command,
+            timeout=None,
+            failure_message="Failed to import users and groups to synchronized partition -> '{}'".format(
+                name,
+            ),
+            parse_request_response=False,
+        )
+
+        return bool(response and response.ok and response.status_code == 204)
+
     # end of method definition
-    
-    def add_synchronized_partition(self, name: str, description: str, data: str) -> dict:
-        """Add a new synchronized partition to OTDS
+
+    def add_synchronized_partition(
+        self,
+        name: str,
+        description: str,
+        data: dict,
+    ) -> dict | None:
+        """Add a new synchronized partition to OTDS.
 
         Args:
-            name (str): name of the new partition
-            description (str): description of the new partition
-            data (dict): data for creating synchronized partition
+            name (str):
+                The name of the new synchronized partition.
+            description (str):
+                The description of the new synchronized partition.
+            data (dict):
+                The data for creating synchronized partition
+
         Returns:
-            dict: Request response or None if the creation fails.
+            dict | None:
+                Request response or None if the creation fails.
+
         """
-        synchronizedPartitionPostBodyJson = {
-                "ipConnectionParameter": [
-                ],
-                "ipAuthentication": {
-                },
-                "objectClassNameMapping": [
-                    
-                ],
-                "basicInfo": {
-                },
-                "basicAttributes": []
+
+        synchronized_partition_post_body_json = {
+            "ipConnectionParameter": [],
+            "ipAuthentication": {},
+            "objectClassNameMapping": [],
+            "basicInfo": {},
+            "basicAttributes": [],
         }
-        synchronizedPartitionPostBodyJson.update(data)
+        synchronized_partition_post_body_json.update(data)
+
         request_url = self.synchronized_partition_url()
-        logger.debug(
-            "Adding synchronized partition -> %s (%s); calling -> %s",
+        self.logger.debug(
+            "Adding synchronized partition -> '%s' ('%s'); calling -> %s",
             name,
             description,
             request_url,
         )
-        synchronizedPartitionPostBodyJson["ipAuthentication"]["bindPassword"] = self.config()["bindPassword"]
-        retries = 0
-        while True:
-            response = requests.post(
-                url=request_url,
-                json=synchronizedPartitionPostBodyJson,
-                headers=REQUEST_HEADERS,
-                cookies=self.cookie(),
-                timeout=None,
-            )
-            if response.ok:
-                return self.parse_request_response(response)
-            # Check if Session has expired - then re-authenticate and try once more
-            elif response.status_code == 401 and retries == 0:
-                logger.debug("Session has expired - try to re-authenticate...")
-                self.authenticate(revalidate=True)
-                retries += 1
-            else:
-                logger.error(
-                    "Failed to add synchronized partition -> %s; error -> %s (%s)",
-                    name,
-                    response.text,
-                    response.status_code,
-                )
-                return None
-        
+        synchronized_partition_post_body_json["ipAuthentication"]["bindPassword"] = self.config()["bindPassword"]
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=synchronized_partition_post_body_json,
+            timeout=None,
+            failure_message="Failed to add synchronized partition -> '{}'".format(name),
+        )
+
     # end of method definition
 
     def add_system_attribute(
-        self, name: str, value: str, description: str = ""
+        self,
+        name: str,
+        value: str,
+        description: str = "",
     ) -> dict | None:
-        """Add a new system attribute to OTDS
+        """Add a new system attribute to OTDS.
 
         Args:
-            name (str): name of the new system attribute
-            value (str): value of the system attribute
-            description (str, optional): optional description of the system attribute
+            name (str):
+                The name of the new system attribute.
+            value (str):
+                The value of the system attribute.
+            description (str, optional):
+                The optional description of the system attribute.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails.
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
         system_attribute_post_body_json = {
@@ -2265,7 +3367,7 @@ class OTDS:
         request_url = "{}/system_attributes".format(self.config()["systemConfigUrl"])
 
         if description:
-            logger.debug(
+            self.logger.debug(
                 "Add system attribute -> '%s' ('%s') with value -> %s; calling -> %s",
                 name,
                 description,
@@ -2273,7 +3375,7 @@ class OTDS:
                 request_url,
             )
         else:
-            logger.debug(
+            self.logger.debug(
                 "Add system attribute -> '%s' with value -> %s; calling -> %s",
                 name,
                 value,
@@ -2286,24 +3388,28 @@ class OTDS:
             json_data=system_attribute_post_body_json,
             timeout=None,
             failure_message="Failed to add system attribute -> '{}' with value -> '{}'".format(
-                name, value
+                name,
+                value,
             ),
         )
 
     # end method definition
 
     def get_trusted_sites(self) -> dict | None:
-        """Get all configured OTDS trusted sites
+        """Get all configured OTDS trusted sites.
 
         Args:
             None
+
         Returns:
-            dict: Request response or None if the REST call fails.
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         request_url = "{}/whitelist".format(self.config()["systemConfigUrl"])
 
-        logger.debug("Get trusted sites; calling -> %s", request_url)
+        self.logger.debug("Get trusted sites; calling -> %s", request_url)
 
         return self.do_request(
             url=request_url,
@@ -2315,12 +3421,16 @@ class OTDS:
     # end method definition
 
     def add_trusted_site(self, trusted_site: str) -> dict | None:
-        """Add a new OTDS trusted site
+        """Add a new OTDS trusted site.
 
         Args:
-            trusted_site (str): name of the new trusted site
-        Return:
-            dict: Request response or None if the REST call fails.
+            trusted_site (str):
+                The name of the new trusted site.
+
+        Returns:
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
         trusted_site_post_body_json = {"stringList": [trusted_site]}
@@ -2331,13 +3441,15 @@ class OTDS:
 
         if existing_trusted_sites:
             trusted_site_post_body_json["stringList"].extend(
-                existing_trusted_sites["stringList"]
+                existing_trusted_sites["stringList"],
             )
 
         request_url = "{}/whitelist".format(self.config()["systemConfigUrl"])
 
-        logger.debug(
-            "Add trusted site -> '%s'; calling -> %s", trusted_site, request_url
+        self.logger.debug(
+            "Add trusted site -> '%s'; calling -> %s",
+            trusted_site,
+            request_url,
         )
 
         response = self.do_request(
@@ -2349,27 +3461,38 @@ class OTDS:
             parse_request_response=False,  # don't parse it!
         )
 
-        if not response.ok:
+        if not response or not response.ok:
             return None
 
         return response
 
     # end method definition
 
-    def enable_audit(self):
-        """enable OTDS Audit
+    def enable_audit(
+        self,
+        enable: bool = True,
+        days_to_keep: int = 7,
+        event_types: list | None = None,
+    ) -> dict | None:
+        """Enable the OTDS Audit.
 
         Args:
-            None
-        Return:
-            Request response (json) or None if the REST call fails.
+            enable (bool, optional):
+                True = enable audit, False = disable audit.
+            days_to_keep (int, optional):
+                Days to keep the audit information. Default = 7 Days.
+            event_types (list, optional):
+                A list of event types to record.
+                If None then a default list will be used.
+
+        Returns:
+            dict | None:
+                Request response or None if the REST call fails.
+
         """
 
-        audit_put_body_json = {
-            "daysToKeep": "7",
-            "enabled": "true",
-            "auditTo": "DATABASE",
-            "eventIDs": [
+        if event_types is None:
+            event_types = [
                 "User Create",
                 "Group Create",
                 "User Delete",
@@ -2417,19 +3540,30 @@ class OTDS:
                 "Tenant Delete",
                 "Tenant Modify",
                 "Migration",
-            ],
+            ]
+
+        audit_put_body_json = {
+            "daysToKeep": str(days_to_keep),
+            "enabled": enable,
+            "auditTo": "DATABASE",
+            "eventIDs": event_types,
         }
 
         request_url = "{}/audit".format(self.config()["systemConfigUrl"])
 
-        logger.debug("Enable audit; calling -> %s", request_url)
+        if enable:
+            self.logger.debug("Enable audit; calling -> %s", request_url)
+            failure_message = "Failed to enable audit"
+        else:
+            self.logger.debug("Disable audit; calling -> %s", request_url)
+            failure_message = "Failed to disable audit"
 
         return self.do_request(
             url=request_url,
             method="PUT",
             json_data=audit_put_body_json,
             timeout=None,
-            failure_message="Failed to enable audit",
+            failure_message=failure_message,
             parse_request_response=False,
         )
 
@@ -2447,21 +3581,33 @@ class OTDS:
         default_scopes: list | None = None,  # in OTDS UI: Default scopes
         secret: str = "",
     ) -> dict | None:
-        """Add a new OAuth client to OTDS
+        """Add a new OAuth client to OTDS.
 
         Args:
-            client_id (str): name of the new OAuth client (should not have blanks)
-            description (str): description of the OAuth client
-            redirect_urls (list): list of redirect URLs (strings)
-            allow_impersonation (bool, optional): allow impresonation
-            confidential (bool, optional): is confidential
-            auth_scopes (list, optional): if empty then "Global"
-            allowed_scopes (list, optional): in OTDS UI this is called Permissible scopes
-            default_scopes (list, optional): in OTDS UI this is called Default scopes
-            secret (str, optional): predefined OAuth client secret. If empty a new secret is generated.
+            client_id (str):
+                The name of the new OAuth client (should not have blanks).
+            description (str):
+                The description of the OAuth client.
+            redirect_urls (list):
+                A list of redirect URLs (strings).
+            allow_impersonation (bool, optional):
+                Whether or not to allow impersonation.
+            confidential (bool, optional):
+                is confidential
+            auth_scopes (list, optional):
+                The authorization scope. If empty then "Global" is assumed.
+            allowed_scopes (list, optional):
+                In the OTDS UI this is called Permissible scopes.
+            default_scopes (list, optional):
+                In the OTDS UI this is called Default scopes.
+            secret (str, optional):
+                Predefined OAuth client secret. If empty a new secret is generated.
+
         Returns:
-            dict: Request response or None if the creation fails.
-            Example:
+            dict | None:
+                Request response or None if the creation fails.
+
+        Example:
             {
                 "description": "string",
                 "redirectURLs": [
@@ -2503,6 +3649,7 @@ class OTDS:
                 "urlId": "string",
                 "urlLocation": "string"
             }
+
         """
 
         # Avoid linter warning W0102:
@@ -2537,7 +3684,7 @@ class OTDS:
 
         request_url = self.oauth_client_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding oauth client -> '%s' (%s); calling -> %s",
             description,
             client_id,
@@ -2555,18 +3702,27 @@ class OTDS:
     # end method definition
 
     def get_oauth_client(self, client_id: str, show_error: bool = True) -> dict | None:
-        """Get an existing OAuth client from OTDS
+        """Get an existing OAuth client from OTDS.
 
         Args:
-            client_id (str): name (= ID) of the OAuth client to retrieve
-            show_error (bool): whether or not we want to log an error if partion is not found
+            client_id (str):
+                The name (= ID) of the OAuth client to retrieve
+            show_error (bool, optional):
+                Whether or not we want to log an error if partion is not found.
+
         Returns:
-            dict: Request response (dictionary) or None if the client is not found.
+            dict | None:
+                Request response (dictionary) or None if the client is not found.
+
         """
 
         request_url = "{}/{}".format(self.oauth_client_url(), client_id)
 
-        logger.debug("Get oauth client -> '%s'; calling -> %s", client_id, request_url)
+        self.logger.debug(
+            "Get oauth client -> '%s'; calling -> %s",
+            client_id,
+            request_url,
+        )
 
         return self.do_request(
             url=request_url,
@@ -2579,22 +3735,26 @@ class OTDS:
     # end method definition
 
     def update_oauth_client(self, client_id: str, updates: dict) -> dict | None:
-        """Updates the OAuth client with new values
+        """Update an OAuth client with new values.
 
         Args:
-            client_id (str): name (= ID) of the OAuth client
-            updates (dict): new values for OAuth client, e.g.
-                            {"description": "this is the new value"}
+            client_id (str):
+                The name (= ID) of the OAuth client.
+            updates (dict):
+                New values for OAuth client, e.g.
+                {"description": "this is the new value"}
 
         Returns:
-            dict: Request response (json) or None if the REST call fails.
+            dict | None:
+                Request response (json) or None if the REST call fails.
+
         """
 
         oauth_client_patch_body_json = updates
 
         request_url = "{}/{}".format(self.oauth_client_url(), client_id)
 
-        logger.debug(
+        self.logger.debug(
             "Update OAuth client -> '%s' with -> %s; calling -> %s",
             client_id,
             str(updates),
@@ -2611,19 +3771,25 @@ class OTDS:
 
     # end method definition
 
-    def add_oauth_clients_to_access_role(self, access_role_name: str):
-        """Add Oauth clients user partion to an OTDS Access Role
+    def add_oauth_clients_to_access_role(self, access_role_name: str) -> dict | None:
+        """Add OAuth clients (in the "OAuthClients" partition) to an OTDS access role.
 
         Args:
-            access_role_name (str): name of the OTDS Access Role
+            access_role_name (str):
+                The name of the OTDS access role.
+
         Returns:
-            response of REST call or None in case of an error
+            dict | None:
+                Response of REST call or None in case of an error.
+
         """
 
         request_url = self.config()["accessRoleUrl"] + "/" + access_role_name
 
-        logger.debug(
-            "Get access role -> '%s'; calling -> %s", access_role_name, request_url
+        self.logger.debug(
+            "Get access role -> '%s'; calling -> %s",
+            access_role_name,
+            request_url,
         )
 
         access_role = self.do_request(
@@ -2631,7 +3797,7 @@ class OTDS:
             method="GET",
             timeout=None,
             failure_message="Failed to retrieve access role -> '{}'".format(
-                access_role_name
+                access_role_name,
             ),
         )
         if not access_role:
@@ -2641,7 +3807,7 @@ class OTDS:
         user_partitions = access_role["accessRoleMembers"]["userPartitions"]
         for user_partition in user_partitions:
             if user_partition["userPartition"] == "OAuthClients":
-                logger.error(
+                self.logger.error(
                     "OAuthClients partition already added to role -> %s",
                     access_role_name,
                 )
@@ -2656,7 +3822,7 @@ class OTDS:
             method="GET",
             timeout=None,
             failure_message="Failed to get partition info for OAuthClients for role -> '{}'".format(
-                access_role_name
+                access_role_name,
             ),
         )
         if not response:
@@ -2671,7 +3837,7 @@ class OTDS:
             "userPartition": None,
         }
         access_role["accessRoleMembers"]["organizationalUnits"].append(
-            oauth_clients_ou_block
+            oauth_clients_ou_block,
         )
 
         return self.do_request(
@@ -2679,7 +3845,7 @@ class OTDS:
             method="PUT",
             timeout=None,
             warning_message="Failed to add OAuthClients to access role -> '{}'".format(
-                access_role_name
+                access_role_name,
             ),
             show_error=False,
             show_warning=True,
@@ -2689,21 +3855,24 @@ class OTDS:
     # end method definition
 
     def get_access_token(self, client_id: str, client_secret: str) -> str | None:
-        """Get the access token
+        """Get the access token.
 
         Args:
-            client_id (str): OAuth client name (= ID)
-            client_secret (str): OAuth client secret. This is typically returned
-                                 by add_oauth_client() method in ["secret"] field
+            client_id (str):
+                The OAuth client name (= ID).
+            client_secret (str):
+                The OAuth client secret. This is typically returned
+                by add_oauth_client() method in ["secret"] field.
 
         Returns:
-            str: access token, or None
+            str | None:
+                The access token, or None in case of an error.
+
         """
 
         encoded_client_secret = "{}:{}".format(client_id, client_secret).encode("utf-8")
-        accessTokenRequestHeaders = {
-            "Authorization": "Basic "
-            + base64.b64encode(encoded_client_secret).decode("utf-8"),
+        access_token_request_headers = {
+            "Authorization": "Basic " + base64.b64encode(encoded_client_secret).decode("utf-8"),
             "Content-Type": "application/x-www-form-urlencoded",
         }
 
@@ -2712,16 +3881,16 @@ class OTDS:
         response = requests.post(
             url=request_url,
             data={"grant_type": "client_credentials"},
-            headers=accessTokenRequestHeaders,
-            timeout=None,
+            headers=access_token_request_headers,
+            timeout=REQUEST_TIMEOUT,
         )
 
         access_token = None
         if response.ok:
-            accessTokenJson = self.parse_request_response(response)
+            access_token = self.parse_request_response(response)
 
-            if "access_token" in accessTokenJson:
-                access_token = accessTokenJson["access_token"]
+            if "access_token" in access_token:
+                access_token = access_token["access_token"]
             else:
                 return None
 
@@ -2733,12 +3902,17 @@ class OTDS:
         """Get the OTDS auth handler with a given name.
 
         Args:
-            name (str): Name of the authentication handler
+            name (str):
+                The name of the authentication handler
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed REST call.
+                If False, then only a warning is logged. Defaults to True.
 
         Returns:
-            dict | None: auth handler dictionary, or None
+            dict | None:
+                The auth handler dictionary, or None in case of an error.
 
-            Example result:
+        Example:
             {
                 '_name': 'Salesforce',
                 '_id': 'Salesforce',
@@ -2775,8 +3949,10 @@ class OTDS:
 
         request_url = "{}/{}".format(self.auth_handler_url(), name)
 
-        logger.debug(
-            "Getting authentication handler -> '%s'; calling -> %s", name, request_url
+        self.logger.debug(
+            "Getting authentication handler -> '%s'; calling -> %s",
+            name,
+            request_url,
         )
 
         return self.do_request(
@@ -2803,26 +3979,40 @@ class OTDS:
         auth_principal_attributes: list | None = None,
         nameid_format: str = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
     ) -> dict | None:
-        """Add a new SAML authentication handler
+        """Add a new SAML authentication handler.
 
         Args:
-            name (str): name of the new authentication handler
-            description (str): description of the new authentication handler
-            scope (str): name of the user partition (to define a scope of the auth handler)
-            provider_name (str): description of the new authentication handler
-            saml_url (str): SAML URL
-            otds_sp_endpoint (str): the external(!) service provider URL of OTDS
-            enabled (bool, optional): if the handler should be enabled or disabled. Default is True = enabled.
-            priority (int, optional): Priority of the Authentical Handler (compared to others). Default is 5
-            active_by_default (bool, optional): should OTDS redirect immediately to provider page
-                                                (not showing the OTDS login at all)
-            auth_principal_attributes (list, optional): List of Authentication principal attributes
-            nameid_format (str, optional): Specifies which NameID format supported by the identity provider
-                                           contains the desired user identifier. The value in this identifier
-                                           must correspond to the value of the user attribute specified for the
-                                           authentication principal attribute.
+            name (str):
+                The name of the new authentication handler.
+            description (str):
+                The description of the new authentication handler.
+            scope (str):
+                The name of the user partition (to define a scope of the auth handler)
+            provider_name (str):
+                The description of the new authentication handler.
+            saml_url (str):
+                The SAML URL.
+            otds_sp_endpoint (str):
+                The external(!) service provider URL of OTDS.
+            enabled (bool, optional):
+                Defines if the handler should be enabled or disabled. Default is True = enabled.
+            priority (int, optional):
+                Priority of the Authentical Handler (compared to others). Default is 5
+            active_by_default (bool, optional):
+                Defines whether OTDS should redirect immediately to provider page
+                (not showing the OTDS login at all).
+            auth_principal_attributes (list, optional):
+                List of Authentication principal attributes
+            nameid_format (str, optional):
+                Specifies which NameID format supported by the identity provider
+                contains the desired user identifier. The value in this identifier
+                must correspond to the value of the user attribute specified for the
+                authentication principal attribute.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails.
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
         if auth_principal_attributes is None:
@@ -3110,7 +4300,7 @@ class OTDS:
 
         request_url = self.auth_handler_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding SAML auth handler -> '%s' ('%s'); calling -> %s",
             name,
             description,
@@ -3137,23 +4327,33 @@ class OTDS:
         enabled: bool = True,
         priority: int = 10,
         auth_principal_attributes: list | None = None,
-    ):
-        """Add a new SAP authentication handler
+    ) -> dict | None:
+        """Add a new SAP authentication handler.
 
         Args:
-            name (str): name of the new authentication handler
-            description (str): description of the new authentication handler
-            scope (str): name of the user partition (to define a scope of the auth handler)
-            certificate_file (str): fully qualified file name (with path) to the certificate file
-            certificate_password (str): password of the certificate
-            enabled (bool, optional): if the handler should be enabled or disabled. Default is True = enabled.
-            priority (int, optional): Priority of the Authentical Handler (compared to others). Default is 5
-            auth_principal_attributes (list, optional): List of Authentication principal attributes
+            name (str):
+                The name of the new authentication handler.
+            description (str):
+                The description of the new authentication handler.
+            scope (str):
+                The name of the user partition (to define a scope of the auth handler)
+            certificate_file (str):
+                A fully qualified file name (with path) to the certificate file.
+            certificate_password (str):
+                The password of the certificate.
+            enabled (bool, optional):
+                Defines if the handler should be enabled or disabled. Default is True = enabled.
+            priority (int, optional):
+                Priority of the Authentical Handler (compared to others). Default is 10.
+            auth_principal_attributes (list, optional):
+                List of Authentication principal attributes.
+
         Returns:
-            Request response (json) or None if the REST call fails.
+            dict | None: Request response (json) or None if the REST call fails.
+
         """
 
-        # Avoid linter warning W0102:
+        # Avoid linter warning W0102 by establishing the default value inside the method:
         if auth_principal_attributes is None:
             auth_principal_attributes = ["oTExternalID1"]
 
@@ -3176,7 +4376,7 @@ class OTDS:
                     "_fileName": False,
                     "_fileExtensions": None,
                     "_value": os.path.basename(
-                        certificate_file
+                        certificate_file,
                     ),  # "TM6_Sandbox.pse" - file name only
                     "_allowedValues": None,
                     "_confidential": False,
@@ -3214,7 +4414,7 @@ class OTDS:
         # 2. Create the auth handler in OTDS
         request_url = self.auth_handler_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding SAP auth handler -> '%s' ('%s'); calling -> %s",
             name,
             description,
@@ -3235,21 +4435,21 @@ class OTDS:
         # 3. Upload the certificate file:
 
         # Check that the certificate (PSE) file is readable:
-        logger.debug("Reading certificate file -> '%s'...", certificate_file)
+        self.logger.debug("Reading certificate file -> '%s'...", certificate_file)
         try:
             # PSE files are binary - so we need to open with "rb":
             with open(certificate_file, "rb") as cert_file:
                 cert_content = cert_file.read()
                 if not cert_content:
-                    logger.error(
-                        "No data in certificate file -> '%s'", certificate_file
+                    self.logger.error(
+                        "No data in certificate file -> '%s'",
+                        certificate_file,
                     )
                     return None
-        except IOError as exception:
-            logger.error(
-                "Unable to open certificate file -> '%s'; error -> %s",
+        except OSError:
+            self.logger.error(
+                "Unable to open certificate file -> '%s'!",
                 certificate_file,
-                exception.strerror,
             )
             return None
 
@@ -3257,56 +4457,49 @@ class OTDS:
         # base64 encoded we will decode it and write it back into the same file
         try:
             # If file is not base64 encoded the next statement will throw an exception
-            # (this is good)
             cert_content_decoded = base64.b64decode(cert_content, validate=True)
             cert_content_encoded = base64.b64encode(cert_content_decoded).decode(
-                "utf-8"
+                "utf-8",
             )
             if cert_content_encoded == cert_content.decode("utf-8"):
-                logger.debug(
-                    "Certificate file -> '%s' is base64 encoded", certificate_file
+                self.logger.debug(
+                    "Certificate file -> '%s' is base64 encoded",
+                    certificate_file,
                 )
                 cert_file_encoded = True
             else:
                 cert_file_encoded = False
         except TypeError:
-            logger.debug(
-                "Certificate file -> '%s' is not base64 encoded", certificate_file
+            self.logger.debug(
+                "Certificate file -> '%s' is not base64 encoded",
+                certificate_file,
             )
             cert_file_encoded = False
 
         if cert_file_encoded:
-            certificate_file = "/tmp/" + os.path.basename(certificate_file)
-            logger.debug("Writing decoded certificate file -> %s...", certificate_file)
+            certificate_file = os.path.join(tempfile.gettempdir(), os.path.basename(certificate_file))
+            self.logger.debug(
+                "Writing decoded certificate file -> %s...",
+                certificate_file,
+            )
             try:
                 # PSE files need to be binary - so we need to open with "wb":
                 with open(certificate_file, "wb") as cert_file:
                     cert_file.write(base64.b64decode(cert_content))
-            except IOError as exception:
-                logger.error(
-                    "Failed writing to file -> '%s'; error -> %s",
+            except OSError:
+                self.logger.error(
+                    "Failed writing to file -> '%s'!",
                     certificate_file,
-                    exception.strerror,
                 )
                 return None
 
         auth_handler_post_data = {
-            "file1_property": "com.opentext.otds.as.drivers.sapssoext.certificate1"
-        }
-
-        # It is important to send the file pointer and not the actual file content
-        # otherwise the file is send base64 encoded which we don't want:
-        auth_handler_post_files = {
-            "file1": (
-                os.path.basename(certificate_file),
-                open(certificate_file, "rb"),
-                "application/octet-stream",
-            )
+            "file1_property": "com.opentext.otds.as.drivers.sapssoext.certificate1",
         }
 
         request_url = self.auth_handler_url() + "/" + name + "/files"
 
-        logger.debug(
+        self.logger.debug(
             "Uploading certificate file -> '%s' for SAP auth handler -> '%s' ('%s'); calling -> %s",
             certificate_file,
             name,
@@ -3314,18 +4507,30 @@ class OTDS:
             request_url,
         )
 
-        # it is important to NOT pass the headers parameter here!
-        # Basically, if you specify a files parameter (a dictionary),
-        # then requests will send a multipart/form-data POST automatically:
-        response = requests.post(
-            url=request_url,
-            data=auth_handler_post_data,
-            files=auth_handler_post_files,
-            cookies=self.cookie(),
-            timeout=None,
-        )
+        # It is important to send the file pointer and not the actual file content
+        # otherwise the file is sent base64 encoded, which we don't want:
+        with open(certificate_file, "rb") as file_obj:
+            auth_handler_post_files = {
+                "file1": (
+                    os.path.basename(certificate_file),
+                    file_obj,
+                    "application/octet-stream",
+                ),
+            }
+
+            # It is important to NOT pass the headers parameter here!
+            # Basically, if you specify a files parameter (a dictionary),
+            # then requests will send a multipart/form-data POST automatically:
+            response = requests.post(
+                url=request_url,
+                data=auth_handler_post_data,
+                files=auth_handler_post_files,
+                cookies=self.cookie(),
+                timeout=REQUEST_TIMEOUT,
+            )
+
         if not response.ok:
-            logger.error(
+            self.logger.error(
                 "Failed to upload certificate file -> '%s' for SAP auth handler -> '%s'; error -> %s (%s)",
                 certificate_file,
                 name,
@@ -3354,28 +4559,44 @@ class OTDS:
         priority: int = 10,
         auth_principal_attributes: list | None = None,
     ) -> dict | None:
-        """Add a new OAuth authentication handler
+        """Add a new OAuth authentication handler.
 
         Args:
-            name (str): name of the new authentication handler
-            description (str): description of the new authentication handler
-            scope (str): name of the user partition (to define a scope of the auth handler)
-            provider_name (str): the name of the authentication provider. This name is displayed on the login page.
-            client_id (str): the client ID
-            client_secret (str): the client secret
-            active_by_default (bool, optional): Whether to activate this handler for any request to the OTDS login page.
-                                                If True, any login request to the OTDS login page will be redirected to this OAuth provider.
-                                                If False, the user has to select the provider on the login page.
-            authorization_endpoint (str, optional): The URL to redirect the browser to for authentication.
-                                                    It is used to retrieve the authorization code or an OIDC id_token.
-            token_endpoint (str, optional): The URL from which to retrieve the access token.
-                                            Not strictly required with OpenID Connect if using the implicit flow.
-            scope_string (str, optional): Space delimited scope values to send. Include 'openid' to use OpenID Connect.
-            enabled (bool, optional): if the handler should be enabled or disabled. Default is True = enabled.
-            priority (int, optional): Priority of the Authentical Handler (compared to others). Default is 5
-            auth_principal_attributes (list, optional): List of Authentication principal attributes
+            name (str):
+                The name of the new authentication handler.
+            description (str):
+                The description of the new authentication handler.
+            scope (str):
+                The name of the user partition (to define a scope of the auth handler).
+            provider_name (str):
+                The name of the authentication provider. This name is displayed on the login page.
+            client_id (str):
+                The client ID.
+            client_secret (str):
+                The client secret.
+            active_by_default (bool, optional):
+                Defines, whether to activate this handler for any request to the OTDS login page.
+                If True, any login request to the OTDS login page will be redirected to this OAuth provider.
+                If False, the user has to select the provider on the login page.
+            authorization_endpoint (str, optional):
+                The URL to redirect the browser to for authentication.
+                It is used to retrieve the authorization code or an OIDC id_token.
+            token_endpoint (str, optional):
+                The URL from which to retrieve the access token.
+                Not strictly required with OpenID Connect if using the implicit flow.
+            scope_string (str, optional):
+                Space delimited scope values to send. Include 'openid' to use OpenID Connect.
+            enabled (bool, optional):
+                Defines if the handler should be enabled or disabled. Default is True = enabled.
+            priority (int, optional):
+                Priority of the Authentical Handler (compared to others). Default is 5.
+            auth_principal_attributes (list, optional):
+                List of Authentication principal attributes.
+
         Returns:
-            dict: Request response (dictionary) or None if the REST call fails.
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
         """
 
         # Avoid linter warning W0102:
@@ -3722,7 +4943,7 @@ class OTDS:
 
         request_url = self.auth_handler_url()
 
-        logger.debug(
+        self.logger.debug(
             "Adding OAuth auth handler -> '%s' ('%s'); calling -> %s",
             name,
             description,
@@ -3740,24 +4961,29 @@ class OTDS:
         # end method definition
 
     def consolidate(self, resource_name: str) -> bool:
-        """Consolidate an OTDS resource
+        """Consolidate an OTDS resource.
 
         Args:
-            resource_name (str): resource to be consolidated
+            resource_name (str):
+                The name of the resource to be consolidated.
+
         Returns:
-            bool: True if the consolidation succeeded or False if it failed.
+            bool:
+                True, if the consolidation succeeded or False if it failed.
+
         """
 
         resource = self.get_resource(resource_name)
         if not resource:
-            logger.error(
-                "Resource -> '%s' not found - cannot consolidate", resource_name
+            self.logger.error(
+                "Resource -> '%s' not found - cannot consolidate",
+                resource_name,
             )
             return False
 
         resource_dn = resource["resourceDN"]
         if not resource_dn:
-            logger.error("Resource DN is empty - cannot consolidate")
+            self.logger.error("Resource DN is empty - cannot consolidate")
             return False
 
         consolidation_post_body_json = {
@@ -3769,8 +4995,8 @@ class OTDS:
 
         request_url = "{}".format(self.consolidation_url())
 
-        logger.debug(
-            "Consolidation of resource -> %s (%s); calling -> %s",
+        self.logger.debug(
+            "Consolidation of resource -> '%s' (%s); calling -> %s",
             resource_name,
             resource_dn,
             request_url,
@@ -3782,15 +5008,12 @@ class OTDS:
             json_data=consolidation_post_body_json,
             timeout=None,
             failure_message="Failed to consolidate resource -> '{}'".format(
-                resource_name
+                resource_name,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -3800,15 +5023,20 @@ class OTDS:
         allow_impersonation: bool = True,
         impersonation_list: list | None = None,
     ) -> bool:
-        """Configure impersonation for an OTDS resource
+        """Configure impersonation for an OTDS resource.
 
         Args:
-            resource_name (str): resource to be configure impersonation for
-            allow_impersonation (bool, optional): wether to turn on or off impersonation (default = True)
-            impersonation_list (list, optional): list of users to restrict it to
-                                                 (default = empty list = all users)
+             resource_name (str):
+                 Name of the resource to configure impersonation for.
+             allow_impersonation (bool, optional):
+                 Whether to turn on or off impersonation (default = True)
+             impersonation_list (list, optional):
+                 A list of users to restrict it to (default = empty list = all users)
+
         Returns:
-            bool: True if the impersonation setting succeeded or False if it failed.
+             bool:
+                True if the impersonation setting succeeded or False if it failed.
+
         """
 
         # Avoid linter warning W0102:
@@ -3822,7 +5050,7 @@ class OTDS:
 
         request_url = "{}/{}/impersonation".format(self.resource_url(), resource_name)
 
-        logger.debug(
+        self.logger.debug(
             "Impersonation settings for resource -> '%s'; calling -> %s",
             resource_name,
             request_url,
@@ -3834,15 +5062,12 @@ class OTDS:
             json_data=impersonation_put_body_json,
             timeout=None,
             failure_message="Failed to set impersonation for resource -> '{}'".format(
-                resource_name
+                resource_name,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -3852,17 +5077,23 @@ class OTDS:
         allow_impersonation: bool = True,
         impersonation_list: list | None = None,
     ) -> bool:
-        """Configure impersonation for an OTDS OAuth Client
+        """Configure impersonation for an OTDS OAuth Client.
 
         Args:
-            client_id (str): OAuth Client to be configure impersonation for
-            allow_impersonation (bool, optional): wether to turn on or off impersonation (default = True)
-            impersonation_list (list, optional): list of users to restrict it to; (default = empty list = all users)
+            client_id (str):
+                The ID of the OAuth Client to configure impersonation for.
+            allow_impersonation (bool | None, optional):
+                Defines whether to turn on or off impersonation (default = True).
+            impersonation_list (list | None, optional):
+                A list of users to restrict it to; (default = empty list = all users).
+
         Returns:
-            bool: True if the impersonation setting succeeded or False if it failed.
+            bool:
+                True if the impersonation setting succeeded or False if it failed.
+
         """
 
-        # Avoid linter warning W0102:
+        # Avoid linter warning W0102 by establishing the default inside the method:
         if impersonation_list is None:
             impersonation_list = []
 
@@ -3873,7 +5104,7 @@ class OTDS:
 
         request_url = "{}/{}/impersonation".format(self.oauth_client_url(), client_id)
 
-        logger.debug(
+        self.logger.debug(
             "Impersonation settings for OAuth Client -> '%s'; calling -> %s",
             client_id,
             request_url,
@@ -3885,27 +5116,26 @@ class OTDS:
             json_data=impersonation_put_body_json,
             timeout=None,
             failure_message="Failed to set impersonation for OAuth Client -> '{}'".format(
-                client_id
+                client_id,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition
 
-    def get_password_policy(self):
-        """Get the global password policy
+    def get_password_policy(self) -> dict | None:
+        """Get the global password policy.
 
         Args:
             None
-        Returns:
-            dict: Request response or None if the REST call fails.
 
-            Example response:
+        Returns:
+            dict | None:
+                Request response or None if the REST call fails.
+
+        Example:
             {
                 'passwordHistoryMaximumCount': 3,
                 'daysBeforeNewPasswordMayBeChanged': 1,
@@ -3924,11 +5154,12 @@ class OTDS:
                 'blockCommonPassword': False
                 ...
             }
+
         """
 
         request_url = "{}/passwordpolicy".format(self.config()["systemConfigUrl"])
 
-        logger.debug("Getting password policy; calling -> %s", request_url)
+        self.logger.debug("Getting password policy; calling -> %s", request_url)
 
         return self.do_request(
             url=request_url,
@@ -3940,13 +5171,14 @@ class OTDS:
     # end method definition
 
     def update_password_policy(self, update_values: dict) -> bool:
-        """Update the global password policy
+        """Update the global password policy.
 
         Args:
-            update_values (dict): new values for selected settings.
-                                  A value of 0 means the settings is deactivated.
+            update_values (dict):
+                New values for selected settings.
+                A value of 0 means the settings is deactivated.
 
-            Example values:
+        Example:
             {
                 'passwordHistoryMaximumCount': 3,
                 'daysBeforeNewPasswordMayBeChanged': 1,
@@ -3965,15 +5197,17 @@ class OTDS:
                 'blockCommonPassword': False
                 ...
             }
+
         Returns:
-            bool: True if the REST call succeeds, otherwise False. We use a boolean return
-                  value as the response of the REST call does not have meaningful content.
+            bool:
+                True if the REST call succeeds, otherwise False. We use a boolean return
+                value as the response of the REST call does not have meaningful content.
 
         """
 
         request_url = "{}/passwordpolicy".format(self.config()["systemConfigUrl"])
 
-        logger.debug(
+        self.logger.debug(
             "Update password policy with these new values -> %s; calling -> %s",
             str(update_values),
             request_url,
@@ -3985,14 +5219,11 @@ class OTDS:
             json_data=update_values,
             timeout=None,
             failure_message="Failed to update password policy with values -> {}".format(
-                update_values
+                update_values,
             ),
             parse_request_response=False,
         )
 
-        if response and response.ok:
-            return True
-
-        return False
+        return bool(response and response.ok)
 
     # end method definition

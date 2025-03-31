@@ -1,27 +1,25 @@
-"""
-OTIV Module to keep Intelligent Viewing specific data
-such as connection parameters, license information ...
-
-Class: OTIV
-Methods:
-
-__init__ : class initializer
-config : returns config data set
-"""
+"""OTIV Module to keep Intelligent Viewing specific data."""
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
 import logging
+from importlib.metadata import version
 
-logger = logging.getLogger("pyxecm.otiv")
+APP_NAME = "pyxecm"
+APP_VERSION = version("pyxecm")
+MODULE_NAME = APP_NAME + ".otiv"
+
+default_logger = logging.getLogger(MODULE_NAME)
 
 
 class OTIV:
-    """Used to manage stettings for OpenText Intelligent Viewing."""
+    """Class OTIV is used to manage stettings for OpenText Intelligent Viewing."""
+
+    logger: logging.Logger = default_logger
 
     _config: dict
 
@@ -32,15 +30,30 @@ class OTIV:
         product_description: str,
         license_file: str,
         default_license: str = "FULLTIME_USERS_REGULAR",
-    ):
-        """Initialize the OTIV class for Intelligent Viewing
+        logger: logging.Logger = default_logger,
+    ) -> None:
+        """Initialize the OTIV class for Intelligent Viewing.
 
         Args:
-            resource_name (str): OTDS resource name
-            product_name (str): OTDS product name for licensing
-            license_file (str): path to license file
-            default_license (str, optional): Defaults to "FULLTIME_USERS_REGULAR".
+            resource_name (str):
+                The OTDS resource name.
+            product_name (str):
+                The OTDS product name for licensing.
+            product_description (str):
+                The OTDS product description for licensing.
+            license_file (str):
+                The path to license file.
+            default_license (str, optional):
+                Defaults to "FULLTIME_USERS_REGULAR".
+            logger (logging.Logger, optional):
+                The logging object to use for all log messages. Defaults to default_logger.
+
         """
+
+        if logger != default_logger:
+            self.logger = logger.getChild("otiv")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
 
         # Initialize otiv_config as an empty dictionary
         otiv_config = {}
@@ -56,10 +69,12 @@ class OTIV:
     # end method definition
 
     def config(self) -> dict:
-        """Returns the configuration dictionary
+        """Return the configuration dictionary.
 
         Returns:
-            dict: Configuration dictionary
+            dict:
+                The configuration dictionary.
+
         """
         return self._config
 

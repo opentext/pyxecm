@@ -1,28 +1,21 @@
-"""
-Extended ECM Assoc Module to implement functions to read / write from
-so called "Assoc" data structures in Extended ECM. Right now this module
-is used to tweak settings in XML-based transport packages that include
+"""Assoc Module to implement functions to read / write from so called "Assoc" data structures in Content Server.
+
+Right now this module is used to tweak settings in XML-based transport packages that include
 Assoc structures inside some of the XML elements.
-
-Class: Assoc
-Methods:
-
-stringToDict: convert an Assoc string to an Python dict representing the assoc values
-dictToString: converting an Assoc dict to an Assoc string
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
-import re
 import html
+import re
 
 
 class Assoc:
-    """Class to handle Extended ECM Assoc data structures."""
+    """Class Assoc is used to handle Extended ECM Assoc data structures."""
 
     @classmethod
     def is_unicode_escaped(cls, assoc_string: str) -> bool:
@@ -33,6 +26,7 @@ class Assoc:
 
         Returns:
             bool: True if string is in Unicode, False otherwise
+
         """
 
         pattern = r"\\u[0-9a-fA-F]{4}"
@@ -40,78 +34,100 @@ class Assoc:
 
         return len(matches) > 0
 
+    # end method definition
+
     @classmethod
     def escape_unicode(cls, assoc_string: str) -> str:
-        """Escape / Encode a given string in Unicode
+        """Escape / Encode a given string in Unicode.
 
         Args:
-            assoc_string (str): Source string
+            assoc_string (str):
+                The source string to escape.
 
         Returns:
-            str: Escaped string
+            str:
+                The escaped string.
+
         """
 
         encoded_string = assoc_string.encode("unicode_escape")  # .decode()
 
         return encoded_string
 
+    # end method definition
+
     @classmethod
     def unescape_unicode(cls, assoc_string: str) -> str:
-        """Unescape / Decode a given string
+        """Unescape / Decode a given string.
 
         Args:
-            assoc_string (str): Source string
+            assoc_string (str):
+                The source string to unescape.
 
         Returns:
-            str: Unescaped string
+            str:
+                The unescaped string.
+
         """
         try:
             decoded_string = bytes(assoc_string, "utf-8").decode("unicode_escape")
-            return decoded_string
         except UnicodeDecodeError:
             return assoc_string
 
+        return decoded_string
+
+    # end method definition
+
     @classmethod
     def is_html_escaped(cls, assoc_string: str) -> bool:
-        """Class method to check if an Extended ECM Assoc String
-           is HTML escaped.
+        """Check if an Assoc String is HTML escaped.
 
         Args:
-            assoc_string (str): the string to test for HTML escaping
+            assoc_string (str):
+                The string to test for HTML escaping.
 
         Returns:
-            bool: True = string is HTML escaped, False if now
+            bool:
+                True = string is HTML escaped, False if now
+
         """
 
         decoded_string = html.unescape(assoc_string)
 
         return assoc_string != decoded_string
 
+    # end method definition
+
     @classmethod
     def unescape_html(cls, assoc_string: str) -> str:
-        """HTML unescape a a string
+        """HTML unescape a a string.
 
         Args:
             assoc_string (str): the string to unescape.
 
         Returns:
             str: unescaped string
+
         """
 
         decoded_string = html.unescape(assoc_string)
         return decoded_string
 
+    # end method definition
+
     @classmethod
     def string_to_dict(cls, assoc_string: str) -> dict:
         """Convert an Assoc string to a Python dict.
-           Each comma-separated element of the Assoc will
-           become a dict element.
+
+        Each comma-separated element of the Assoc will become a dict element.
 
         Args:
-            assoc_string (str): Source Assoc string
+            assoc_string (str):
+                The source Assoc string to convert.
 
         Returns:
             dict: Python dict with the Assoc elements
+
         """
 
         if cls.is_html_escaped(assoc_string):
@@ -152,15 +168,20 @@ class Assoc:
 
         return assoc_dict
 
+    # end method definition
+
     @classmethod
     def dict_to_string(cls, assoc_dict: dict) -> str:
-        """Convert a Python dict to an Assoc string
+        """Convert a Python dict to an Assoc string.
 
         Args:
-            assoc_dict (dict): Source dict
+            assoc_dict (dict):
+                The source dictionary to convert.
 
         Returns:
-            str: Assoc string
+            str:
+                The resulting Assoc string.
+
         """
 
         assoc_string: str = "A&lt;1,?,"
@@ -182,20 +203,29 @@ class Assoc:
         assoc_string += "&gt;"
         return assoc_string
 
+    # end method definition
+
     @classmethod
     def extract_substring(
-        cls, input_string: str, start_sequence: str, stop_sequence: str
+        cls,
+        input_string: str,
+        start_sequence: str,
+        stop_sequence: str,
     ) -> str | None:
-        """A generic method to extract a substring that is delimited
-           by a strart and stop sequence.
+        """Extract a substring that is delimited by a start and stop sequence.
 
         Args:
-            input_string (str): Input string to search the delimited substring in.
-            start_sequence (str): Start esequence of characters.
-            stop_sequence (str): Stopß sequence of characters
+            input_string (str):
+                Input string to search the delimited substring in.
+            start_sequence (str):
+                Start esequence of characters.
+            stop_sequence (str):
+                Stop sequence of characters
 
         Returns:
-            str | None: the deliminated substring or None if not found.
+            str | None:
+                The deliminated substring or None if not found.
+
         """
 
         start_index = input_string.find(start_sequence)
@@ -209,17 +239,25 @@ class Assoc:
         end_index += len(stop_sequence)
         return input_string[start_index:end_index]
 
+    # end method definition
+
     @classmethod
     def extract_assoc_string(cls, input_string: str, is_escaped: bool = False) -> str:
-        """Extract an Assoc from a string. The assoc is deliminated by A< ... >.
+        """Extract an Assoc from a string.
+
+        The assoc is deliminated by A< ... >.
 
         Args:
-            input_string (str): Input string that includes the Assoc as a substring.
-            is_escaped (bool, optional): Whether or not the input string includes the
-                                         assoc escaped or not.
+            input_string (str):
+                Input string that includes the Assoc as a substring.
+            is_escaped (bool, optional):
+                Whether or not the input string includes the
+                assoc escaped or not.
 
         Returns:
-            str: the assoc string
+            str:
+                The assoc string.
+
         """
 
         if is_escaped:
@@ -227,3 +265,5 @@ class Assoc:
         else:
             assoc_string = cls.extract_substring(input_string, "A<", ">")
         return assoc_string
+
+    # end method definition

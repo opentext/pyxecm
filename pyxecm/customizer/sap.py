@@ -1,7 +1,7 @@
-"""
-SAP RFC Module to implement Remote Function calls to SAP S/4HANA
+"""SAP RFC Module to implement Remote Function calls to SAP S/4HANA.
+
 For documentation of PyRFC see here: https://github.com/SAP/PyRFC
-and here: https://sap.github.io/PyRFC/pyrfc.html 
+and here: https://sap.github.io/PyRFC/pyrfc.html
 
 RFC typically uses port 3300 to communication with the SAP server.
 Make sure this port is not blocked by your firewall.
@@ -22,41 +22,36 @@ Connection Parameter:
                   ending with the root CA certifcate. It should also contain the client certificate
                   used for login at the server, if your client program does not use basic
                   user & password authentication)
-
-Class: SAP
-Methods:
-
-__init__ : class initializer
-call: Calls and RFC based on its name and passes parameters.
-
 """
 
 __author__ = "Dr. Marc Diefenbruch"
-__copyright__ = "Copyright 2024, OpenText"
+__copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
 import logging
 
-logger = logging.getLogger("pyxecm.customizer.sap")
+default_logger = logging.getLogger("pyxecm.customizer.sap")
 
 try:
     import pyrfc
 
     _has_pyrfc = True
 
-except ModuleNotFoundError as module_exception:
-    logger.error("pyrfc not installed, SAP integration impacted")
+except ModuleNotFoundError:
+    default_logger.debug("pyrfc not installed, SAP integration impacted")
     _has_pyrfc = False
 
-except ImportError as import_exception:
-    logger.error("pyrfc could not be loaded, SAP integration impacted")
+except ImportError:
+    default_logger.debug("pyrfc could not be loaded, SAP integration impacted")
     _has_pyrfc = False
 
 
-class SAP(object):
-    """Used to implement Remote Function Calls (RFC) to SAP S/4HANA"""
+class SAP:
+    """Implement Remote Function Calls (RFC) to SAP S/4HANA."""
+
+    logger: logging.Logger = default_logger
 
     _connection_parameters = {}
 
@@ -74,11 +69,17 @@ class SAP(object):
         system_number: str = "00",
         lang: str = "EN",
         trace: str = "3",
-    ):
+        logger: logging.Logger = default_logger,
+    ) -> None:
         """Initialize the SAP object."""
 
-        logger.info("Initializing SAP object...")
-        logger.info("Using PyRFC version -> %s", pyrfc.__version__)
+        if logger != default_logger:
+            self.logger = logger.getChild("sap")
+            for logfilter in logger.filters:
+                self.logger.addFilter(logfilter)
+
+        self.logger.info("Initializing SAP object...")
+        self.logger.info("Using PyRFC version -> %s", pyrfc.__version__)
 
         # Set up connection parameters
         self._connection_parameters = {
@@ -91,13 +92,15 @@ class SAP(object):
 
         # see https://sap.github.io/PyRFC/pyrfc.html#connection
         if ashost:
-            logger.info("Logon with application server logon: requiring ashost, sysnr")
+            self.logger.info(
+                "Logon with application server logon: requiring ashost, sysnr",
+            )
             self._connection_parameters["ashost"] = ashost
             self._connection_parameters["sysnr"] = system_number
             self._connection_parameters["sysid"] = system_id
         elif mshost:
-            logger.info(
-                "Logon with load balancing: requiring mshost, msserv, sysid, group"
+            self.logger.info(
+                "Logon with load balancing: requiring mshost, msserv, sysid, group",
             )
             self._connection_parameters["mshost"] = mshost
             self._connection_parameters["sysid"] = system_id
@@ -110,35 +113,49 @@ class SAP(object):
         # end method definition
 
     def call(self, rfc_name: str, options: dict, rfc_parameters: dict) -> dict | None:
-        """Do an RFC Call. See http://sap.github.io/PyRFC/pyrfc.html#pyrfc.Connection.call
+        """Do an RFC Call.
+
+        See http://sap.github.io/PyRFC/pyrfc.html#pyrfc.Connection.call
 
         Args:
-            rfc_name (str): this is the name of the RFC (typical in capital letters), e.g. SM02_ADD_MESSAGE
-            options (dictionary, optional): the call options for the RFC call. Defaults to {}.
-            * not_requested: Allows to deactivate certain parameters in the function module interface.
-              This is particularly useful for BAPIs which have many large tables, the Python client is not interested in.
-              Deactivate those, to reduce network traffic and memory consumption in your application considerably.
-              This functionality can be used for input and output parameters. If the parameter is an input,
-              no data for that parameter will be sent to the backend. If it’s an output, the backend will be
-              informed not to return data for that parameter.
-            * timeout: Cancel RFC connection if ongoing RFC call not completed within timeout seconds.
-              Timeout can be also set as client connection configuration option, in which case is valid for all RFC calls.
-            rfc_parameters (dict, optional): the actual RFC parameters thatare specific for
-                                                   the type of the call. Defaults to {}.
+            rfc_name (str):
+                This is the name of the RFC (typical in capital letters), e.g. SM02_ADD_MESSAGE.
+            options (dictionary, optional):
+                The call options for the RFC call. Defaults to {}. Potential options (keys):
+                * not_requested:
+                    Allows to deactivate certain parameters in the function module interface.
+                    This is particularly useful for BAPIs which have many large tables, the Python client is not interested in.
+                    Deactivate those, to reduce network traffic and memory consumption in your application considerably.
+                    This functionality can be used for input and output parameters. If the parameter is an input,
+                    no data for that parameter will be sent to the backend. If it's an output, the backend will be
+                    informed not to return data for that parameter.
+                * timeout:
+                    Cancel RFC connection if ongoing RFC call not completed within timeout seconds.
+                    Timeout can be also set as client connection configuration option, in which case is valid
+                    for all RFC calls.
+            rfc_parameters (dict, optional):
+                The actual RFC parameters that are specific for the type of the call. Defaults to {}.
+
         Returns:
-            dict: Result of the RFC call or None if the call fails or timeouts.
+            dict | None:
+                Result of the RFC call or None if the call fails or timeouts.
+
         """
 
         # Create the connection object and call the RFC function
         params = self._connection_parameters
-        logger.debug("Connection Parameters -> %s", params)
+        self.logger.debug("Connection Parameters -> %s", params)
 
         try:
             with pyrfc.Connection(**params) as conn:
                 result = conn.call(rfc_name, options=options, **rfc_parameters)
                 return result
-        except pyrfc.RFCError as exception:
-            logger.error("Failed to call RFC -> %s; error -> %s", rfc_name, exception)
+        except pyrfc.RFCError as sap_error:
+            self.logger.error(
+                "Failed to call RFC -> '%s'; error -> %s",
+                rfc_name,
+                str(sap_error),
+            )
             return None
 
         # end method definition

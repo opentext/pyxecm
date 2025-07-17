@@ -19,8 +19,6 @@ theme:
 plugins:
   - search
   - mkdocstrings
-  - git-revision-date-localized:
-      enable_creation_date: true
 
 repo_url: https://github.com/opentext/pyxecm
 repo_name: opentext/pyxecm
@@ -53,8 +51,7 @@ markdown_extensions:
 
 nav:
   - Index: index.md
-  - Payload Syntax: payload-syntax.md
-  - Extended ECM Python Classes:
+  - pyxecm:
       - Archive Center (OTAC): pyxecm/otac.md
       - Aviator Search: pyxecm/avts.md
       - Content Server (OTCS): pyxecm/otcs.md
@@ -63,21 +60,23 @@ nav:
       - Intelligent Viewing (OTIV): pyxecm/otiv.md
       - Media Management (OTMM): pyxecm/otmm.md
       - PowerDocs (OTPD): pyxecm/otpd.md
-  - Customizer Python Classes:
+      - Helper Python Classes:
+          - Assoc: pyxecm/assoc.md
+          - Data: pyxecm/data.md
+          - Web: pyxecm/web.md
+          - XML: pyxecm/xml.md
+  - pyxecm-api:
       - API: pyxecm/api.md
       - API Settings: customizerapisettings.md
-      - Browser Automation: pyxecm/browser.md
+  - pyxecm-customizer:
       - Customizer: pyxecm/customizer.md
       - Customizer Settings: customizersettings.md
-      - K8s: pyxecm/k8s.md
+      - Browser Automation: pyxecm/browser.md
       - Payload: pyxecm/payload.md
+      - Payload Syntax: payload-syntax.md
+      - K8s: pyxecm/k8s.md
       - Microsoft 365: pyxecm/m365.md
       - Salesforce: pyxecm/salesforce.md
       - SAP: pyxecm/sap.md
       - SuccessFactors: pyxecm/successfactors.md
       - Translate: pyxecm/translate.md
-  - Helper Python Classes:
-      - Assoc: pyxecm/assoc.md
-      - Data: pyxecm/data.md
-      - Web: pyxecm/web.md
-      - XML: pyxecm/xml.md

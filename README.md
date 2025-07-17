@@ -1,34 +1,21 @@
 # PYXECM
 
-A python library to interact with Opentext Extended ECM REST API.
+A python library to interact with Opentext Content Mangement REST API.
 The product API documentation is available on [OpenText Developer](https://developer.opentext.com/ce/products/extendedecm)
 Detailed documentation of this package is available [here](https://opentext.github.io/pyxecm/).
 
-# Quick start
+## Quick start - Library usage
 
-Install pyxecm with the desired extras into your python environment, extra options are:
-
-    - browserautomation
-    - dataloader
-    - sap
+Install the latest version from pypi:
 
 ```bash
 pip install pyxecm
 ```
 
-## Start using the Customizer
+### Start using the package libraries
 
-Create an `.env` file as described here: [sample-environment-variables](customizerapisettings/#sample-environment-variables)
+example usage of the OTCS class, more details can be found in the docs:
 
-```bash
-python -m pyxecm.customizer.api
-```
-
-
-Access the Customizer API at [http://localhost:8000/api](http://localhost:8000/api)
-
-
-## Start using the package libraries
 ```python
 from pyxecm import OTCS
 
@@ -50,8 +37,30 @@ for node in nodes["results"]:
     print(node["data"]["properties"]["id"], node["data"]["properties"]["name"])
 ```
 
+## Quick start - Customizer usage
 
-# Disclaimer
+- Create an `.env` file as described here: [sample-environment-variables](customizerapisettings/#sample-environment-variables)
+- Create an payload file to define what the customizer should do, as described here [payload-syntax](payload-syntax)
+
+```bash
+pip install pyxecm[customizer]
+
+pyxecm-customizer PAYLOAD.tfvars/PAYLOAD.yaml
+```
+
+## Quick start - API 
+
+- Install pyxecm with api and customizer dependencies
+- Launch the Rest API server
+- Access the Customizer API at [http://localhost:8000/api](http://localhost:8000/api)
+
+```bash
+pip install pyxecm[api,customizer]
+
+pyxecm-api
+```
+
+## Disclaimer
 
 !!! quote ""
     Copyright © 2025 Open Text Corporation, All Rights Reserved.

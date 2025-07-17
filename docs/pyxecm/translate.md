@@ -1,1 +1,1 @@
-::: pyxecm.customizer.translate
+::: pyxecm_customizer.translate

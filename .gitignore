@@ -10,3 +10,9 @@ build/
 .env
 pyxecm/.vscode/
 ~$*
+
+pyproject.toml
+
+uv.lock
+
+packages/pyxecm/tests/

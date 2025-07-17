@@ -1,1 +1,1 @@
-::: pyxecm.customizer.customizer
+::: pyxecm_customizer.customizer

@@ -50,7 +50,7 @@ The customizing payload can be defined in either of the following standards:
 
 ## payloadOptions
 
-This sections defines options that are used to manage the payload. This is only required when using the Customizer as a Service (API)
+This sections defines options that are used to manage the payload. This is only required when using the Customizer as a Service (API).
 
 === "Terraform / HCL"
 
@@ -58,7 +58,7 @@ This sections defines options that are used to manage the payload. This is only 
     payloadOptions = {
         enabled = true
         name = "Name of the Payload Object"
-        dependencies = ["Name of Payload item #1 it depends on","Name of Payload item #2 it depends on"]
+        dependencies = ["Name of Payload item #1 it depends on","Name of Payload item #2 it depends on", ...]
         loglevel = "INFO" # DEBUG, INFO, WARNING, ERROR
     }
     ```
@@ -442,6 +442,37 @@ In addition, each partition has a `name`, an optional `description`. It is also 
         - "ADDON_MEDIA"
     ```
 
+#### licenses
+
+`licenses` allows to assign a license to a resource.
+
+Each list element includes a switch `enabled` to turn them on or off. This switch can be controlled by a Terraform variable.
+
+=== "Terraform / HCL"
+
+    ```terraform
+    licenses = [
+      {
+        enabled      = true
+        path         = "/payload/otawp-license.lic"
+        product_name = "APPWORKS_PLATFORM"
+        resource     = "awp"
+        description  = "License for Appworks Platform"
+      }
+    ]
+    ```
+
+=== "YAML"
+
+    ```yaml
+    licenses:
+      - enabled: True
+        path: "/payload/otawp-license.lic"
+        product_name: "APPWORKS_PLATFORM"
+        resource: "awp"
+        description: "Salesforce user partition"
+    ```
+
 #### oauthClients
 
 `oauthClients` allows to create a list of new OAuth client in OTDS.
@@ -702,17 +733,17 @@ In addition, each element consists of a `access_role` value combined with either
       partition_name: Content Server Members
     ```
 
-### Extended ECM Customizing Syntax
+### Content Management Customizing Syntax
 
-The payload syntax for Extended ECM configurations uses these lists (list elements are maps / dictionaries):
+The payload syntax for Content Management configurations uses these lists (list elements are maps / dictionaries):
 
 #### groups
 
-`groups` is a list of Extended ECM user groups that are automatically created during the deployment.
+`groups` is a list of Content Management user groups that are automatically created during the deployment.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
 
-In addition, each group has a `name` and (optionally) a list of parent groups. `enable_o365`, `enable_salesforce`, and `enable_core_share` are used to control whether or not a Microsoft 365, Salesforce or Core Share group should be created matching the Extended ECM group. The example below shows two groups. The `Finance` group is a child group of the `Innovate` group. The `Finance` group is also created in Microsoft 365 if the variable `var.enable_o365` evaluates to `true`.
+In addition, each group has a `name` and (optionally) a list of parent groups. `enable_o365`, `enable_salesforce`, and `enable_core_share` are used to control whether or not a Microsoft 365, Salesforce or Core Share group should be created matching the OpenText Content Management group. The example below shows two groups. The `Finance` group is a child group of the `Innovate` group. The `Finance` group is also created in Microsoft 365 if the variable `var.enable_o365` evaluates to `true`.
 
 === "Terraform / HCL"
 
@@ -750,13 +781,13 @@ In addition, each group has a `name` and (optionally) a list of parent groups. `
 
 #### users
 
-`users` is a list of Extended ECM users that are automatically created during deployment.
+`users` is a list of OpenText Content Management users that are automatically created during deployment.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
 
-In addition, users should have `name`, `password`, `firstname`, `lastname`, `email`, `title`, and `company`. The `password` of these users can also be randomly generated and can be printed by `terraform output -json` (all users have the same password). Each user need to have a base group that must be in the `groups` section of the payload. Optionally a user can have a list of additional groups. A user can also have a list of favorites. Favorites can either be the logical name of a workspace instance used in the payload (see workspace below) or it can be a nickname of an Extended item. Users can also have a **security clearance level** and multiple **supplementatal markings**. Both are optional. `security_clearance` is used to define the security clearance level of the user. This needs to match one of the existing security clearnace levels that have been defined in the `securityClearances`section in the payload. `supplemental_markings` defines a list of supplemental markings the user should get. These need to match markings defined in the `supplementalMarkings` section in the payload. The field `privileges` defines the standard privileges of a user. If it is omitted users get the default privileges `["Login", "Public Access"]`.
+In addition, users should have `name`, `password`, `firstname`, `lastname`, `email`, `title`, and `company`. The `password` of these users can also be randomly generated and can be printed by `terraform output -json` (all users have the same password). Each user need to have a base group that must be in the `groups` section of the payload. Optionally a user can have a list of additional groups. A user can also have a list of favorites. Favorites can either be the logical name of a workspace instance used in the payload (see workspace below) or it can be a nickname of an OpenText Content Management item. Users can also have a **security clearance level** and multiple **supplementatal markings**. Both are optional. `security_clearance` is used to define the security clearance level of the user. This needs to match one of the existing security clearnace levels that have been defined in the `securityClearances`section in the payload. `supplemental_markings` defines a list of supplemental markings the user should get. These need to match markings defined in the `supplementalMarkings` section in the payload. The field `privileges` defines the standard privileges of a user. If it is omitted users get the default privileges `["Login", "Public Access"]`. The filed `user_type` is optional and can have the values `User` or `ServiceUser`. The default is `User`.
 
-The customizing module is also able to automatically configure Microsoft 365 users for each Extended ECM user. To make this work, the Terraform variable for Office 365 / Microsoft 365 need to be configured. In particular `var.enable_o365` needs to be `true`. In the user settings `enable_o365` has to be set to `true` as well (or you use the variable `var.enable_o365` if the payload is in the `customization.tf` file). `m365_skus` defines a list of Microsoft 365 SKUs that should be assigned to the user. These are the technical SKU IDs that are documented by Microsoft: [Licensing Service Plans](https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference). Inside the `customizing.tf` file you also find a convinient map called `m365_skus` that map the SKU ID to readable names (such as "Microsoft 365 E3" or "Microsoft 365 E5"). The `enable_sap`, `enable_successfactors`, `enable_salesforce`, `enable_core_share` allow to automatically create + configure the users in connected SAP S/4HANA, SuccessFactors, Salesforce, and Core Share applications respectively.
+The customizing module is also able to automatically configure Microsoft 365 users for each OpenText Content Management user. To make this work, the Terraform variable for Office 365 / Microsoft 365 need to be configured. In particular `var.enable_o365` needs to be `true`. In the user settings `enable_o365` has to be set to `true` as well (or you use the variable `var.enable_o365` if the payload is in the `customization.tf` file). `m365_skus` defines a list of Microsoft 365 SKUs that should be assigned to the user. These are the technical SKU IDs that are documented by Microsoft: [Licensing Service Plans](https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference). Inside the `customizing.tf` file you also find a convinient map called `m365_skus` that map the SKU ID to readable names (such as "Microsoft 365 E3" or "Microsoft 365 E5"). The `enable_sap`, `enable_successfactors`, `enable_salesforce`, `enable_core_share` allow to automatically create + configure the users in connected SAP S/4HANA, SuccessFactors, Salesforce, and Core Share applications respectively.
 
 === "Terraform / HCL"
 
@@ -873,7 +904,7 @@ The customizing module is also able to automatically configure Microsoft 365 use
 
 #### items
 
-`items` and `itemsPost` are lists of Extended ECM items such as folders, shortcuts or URLs that should be created automatically but are not included in transports. All items are created in the `Enterprise Workspace` of Extended ECM or any subfolder.
+`items` and `itemsPost` are lists of OpenText Content Management items such as folders, shortcuts or URLs that should be created automatically but are not included in transports. All items are created in the `Enterprise Workspace` of OpenText Content Management or any subfolder.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
 
@@ -962,7 +993,7 @@ In addition, the item can be specified via a path (list of folder names in Enter
         nickname = "..." # an item with this nick name needs to exist
         owner_permissions = []
         owner_group_permissions = []
-        public_permissions = ["see", "see_content"]
+        public_permissions = ["see", "see_contents"]
         groups = [
             {
               name = "..."
@@ -1006,11 +1037,11 @@ In addition, the item can be specified via a path (list of folder names in Enter
 
 #### renamings
 
-`renamings` is a list of Extended ECM items (e.g. volume names) that are automatically renamed during deployment.
+`renamings` is a list of OpenText Content Management items (e.g. volume names) that are automatically renamed during deployment.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
 
-In addition, you have to either provide the `nodeid` (only a few node IDs are really know upfront such as 2000 for the Enterprise Workspace) or a `volume` (type ID). In case of volumes there's a list of known volume types defined at the beginning of the `customizing.tf` file with the variable `otcs_volumes`. You can also specific a description that will be used to update the description of the node / item.
+In addition, you have to either provide the `nodeid` (only a few node IDs are really know upfront such as 2000 for the Enterprise Workspace) or a `volume` (type ID) with an optional `path` in that volume. Another alternative is to use a `nickname` to specify the node to be renamed. In case of volumes there's a list of known volume types defined at the beginning of the `customizing.tf` file with the variable `otcs_volumes`. You can also specific a description that will be used to update the description of the node / item.
 
 === "Terraform / HCL"
 
@@ -1026,7 +1057,7 @@ In addition, you have to either provide the `nodeid` (only a few node IDs are re
         enabled     = true
         volume      = var.otcs_volumes["Content Server Document Templates"]
         name        = "Content Server Document Templates"
-        description = "Extended ECM Workspace and Document Templates"
+        description = "OpenText Content Management Workspace and Document Templates"
       }
     ]
     ```
@@ -1039,7 +1070,7 @@ In addition, you have to either provide the `nodeid` (only a few node IDs are re
       enabled: true
       name: Innovate
       nodeid: 2000
-    - description: Extended ECM Workspace and Document Templates
+    - description: OpenText Content Management Workspace and Document Templates
       enabled: true
       name: Content Server Document Templates
       volume: ${var.otcs_volumes["Content Server Document Templates"]}
@@ -1051,7 +1082,7 @@ In addition, you have to either provide the `nodeid` (only a few node IDs are re
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`).
 
-In addition, each setting is defined by a `description`, the `filename` of an XML file that includes the actual Extended ECM admin settings that are applied automatically (using XML import / LLConfig). These files need to be stored inside the `setting/payload` sub-folder inside the terraform folder.
+In addition, each setting is defined by a `description`, the `filename` of an XML file that includes the actual OpenText Content Management admin settings that are applied automatically (using XML import / LLConfig). These files need to be stored inside the `setting/payload` sub-folder inside the terraform folder.
 
 === "Terraform / HCL"
 
@@ -1094,7 +1125,7 @@ In addition, each setting is defined by a `description`, the `filename` of an XM
 
 #### docGenSettings
 
-`docgenSettings` allows you to set settings in Extended ECM Document Generation (OTPD - PowerDocs).
+`docgenSettings` allows you to set settings in OpenText Content Management Document Generation (OTPD - PowerDocs).
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable.
 
@@ -1362,7 +1393,14 @@ Each element is a dict with these keys:
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`).
 
-In addition, the `id` needs to be a unique value in the payload. It does not need to be something related to any of the actual Extended ECM workspace data. It is only used to establish relationship between different workspaces in the payload (using the list of IDs in `relationships`). **_Important_**: If the workspace type definition uses a pattern to generate the workspace name then the `name` in the payload should match the pattern in the workspace type definition. Otherwise incremental deployments of the payload may not find the existing workspaces and may try to recreate them resulting in an error. The `nickname` is the Extended ECM nickname that allows to refer to this item without knowing its technical ID.
+In addition, the `id` needs to be a unique value in the payload. It does not need to be something related to any of the actual OpenText Content Management workspace data. It is only used to establish relationship between different workspaces in the payload (using the list of related workspaces in `relationships`). **_Important_**: If the workspace type definition uses a pattern to generate the workspace name then the `name` in the payload should match the pattern in the workspace type definition. Otherwise incremental deployments of the payload may not find the existing workspaces and may try to recreate them resulting in an error. The `nickname` is the OpenText Content Management nickname that allows to refer to this item without knowing its technical ID.
+
+The `relationships` are given as a list of related workspaces. The elements of the list can be:
+
+- string or integer with logical workspace ID
+- string with nickname of the related workspace
+- list of dictionaries with `type` and `name` of the related workspace
+- list of strings with the top-down path in the Enterprise volume
 
 Business Object information can be provided with a `business_objects` list. Each list item defines the external system (see above), the business object type, and business object ID. This list is optional.
 
@@ -1585,11 +1623,11 @@ A third workspace in the example below is for `Material` - it has an additional 
 
 #### webReports
 
-`webReports` and `webReportsPost` are two lists of Extended ECM web reports that should be automatically executed during deployment. Having two lists give you the option to run some webReports after the business configuration and some others after demo content has been produced. These Web Reports have typically been deployd to Extended ECM system with the transport warehouse before. Each list item specifies one Web Report.
+`webReports` and `webReportsPost` are two lists of OpenText Content Management web reports that should be automatically executed during deployment. Having two lists give you the option to run some webReports after the business configuration and some others after demo content has been produced. These Web Reports have typically been deployd to OpenText Content Management system with the transport warehouse before. Each list item specifies one Web Report.
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`).
 
-In addition, the `nickname` is mandatory and defines the nickname of the Web Report to be executed. So you need to give each webReport you want to run a nickname before putting it in a transport package. The element `description` is optional. The `parameters` set defines parameter name and parameter value pairs. The corresponding Web Report in Extended ECM must have exactly these parameters defined.
+In addition, the `nickname` is mandatory and defines the nickname of the Web Report to be executed. So you need to give each webReport you want to run a nickname before putting it in a transport package. The element `description` is optional. The `parameters` set defines parameter name and parameter value pairs. The corresponding Web Report in OpenText Content Management must have exactly these parameters defined.
 
 === "Terraform / HCL"
 
@@ -1604,14 +1642,14 @@ In addition, the `nickname` is mandatory and defines the nickname of the Web Rep
       },
       {
         nickname    = "web_report_set_cust_sf"
-        description = "Web Report to auto-configure Extended ECM for SuccessFactors Module Specific Settings"
+        description = "Web Report to auto-configure OpenText Content Management for SuccessFactors Module Specific Settings"
       }
     ]
 
     webReportsPost = [
       {
         nickname    = "web_report_set_cust_sf"
-        description = "Web Report to auto-configure Extended ECM for SuccessFactors Module Specific Settings"
+        description = "Web Report to auto-configure OpenText Content Management for SuccessFactors Module Specific Settings"
       }
     ]
     ```
@@ -1624,11 +1662,11 @@ In addition, the `nickname` is mandatory and defines the nickname of the Web Rep
       nickname: web_report_unset_xgov_doc_view
       parameters:
         user_name: swang
-    - description: Web Report to auto-configure Extended ECM for SuccessFactors Module
+    - description: Web Report to auto-configure OpenText Content Management for SuccessFactors Module
         Specific Settings
       nickname: web_report_set_cust_sf
     webReportsPost:
-    - description: Web Report to auto-configure Extended ECM for SuccessFactors Module
+    - description: Web Report to auto-configure OpenText Content Management for SuccessFactors Module
         Specific Settings
       nickname: web_report_set_cust_sf
     ```
@@ -1678,7 +1716,7 @@ In addition, each element has a `name` for the application and optionally a `des
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`).
 
-Each assignment assigns either a `workspace` or an Extended ECM item with a `nickname` to a defined list of `users` or `groups`. Assignments have a `subject` (title) and `instructions` for the target users or groups.
+Each assignment assigns either a `workspace` or an OpenText Content Management item with a `nickname` to a defined list of `users` or `groups`. Assignments have a `subject` (title) and `instructions` for the target users or groups.
 
 === "Terraform / HCL"
 
@@ -1713,7 +1751,7 @@ Each assignment assigns either a `workspace` or an Extended ECM item with a `nic
 
 #### documentGenerators
 
-`documentGenerators` defines a list of document generators that is based on the document template capabilities of Extended ECM. Each element is a dictionary with these fields:
+`documentGenerators` defines a list of document generators that is based on the document template capabilities of OpenText Content Management. Each element is a dictionary with these fields:
 
 - `enabled` switch to turn payload element on or off (the default is `true`)
 - `workspace_type` is the name of the workspace type. It is a mandatory field.
@@ -1820,7 +1858,7 @@ For mass loading and generation of workspaces, documents, items and classificati
 
 #### bulkDatasources
 
-Before you can bulk load workspaces, workspace relationships, or documents you have to declare the used data sources. `bulkDatasources` is a list of datasources. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `type`. Supported types are `excel` (Microsoft Excel workbooks), `servicenow` (ServiceNow REST API), `otmm` (OpenText Media Management REST API), `otcs` (Extended ECM REST API), `pht` (internal OpenText System for Product Master Data, REST API), `json` (JSON files), `csv` (comma-separated values), and `xml` (XML files, or whole directories / zip files of XML files). Based on the selected `type` data sources may have many specific fields to configure the specifics of the data source and define how to connect to the data source.
+Before you can bulk load workspaces, workspace relationships, or documents you have to declare the used data sources. `bulkDatasources` is a list of datasources. Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`). First, a data source needs a `type`. Supported types are `excel` (Microsoft Excel workbooks), `servicenow` (ServiceNow REST API), `otmm` (OpenText Media Management REST API), `otcs` (OpenText Content Management REST API), `pht` (internal OpenText System for Product Master Data, REST API), `json` (JSON files), `csv` (comma-separated values), and `xml` (XML files, or whole directories / zip files of XML files). Based on the selected `type` data sources may have many specific fields to configure the specifics of the data source and define how to connect to the data source.
 
 The following settings can be applied to all data source types:
 
@@ -1876,7 +1914,7 @@ CSV File specific settings:
 - `csv_column_names` (list, optional) - if the file has no header line the column name can be specified as a list of strings
 - `csv_use_columns` (list, optional) - this list can either include integers (index of columns to keep), strings (names of columns to keep), or a list of boolean values (True = column is kept, False = column is dropped)
 
-OpenText Extended ECM / Content Server specific settings (fields):
+OpenText OpenText Content Management / Content Server specific settings (fields):
 
 - `otcs_hostname` (str, mandatory)
 - `otcs_protocol` (str, optional, default = `https`)
@@ -1903,7 +1941,12 @@ OpenText Extended ECM / Content Server specific settings (fields):
   - `row` (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
   - `attribute` (str, mandatory) - name of the attribute
   - `value` (str, mandatory) - value the attribute should have to pass the filter
+- `otcs_filter_item_in_workspace` (bool, optional, default = True) - defines whether or not items in workspace should also be filtered
 - `otcs_exclude_node_ids` (list, optional, default = None) - list of Content Server IDs to exclude from loading / traversing
+- `otcs_download_document` (bool, optional, default = True) - defines whether or not documents should actually be downloaded
+- `otcs_skip_existing_downloads` (bool, optional, default = True) - defines whether or not documents downloaded before and still exist in the filesystem should be downloaded once more
+- `extract_zip` (bool, optional, default = False) - defines whether or not zip files should be uncompressed and its content should be uploaded instead
+- `otcs_use_numeric_category_identifier` (bool, optional, default = True) - defines whether or not category IDs should be used in data frame columns. If `False` then a normalized category name will be used instead
 
 ServiceNow specific settings (fields):
 
@@ -2537,12 +2580,74 @@ This is an example for bulkItems definitions:
 
 ### Advanced Customizing Syntax
 
-For advanced use cases that are not covered by Extended ECM or OTDS APIs, there are additional customizing capabilities.
+For advanced use cases that are not covered by OpenText Content Management or OTDS APIs, there are additional customizing capabilities.
 This includes calling SAP Remote Function Calls (RFC), executing commands in the Kubernetes Pods or triggering web hooks (HTTP POST requests):
 
-#### execPodCommands
+#### kubernetes
 
-`execPodCommands` is used to execute a Linux command inside a Kubernetes pod using the Kubernetes API (similar to what `kubectl exec` does). This may be handy to influence / change some of the intrinsics of the pods. If `eanbled` evaluates to `true` then the command will be called during the customization process. The `pod_name` must match is technical name of the pod in the Kubernetes deployment (you can get the pod names with `kubectl get pods`). `command` is a list of the command terms and parameters. The first element is typically the Linux shell that is used for executing the command and the second parameter is typically `-c` if the command is run in non-interactive mode. `interactive` defines if the command is run interactively or not. The default is to run the command non-interactively. Only for longer running commands you should prefer to run the command interactively.
+This payload type allows to apply commands via the Kubernetes API. Currently the actions `restart` and `execPodCommands` are supported.
+
+##### action="restart"
+
+`restart` can be used with type (deployment, statefulset, pod). For `deployment` and `statefulset` a rolling deployment will be triggered. In case of "pod" the it will be deleted and it is expected that the Kubernetes API automatically recreates it. This will not work if the pod was created as a standalone instance.
+
+##### action="execPodCommands"
+
+`execPodCommands` is used to execute a Linux command inside a Kubernetes pod using the Kubernetes API (similar to what `kubectl exec` does). This may be handy to influence / change some of the intrinsics of the pods. If `enabled` evaluates to `true` then the command will be called during the customization process. The `pod_name` must match is technical name of the pod in the Kubernetes deployment (you can get the pod names with `kubectl get pods`). `command` is a list of the command terms and parameters. The first element is typically the Linux shell that is used for executing the command and the second parameter is typically `-c` if the command is run in non-interactive mode. `interactive` defines if the command is run interactively or not. The default is to run the command non-interactively. Only for longer running commands you should prefer to run the command interactively.
+
+=== "Terraform / HCL"
+
+    ```terraform
+    kubernetes = [
+        {
+          enabled     = true
+          action      = "execPodCommands"
+          description = "Test"
+          pod_name    = "otcs-admin-0"
+          command     = ["/bin/sh", "-c", "touch /tmp/python_was_here"]
+          interactive = false
+        },
+        {
+          enabled     = true
+          action      = "restart"
+          type        = "deployment"
+          name        = "otdsws"
+        },
+        {
+          enabled     = true
+          action      = "restart"
+          type        = "statefulset"
+          name        = "otcs-frontend"
+        }
+    ]
+    ```
+
+=== "YAML"
+
+    ```yaml
+    kubernetes:
+    - action: execPodCommands
+      command:
+      - /bin/sh
+      - -c
+      - touch /tmp/python_was_here
+      description: Test
+      enabled: true
+      interactive: false
+      pod_name: otcs-admin-0
+    - action: restart
+      type: deployment
+      name: otdsws
+    - action: restart
+      type: statefulset
+      name: otcs-frontend
+    ```
+
+#### execPodCommands (deprecated)
+
+**use `kubernetes` with action `execPodCommands`**
+
+`execPodCommands` is used to execute a Linux command inside a Kubernetes pod using the Kubernetes API (similar to what `kubectl exec` does). This may be handy to influence / change some of the intrinsics of the pods. If `enabled` evaluates to `true` then the command will be called during the customization process. The `pod_name` must match is technical name of the pod in the Kubernetes deployment (you can get the pod names with `kubectl get pods`). `command` is a list of the command terms and parameters. The first element is typically the Linux shell that is used for executing the command and the second parameter is typically `-c` if the command is run in non-interactive mode. `interactive` defines if the command is run interactively or not. The default is to run the command non-interactively. Only for longer running commands you should prefer to run the command interactively.
 
 === "Terraform / HCL"
 
@@ -2575,7 +2680,7 @@ This includes calling SAP Remote Function Calls (RFC), executing commands in the
 
 #### execCommands
 
-`execCommands` is used to execute a command. `command` is a list of the command terms and parameters. The first element is typically the Linux shell that is used for executing the command and the second parameter is typically `-c`.
+`execCommands` is used to execute a command in the local customizer pod. `command` is a list of the command terms and parameters. The first element is typically the Linux shell that is used for executing the command and the second parameter is typically `-c`.
 
 === "Terraform / HCL"
 
@@ -2602,11 +2707,56 @@ This includes calling SAP Remote Function Calls (RFC), executing commands in the
 
     ```
 
+#### execDatabaseCommands
+
+`execDatabaseCommands` is used to execute commands in a database. If `enabled` evaluates to `true` then the database command set is active.
+Each item in the `execDatabaseCommands` list consists of a database connection `db_connection` and a list of commands `db_commands` to execute in that database. Each command can have a list of associated parameters `params`. If params is not empty then the command must have placeholders given by `%s` that are replaced by the parameters from the `params` list in the given ordering.
+
+=== "Terraform / HCL"
+
+    ```terraform
+    execDatabaseCommands = [
+        {
+          enabled       = false
+          db_connection = {
+            db_name     = "otcs"
+            db_hostname = "localhost"
+            db_port     = 5432
+            db_username = "test"
+            db_password = "123"
+          }
+          db_commands = [
+            {
+              command = "select * from dtree where name = %s"
+              params  = ["Test"]
+            }
+          ]
+        }
+    ]
+    ```
+
+=== "YAML"
+
+    ```yaml
+    execDatabaseCommands:
+      enabled: false
+      db_connection:
+        db_name: "otcs"
+        db_hostname: "localhost"
+        db_port: 5432
+        db_username: "test"
+        db_password: "123"
+      db_commands:
+      - command: "select * from dtree where name = %s"
+        params:
+          - ["Test"]
+    ```
+
 #### webHooks
 
 `webHooks` and `webHooksPost` are used to call (HTTP request) defined URLs that may trigger certain activities as webhooks. `webHooks` is called at the beginning of the customization process and `webHooksPost` is called at the end.
 
-If `eanbled` evaluates to `true` then the weekhook is active.
+If `enabled` evaluates to `true` then the weekhook is active.
 
 `url` defines the URL of the web hook. `method` can we one of the typical HTTP request types (POST, GET, PUT, ...). If it is omitted the default is `POST`. `description` should describe the purpose of the web hook. The parameters `payload` and `headers` are maps (dictionaries) of name, value pairs. These are passed as additional header or body values to the HTTP request.
 
@@ -2659,7 +2809,7 @@ If `eanbled` evaluates to `true` then the weekhook is active.
 
 #### sapRFCs
 
-`sapRFCs` are defining a list of SAP Remote Function Calls (RFC) that are called to automate things in SAP S/4HANA. If `eanbled` evaluates to `true` then the RFC will be called during the customization process. `name` is the technical SAP name of the RFC. `description` is optional and is just informative. If the RFC requires parameters they can be passed via the `parameters` block (name, value pairs).
+The `sapRFCs` payload defines a list of SAP Remote Function Calls (RFC) that are called to automate things in SAP S/4HANA. If `enabled` evaluates to `true` then the RFC will be called during the customization process. `name` is the technical SAP name of the RFC. `description` is optional and is just informative. If the RFC requires parameters they can be passed via the `parameters` block (name, value pairs).
 
 === "Terraform / HCL"
 
@@ -2704,6 +2854,51 @@ If `eanbled` evaluates to `true` then the weekhook is active.
         SYNC: ''
     ```
 
+#### Browser Automations
+
+`browserAutomations` is a list of browser automation for things that can only be
+automated via the web user interface. Each list element is a dict with these keys:
+
+- `enabled` (bool, optional, default = True)
+- `name` (str, mandatory)
+- `description` (str, optional)
+- `base_url` (str, mandatory)
+- `user_name` (str, optional)
+- `password` (str, optional)
+- `wait_time` (float, optional, default = 30.0) - wait time in seconds
+- `wait_until` (str, optional) - the page load / navigation `wait until` strategy. Possible values: `load`, `networkidle`, `domcontentloaded`
+- `debug` (bool, optional, default = False) - if True take screenshots and save to customizer pod
+- `automations` (list, mandatory)
+  - `dependent` (bool, optional, default = true) - decide if current automation step is dependent on the previous step. If dependent = True and previous step failed this step is skipped.
+  - `type` (str, optional, default = "") - possible types: `login`, `get_page`, `click_elem`, `set_elem`, `check_elem`
+  - `page` (str, optional, default = "") - the page-specific part of the URL. Will be concatenated with the `base_url`
+  - `selector` (str, optional, default = "") - the selector (search pattern) for the page element
+  - `selector_type` (str, optional, default = "id") - the type of the selector - either `id`, `name`, `css`, `xpath`, `role`, `text`, `title`, `label`, `placeholder`, `alt`
+  - `role_type` (str, optional, default = "") - the ARIA role of an element. Only relevant for find = `role`.
+  - `scroll_to_element` (bool, optional, default = true) - scroll to the element before clicking it - for type `click_elem` only. Should actually not be necessary as locators should scroll automatically.
+  - `value` (str, optional, default = "") - the new value of element. Relevant for type = `set_elem`.
+  - `user_field` (str, optional, default = "") - the name of the HTML field holding the user name - only for type `login`.
+  - `password_field` (str, optional, default = "") - the name of the HTML field holding the password - only for type `login`.
+  - `iframe`: name of the iframe if the elem is inside an iframe
+  - `press_enter`: simulate pressing the "Enter" key after setting the elem value - for type `set_elem` only
+  - `typing` (bool, optional) - deciding if to simulate keyboard input - this is required for many type-ahead fields to work - for type `set_elem` only
+  - `exact_match` (bool, optional) - deciding if the element should be identified with an exact match
+  - `hover_only` (bool, optional) - deciding if instead of clicking the element only a mouse over hovering should be simulated - for type `click_elem` only
+  - `wait_until` (str, optional, default = "") - an automation-step specific value for `wait_until` (see above)
+  - `volume` (int, optional, default = 141 (Enterprise Volume)) - the OTCS volume ID. Only relevant for type = `get_page`.
+  - `path` (list, optional, default = []) - a top-down list of folder / workspace names. Only relevant for type = `get_page`.
+  - `navigation` (bool, optional, default = False) - whether or not the click issues a nvigation event. Relevant only for type = `click_elem`.
+  - `popup_window` (bool, optional) - deciding if the click will popup a new browser window - for type `click_elem` only
+  - `close_window` (bool, optional) - deciding if the click will close the current window - for type `click_elem` only
+  - `checkbox_state` (bool, optional, default = None) - defines the desired state of a checkbox element (True = checked, False = unchecked)
+  - `attribute` (str, optional, default = "") - the attribute name of an HTML element. Relevant only for type = `check_elem`.
+  - `substring` (bool, optional, default = False) - with or not a string comparison should consider substrings. Relevant only for type = `check_elem`.
+  - `min_count` (int, optional, default = 1) - defines how many elements should be found at a minimum by type = `check_elem`.
+  - `want_exist` (bool, optional, default = True) - defines for type = `check_elem` if the existence or non-existence should be checked.
+  - `iframe` (str, optional) - name of the iframe tag if the element is inside an iframe.
+  - `exact_match` - if the element name should be an exact match
+  - `regex` (bool, optional) - is the name to be interpreted as a regular expression?
+
 ---
 
 ### Search Aviator Customizing Syntax
@@ -2720,7 +2915,7 @@ These are all the settings in a single repository list element:
   - Extended ECM
   - Documentum
 
-##### Extended ECM specific values
+##### OpenText Content Management specific values
 
 - `otcs_url`: URL of Content Server (OTCS), e.g. `https://otcs.domain.tld/cs/cs`
 - `otcs_api_url`: URL of Content Server (OTCS), e.g. `https://otcs.domain.tld/cs/cs`
@@ -2738,7 +2933,7 @@ These are all the settings in a single repository list element:
       avtsRepositories = [
         {
           enabled  = true
-          name     = "Extended ECM"
+          name     = "OpenText Content Management"
           type     = "Extended ECM"
           otcs_url = "https://otcs.domain.tld/cs/cs"
           otcs_url = "http://otcs-frontend/cs/cs"

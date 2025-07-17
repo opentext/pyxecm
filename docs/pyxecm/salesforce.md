@@ -1,1 +1,1 @@
-::: pyxecm.customizer.salesforce
+::: pyxecm_customizer.salesforce

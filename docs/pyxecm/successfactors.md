@@ -1,1 +1,1 @@
-::: pyxecm.customizer.successfactors
+::: pyxecm_customizer.successfactors

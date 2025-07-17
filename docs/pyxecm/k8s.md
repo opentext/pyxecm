@@ -1,1 +1,1 @@
-::: pyxecm.customizer.k8s
+::: pyxecm_customizer.k8s

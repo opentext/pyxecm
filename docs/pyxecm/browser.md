@@ -1,1 +1,1 @@
-::: pyxecm.customizer.browser_automation
+::: pyxecm_customizer.browser_automation

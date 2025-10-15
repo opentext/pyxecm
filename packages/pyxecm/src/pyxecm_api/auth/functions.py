@@ -27,8 +27,8 @@ def get_groups(response: dict, token: str) -> list:
     """Get the groups of the user.
 
     Args:
-        response (_type_): _description_
-        token (_type_): _description_
+        response (dict): _description_
+        token (str): _description_
 
     Returns:
         list: _description_

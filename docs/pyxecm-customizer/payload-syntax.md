@@ -1925,6 +1925,10 @@ OpenText OpenText Content Management / Content Server specific settings (fields)
 - `otcs_thread_number` (int, optional, default = BULK_THREAD_NUMBER)
 - `otcs_download_dir` (str, optional, default = `/data/contentserver`)
 - `otcs_root_node_ids` (int | list[int], mandatory)
+- `otcs_include_workspaces` (bool, optional, default = True) - if workspace rows should be created in the data frame
+- `otcs_include_items` (bool, optional, default = True) - if item rows should be created in the data frame
+- `otcs_include_workspace_metadata` (bool, optional, default = True) - if metadata columns for workspaces should be created in the data frame
+- `otcs_include_item_metadata` (bool, optional, default = True) - if metadata columns for items should be created in the data frame
 - `otcs_filter_workspace_depth` (int, optional, default = 0) - 0 = workspaces are located immedeately below given root node
 - `otcs_filter_workspace_subtypes` (list, optional, default = `[]`) - 0 = folder subtype
 - `otcs_filter_workspace_category` (str, optional, default = None) - defines the category the workspace needs to have to pass the filter

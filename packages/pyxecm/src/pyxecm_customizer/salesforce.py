@@ -24,8 +24,8 @@ REQUEST_LOGIN_HEADERS = {
     "Accept": "application/json",
 }
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 3
 
 SALESFORCE_API_VERSION = "v60.0"
@@ -199,7 +199,7 @@ class Salesforce:
         json_data: dict | None = None,
         files: dict | None = None,
         params: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -231,7 +231,7 @@ class Salesforce:
                 Add key-value pairs to the query string of the URL.
                 When you use the params parameter, requests automatically appends
                 the key-value pairs to the URL as part of the query string
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -267,7 +267,7 @@ class Salesforce:
 
         if headers is None:
             self.logger.error(
-                "Missing request header. Cannot send request to Core Share!",
+                "Missing request header. Cannot send request to Salesforce!",
             )
             return None
 
@@ -370,7 +370,7 @@ class Salesforce:
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     self.logger.error(
-                        "%s; connection error.",
+                        "%s; connection error!",
                         failure_message,
                     )
                     if retry_forever:
@@ -449,7 +449,7 @@ class Salesforce:
 
         Args:
             response (dict):
-                REST response from an Salesforce API call
+                REST response from an Salesforce API call.
             key (str):
                 The property name (key) of the item to lookup.
             value (str):
@@ -536,7 +536,7 @@ class Salesforce:
         Returns:
             str | None:
                 The Access token. Also stores access token in self._access_token.
-                None in case of error
+                None in case of error.
 
         """
 
@@ -604,12 +604,16 @@ class Salesforce:
         """Get the ID of a given Salesforce object with a given type and name.
 
         Args:
-            object_type (str): Sales object type, like "Account", "Case", ...
-            name (str): Name of the Salesforce object.
-            name_field (str, optional): Field where the name is stored. Defaults to "Name".
+            object_type (str):
+                The Salesforce object type, like "Account", "Case", ...
+            name (str):
+                The name of the Salesforce object.
+            name_field (str, optional):
+                The field where the name is stored. Defaults to "Name".
 
         Returns:
-            Optional[str]: Object ID or None if the request fails.
+            str | None:
+                Object ID or None if the request fails.
 
         """
 
@@ -650,17 +654,21 @@ class Salesforce:
         """Get a Salesforce object based on a defined field value and return selected result fields.
 
         Args:
-            object_type (str): Salesforce Business Object type. Such as "Account" or "Case".
-            search_field (str): The object field to search in.
-            search_value (str): The value to search for.
+            object_type (str):
+                The Salesforce Business Object type. Such as "Account" or "Case".
+            search_field (str):
+                The object field to search in.
+            search_value (str):
+                The value to search for.
             result_fields (list | None):
-                List of fields to return. If None, then all standard fields
+                The list of fields to return. If None, then all standard fields
                 of the object will be returned.
             limit (int, optional):
                 The maximum number of fields to return. Salesforce enforces 200 as upper limit.
 
         Returns:
-            dict | None: Dictionary with the Salesforce object data.
+            dict | None:
+                Dictionary with the Salesforce object data.
 
         Example:
             {
@@ -742,7 +750,8 @@ class Salesforce:
                 on the object type.
 
         Returns:
-            dict | None: Dictionary with the Salesforce object data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce object data or None if the request fails.
 
         """
 
@@ -824,10 +833,12 @@ class Salesforce:
         """Get a group ID by group name.
 
         Args:
-            group_name (str): Name of the Group.
+            group_name (str):
+                The name of the Group.
 
         Returns:
-            Optional[str]: Technical ID of the group
+            str | None:
+                The technical Salesforce ID of the group.
 
         """
 
@@ -844,7 +855,7 @@ class Salesforce:
 
         Args:
             group_id (str):
-                ID of the Salesforce group to retrieve.
+                The ID of the Salesforce group to retrieve.
 
         Returns:
             dict | None:
@@ -884,11 +895,14 @@ class Salesforce:
         """Add a new Salesforce group.
 
         Args:
-            group_name (str): Name of the new Salesforce group
-            group_type (str, optional): Type of the group. Default is "Regular".
+            group_name (str):
+                The name of the new Salesforce group.
+            group_type (str, optional):
+                The type of the group. Default is "Regular".
 
         Returns:
-            dict | None: Dictionary with the Salesforce Group data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce Group data or None if the request fails.
 
         Example:
             {
@@ -932,11 +946,14 @@ class Salesforce:
         """Update a Salesforce group.
 
         Args:
-            group_id (str): The Salesforce group ID.
-            update_data (dict): Dictionary containing the fields to update.
+            group_id (str):
+                The Salesforce group ID.
+            update_data (dict):
+                A dictionary containing the fields to update.
 
         Returns:
-            dict | None: Response from the Salesforce API. None in case of an error.
+            dict | None:
+                Response from the Salesforce API. None in case of an error.
 
         """
 
@@ -1132,10 +1149,12 @@ class Salesforce:
         """Get a user profile ID by profile name.
 
         Args:
-            profile_name (str): Name of the User Profile.
+            profile_name (str):
+                The name of the User Profile.
 
         Returns:
-            Optional[str]: Technical ID of the user profile.
+            str | None:
+                The technical ID of the user profile.
 
         """
 
@@ -1166,10 +1185,12 @@ class Salesforce:
         """Get a Salesforce user based on its ID.
 
         Args:
-            user_id (str): ID of the Salesforce user
+            user_id (str):
+                The ID of the Salesforce user.
 
         Returns:
-            dict | None: Dictionary with the Salesforce user data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce user data or None if the request fails.
 
         """
 
@@ -1217,20 +1238,20 @@ class Salesforce:
 
         Args:
             username (str):
-                Login name of the new user
+                The login name of the new user
             email (str):
-                Email of the new user
+                The Email of the new user.
             firstname (str):
-                First name of the new user.
+                The first name of the new user.
             lastname (str):
-                Last name of the new user.
-            title (str):
-                Title of the user.
-            department (str):
-                Department of the user.
-            company_name (str):
+                The last name of the new user.
+            title (str, optional):
+                The title of the user.
+            department (str, optional):
+                The name of the department of the user.
+            company_name (str, optional):
                 Name of the Company of the user.
-            profile_name (str):
+            profile_name (str, optional):
                 Profile name like "Standard User"
             profile_id (str, optional):
                 Profile ID of the new user. Defaults to None.
@@ -1246,7 +1267,8 @@ class Salesforce:
                 Alias of the new user. Defaults to None.
 
         Returns:
-            dict | None: Dictionary with the Salesforce User data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce User data or None if the request fails.
 
         """
 
@@ -1297,15 +1319,18 @@ class Salesforce:
         self,
         user_id: str,
         update_data: dict,
-    ) -> dict:
+    ) -> dict | None:
         """Update a Salesforce user.
 
         Args:
-            user_id (str): The Salesforce user ID.
-            update_data (dict): Dictionary containing the fields to update.
+            user_id (str):
+                The Salesforce user ID.
+            update_data (dict):
+                Dictionary containing the fields to update.
 
         Returns:
-            dict: Response from the Salesforce API.
+            dict | None:
+                Response from the Salesforce API. None in case of an error.
 
         """
 
@@ -1343,11 +1368,14 @@ class Salesforce:
         """Update the password of a Salesforce user.
 
         Args:
-            user_id (str): The Salesforce user ID.
-            password (str): New user password.
+            user_id (str):
+                The Salesforce user ID.
+            password (str):
+                The new user password.
 
         Returns:
-            dict: Response from the Salesforce API.
+            dict | None:
+                Response from the Salesforce API. None in case of an error.
 
         """
 
@@ -1387,11 +1415,14 @@ class Salesforce:
         """Update the Salesforce user photo.
 
         Args:
-            user_id (str): Salesforce ID of the user
-            photo_path (str): file system path with the location of the photo
+            user_id (str):
+                The Salesforce ID of the user.
+            photo_path (str):
+                A file system path with the location of the photo.
 
         Returns:
-            dict | None: Dictionary with the Salesforce User data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce User data or None if the request fails.
 
         """
 
@@ -1410,7 +1441,7 @@ class Salesforce:
         except OSError:
             # Handle any errors that occurred while reading the photo file
             self.logger.error(
-                "Error reading photo file -> %s",
+                "Error reading photo file -> '%s'!",
                 photo_path,
             )
             return None
@@ -1464,17 +1495,26 @@ class Salesforce:
         """Add a new Account object to Salesforce.
 
         Args:
-            account_name (str): Name of the new Salesforce account.
-            account_number (str): Number of the new Salesforce account (this is a logical number, not the technical ID)
-            account_type (str): Type of the Salesforce account. Typical values are "Customer" or "Prospect".
-            description(str, optional): Description of the new Salesforce account.
-            industry (str, optional): Industry of the new Salesforce account. Defaults to None.
-            website (str, optional): Website of the new Salesforce account. Defaults to None.
-            phone (str, optional): Phone number of the new Salesforce account. Defaults to None.
-            kwargs (dict): Additional values (e.g. custom fields)
+            account_name (str):
+                The name of the new Salesforce account.
+            account_number (str):
+                The number of the new Salesforce account (this is a logical number, not the technical ID).
+            account_type (str):
+                The type of the Salesforce account. Typical values are "Customer" or "Prospect".
+            description(str, optional):
+                The description of the new Salesforce account.
+            industry (str, optional):
+                The industry of the new Salesforce account. Defaults to None.
+            website (str, optional):
+                The website of the new Salesforce account. Defaults to None.
+            phone (str, optional):
+                The phone number of the new Salesforce account. Defaults to None.
+            kwargs (dict):
+                Additional values (e.g. custom fields)
 
         Returns:
-            dict | None: Dictionary with the Salesforce Account data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce Account data or None if the request fails.
 
         """
 
@@ -1528,18 +1568,19 @@ class Salesforce:
 
         Args:
             product_name (str):
-                Name of the Salesforce Product.
+                The name of the Salesforce Product.
             product_code (str):
-                Code of the Salesforce Product.
+                The code of the Salesforce Product.
             description (str):
-                Description of the Salesforce Product.
+                A description of the Salesforce Product.
             price (float):
-                Price of the Salesforce Product.
-            kwargs:
+                The price of the Salesforce Product.
+            kwargs (dict):
                 Additional keyword arguments.
 
         Returns:
-            dict | None: Dictionary with the Salesforce Product data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce Product data or None if the request fails.
 
         """
 
@@ -1591,9 +1632,10 @@ class Salesforce:
         """Add a new Opportunity object to Salesfoce.
 
         Args:
-            name (str): Name of the Opportunity.
+            name (str):
+                The name of the Opportunity.
             stage (str):
-                Stage of the Opportunity. Typical Value:
+                The stage of the Opportunity. Typical Value:
                 - "Prospecting"
                 - "Qualification"
                 - "Value Proposition"
@@ -1601,7 +1643,7 @@ class Salesforce:
                 - "Closed Won"
                 - "Closed Lost"
             close_date (str):
-                Close date of the Opportunity. Should be in format YYYY-MM-DD.
+                The close date of the Opportunity. Should be in format YYYY-MM-DD.
             amount (Union[int, float]):
                 Amount (expected revenue) of the opportunity.
                 Can either be an integer or a float value.
@@ -1613,7 +1655,8 @@ class Salesforce:
                 Additional keyword arguments.
 
         Returns:
-            dict | None: Dictionary with the Salesforce Opportunity data or None if the request fails.
+            dict | None:
+                Dictionary with the Salesforce Opportunity data or None if the request fails.
 
         """
 
@@ -1670,11 +1713,11 @@ class Salesforce:
 
         Args:
             subject (str):
-                Subject (title) of the case. It's like the name.
+                The subject (title) of the case. It's like the name.
             description (str):
-                Description of the case
+                The description of the case.
             status (str):
-                Status of the case. Typecal values: "New", "On Hold", "Escalated"
+                Status of the case. Typecal values: "New", "On Hold", "Escalated".
             priority (str):
                 Priority of the case. Typical values: "High", "Medium", "Low".
             origin (str):
@@ -1683,9 +1726,9 @@ class Salesforce:
                 Technical ID of the related Account
             owner_id (str):
                 Owner of the case
-            asset_id (str):
+            asset_id (str, optional):
                 Technical ID of the related Asset.
-            product_id (str):
+            product_id (str, optional):
                 Technical ID of the related Product.
             kwargs (dict):
                 Additional values (e.g. custom fields)
@@ -1762,7 +1805,7 @@ class Salesforce:
                 Purchase date of the Asset.
             install_date (str):
                 Install date of the Asset.
-            description (str):
+            description (str, optional):
                 Description of the Asset.
             kwargs (dict):
                 Additional values (e.g. custom fields)
@@ -1835,7 +1878,7 @@ class Salesforce:
                 - "Support"
                 - "Lease"
                 - "Service"
-            status (str):
+            status (str, optional):
                 Status of the Contract. Typical values are:
                 - "Draft"
                 - "Activated"

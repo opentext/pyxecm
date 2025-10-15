@@ -53,10 +53,10 @@ REQUEST_HEADERS_JSON = {
     "accept": "application/json",
 }
 
-REQUEST_TIMEOUT = 120
+REQUEST_TIMEOUT = 120.0
 REQUEST_MAX_RETRIES = 10
-REQUEST_RETRY_DELAY = 30
-SYNC_PUBLISH_REQUEST_TIMEOUT = 600
+REQUEST_RETRY_DELAY = 30.0
+SYNC_PUBLISH_REQUEST_TIMEOUT = 600.0
 
 default_logger = logging.getLogger(MODULE_NAME)
 
@@ -332,13 +332,13 @@ class OTAWP:
                 The hostname of Extended ECM server to communicate with.
             port (int):
                 The port number used to talk to the Extended ECM server.
-            username (str, optional):
+            username (str | None, optional):
                 The admin user name of OTAWP. Optional if otawp_ticket is provided.
-            password (str, optional):
+            password (str | None, optional):
                 The admin password of OTAWP. Optional if otawp_ticket is provided.
-            organization (str, optional):
+            organization (str | None, optional):
                 The AppWorks organization. Used in LDAP strings and base URL.
-            otawp_ticket (str, optional):
+            otawp_ticket (str | None, optional):
                 The authentication ticket of OTAWP.
             config_map_name (str | None, optional):
                 The AppWorks Kubernetes Config Map name. Defaults to None.
@@ -805,8 +805,8 @@ class OTAWP:
                 The key to find.
 
         Returns:
-            str:
-                The value for the key.
+            str | None:
+                The value for the key. None in case of an error.
 
         """
 
@@ -859,7 +859,7 @@ class OTAWP:
         data: dict | None = None,
         json_data: dict | None = None,
         files: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -886,7 +886,7 @@ class OTAWP:
             files (dict | None, optional):
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -995,9 +995,9 @@ class OTAWP:
         Args:
             response_object (object):
                 This is reponse object delivered by the request call.
-            additional_error_message (str):
+            additional_error_message (str, optional):
                 Print a custom error message.
-            show_error (bool):
+            show_error (bool, optional):
                 If True log an error, if False log a warning.
 
         Returns:
@@ -1111,7 +1111,7 @@ class OTAWP:
                 Whether an error or just a warning should be logged.
 
         Returns:
-            str | None:
+            str | int | None:
                 Value of the item with the given key, or None if no value is found.
 
         """
@@ -1982,7 +1982,7 @@ class OTAWP:
                 The trading name.
 
         Returns:
-            dict:
+            dict | None:
                 Request response (dictionary) or None if the REST call fails.
 
         """
@@ -2310,7 +2310,7 @@ class OTAWP:
             cookies=self.cookie(),
             json_data=create_category_data,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Request to create category -> '{}' failed".format(name),
+            failure_message="Failed to create category -> '{}'".format(name),
         )
 
     # end method definition
@@ -2375,7 +2375,7 @@ class OTAWP:
             headers=REQUEST_HEADERS_JSON,
             cookies=self.cookie(),
             timeout=REQUEST_TIMEOUT,
-            failure_message="Request to get categories failed",
+            failure_message="Failed to get categories",
         )
 
     # end method definition
@@ -2480,7 +2480,7 @@ class OTAWP:
             cookies=self.cookie(),
             json_data=create_sub_category_data,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Request to create sub-category -> '{}' with parent category ID -> {} failed".format(
+            failure_message="Failed to create sub-category -> '{}' with parent category ID -> {}".format(
                 name, parent_id
             ),
         )
@@ -2541,7 +2541,7 @@ class OTAWP:
             headers=REQUEST_HEADERS_JSON,
             cookies=self.cookie(),
             timeout=REQUEST_TIMEOUT,
-            failure_message="Request to get sub-categories for parent category with ID -> {} failed".format(parent_id),
+            failure_message="Failed to get sub-categories for parent category with ID -> {}".format(parent_id),
         )
 
     # end method definition

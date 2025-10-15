@@ -56,9 +56,6 @@ class CustomizerAPISettings(BaseSettings):
     )
 
     loglevel: Literal["INFO", "DEBUG", "WARNING", "ERROR"] = "INFO"
-    log_payload_processing: bool = Field(
-        default=False, description="Print the customizer payload processing log messages to stdout"
-    )
     logfolder: str = Field(
         default=os.path.join(tempfile.gettempdir(), "customizer"),
         description="Logfolder for Customizer logfiles",
@@ -120,11 +117,6 @@ class CustomizerAPISettings(BaseSettings):
     csai_prefix: str = Field(
         default="csai",
         description="Prefix for the CSAI",
-    )
-
-    csai_studio_integration: bool = Field(
-        default=False,
-        description="Enable the CSAI Studio Integration",
     )
 
     upload_folder: str = Field(default=os.path.join(tempfile.gettempdir(), "upload"), description="Folder for uploads")

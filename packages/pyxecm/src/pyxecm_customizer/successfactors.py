@@ -26,9 +26,9 @@ request_login_headers = {
     "Accept": "application/json",
 }
 
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 60.0
 REQUEST_MAX_RETRIES = 5
-REQUEST_RETRY_DELAY = 60
+REQUEST_RETRY_DELAY = 60.0
 
 
 class SuccessFactors:

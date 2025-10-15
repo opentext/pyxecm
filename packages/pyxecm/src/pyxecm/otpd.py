@@ -9,10 +9,45 @@ __email__ = "mdiefenb@opentext.com"
 import json
 import logging
 import os
+import platform
+import sys
+import time
+from http import HTTPStatus
+from importlib.metadata import version
 
 import requests
 from requests.auth import HTTPBasicAuth
 from requests_toolbelt.multipart.encoder import MultipartEncoder
+
+APP_NAME = "pyxecm"
+APP_VERSION = version("pyxecm")
+MODULE_NAME = APP_NAME + ".otpd"
+
+PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+OS_INFO = f"{platform.system()} {platform.release()}"
+ARCH_INFO = platform.machine()
+REQUESTS_VERSION = requests.__version__
+
+USER_AGENT = (
+    f"{APP_NAME}/{APP_VERSION} ({MODULE_NAME}/{APP_VERSION}; "
+    f"Python/{PYTHON_VERSION}; {OS_INFO}; {ARCH_INFO}; Requests/{REQUESTS_VERSION})"
+)
+
+REQUEST_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "accept": "application/json;charset=utf-8",
+    "Content-Type": "application/json",
+}
+
+REQUEST_FORM_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "accept": "application/json;charset=utf-8",
+    "Content-Type": "application/x-www-form-urlencoded",
+}
+
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
+REQUEST_MAX_RETRIES = 2
 
 default_logger = logging.getLogger("pyxecm.otpd")
 
@@ -93,15 +128,17 @@ class OTPD:
         otpd_base_url = protocol + "://" + otpd_config["hostname"]
         if str(port) not in ["80", "443"]:
             otpd_base_url += ":{}".format(port)
-        otpd_base_url += "/ServerManager"
         otpd_config["baseUrl"] = otpd_base_url
 
-        otpd_rest_url = otpd_base_url + "/api"
+        otpd_servermanager_url = otpd_base_url + "/ServerManager"
+        otpd_config["serverManagerUrl"] = otpd_servermanager_url
+
+        otpd_rest_url = otpd_servermanager_url + "/api"
         otpd_config["restUrl"] = otpd_rest_url
 
         otpd_config["settingsUrl"] = otpd_rest_url + "/v1/settings"
 
-        otpd_config["importDatabaseUrl"] = otpd_base_url + "/servlet/import"
+        otpd_config["importDatabaseUrl"] = otpd_servermanager_url + "/servlet/import"
 
         self._config = otpd_config
 
@@ -171,32 +208,6 @@ class OTPD:
         """
 
         self.config()["hostname"] = hostname
-
-    # end method definition
-
-    def base_url(self) -> str:
-        """Return the base URL of PowerDocs.
-
-        Returns:
-            string:
-                The base URL.
-
-        """
-
-        return self.config()["baseUrl"]
-
-    # end method definition
-
-    def rest_url(self) -> str:
-        """Return the REST URL of PowerDocs.
-
-        Returns:
-            string:
-                The REST URL.
-
-        """
-
-        return self.config()["restUrl"]
 
     # end method definition
 
@@ -270,7 +281,7 @@ class OTPD:
             return self._jsessionid
 
         auth_url = (
-            self.base_url()
+            self.config()["serverManagerUrl"]
             + "/j_security_check?j_username="
             + self.config()["username"]
             + "&j_password="
@@ -482,3 +493,208 @@ class OTPD:
                 return None
 
     # end method definition
+
+    def do_request(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: dict | None = None,
+        data: dict | None = None,
+        json_data: dict | None = None,
+        files: dict | None = None,
+        timeout: float | None = REQUEST_TIMEOUT,
+        show_error: bool = True,
+        show_warning: bool = False,
+        warning_message: str = "",
+        failure_message: str = "",
+        success_message: str = "",
+        max_retries: int = REQUEST_MAX_RETRIES,
+        retry_forever: bool = False,
+        parse_request_response: bool = True,
+    ) -> dict | None:
+        """Call an OTDS REST API in a safe way.
+
+        Args:
+            url (str):
+                The URL to send the request to.
+            method (str, optional):
+                The HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional):
+                The request headers. Defaults to None.
+            data (dict | None, optional):
+                Request payload. Defaults to None
+            json_data (dict | None, optional):
+                Request payload for the JSON parameter. Defaults to None.
+            files (dict | None, optional):
+                Dictionary of {"name": file-tuple} for multipart encoding upload.
+                File-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
+            timeout (int | None, optional):
+                The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            show_warning (bool, optional):
+                Whether or not an warning should be logged in case of a
+                failed REST call.
+                If False, then only a warning is logged. Defaults to True.
+            warning_message (str, optional):
+                Specific warning message. Defaults to "". If not given the error_message will be used.
+            failure_message (str, optional):
+                Specific error message. Defaults to "".
+            success_message (str, optional):
+                Specific success message. Defaults to "".
+            max_retries (int, optional):
+                How many retries on Connection errors? Default is REQUEST_MAX_RETRIES.
+            retry_forever (bool, optional):
+                Eventually wait forever - without timeout. Defaults to False.
+            parse_request_response (bool, optional):
+                Defines if the response.text should be interpreted as json and loaded into a dictionary.
+                True is the default.
+
+        Returns:
+            dict | None:
+                Response of OTDS REST API or None in case of an error.
+
+        """
+
+        if headers is None:
+            headers = REQUEST_HEADERS
+
+        # In case of an expired session we reauthenticate and
+        # try 1 more time. Session expiration should not happen
+        # twice in a row:
+        retries = 0
+
+        while True:
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    data=data,
+                    json=json_data,
+                    files=files,
+                    headers=headers,
+                    timeout=timeout,
+                )
+
+                if response.ok:
+                    if success_message:
+                        self.logger.info(success_message)
+                    if parse_request_response:
+                        return self.parse_request_response(response)
+                    else:
+                        return response
+                else:
+                    # Handle plain HTML responses to not pollute the logs
+                    content_type = response.headers.get("content-type", None)
+                    response_text = (
+                        "HTML content (only printed in debug log)" if content_type == "text/html" else response.text
+                    )
+
+                    if show_error:
+                        self.logger.error(
+                            "%s; status -> %s/%s; error -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    elif show_warning:
+                        self.logger.warning(
+                            "%s; status -> %s/%s; warning -> %s",
+                            warning_message if warning_message else failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response_text,
+                        )
+                    if content_type == "text/html":
+                        self.logger.debug(
+                            "%s; status -> %s/%s; warning -> %s",
+                            failure_message,
+                            response.status_code,
+                            HTTPStatus(response.status_code).phrase,
+                            response.text,
+                        )
+                    return None
+            except requests.exceptions.Timeout:
+                if retries <= max_retries:
+                    self.logger.warning(
+                        "Request timed out. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    self.logger.error(
+                        "%s; timeout error.",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        self.logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                    else:
+                        return None
+            except requests.exceptions.ConnectionError:
+                if retries <= max_retries:
+                    self.logger.warning(
+                        "Connection error. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY),
+                    )
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                else:
+                    self.logger.error(
+                        "%s; connection error.",
+                        failure_message,
+                    )
+                    if retry_forever:
+                        # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
+                        self.logger.warning("Turn timeouts off and wait forever...")
+                        timeout = None
+                        time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                    else:
+                        return None
+            # end try
+            self.logger.info(
+                "Retrying REST API %s call -> %s... (retry = %s",
+                method,
+                url,
+                str(retries),
+            )
+        # end while True
+
+    # end method definition
+
+    def generate_document(self, payload: str) -> dict | None:
+        """Generate a PowerDocs document based on the provided XML payload.
+
+        Args:
+            payload (str):
+                The XML payload to generate the document.
+
+        Returns:
+            dict | None:
+                The request response or None in case of an error.
+
+        """
+
+        if not payload:
+            self.logger.error("Cannot generate PowerDocs document from empty payload!")
+            return None
+
+        url = self.config()["baseUrl"] + "/c4ApplicationServer/rest/document"
+
+        body = {"documentgeneration": payload}
+
+        response = self.do_request(
+            url=url,
+            method="POST",
+            headers=REQUEST_FORM_HEADERS,
+            data=body,
+            show_error=True,
+            failure_message="Failed to generate PowerDocs document",
+            parse_request_response=False,
+        )
+
+        return response

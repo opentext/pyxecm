@@ -32,8 +32,8 @@ request_login_headers = {
     "Accept": "application/json",
 }
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 3
 
 
@@ -259,7 +259,7 @@ class M365:
         json_data: dict | None = None,
         files: dict | None = None,
         params: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -290,7 +290,7 @@ class M365:
                 Add key-value pairs to the query string of the URL.
                 When you use the params parameter, requests automatically appends
                 the key-value pairs to the URL as part of the query string
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -418,7 +418,7 @@ class M365:
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     self.logger.error(
-                        "%s; timeout error.",
+                        "%s; timeout error!",
                         failure_message,
                     )
                     if retry_forever:
@@ -437,7 +437,7 @@ class M365:
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     self.logger.error(
-                        "%s; connection error.",
+                        "%s; connection error!",
                         failure_message,
                     )
                     if retry_forever:
@@ -512,7 +512,7 @@ class M365:
 
     def exist_result_item(
         self,
-        response: dict,
+        response: dict | None,
         key: str,
         value: str,
         sub_dict_name: str = "",
@@ -520,7 +520,7 @@ class M365:
         """Check existence of key / value pair in the response properties of an MS Graph API call.
 
         Args:
-            response (dict):
+            response (dict | None):
                 REST response from an MS Graph REST Call.
             key (str):
                 The property name (key).
@@ -563,7 +563,7 @@ class M365:
 
     def get_result_value(
         self,
-        response: dict,
+        response: dict | None,
         key: str,
         index: int = 0,
         sub_dict_name: str = "",
@@ -571,7 +571,7 @@ class M365:
         """Get value of a result property with a given key of an MS Graph API call.
 
         Args:
-            response (dict):
+            response (dict | None):
                 REST response from an MS Graph REST Call.
             key (str):
                 The property name (key).
@@ -584,7 +584,7 @@ class M365:
                 a case we use the sub_dict_name to access it.
 
         Returns:
-            str:
+            str | None:
                 The value for the key, None otherwise.
 
         """
@@ -678,7 +678,7 @@ class M365:
             return None
         else:
             self.logger.error(
-                "Result needs to be a list or dict but it is of type -> %s",
+                "Result needs to be a list or dictionary but it is of type -> '%s'!",
                 str(type(results)),
             )
             return None
@@ -953,7 +953,7 @@ class M365:
         # Some sanity checks:
         if user_email and ("@" not in user_email or "." not in user_email):
             self.logger.error(
-                "User email -> %s is not a valid email address",
+                "User email -> %s is not a valid email address!",
                 user_email,
             )
             return None
@@ -974,7 +974,7 @@ class M365:
             # Construct the email address without the alias
             user_email = user_email[:alias_index] + user_email[domain_index:]
             self.logger.info(
-                "M365 user principal name -> %s",
+                "M365 user principal name -> '%s'.",
                 user_email,
             )
 
@@ -1305,7 +1305,7 @@ class M365:
                 )
             else:
                 self.logger.info(
-                    "Photo for M365 user with ID -> %s saved to -> '%s'",
+                    "Photo for M365 user with ID -> %s saved to -> '%s'.",
                     user_id,
                     file_path,
                 )
@@ -1715,7 +1715,7 @@ class M365:
         group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
             self.logger.error(
-                "M365 Group -> %s does not exist! Cannot retrieve group members.",
+                "M365 Group -> '%s' does not exist! Cannot retrieve group members.",
                 group_name,
             )
             return None
@@ -1940,9 +1940,9 @@ class M365:
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
         )
-        deleted_groups = self.parse_request_response(response)
+        deleted_groups = self.parse_request_response(response) or {}
 
-        for group in deleted_groups["value"]:
+        for group in deleted_groups.get("value", []):
             group_id = group["id"]
             response = self.purge_deleted_item(group_id)
 
@@ -1952,9 +1952,9 @@ class M365:
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
         )
-        deleted_users = self.parse_request_response(response)
+        deleted_users = self.parse_request_response(response) or {}
 
-        for user in deleted_users["value"]:
+        for user in deleted_users.get("value", []):
             user_id = user["id"]
             response = self.purge_deleted_item(user_id)
 
@@ -2012,7 +2012,7 @@ class M365:
         group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
             self.logger.error(
-                "M365 Group -> %s not found. Cannot check if it has a M365 Team.",
+                "M365 Group -> '%s' not found! Cannot check if it has a M365 Team.",
                 group_name,
             )
             return False
@@ -2094,7 +2094,7 @@ class M365:
         team_id = self.get_result_value(response=response, key="id", index=0)
         if not team_id:
             self.logger.error(
-                "Failed to get the ID of the M365 Team -> %s via the M365 Group API",
+                "Failed to get the ID of the M365 Team -> '%s' via the M365 Group API!",
                 name,
             )
             return None
@@ -2139,7 +2139,7 @@ class M365:
         group_id = self.get_result_value(response=response, key="id", index=0)
         if not group_id:
             self.logger.error(
-                "M365 Group -> '%s' not found. It is required for creating a corresponding M365 Team.",
+                "M365 Group -> '%s' not found! It is required for creating a corresponding M365 Team.",
                 name,
             )
             return None
@@ -2258,7 +2258,7 @@ class M365:
 
                     if not response:
                         self.logger.error(
-                            "Failed to delete M365 Team -> '%s' (%s)",
+                            "Failed to delete M365 Team -> '%s' (%s)!",
                             name,
                             team_id,
                         )
@@ -2266,17 +2266,18 @@ class M365:
                     counter += 1
 
                 self.logger.info(
-                    "%s M365 Team%s with name -> '%s' have been deleted.",
+                    "%s M365 Team%s with name -> '%s' %s been deleted.",
                     str(counter),
                     "s" if counter > 1 else "",
                     name,
+                    "have" if counter > 1 else "has",
                 )
                 return True
             else:
                 self.logger.info("No M365 Team with name -> '%s' found.", name)
                 return False
         else:
-            self.logger.error("Failed to retrieve M365 Teams with name -> '%s'", name)
+            self.logger.error("Failed to retrieve M365 Teams with name -> '%s'!", name)
             return False
 
     # end method definition
@@ -2328,7 +2329,7 @@ class M365:
                 result = re.search(pattern, group_name)
                 if result:
                     self.logger.info(
-                        "M365 Group name -> '%s' is matching pattern -> '%s'. Delete it now...",
+                        "M365 Group name -> '%s' is matching pattern -> '%s'. Deleting...",
                         group_name,
                         pattern,
                     )
@@ -2456,7 +2457,7 @@ class M365:
         )
         if not channel:
             self.logger.error(
-                "Cannot find Channel -> %s on M365 Team -> %s",
+                "Cannot find Channel -> '%s' on M365 Team -> '%s'!",
                 channel_name,
                 team_name,
             )
@@ -3282,7 +3283,7 @@ class M365:
         )
         if not channel:
             self.logger.error(
-                "Cannot find Channel -> '%s' on M365 Team -> '%s'",
+                "Cannot find Channel -> '%s' on M365 Team -> '%s'!",
                 channel_name,
                 team_name,
             )
@@ -3375,7 +3376,7 @@ class M365:
         )
         if not channel:
             self.logger.error(
-                "Cannot find Channel -> '%s' for M365 Team -> '%s'",
+                "Cannot find Channel -> '%s' for M365 Team -> '%s'!",
                 channel_name,
                 team_name,
             )
@@ -3394,7 +3395,7 @@ class M365:
         )
         if not tab:
             self.logger.error(
-                "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)",
+                "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)!",
                 tab_name,
                 team_name,
                 team_id,
@@ -3489,7 +3490,7 @@ class M365:
         )
         if not channel:
             self.logger.error(
-                "Cannot find Channel -> '%s' for M365 Team -> '%s'",
+                "Cannot find Channel -> '%s' for M365 Team -> '%s'!",
                 channel_name,
                 team_name,
             )
@@ -3506,7 +3507,7 @@ class M365:
         tab_list = [item for item in response["value"] if item["displayName"] == tab_name]
         if not tab_list:
             self.logger.error(
-                "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)",
+                "Cannot find Tab -> '%s' on M365 Team -> '%s' (%s) and Channel -> '%s' (%s)!",
                 tab_name,
                 team_name,
                 team_id,
@@ -4298,7 +4299,7 @@ class M365:
                                 )
                                 if not result:
                                     self.logger.error(
-                                        "Failed to enter password in field -> '%s'",
+                                        "Failed to enter password in field -> '%s'!",
                                         password_field_id,
                                     )
                                     success = False
@@ -4313,7 +4314,7 @@ class M365:
                             )
                             if password_confirm_field:
                                 self.logger.info(
-                                    "Found password confirmation field on returned page - it seems email verification requests consecutive password!",
+                                    "Found password confirmation field on returned page - it seems email verification requests consecutive password.",
                                 )
                                 result = browser_automation_object.find_elem_and_set(
                                     selector=password_confirmation_field_id,
@@ -4322,7 +4323,7 @@ class M365:
                                 )
                                 if not result:
                                     self.logger.error(
-                                        "Failed to enter password in field -> '%s'",
+                                        "Failed to enter password in field -> '%s'!",
                                         password_confirmation_field_id,
                                     )
                                     success = False
@@ -4334,7 +4335,7 @@ class M365:
                             )
                             if password_submit_button:
                                 self.logger.info(
-                                    "Submit password change dialog with button -> '%s' (found with XPath -> %s)",
+                                    "Submit password change dialog with button -> '%s' (found with XPath -> %s).",
                                     password_submit_button.inner_text(),
                                     password_submit_xpath,
                                 )
@@ -4358,7 +4359,7 @@ class M365:
                             )
                             if terms_accept_button:
                                 self.logger.info(
-                                    "Accept terms of service with button -> '%s' (found with XPath -> %s)",
+                                    "Accept terms of service with button -> '%s' (found with XPath -> %s).",
                                     terms_accept_button.inner_text(),
                                     terms_of_service_xpath,
                                 )
@@ -4368,7 +4369,7 @@ class M365:
                                 )
                                 if not result:
                                     self.logger.error(
-                                        "Failed to accept terms of service with button -> '%s'",
+                                        "Failed to accept terms of service with button -> '%s'!",
                                         terms_accept_button.inner_text(),
                                     )
                                     success = False
@@ -4382,7 +4383,7 @@ class M365:
                 else:
                     # Salesforce (other than Core Share) is OK with the simple HTTP GET request:
                     self.logger.info(
-                        "Open URL -> %s to verify account or email change",
+                        "Open URL -> %s to verify account or email change...",
                         url,
                     )
                     response = self._http_object.http_request(url=url, method="GET")
@@ -4396,14 +4397,14 @@ class M365:
                     response = self.delete_mail(user_id=m365_user_id, email_id=email_id)
                     if not response:
                         self.logger.warning(
-                            "Couldn't remove the mail from the inbox of user -> %s",
+                            "Couldn't remove the mail from the inbox of user -> %s!",
                             user_email,
                         )
                     # We have success now and can break from the while loop
                     return True
                 else:
                     self.logger.error(
-                        "Failed to process e-mail verification for user -> %s",
+                        "Failed to process e-mail verification for user -> %s!",
                         user_email,
                     )
                     return False
@@ -5710,7 +5711,7 @@ class M365:
         webpart = self.get_sharepoint_webpart(site_id=site_id, page_id=page_id, webpart_id=webpart_id)
         if not webpart:
             self.logger.error(
-                "Cannot find web part for site ID -> '%s', page -> '%s', webpart ID -> '%s'",
+                "Cannot find web part for site ID -> '%s', page -> '%s', webpart ID -> '%s'!",
                 site_id,
                 page_id,
                 webpart_id,
@@ -5806,7 +5807,7 @@ class M365:
         """
 
         if not user_id and not username:
-            self.logger.error("User missing to follow. Provide the user ID or its email address!")
+            self.logger.error("No user given to follow SharePoint site. Provide the user ID or its email address!")
             return None
 
         user = self.get_user(user_email=username, user_id=user_id)

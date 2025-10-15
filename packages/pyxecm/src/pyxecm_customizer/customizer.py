@@ -200,7 +200,7 @@ class Customizer:
             # of unsetting 2 checkboxes on that config page - we reset these checkboxes
             # with the settings file "O365Settings.xml"):
             file_path = os.path.join(tempfile.gettempdir(), "ot.xecm.teams.zip")
-            response = self.otcs_frontend_object.download_config_file(
+            _ = self.otcs_frontend_object.download_config_file(
                 otcs_url_suffix="/cs/cs?func=officegroups.DownloadTeamsPackage",
                 file_path=file_path,
             )
@@ -257,7 +257,7 @@ class Customizer:
                 # by its wrong name in the customizer automation. This can
                 # happen if the app is installed manually or the environment
                 # variable is set to a wrong name.
-                app_catalog_name = m365_object.get_result_value(response, "displayName")
+                app_catalog_name = m365_object.get_result_value(response=response, key="displayName")
                 if app_catalog_name != self.settings.m365.teams_app_name:
                     self.logger.warning(
                         "The Extended ECM app name -> '%s' in the M365 Teams catalog does not match the defined app name -> '%s'!",
@@ -624,14 +624,14 @@ class Customizer:
         )
         if not otcs_frontend_scale:
             self.logger.error(
-                "Cannot find Kubernetes Stateful Set -> '%s' for OTCS Frontends!",
+                "Cannot find Kubernetes stateful set -> '%s' for OTCS Frontends!",
                 self.settings.k8s.sts_otcs_frontend,
             )
             sys.exit()
 
         self.settings.k8s.sts_otcs_frontend_replicas = otcs_frontend_scale.spec.replicas
         self.logger.info(
-            "Stateful Set -> '%s' has -> %s replicas",
+            "Stateful set -> '%s' has -> %s replicas",
             self.settings.k8s.sts_otcs_frontend,
             self.settings.k8s.sts_otcs_frontend_replicas,
         )
@@ -642,16 +642,17 @@ class Customizer:
         )
         if not otcs_backend_scale:
             self.logger.error(
-                "Cannot find Kubernetes Stateful Set -> '%s' for OTCS Backends!",
+                "Cannot find Kubernetes stateful set -> '%s' for OTCS Backends!",
                 self.settings.k8s.sts_otcs_admin,
             )
             sys.exit()
 
         self.settings.k8s.sts_otcs_admin_replicas = otcs_backend_scale.spec.replicas
         self.logger.info(
-            "Stateful Set -> '%s' has -> %s replicas",
+            "Stateful set -> '%s' has -> %s replica%s",
             self.settings.k8s.sts_otcs_admin,
             self.settings.k8s.sts_otcs_admin_replicas,
+            "s" if self.settings.k8s.sts_otcs_admin_replicas > 1 else "",
         )
 
         return k8s_object
@@ -782,7 +783,7 @@ class Customizer:
         if not response:
             self.logger.error("Failed to enable OTAC certificate for OTCS!")
         else:
-            self.logger.info("Successfully enabled OTAC certificate for OTCS!")
+            self.logger.info("Successfully enabled OTAC certificate for OTCS.")
 
         # is there a known server configured for Archive Center (to sync content with)
         if otac_object and self.settings.otac.known_server != "":
@@ -918,7 +919,9 @@ class Customizer:
         otcs_resource_id = otcs_resource["resourceID"]
         otcs_object.set_resource_id(resource_id=otcs_resource_id)
         self.logger.info(
-            "OTCS has resource ID -> '%s' for resource name -> '%s'", otcs_resource_id, self.settings.otcs.resource_name
+            "OTCS has resource -> '%s' (%s) in OTDS.",
+            self.settings.otcs.resource_name,
+            otcs_resource_id,
         )
 
         if "OTCS_RESSOURCE_ID" not in self.settings.placeholder_values:
@@ -1257,7 +1260,7 @@ class Customizer:
         )
         while otcs_partition is None:
             self.logger.warning(
-                "OTDS user partition for Content Server with name -> '%s' does not exist yet. Waiting...",
+                "OTDS user partition -> '%s' for Content Server does not exist yet. Waiting...",
                 self.settings.otcs.partition,
             )
 
@@ -1350,24 +1353,27 @@ class Customizer:
         )
         if not otcs_da_scale:
             self.logger.warning(
-                "Cannot find Kubernetes Stateful Set -> '%s' for OTCS DA!",
+                "Cannot find Kubernetes stateful set -> '%s' for OTCS DA!",
                 self.settings.k8s.sts_otcs_da,
             )
             self.settings.k8s.sts_otcs_da_replicas = 0
         else:
             self.settings.k8s.sts_otcs_da_replicas = otcs_da_scale.spec.replicas
 
+        if not self.settings.k8s.sts_otcs_da_replicas:
+            self.settings.k8s.sts_otcs_da_replicas = 0
+
         # Restart all da:
         for x in range(self.settings.k8s.sts_otcs_da_replicas):
             pod_name = self.settings.k8s.sts_otcs_da + "-" + str(x)
 
-            self.logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
+            self.logger.info("Deactivate liveness probe for pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "touch /tmp/keepalive"],
                 container="otcs-da-container",
             )
-            self.logger.info("Restarting OTCS in pod -> '%s'", pod_name)
+            self.logger.info("Restarting OTCS in pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
@@ -1385,24 +1391,27 @@ class Customizer:
         )
         if not otcs_frontend_scale:
             self.logger.error(
-                "Cannot find Kubernetes Stateful Set -> '%s' for OTCS Frontends!",
+                "Cannot find Kubernetes stateful set -> '%s' for OTCS frontends!",
                 self.settings.k8s.sts_otcs_frontend,
             )
             self.settings.k8s.sts_otcs_frontend_replicas = 0
         else:
             self.settings.k8s.sts_otcs_frontend_replicas = otcs_frontend_scale.spec.replicas
 
+        if not self.settings.k8s.sts_otcs_frontend_replicas:
+            self.settings.k8s.sts_otcs_frontend_replicas = 0
+
         # Restart all frontends:
         for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
             pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
 
-            self.logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
+            self.logger.info("Deactivate liveness probe for pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "touch /tmp/keepalive"],
                 container="otcs-frontend-container",
             )
-            self.logger.info("Restarting OTCS in pod -> '%s'", pod_name)
+            self.logger.info("Restarting OTCS in pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
@@ -1418,13 +1427,13 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_admin_replicas):
             pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
 
-            self.logger.info("Deactivate Liveness probe for pod -> '%s'", pod_name)
+            self.logger.info("Deactivate liveness probe for pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "touch /tmp/keepalive"],
                 container="otcs-admin-container",
             )
-            self.logger.info("Restarting OTCS in pod -> '%s'", pod_name)
+            self.logger.info("Restarting OTCS in pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
@@ -1438,7 +1447,7 @@ class Customizer:
 
         # Reauthenticate at frontend:
         self.logger.info(
-            "Re-Authenticating to OTCS frontend after restart of frontend pods...",
+            "Re-authenticating to OTCS frontend after restart of frontend pods...",
         )
         otcs_cookie = frontend.authenticate(revalidate=True)
         while otcs_cookie is None:
@@ -1449,7 +1458,7 @@ class Customizer:
 
         # Reauthenticate at backend:
         self.logger.info(
-            "Re-Authenticating to OTCS backend after restart of backend pods...",
+            "Re-authenticating to OTCS backend after restart of backend pods...",
         )
         otcs_cookie = backend.authenticate(revalidate=True)
         while otcs_cookie is None:
@@ -1458,11 +1467,11 @@ class Customizer:
             otcs_cookie = backend.authenticate(revalidate=True)
         self.logger.info("OTCS backend is ready again.")
 
-        # Reactivate Liveness probes in all pods:
+        # Reactivate Kubernetes liveness probes in all pods:
         for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
             pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
 
-            self.logger.info("Reactivate Liveness probe for pod -> '%s'", pod_name)
+            self.logger.info("Reactivate liveness probe for pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "rm /tmp/keepalive"],
@@ -1472,7 +1481,7 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_admin_replicas):
             pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
 
-            self.logger.info("Reactivate Liveness probe for pod -> '%s'", pod_name)
+            self.logger.info("Reactivate liveness probe for pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "rm /tmp/keepalive"],
@@ -1522,7 +1531,7 @@ class Customizer:
     # end method definition
 
     def restart_otawp_pod(self) -> None:
-        """Delete the AppWorks Platform Pod to make Kubernetes restart it."""
+        """Delete the AppWorks Platform pod to make Kubernetes restart it."""
 
         self.k8s_object.delete_pod(self.settings.k8s.sts_otawp + "-0")
 
@@ -1899,6 +1908,15 @@ class Customizer:
 
                 # Upload payload file for later review to Enterprise Workspace
                 if self.settings.otcs.upload_config_files:
+                    # Wait until OTCS is ready to accept uploads. Parallel running
+                    # payload processing might be in the process of restarting OTCS:
+                    while not self.otcs_backend_object.is_ready():
+                        self.logger.info(
+                            "OTCS is not ready. Cannot upload payload file -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                            os.path.basename(cust_payload),
+                        )
+                        time.sleep(30)
+
                     self.log_header("Upload Payload file to OpenText Content Management")
                     response = self.otcs_backend_object.get_node_from_nickname(
                         nickname=self.settings.cust_target_folder_nickname,
@@ -1908,7 +1926,7 @@ class Customizer:
                         key="id",
                     )
                     if not target_folder_id:
-                        target_folder_id = 2000  # use Enterprise Workspace as fallback
+                        target_folder_id = 2004  # use Enterprise Workspace as fallback
                     # Write YAML file with upadated payload (including IDs, etc.).
                     # We need to write to a temporary location as initial location is read-only:
                     payload_file = os.path.basename(cust_payload)
@@ -2017,7 +2035,7 @@ class Customizer:
                 key="id",
             )
             if not target_folder_id:
-                target_folder_id = 2000  # use Enterprise Workspace as fallback
+                target_folder_id = 2004  # use Enterprise Workspace as fallback
             # Check if the log file has been uploaded before.
             # This can happen if we re-run the python container:
             # In this case we add a version to the existing document:

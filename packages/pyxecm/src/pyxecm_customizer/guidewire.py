@@ -48,6 +48,7 @@ class Guidewire:
     def __init__(
         self,
         base_url: str,
+        as_url: str,
         auth_type: str = "",
         client_id: str = "",
         client_secret: str = "",
@@ -62,6 +63,8 @@ class Guidewire:
         Args:
             base_url (str):
                 The base URL of the Guidewire Cloud API.
+            as_url (str):
+                The application server endpount the Guidewire system.
             auth_type (str):
                 The authorization type, either "oauth" or "basic".
             client_id (str, optional):
@@ -104,21 +107,33 @@ class Guidewire:
         guidewire_config = {}
         # Store the credentials and parameters in a config dictionary:
         guidewire_config["baseUrl"] = base_url.rstrip("/")
+        guidewire_config["asUrl"] = as_url.rstrip("/")
         guidewire_config["authType"] = auth_type
         guidewire_config["clientId"] = client_id
         guidewire_config["clientSecret"] = client_secret
         guidewire_config["username"] = username
         guidewire_config["password"] = password
-        guidewire_config["restUrl"] = guidewire_config["baseUrl"] + "/rest"  # "/api/v1"
-        #        guidewire_config["tokenUrl"] = guidewire_config["restUrl"] + "/oauth2/token"
+        guidewire_config["restUrl"] = (
+            guidewire_config["baseUrl"] + "/rest"
+            if guidewire_config["baseUrl"]
+            else guidewire_config["asUrl"] + "/rest"
+        )
         if token_url:
             guidewire_config["tokenUrl"] = token_url
         else:
-            guidewire_config["tokenUrl"] = guidewire_config["baseUrl"] + "/oauth2/token"
+            guidewire_config["tokenUrl"] = (
+                guidewire_config["baseUrl"] + "/oauth2/token"
+                if guidewire_config["baseUrl"]
+                else guidewire_config["asUrl"] + "/oauth2/token"
+            )
 
         guidewire_config["adminUrl"] = guidewire_config["restUrl"] + "/admin/v1"
-        guidewire_config["claimUrl"] = guidewire_config["restUrl"] + "/claim/v1"
         guidewire_config["accountUrl"] = guidewire_config["restUrl"] + "/account/v1"
+        guidewire_config["accountSearchUrl"] = guidewire_config["accountUrl"] + "/search/accounts"
+        guidewire_config["policyUrl"] = guidewire_config["restUrl"] + "/policy/v1"
+        guidewire_config["policySearchUrl"] = guidewire_config["policyUrl"] + "/search/policies"
+        guidewire_config["claimUrl"] = guidewire_config["restUrl"] + "/claim/v1"
+        guidewire_config["claimSearchUrl"] = guidewire_config["claimUrl"] + "/search/claims-v2"
 
         self._config = guidewire_config
 
@@ -208,7 +223,9 @@ class Guidewire:
             # Log an error if required credentials are missing
             # Either username/password AND client credentials (for ROPC)
             # OR just client credentials (for Client Credentials Grant)
-            self.logger.error("Authentication requires either client credentials or username/password.")
+            self.logger.error(
+                "Authentication of type -> '%s' requires either client credentials or username/password.", auth_type
+            )
             return False
 
         if self._scope:
@@ -254,7 +271,9 @@ class Guidewire:
 
     # end method definition
 
-    def do_request(self, method: str, url: str, data: dict | None = None, params: dict | None = None) -> dict:
+    def do_request(
+        self, method: str, url: str, data: dict | None = None, json_data: dict | None = None, params: dict | None = None
+    ) -> dict:
         """Send a request to the Guidewire REST API.
 
         Args:
@@ -264,6 +283,8 @@ class Guidewire:
                 The API endpoint to call.
             data (dict):
                 The request payload (if applicable).
+            json_data (dict | None, optional):
+                Request payload for the JSON parameter. Defaults to None.
             params (dict):
                 The URL parameters (if applicable).
 
@@ -274,7 +295,7 @@ class Guidewire:
         """
 
         response = self._session.request(
-            method=method, url=url, headers=self.request_header(), data=data, params=params
+            method=method, url=url, headers=self.request_header(), data=data, json=json_data, params=params
         )
 
         return response.json() if response.content else {}
@@ -327,6 +348,92 @@ class Guidewire:
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
 
         return encoded_query
+
+    # end method definition
+
+    def get_result_value(
+        self,
+        response: dict,
+        key: str,
+        index: int = 0,
+        show_error: bool = True,
+    ) -> str | None:
+        """Read an item value from the REST API response.
+
+        Args:
+            response (dict):
+                REST API response object.
+            key (str):
+                Key to find (e.g., "id", "name").
+            index (int, optional):
+                Index to use if a list of results is delivered (1st element has index 0).
+                Defaults to 0.
+            show_error (bool, optional):
+                Whether an error or just a warning should be logged.
+
+        Returns:
+            str:
+                Value of the item with the given key, or None if no value is found.
+
+        """
+
+        # First do some sanity checks:
+        if not response:
+            self.logger.debug("Empty response - no results found!")
+            return None
+
+        # To support also iterators that yield from results,
+        # we wrap an attributea element into a data element
+        # to make the following code work like for direct REST responses:
+        if "attributes" in response:
+            response = {"data": response}
+
+        if "data" not in response:
+            if show_error:
+                self.logger.error("No 'data' key in REST response - returning None")
+            return None
+
+        results = response["data"]
+        if not results:
+            self.logger.debug("No results found! Empty data element.")
+            return None
+
+        # check if results is a list or a dict (both is possible - iterator responses will be dict):
+        if isinstance(results, dict):
+            # result is a dict - we don't need index value
+
+            attributes = results.get("attributes", {})
+            if key in attributes:
+                return attributes[key]
+            else:
+                self.logger.error(
+                    "Key -> '%s' is not in result attributes!",
+                    key,
+                )
+                return None
+
+        elif isinstance(results, list):
+            # result is a list - we need a valid index:
+            if index > len(results) - 1:
+                self.logger.error(
+                    "Illegal Index -> %s given. List has only -> %s elements!",
+                    str(index),
+                    str(len(results)),
+                )
+                return None
+            data = results[index]
+            attributes = data.get("attributes", {})
+            if key not in attributes:
+                if show_error:
+                    self.logger.error("Key -> '%s' is not in result attributes -> %s!", key, attributes)
+                return None
+            return attributes[key]
+        else:
+            self.logger.error(
+                "Result needs to be a list or dict but it is -> %s",
+                str(type(results)),
+            )
+            return None
 
     # end method definition
 
@@ -1020,7 +1127,7 @@ class Guidewire:
                     * cn - contains
                 - "value": the filue to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return.
+                The maximum number of accounts to return.
 
         Returns:
             iter:
@@ -1072,6 +1179,79 @@ class Guidewire:
         request_url = self.config()["accountUrl"] + "/accounts/" + str(account_id)
 
         return self.do_request(method="GET", url=request_url)
+
+    # end method definition
+
+    def search_account(self, attributes: dict) -> dict:
+        """Search accounts based on its attributes.
+
+        Args:
+            attributes (dict):
+                The attribute to search the value in. Possible key values:
+                * "accountNumber"
+                * "addressLine1"
+                * "addressLine2"
+                * "city"
+                * "country"
+                * "companyName"
+
+        Returns:
+            dict:
+                JSON response containing account details.
+
+        Example:
+        {
+            'count': 2,
+            'data': [
+                {
+                    'attributes': {
+                        'accountHolder': {
+                            'displayName': 'Armstrong and Company',
+                            'id': 'test_pc:1',
+                            'type': 'AccountContact',
+                            'uri': '/account/v1/accounts/pc:ds:1/contacts/test_pc:1'
+                        },
+                        'accountNumber': 'C000212105',
+                        'accountStatus': {...},
+                        'businessOperationsDescription': 'business description',
+                        'createdDate': '2025-07-14T03:59:30.055Z',
+                        'frozen': False,
+                        'id': 'pc:ds:1',
+                        'industryCode': {...},
+                        'numberOfContacts': '8',
+                        'organizationType': {...},
+                        'preferredCoverageCurrency': {...},
+                        'preferredSettlementCurrency': {...},
+                        'primaryLanguage': {...},
+                        'primaryLocale': {...},
+                        'primaryLocation': {...},
+                        'producerCodes': [...]
+                    },
+                    'checksum': '2',
+                    'links': {
+                        'do-not-destroy': {...},
+                        'freeze': {...},
+                        'merge': {...},
+                        'move-policies': {...},
+                        'move-submissions': {...},
+                        'self': {...}
+                    }
+                },
+                {...}
+            ],
+            'links': {
+                'first': {...},
+                'self': {...}
+            }
+        }
+
+        """
+
+        body = {"data": {"attributes": attributes}}
+
+        request_url = self.config()["accountSearchUrl"]
+
+        return self.do_request(method="POST", json_data=body, url=request_url)
 
     # end method definition
 
@@ -1131,6 +1311,218 @@ class Guidewire:
         request_url = self.config()["accountUrl"] + "/accounts/" + str(account_id)
 
         return self.do_request(method="DELETE", url=request_url)
+
+    # end method definition
+
+    def get_policies(
+        self,
+        fields: list | None = None,
+        filters: list | None = None,
+        page_size: int = 25,
+        next_page_url: str | None = None,
+    ) -> dict | None:
+        """Retrieve a list of policies.
+
+        Args:
+            fields (list | None, optional):
+                The list of fields in the results. If None, all default
+                fields are returned.
+                Fields for Guidewire accounts:
+                - *all = return all fields
+                - *default = return just the default list of fields
+                - *summary = return the fields defined for giving a summary
+                - *detail = details
+                - displayName
+                - groupType
+                - id
+                - loadFactor
+                - name
+                - organization
+                - parent
+                - securityZone
+                - supervisor
+            filters (list | None, optional):
+                List of dictionaries with three keys each:
+                - "attribute" - name of the attribute to use for the filter (available attributes see above)
+                - "op" - operator:
+                    * eq - equal
+                    * ne - not equal
+                    * lt - less than - also usable for dates (before)
+                    * gt - greater than - also usable for dates (after)
+                    * le - less or equal
+                    * ge - greater or equal
+                    * in - is in list
+                    * ni - is NOT in list
+                    * sw - starts with
+                    * cn - contains
+                - "value": the value to filter for. Either literal or list of values
+            page_size (int, optional):
+                The maximum number of groups to return.
+            next_page_url (str, optional):
+                The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
+                This is used for the iterator get_groups_iterator() below.
+
+        Returns:
+            dict | None:
+                JSON response containing claim data.
+
+        """
+
+        if not next_page_url:
+            request_url = self.config()["policyUrl"] + "/policies"
+
+            encoded_query = self.process_parameters(fields=fields, filters=filters, page_size=page_size)
+            if encoded_query:
+                request_url += "?" + encoded_query
+        else:
+            request_url = self.config()["restUrl"] + next_page_url
+
+        return self.do_request(method="GET", url=request_url)
+
+    # end method definition
+
+    def get_policies_iterator(
+        self, fields: list | None = None, filters: list | None = None, page_size: int = 25
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all Guidewire policies.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of groups.
+
+        Example usage:
+            policies = guidewire_object.get_policies_iterator()
+            for policy in policies:
+                logger.info("Traversing Guidewire policy -> '%s'...", policy.get("attributes", {}).get("displayName"))
+
+        Args:
+            fields (list | None, optional):
+                The list of fields in the results. If None, all default
+                fields are returned.
+                Fields for Guidewire accounts:
+                - *all = return all fields
+                - *default = return just the default list of fields
+                - *summary = return the fields defined for giving a summary
+                - *detail = details
+                - displayName
+                - groupType
+                - id
+                - loadFactor
+                - name
+                - organization
+                - parent
+                - securityZone
+                - supervisor
+            filters (list | None, optional):
+                List of dictionaries with three keys each:
+                - "attribute" - name of the attribute to use for the filter (available attributes see above)
+                - "op" - operator:
+                    * eq - equal
+                    * ne - not equal
+                    * lt - less than - also usable for dates (before)
+                    * gt - greater than - also usable for dates (after)
+                    * le - less or equal
+                    * ge - greater or equal
+                    * in - is in list
+                    * ni - is NOT in list
+                    * sw - starts with
+                    * cn - contains
+                - "value": the value to filter for. Either literal or list of values
+            page_size (int, optional):
+                The maximum number of policies to return.
+
+        Returns:
+            iter:
+                A generator yielding one Guidewire account per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_url = None
+
+        while True:
+            response = self.get_policies(
+                fields=fields, filters=filters, page_size=page_size, next_page_url=next_page_url
+            )
+            if not response or "data" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield users one at a time:
+            yield from response["data"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_url = response.get("links", {}).get("next", {}).get("href")
+            if not next_page_url:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+    # end method definition
+
+    def search_policy(self, attributes: dict) -> dict:
+        """Search a specific policy based on its attributes.
+
+        See: https://docs.guidewire.com/cloud/pc/202407/apiref/generated/Policy%20API/search-policies--post
+
+        Args:
+            attributes (dict):
+                The attribute to search the value in. Possible key values:
+                * "policyNumber" (str)
+                * "city" (str)
+                * "state" (dict with keys "code", "name"), e.g. {"code": "GA", "name": "Georgia"}
+                * "country" (str)
+                * "postalCode" (str)
+                * "street" (str)
+                * "companyName" (str)
+                * "firstName" (str)
+                * "lastName" (str)
+                * "officialId" (str)
+
+        Returns:
+            dict:
+                JSON response containing account details.
+
+        Example:
+        {
+            'count': 1,
+            'data': [
+                {
+                    'attributes': {
+                        'accountNumber': 'C000212105',
+                        'effectiveDate': '2025-07-14T04:01:00.000Z',
+                        'expirationDate': '2026-07-14T04:01:00.000Z',
+                        'insuredName': 'Armstrong and Company',
+                        'policyAddress': '142 Central Ave, Metter, GA 30439',
+                        'policyId': 'pc:Sn09Itxh7Btpc8izhUrtc',
+                        'policyNumber': '5050680845',
+                        'producerOfRecordName': 'Armstrong and Company',
+                        'producerOfServiceName': 'Armstrong and Company',
+                        'product': {
+                            'displayName': 'Manual Products',
+                            'id': 'Manual'
+                        }
+                    },
+                    'links': {...}
+                }
+            ],
+            'links': {
+                'first': {'href': '/policy/v1/search/policies', 'methods': ['post']},
+                'self': {'href': '/policy/v1/search/policies', 'methods': ['post']}
+            }
+        }
+
+        """
+
+        body = {"data": {"attributes": attributes}}
+
+        request_url = self.config()["policySearchUrl"]
+
+        return self.do_request(method="POST", json_data=body, url=request_url)
 
     # end method definition
 
@@ -1296,6 +1688,28 @@ class Guidewire:
         request_url = self.config()["claimUrl"] + "/claims/" + str(claim_id)
 
         return self.do_request(method="GET", url=request_url)
+
+    # end method definition
+
+    def search_claim(self, attributes: dict) -> dict:
+        """Search a specific claim based on its attributes.
+
+        Args:
+            attributes (dict):
+                The attribute to search the value in. Possible key values:
+                * TBD
+
+        Returns:
+            dict:
+                JSON response containing account details.
+
+        """
+
+        body = {"data": {"attributes": attributes}}
+
+        request_url = self.config()["claimSearchUrl"]
+
+        return self.do_request(method="POST", json_data=body, url=request_url)
 
     # end method definition
 

@@ -93,7 +93,7 @@ async def ws_terminal(
         read_task = asyncio.create_task(read_from_pty())
         write_task = asyncio.create_task(write_to_pty())
 
-        done, pending = await asyncio.wait([read_task, write_task], return_when=asyncio.FIRST_COMPLETED)
+        _done, pending = await asyncio.wait([read_task, write_task], return_when=asyncio.FIRST_COMPLETED)
 
         # Cancel other task
         for task in pending:

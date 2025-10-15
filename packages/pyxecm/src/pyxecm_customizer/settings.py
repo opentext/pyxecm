@@ -18,6 +18,8 @@ class CustomizerSettingsOTDS(BaseModel):
 
     username: str = Field(default="admin", description="Username for the OTDS admin user")
     password: SecretStr = Field(default=None, description="Password for the OTDS admin user")
+    client_id: str | None = Field(None, description="Client ID for the OTDS admin user")
+    client_secret: SecretStr | None = Field(None, description="Client Secret for the OTDS admin user")
     ticket: str | None = Field(None, description="Ticket for the OTDS admin user")
     admin_partition: str = Field(default="otds.admin", description="Name of the admin partition in OTDS")
     enable_audit: bool = Field(default=True, description="Enable the OTDS Audit")
@@ -214,7 +216,7 @@ class CustomizerSettingsOTPD(BaseModel):
             self.url = HttpUrl(
                 os.environ.get("OTPD_PROTOCOL", "http")
                 + "://"
-                + os.environ.get("OTPD_SERVICE_HOST", "otpd-0")
+                + os.environ.get("OTPD_SERVICE_HOST", "otpd")
                 + ":"
                 + os.environ.get("OTPD_SERVICE_PORT", "8080"),
             )

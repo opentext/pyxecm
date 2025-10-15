@@ -4,15 +4,14 @@ import logging
 from http import HTTPStatus
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pyxecm.otcs import OTCS
 from pyxecm_customizer.k8s import K8s
 
-from pyxecm_api.agents.functions import get_otca_object
 from pyxecm_api.auth.functions import get_authorized_user
 from pyxecm_api.auth.models import User
-from pyxecm_api.common.functions import get_k8s_object, get_otcs_object, get_settings
+from pyxecm_api.common.functions import get_k8s_object, get_otca_object, get_otcs_object, get_settings
 from pyxecm_api.settings import CustomizerAPISettings
 
 from .models import CSAIEmbedMetadata
@@ -31,12 +30,16 @@ def embed_metadata(
     """Embed the Metadata of the given objects.
 
     Args:
-        user (Annotated[User, Depends): User required for authentication
-        otcs_object (Annotated[OTCS, Depends(get_otcs_object)]): OTCS object to interact with OTCS
-        body (Annotated[CSAIEmbedMetadata, Body): Request body
+        user (Annotated[User, Depends):
+            User required for authentication.
+        otcs_object (Annotated[OTCS, Depends(get_otcs_object)]):
+            The OTCS object to interact with OTCM (Content Server).
+        body (Annotated[CSAIEmbedMetadata, Body):
+            The request body.
 
     Returns:
-        JSONResponse: JSONResponse with success=true/false
+        JSONResponse:
+            JSONResponse with success=true/false
 
     """
 
@@ -53,7 +56,7 @@ def get_csai_config_data(
 ) -> JSONResponse:
     """Get the csai config data."""
 
-    logger.info("READ csai config data by user -> %s", user.id)
+    logger.info("Read CSAI config data by user -> %s", user.id)
 
     config_data = {}
 
@@ -79,9 +82,9 @@ def set_csai_config_data(
     k8s_object: Annotated[K8s, Depends(get_k8s_object)],
     config: Annotated[dict, Body()],
 ) -> JSONResponse:
-    """Get the csai config data."""
+    """Set the CSAI config data."""
 
-    logger.info("READ csai config data by user -> %s", user.id)
+    logger.info("Write CSAI config data by user -> %s", user.id)
 
     for config_map in config:
         if not config_map.startswith(settings.csai_prefix):
@@ -115,27 +118,39 @@ def set_csai_config_data(
 
 
 @router.get("/graph")
-def get_csai_graph(name: Annotated[str, Query(..., description="Name of the Graph")]) -> HTMLResponse:
+def get_csai_graph(name: Annotated[str, Query(..., description="Name of the graph")]) -> HTMLResponse:
     """Display the graph of the given name.
 
     Args:
-        otca (Annotated[OTCA, Depends): Generic OTCA Objec
-        name (str): name of the graph
+        name (str):
+            The name of the CSAI graph.
 
     Returns:
-        HTMLResponse: _description_
+        HTMLResponse: Visualization of the CSAI graph
 
     """
+
+    # Get the Content Aviator object:
     otca = get_otca_object(otcs_object=None)
 
+    # Get all graphs configured in Content Aviator:
     graphs = otca.get_graphs()
+    # Find the graph (LangGraph) with the given name:
     graph = [g for g in graphs if g["name"] == name]
 
-    if graph:
+    if not graph:
+        logger.error("Couldn't find graph -> '%s' for visualization!", name)
+        raise HTTPException(status_code=404, detail="Graph -> '{}' not found!".format(name))
+
+    try:
         filename = otca.visualize_graph(graph[0]["id"])
 
-    with open(filename) as f:
-        file_content = f.read()
+        with open(filename) as f:
+            file_content = f.read()
+    except Exception as e:
+        logger.error("Error visualizing graph -> '%s': %s", name, str(e))
+        raise HTTPException(status_code=500, detail="Failed to visualize graph -> '{}'!".format(name)) from e
 
-    logger.info("name: %s", name)
+    logger.info("Successfully visualized graph -> '%s'", name)
+
     return HTMLResponse(status_code=200, content=file_content)

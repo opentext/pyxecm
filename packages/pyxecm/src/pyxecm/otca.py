@@ -17,6 +17,7 @@ import logging
 import platform
 import sys
 import time
+import urllib.parse
 from importlib.metadata import version
 
 import requests
@@ -39,9 +40,18 @@ USER_AGENT = (
 
 REQUEST_HEADERS = {"User-Agent": USER_AGENT, "accept": "application/json", "Content-Type": "application/json"}
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 2
+
+DEFAULT_LLM_ATTRIBUTES = {
+    "temperature": 0.2,
+    "maxTokens": 8000,
+    "maxRetries": 2,
+    "topK": 40,
+    "topP": 0.8,
+    "cache": False,
+}
 
 default_logger = logging.getLogger(MODULE_NAME)
 
@@ -57,7 +67,10 @@ except ModuleNotFoundError:
 
 
 class OTCA:
-    """Interact with Content Aviator REST API."""
+    """Interact with Content Aviator / Aviator Studio REST API."""
+
+    AGENT = "ai"  # name of the agent role (used in messages)
+    USER = "user"  # name of the user role (used in messages)
 
     logger: logging.Logger = default_logger
 
@@ -66,6 +79,7 @@ class OTCA:
     _embed_token: str | None = None
     _chat_token: str | None = None
     _chat_token_hashed: str | None = None
+    _studio_token: str | None = None
     _node_dictionary: dict = {}
 
     def __init__(
@@ -97,14 +111,14 @@ class OTCA:
                 The Core Share Client ID.
             client_secret (str):
                 The Core Share client secret.
-            content_system (dict | None):
+            content_system (dict | None, optional):
                 The Content System configuration for the services which control the authentication.
-            otcs_object (OTCS):
+            otcs_object (OTCS | None, optional):
                 The OTCS object..
-            synonyms (list):
+            synonyms (list | None, optional):
                 List of synonyms that are used to generate a better response to the user.
-            inline_citation (bool):
-                Enable/Disable citations in the answers.
+            inline_citation (bool, optional):
+                Enable/Disable citations in the answers. Default is True.
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
 
@@ -117,19 +131,41 @@ class OTCA:
 
         otca_config = {}
 
-        otca_config["chatUrl"] = chat_url + "/v1/chat"
-        otca_config["searchUrl"] = chat_url + "/v1/context"
-        otca_config["embedUrl"] = embed_url + "/v1/embeddings"
-        otca_config["studioGraphsUrl"] = studio_url + "/studio/v1/graphs"
-        otca_config["studioAgentsUrl"] = studio_url + "/studio/v1/agents"
-        otca_config["studioToolsUrl"] = studio_url + "/studio/v1/tools"
-        otca_config["studioRulesUrl"] = studio_url + "/studio/v1/rules"
-        otca_config["studioModelsUrl"] = studio_url + "/studio/v1/api/models"
+        otca_config["studioUrl"] = studio_url.rstrip("/")
 
-        otca_config["content_system"] = content_system if content_system else {"chat": "xecm", "embed": "xecm"}
+        # Health and Readiness endpoints:
+        otca_config["livenessUrl"] = otca_config["studioUrl"] + "/liveness"
+        otca_config["readinessUrl"] = otca_config["studioUrl"] + "/readiness"
+
+        # Chat endpoints:
+        otca_config["chatUrl"] = chat_url + "/v1/chat"
+        otca_config["directChatUrl"] = chat_url + "/v1/direct-chat"
+
+        # RAG endpoints:
+        otca_config["semanticSearchUrl"] = studio_url.rstrip("/") + "/api/v1/semantic_search"
+        otca_config["contextUrl"] = studio_url.rstrip("/") + "/v1/context"
+        otca_config["embedUrl"] = embed_url + "/v1/embeddings"
+        otca_config["directEmbedUrl"] = embed_url + "/v1/direct-embed"
+
+        # Aviator Studio endpoints:
+        otca_config["studioAgentsUrl"] = otca_config["studioUrl"] + "/studio/v1/agents"
+        otca_config["studioToolsUrl"] = otca_config["studioUrl"] + "/studio/v1/tools"
+        otca_config["studioGraphsUrl"] = otca_config["studioUrl"] + "/studio/v1/graphs"
+        otca_config["studioRulesUrl"] = otca_config["studioUrl"] + "/studio/v1/rules"
+        otca_config["studioPromptsUrl"] = otca_config["studioUrl"] + "/studio/v1/prompts"
+        otca_config["studioLLModelsUrl"] = otca_config["studioUrl"] + "/studio/v1/llmmodels"
+        otca_config["studioImportUrl"] = otca_config["studioUrl"] + "/studio/v1/import"
+        otca_config["studioExportUrl"] = otca_config["studioUrl"] + "/studio/v1/export"
+
+        # Studio 'low-level' APIs:
+        otca_config["studioModelsUrl"] = otca_config["studioUrl"] + "/studio/v1/api/models"
+        otca_config["studioTenantsUrl"] = otca_config["studioModelsUrl"] + "/tenants"
+        otca_config["scratchPadUrl"] = otca_config["studioUrl"] + "/v1/scratchpad"
+
+        otca_config["contentSystem"] = content_system if content_system else {"chat": "xecm", "embed": "xecm"}
         otca_config["clientId"] = client_id
         otca_config["clientSecret"] = client_secret
-        otca_config["otdsUrl"] = otds_url
+        otca_config["otdsUrl"] = otds_url.rstrip("/")
 
         otca_config["synonyms"] = synonyms if synonyms else []
         otca_config["inlineCitation"] = inline_citation
@@ -222,7 +258,7 @@ class OTCA:
             request_header["Content-Type"] = content_type
 
         # Configure default Content System
-        content_system = self.config()["content_system"].get(service_type, "none")
+        content_system = self.config()["contentSystem"].get(service_type, "none")
 
         if content_system == "none":
             return request_header
@@ -233,13 +269,19 @@ class OTCA:
 
             if content_system == "xecm":
                 request_header["Authorization"] = "Bearer {}".format(self._chat_token_hashed)
-            elif content_system == "xecm-direct":
+            if content_system == "otcm":
+                request_header["Authorization"] = "Bearer {}".format(self._chat_token)
+            elif content_system == "xecm-direct" | content_system == "otcm-direct":
                 request_header["otcsticket"] = self._chat_token
 
         elif service_type == "embed":
             if self._embed_token is None:
                 self.authenticate_embed()
             request_header["Authorization"] = "Bearer {}".format(self._embed_token)
+        elif service_type == "studio":
+            if self._studio_token is None:
+                self.authenticate_studio()
+            request_header["Authorization"] = "Bearer {}".format(self._studio_token)
 
         return request_header
 
@@ -253,7 +295,7 @@ class OTCA:
         data: dict | list | None = None,
         json_data: dict | None = None,
         files: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         failure_message: str = "",
         success_message: str = "",
@@ -278,7 +320,7 @@ class OTCA:
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple
                 ("filename", fileobj, "content_type").
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -367,7 +409,7 @@ class OTCA:
 
                     return None
             except requests.exceptions.Timeout:
-                if retries <= max_retries:
+                if retries <= max_retries or max_retries < 0:
                     self.logger.warning(
                         "Request timed out. Retrying in %s seconds...",
                         str(REQUEST_RETRY_DELAY),
@@ -386,16 +428,19 @@ class OTCA:
                     else:
                         return None
             except requests.exceptions.ConnectionError:
-                if retries <= max_retries:
+                if retries <= max_retries or max_retries < 0:
                     self.logger.warning(
-                        "Connection error. Retrying in %s seconds...",
-                        str(REQUEST_RETRY_DELAY),
+                        "Connection error (%s)! Retrying in %d seconds... %d/%d",
+                        url,
+                        REQUEST_RETRY_DELAY,
+                        retries,
+                        max_retries,
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     self.logger.error(
-                        "%s; connection error.",
+                        "%s; connection error!",
                         failure_message,
                     )
                     if retry_forever:
@@ -458,6 +503,43 @@ class OTCA:
             return None
         else:
             return list_object
+
+    # end method definition
+
+    def exist_result_item(
+        self,
+        response: dict,
+        key: str,
+        value: str,
+    ) -> bool:
+        """Check existence of key / value pair in the response properties of an Aviator Studio call.
+
+        There are two types of Aviator Studio responses. The /studio/v1/api seems to deliver
+        plain lists while the /studio/v1 [non-api] seems to be be a dictionary with an embedded
+        "results" list. This method handles both cases.
+
+        Args:
+            response (dict):
+                REST response from an Aviator Studio REST call.
+            key (str):
+                The property name (key).
+            value (str):
+                The value to find in the item with the matching key.
+
+        Returns:
+            bool:
+                True if the value was found, False otherwise.
+
+        """
+
+        if not response:
+            return False
+
+        # The lower level model REST APIs return directly a list.
+        # We want to handle both cases:
+        results = response if isinstance(response, list) else response.get("results", [])
+
+        return any(key in result and result[key] == value for result in results)
 
     # end method definition
 
@@ -535,8 +617,38 @@ class OTCA:
 
     # end method definition
 
-    def chat(self, context: str | None, messages: list, where: list) -> dict:
-        r"""Process a chat interaction with Content Aviator.
+    def authenticate_studio(self) -> str | None:
+        """Authenticate at Aviator Studio.
+
+        Returns:
+            str | None:
+                Authentication token or None if the authentication fails.
+
+        """
+
+        url = self.config()["otdsUrl"] + "/otdsws/oauth2/token"
+
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": self.config()["clientId"],
+            "client_secret": self.config()["clientSecret"],
+        }
+
+        result = self.do_request(url=url, method="Post", data=data)
+
+        if result:
+            self._studio_token = result["access_token"]
+            return self._studio_token
+        else:
+            self.logger.error(
+                "Authentication failed with client ID -> '%s' against -> %s", self.config()["clientId"], url
+            )
+            return None
+
+    # end method definition
+
+    def chat(self, context: str | None, messages: list, where: list | None = None, service_type: str = "chat") -> dict:
+        """Process a chat interaction with Content Aviator.
 
         Chat requests are meant to be called as end-users.  This should involve
         passing the end-user's access token via the Authorization HTTP header.
@@ -548,13 +660,17 @@ class OTCA:
                 (empty initially, returned by previous responses from POST /v1/chat).
             messages (list):
                 List of messages from conversation history.
+                TODO: document the message format. Especially which values the auther key can have.
             where (list):
                 Metadata name/value pairs for the query.
                 Could be used to specify workspaces, documents, or other criteria in the future.
                 Values need to match those passed as metadata to the embeddings API.
+            service_type (str, optional):
+                Determines if Aviator Studio, OTCM Chat or Embedding API is used for the Authentication header.
 
         Returns:
-            dict: Conversation status
+            dict:
+                Conversation status
 
         Example:
         {
@@ -634,15 +750,17 @@ class OTCA:
         """
 
         request_url = self.config()["chatUrl"]
-        request_header = self.request_header()
+        request_header = self.request_header(service_type=service_type)
 
         chat_data = {
             "context": context,
             "messages": messages,
-            "where": where,
             # "synonyms": self.config()["synonyms"],
             # "inlineCitation": self.config()["inlineCitation"],
         }
+
+        if where:
+            chat_data["where"] = where
 
         return self.do_request(
             url=request_url,
@@ -655,10 +773,10 @@ class OTCA:
 
     # end method definition
 
-    def search(
+    def context(
         self, query: str, document_ids: list, workspace_ids: list, threshold: float = 0.5, num_results: int = 10
     ) -> dict:
-        """Semantic search for text chunks.
+        """Get semantic context for a given query string.
 
         Search requests are meant to be called as end-users. This should involve
         passing the end-user's access token via the Authorization HTTP header.
@@ -707,12 +825,12 @@ class OTCA:
         """
 
         # Validations:
-        if not workspace_ids and not document_ids:
-            self.logger.error("Either workspace ID(s) or document ID(s) need to be provided!")
-            return None
+        # if not workspace_ids and not document_ids:
+        #     self.logger.error("Either workspace ID(s) or document ID(s) need to be provided!")
+        #     return None
 
-        request_url = self.config()["searchUrl"]
-        request_header = self.request_header()
+        request_url = self.config()["contextUrl"]
+        request_header = self.request_header(service_type="studio")
 
         search_data = {
             "query": query,
@@ -721,18 +839,18 @@ class OTCA:
             "metadata": [],
         }
 
-        for document_id in document_ids:
+        for document_id in document_ids or []:
             search_data["metadata"].append({"documentID": str(document_id)})
-        for workspace_id in workspace_ids:
+        for workspace_id in workspace_ids or []:
             search_data["metadata"].append({"workspaceID": str(workspace_id)})
 
         return self.do_request(
             url=request_url,
             method="POST",
             headers=request_header,
-            data=search_data,
+            json_data=search_data,
             timeout=None,
-            failure_message="Failed to to do a semantic search with query -> '{}'".format(query),
+            failure_message="Failed to to do a semantic search with query -> '{}' !".format(query),
         )
 
     # end method definition
@@ -744,7 +862,7 @@ class OTCA:
         document_id: int | None = None,
         workspace_id: int | None = None,
         additional_metadata: dict | None = None,
-    ) -> dict:
+    ) -> dict | None:
         """Embed a given content.
 
         Requests are meant to be called as a service user. This would involve passing a service user's access token
@@ -753,17 +871,17 @@ class OTCA:
         Args:
             content (str | None):
                 Content to be embedded. This is a document chunk. Can be empty for "delete" operations.
-            operation (str):
+            operation (str, optional):
                 This can be either "add", "update" or "delete".
-            document_id (int):
+            document_id (int | None, optional):
                 The ID of the document the content originates from. This becmes metadata in the vector store.
-            workspace_id (int):
+            workspace_id (int | None, optional):
                 The ID of the workspace the content originates from. This becomes metadata in the vector store.
-            additional_metadata (dict | None):
+            additional_metadata (dict | None, optional):
                 Dictionary with additional metadata.
 
         Returns:
-            dict:
+            dict | None:
                 REST API response or None in case of an error.
 
         """
@@ -804,11 +922,61 @@ class OTCA:
 
     # end method definition
 
+    def direct_embed(
+        self,
+        content: list[str] | None = None,
+        options: dict | None = None,
+    ) -> dict | None:
+        """Direct embed a given a list of strings. This is an Aviator Studio endpoint.
+
+        Args:
+            content (list[str] | None):
+                Content to be embedded. This is a list of strings.
+            options (dict | None):
+                Optional parameters. Supported parameters (keys):
+                * embeddingType (str) - e.g. "openai"
+                * model (str) - e.g. "text-embedding-ada-002"
+                * baseUrl (str) - e.g. "https://api.openai.com/v1"
+
+        Returns:
+            dict | None:
+                REST API response or None in case of an error.
+
+        Example:
+        {
+            'vectors': [
+                [-0.04728065803647041, -0.006598987616598606, ...],
+                [...]
+            ]
+        }
+
+        """
+
+        request_url = self.config()["directEmbedUrl"]
+        request_header = self.request_header(service_type="studio")
+
+        embed_data = {
+            "content": content,
+        }
+        if options:
+            embed_data["options"] = options
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=embed_data,
+            timeout=None,
+            failure_message="Failed to embed content",
+        )
+
+    # end method definition
+
     def get_graphs(self) -> list | None:
         """Get all graphs.
 
         Returns:
-            list:
+            list | None:
                 A list of all graphs.
 
         Example:
@@ -984,6 +1152,10 @@ class OTCA:
     def get_graph_nodes_iterator(self, graph_id: str) -> iter:
         """Get an iterator object that can be used to traverse graph nodes.
 
+        Args:
+            graph_id (str):
+                The ID of the Graph to retrieve the nodes for.
+
         Returns:
             iter:
                 A generator yielding one node per iteration.
@@ -1001,12 +1173,14 @@ class OTCA:
 
     # end method definition
 
-    def get_graph_nodes_by_name(self, name: str) -> list | None:
+    def get_graph_nodes_by_name(self, name: str, retry_forever: bool = False) -> list | None:
         """Get all nodes of a graph by name.
 
         Args:
             name (str):
                 The Name of the Graph to retrieve the nodes for.
+            retry_forever (bool, optional):
+                Whether to wait forever without timeout. Defaults to False.
 
         Returns:
             list | None:
@@ -1035,6 +1209,7 @@ class OTCA:
             timeout=None,
             show_error=True,
             failure_message="Failed get list of graphs!",
+            retry_forever=retry_forever,
         )
 
         if response is None:
@@ -1095,6 +1270,10 @@ class OTCA:
     def get_graph_edges_iterator(self, graph_id: str) -> iter:
         """Get an iterator object that can be used to traverse graph edges.
 
+        Args:
+            graph_id (str):
+                The ID of the Graph to retrieve the nodes for.
+
         Returns:
             iter:
                 A generator yielding one edge per iteration.
@@ -1120,7 +1299,8 @@ class OTCA:
                 The ID of the graph.
 
         Returns:
-            str: Filename of the generated html file
+            str:
+                Filename of the generated html file
 
         """
 
@@ -1192,6 +1372,561 @@ class OTCA:
 
     # end method definition
 
+    def import_configuration(self) -> bool:
+        """Import Aviator Studio default configuration.
+
+        Returns:
+            bool:
+                True = success, False = error.
+
+        """
+
+        request_url = self.config()["studioImportUrl"]
+        request_header = self.request_header(service_type="studio")
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=None,
+            show_error=True,
+            parse_request_response=False,
+            failure_message="Failed to load default Aviator Studio configuration!",
+        )
+
+        if not response or response.text != "Accepted":
+            self.logger.error("Failed to import Aviator Studio configuration!")
+            return False
+
+        self.logger.info("Successfully imported Aviator Studio configuration.")
+
+        return True
+
+    # end method definition
+
+    def export_configuration(self, show_ids: bool = False) -> dict | None:
+        """Export the current Aviator Studio configuration.
+
+        Args:
+            show_ids(bool, optional):
+                Determines if the ids of the database records will included in the export.
+
+        Returns:
+            dict | None:
+                List of tenants or None in case the request failed.
+
+        Example:
+        {
+            'default': {
+                'id': '8302ca78-a6e1-416d-a93c-39aab189d943',
+                'graphs': {
+                    'supervisor': {
+                        'id': 'abc7436a-33bf-4775-81f6-916961dbb9a0',
+                        'nodes': {...},
+                        'edges': [...]
+                    },
+                    'breakdown': {
+                        'id': 'ea748d81-554f-4638-9789-fd905c8e680f',
+                        'nodes': {...},
+                        'edges': [...]
+                    },
+                    'root': {
+                        'id': 'faf54d3f-b6d7-4954-b222-12f99fd9eb51',
+                        'nodes': {...},
+                        'edges': [...]
+                    },
+                    'answer': {
+                        'id': 'eb563724-4fae-4c82-b24b-955ba57f827c',
+                        'nodes': {...},
+                        'edges': [...]
+                    },
+                    'directChat': {
+                        'id': '702176fa-1701-43d4-84eb-d7628f1f29f7',
+                        'nodes': {...},
+                        'edges': [...]
+                    }
+                },
+                'prompts': {
+                    'cat_prompt': {
+                        'id': '3c96c5e3-dfa2-4aa8-9ce3-2080e0726241',
+                        'type': 'system',
+                        'template': 'Your name is Cat Aviator and you are an AI Assitant that answers questions and always ends answers with jokes about cats.',
+                        'description': 'This is a Cat prompt',
+                        'attributes': {},
+                        'overrides': [...]
+                    },
+                    'breakdown_system': {
+                        'id': 'db797917-4657-48a8-bcf3-fb4a3cd9a0d3',
+                        'type': 'system',
+                        'template': "Given a user message, break it down into separate messages. Guidelines: ..."
+                    },
+                    'chart_prompt': {
+                        'id': 'fa9ff09f-6294-4265-8971-75324024b9b5',
+                        'type': 'system',
+                        'template': 'You are Aviator, an expert in producing data visualizations using Vega-Lite. Your primary task is ...',
+                    },
+                    'agent_route_branch_query': {
+                        'id': '3a117045-191d-4603-84e7-4ee6b0ba7bb1',
+                        'type': 'message',
+                        'template': 'Given the conversation above, pick the right agent to perform the task. Select one of: {options}'
+                    },
+                    'general_system': {
+                        'id': '8f499e25-d07a-4fc0-bb9c-b5392825f7c8',
+                        'type': 'system',
+                        'template': "Your name is Aviator and you are a friendly chatbot assisting users with their queries ...',
+                    },
+                    'breakdown_message': {
+                        'id': 'c2498919-9cba-44f4-aecc-add09a6e94ad',
+                        'type': 'message',
+                        'template': 'Remember, only respond with a JSON object. E.g.  {{"input": ["message1", "message2"]}}'
+                    },
+                    'summarize': {
+                        'id': '4fe7d77d-a28d-489f-83c8-fa514745b8d0',
+                        'type': 'message',
+                        'template': 'The CONTEXT contains text of tool calls, arguments and their responses in the format...',
+                    },
+                    'email_system': {
+                        'id': '0e8e8eaf-dcce-4b35-b0ae-898bd1ba662a',
+                        'type': 'system',
+                        'template': 'Your name is Aviator and you are a friendly chatbot assisting customers ...',
+                    },
+                    'llm_compiler_system': {
+                        'id': 'd0ed1d43-b212-4025-bfff-021d43970b93',
+                        'type': 'system',
+                        'template': 'Given a user query, create a plan to solve it ...',
+                        'attributes': {...}
+                    },
+                    'compare_documents_message': {
+                        'id': 'ccc6b435-f24b-4396-a196-6cd771f486c5',
+                        'type': 'message',
+                        'template': 'You are tasked with a comparative analysis of the documents...',
+                    },
+                    'agent_route_branch_system': {
+                        'id': '55a573dc-9e83-4901-88b9-f81d18c35ffb',
+                        'type': 'system',
+                        'template': 'Your job is to decide which agent to run based on the information provided to you. ...',
+                    },
+                    'check_answer_prompt': {},
+                    'validator_branch_system': {},
+                    'search_query_system': {},
+                    'search_query_message': {},
+                    'general_message': {},
+                    'cite_references': {},
+                    ...
+                'classes': {...},
+                'rules': {...},
+                'llmModels': {
+                    'qwen3:8b': {
+                        'id': 'abbbddf4-2850-4fbb-9b49-b7354b348785',
+                        'family': 'qwen3',
+                        'version': 'qwen3:8b',
+                        'attributes': {
+                            'topK': 40,
+                            'topP': 0.8,
+                            'cache': False,
+                            'baseUrl': 'http://localhost:11434',
+                            'maxTokens': 8000,
+                            'maxRetries': 2,
+                            'temperature': 0.2,
+                            'llmIntegration': 'ollama'
+                        }
+                    }
+                }
+            },
+            ...
+        }
+
+        """
+
+        query = {}
+        if show_ids:
+            query["showIds"] = "true" if show_ids else "false"
+
+        if query:
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url = self.config()["studioExportUrl"] + "?{}".format(encoded_query)
+        else:
+            request_url = self.config()["studioExportUrl"]
+
+        request_header = self.request_header(service_type="studio")
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            show_error=True,
+            parse_request_response=True,
+            failure_message="Failed to export Aviator Studio configuration!",
+        )
+
+        return response
+
+    # end method definition
+
+    def get_scratchpad(self, chat_id: str) -> dict | None:
+        """Get the current scratchpad content.
+
+        Args:
+            chat_id (str):
+                The chat ID.
+
+        Returns:
+            dict | None:
+                Scratchpad content or None in case of an error.
+
+        Example:
+        {
+            'id': 'default',
+            'content': 'This is some scratchpad content.'
+        }
+
+        """
+
+        request_url = self.config()["scratchPadUrl"] + "/" + str(chat_id)
+        request_header = self.request_header(service_type="studio")
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to get scratchpad content!",
+        )
+
+        return response
+
+    # end method definition
+
+    def get_tenants(self) -> list | None:
+        """Get list of Aviator Studio tenants.
+
+        Returns:
+            dict | None:
+                List of tenants or None in case the request failed.
+
+        Example:
+        [
+            {
+                'id': 'edfb5af5-eb82-4867-bbea-fb7e3cba74f5',
+                'externalId': 'default',
+                'createdAt': '2025-08-29T22:59:26.579Z',
+                'updatedAt': '2025-08-29T22:59:26.579Z'
+            }
+        ]
+
+        """
+
+        request_url = self.config()["studioTenantsUrl"]
+        request_header = self.request_header(service_type="studio")
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to get list of tenants!",
+        )
+
+        if response is None:
+            return None
+
+        return response.get("results", [])
+
+    # end method definition
+
+    def get_llms(self, attributes: str | None = None) -> dict | None:
+        """Get a list of configured LLMs in Aviator Studio.
+
+        Args:
+            attributes (str | None, optional):
+                A comma-separated list of attribute fields (in a string).
+                The default is None. In this case all fields are returned.
+                Example: "name,id,tenantId,family,version,attributes"
+
+        Returns:
+            dict | None:
+                List of tenants or None in case the request failed.
+
+        Example:
+        {
+            'results': [
+                {
+                    'id': 'abbbddf4-2850-4fbb-9b49-b7354b348785',
+                    'tenantId': '8302ca78-a6e1-416d-a93c-39aab189d943',
+                    'family': 'qwen3',
+                    'version': 'qwen3:8b',
+                    'name': 'qwen3:8b',
+                    'attributes': {
+                        'topK': 40,
+                        'topP': 0.8,
+                        'cache': False,
+                        'baseUrl': 'http://localhost:11434',
+                        'maxTokens': 8000,
+                        'maxRetries': 2,
+                        'temperature': 0.2,
+                        'llmIntegration': 'ollama'
+                    },
+                    'createdAt': '2025-08-30T15:30:03.727Z',
+                    'updatedAt': '2025-08-30T15:30:03.727Z',
+                    'status': 0
+                },
+                ...
+            ],
+            _links': {
+                'self': {'href': '/'}
+            }
+        }
+
+        """
+
+        query = {}
+        if attributes:
+            query["attributes"] = attributes
+
+        if query:
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url = self.config()["studioLLModelsUrl"] + "?{}".format(encoded_query)
+        else:
+            request_url = self.config()["studioLLModelsUrl"]
+
+        request_header = self.request_header(service_type="studio")
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to get configured LLMs!",
+        )
+
+        return response
+
+    # end method definition
+
+    def add_llm(
+        self,
+        name: str,
+        family: str,
+        version: str,
+        tenant_id: str,
+        status: int = 0,
+        attributes: dict | None = None,
+        llm_integration: str = "",
+        base_url: str = "",
+    ) -> dict | None:
+        """Add an LLM to Aviator Studio.
+
+        Args:
+            name (str):
+                The name of the model, e.g. ""gemini-2.5-flash-001".
+            family (str):
+                The model family name, e.g. "gemini".
+            version (str):
+                The model version (normally the same as name)
+            tenant_id (str):
+                The tenant ID. Should be retrieved with get_tenants() before.
+            status (int, optional):
+                0 = enabled
+                1 = disabled
+                2 = deleted
+            attributes (dict | None, optional):
+                The LLM attributes.
+                * temperature (float)
+                * maxTokens (int)
+                * maxRetries (int)
+                * topK (int)
+                * topP (float)
+                * cache (bool)
+                * llmIntegration (str)
+            llm_integration (str, optional):
+                Name of the LLM integration
+                * "vertex" (for Google)
+                * "ollama" (for Ollama hosted models)
+                * "localai" (for other locally running models)
+                * "bedrock" (AWS)
+                * "azure" (Microsoft)
+            base_url (str, optional):
+                Not required for Gemini. Should be "http://localhost:11434" for Ollama running locally.
+
+        Returns:
+            dict | None:
+                List of tenants or None in case the request failed.
+
+        Example:
+        {
+            'id': 'abbbddf4-2850-4fbb-9b49-b7354b348785',
+            'name': 'qwen3:8b',
+            'family': 'qwen3',
+            'version': 'qwen3:8b',
+            'tenantId': '8302ca78-a6e1-416d-a93c-39aab189d943',
+            'status': 0,
+            'attributes': {
+                'topK': 40,
+                'topP': 0.8,
+                'cache': False,
+                'baseUrl': 'http://localhost:11434',
+                'maxTokens': 8000,
+                'maxRetries': 2,
+                'temperature': 0.2,
+                'llmIntegration': 'ollama'
+            },
+            'updatedAt': '2025-08-30T15:30:03.727Z',
+            'createdAt': '2025-08-30T15:30:03.727Z'
+        }
+
+        """
+
+        if attributes is None:
+            attributes = DEFAULT_LLM_ATTRIBUTES
+
+        if llm_integration:
+            attributes["llmIntegration"] = llm_integration
+        if base_url:
+            attributes["baseUrl"] = base_url
+
+        request_url = self.config()["studioLLModelsUrl"]
+        request_header = self.request_header(service_type="studio")
+        request_data = {
+            "name": name,
+            "family": family,
+            "version": version,
+            "tenantId": tenant_id,
+            "status": status,
+            "attributes": attributes,
+        }
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=request_data,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to add LLM -> '{}' to tenant ID -> '{}'!".format(name, tenant_id),
+        )
+
+        return response
+
+    # end method definition
+
+    def add_prompt(
+        self,
+        name: str,
+        template: str,
+        description: str,
+        llm_model: str,
+        attributes: dict | None = None,
+    ) -> dict | None:
+        """Add a prompt for a specific LLM.
+
+        Args:
+            name (str):
+                A given name fpor the prompt.
+            template (str):
+                The actual prompt string.
+            description (str):
+                An arbitrary desciption of the prompt.
+            llm_model (str):
+                The name of the LLM that has been registered by calling add_llm().
+            attributes (dict | None, optional):
+                * "type": the type of the prompt, e.g. "system"
+
+        Returns:
+            dict | None:
+                The data of the created prompt. This includes the prompt ID and the prompt version.
+
+        Example:
+        {
+            'id': '9e491456-3b72-4fec-8e51-3af2b4f036fb',
+            'name': 'cat_prompt',
+            'template': 'Your name is Cat Aviator and you are an AI Assitant that answers questions and always ends answers with jokes about cats.',
+            'description': 'This is a Cat prompt',
+            'attributes': {'type': 'system'},
+            'llmModel': 'qwen3:8b',
+            'version': 1,
+            'promptId': '3c96c5e3-dfa2-4aa8-9ce3-2080e0726241'
+        }
+
+        """
+
+        request_url = self.config()["studioPromptsUrl"]
+        request_header = self.request_header(service_type="studio")
+        request_data = {
+            "name": name,
+            "template": template,
+            "description": description,
+            "llmModel": llm_model,
+            "attributes": attributes,
+        }
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=request_data,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to add prompt -> '%s' for LLM -> '{}'!".format(name),
+        )
+
+        return response
+
+    # end method definition
+
+    def direct_chat(
+        self,
+        llm_model: str | None = None,
+        messages: list | None = None,
+    ) -> dict | None:
+        r"""Chat with a LLM directly. This is bypassing the configured LangGraph completely.
+
+        Args:
+            llm_model (str | None, optional):
+                The name of the model to use. If None then the default model is used.
+            messages (list | None, optional):
+                List of messages including conversation history. Each list element is
+                a dictionary with two keys: "author" and "content".
+                Example: [{"author": "user", "content": "What is the recommended fridge temperature?"}]
+
+        Returns:
+            dict | None:
+                The data of the created prompt. This includes the prompt ID and the prompt version.
+
+        Example:
+        {
+            'result': "The recommended temperature for a refrigerator is below 40°F (4°C). The ideal temperature range is between 37°F (3°C) and 40°F (4°C). "
+        }
+
+        """
+
+        request_url = self.config()["directChatUrl"]
+        request_header = self.request_header(service_type="studio")
+        request_data = {
+            "messages": messages,
+        }
+        if llm_model is not None:
+            request_data["llmModelName"] = llm_model
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=request_data,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to chat with LLM -> '{}'!".format(
+                llm_model if llm_model is not None else "<default model>"
+            ),
+        )
+
+        return response
+
+    # end method definition
+
     def get_models(self, model_type: str) -> list | None:
         """Get all model details by type.
 
@@ -1235,6 +1970,19 @@ class OTCA:
 
     def get_models_iterator(self, model_type: str) -> iter:
         """Get an iterator object that can be used to traverse models.
+
+        Args:
+            model_type (str):
+                The type of the model. Possible model types:
+                * tenants
+                * graphs
+                * nodes
+                * edges
+                * actions
+                * tools
+                * prompts
+                * rules
+                * klasses
 
         Returns:
             iter:
@@ -1363,7 +2111,7 @@ class OTCA:
 
         """
 
-        self.logger.info("Updating existing model -> '%s' (%s)", model_type, model_id)
+        self.logger.debug("Updating existing model -> '%s' (%s)", model_type, model_id)
 
         request_header = self.request_header(service_type="studio")
         request_url = self.config()["studioModelsUrl"] + "/" + model_type + "/" + model_id
@@ -1606,24 +2354,29 @@ class OTCA:
         # Validations:
         for key in ["name", "description", "APISchema", "agents"]:
             if key not in request_body:
-                self.logger.error("%s is missing in provided request body for tool registration!", key)
+                self.logger.error("%s is missing in provided request body for AI tool registration!", key)
                 return None
 
         # Check if the tool already exists and need to be updated only:
-        self.logger.debug("Check if tool -> '%s' already exists...", request_body["name"])
+        self.logger.debug("Check if AI tool -> '%s' is already registered...", request_body["name"])
         model = self.get_model_by_type_and_name(model_type="tools", name=request_body["name"])
         if model:
-            self.logger.info("Updating existing tool -> '%s'...", request_body["name"])
+            self.logger.info("Updating existing AI tool -> '%s'...", request_body["name"])
 
-            update_body = {
-                "description": request_body["description"],
-                "attributes": {**model.get("attributes", {}), "APISchema": request_body["APISchema"]},
-            }
-            response = self.update_model(model_type="tools", model_id=model["id"], request_body=update_body)
-            if not response:
-                self.logger.error("Failed to update model -> '%s' (%s)", request_body["name"], model["id"])
+            request_header = self.request_header(service_type="studio")
+            request_url = self.config()["studioToolsUrl"] + "/" + request_body["name"]
+            response = self.do_request(
+                url=request_url,
+                method="PUT",
+                headers=request_header,
+                json_data=request_body,
+                timeout=None,
+                show_error=True,
+                failure_message="Failed to update AI tool -> '{}'!".format(request_body["name"]),
+            )
+
         else:
-            self.logger.info("Registering new tool -> '%s'...", request_body["name"])
+            self.logger.info("Registering AI tool -> '%s'...", request_body["name"])
             request_header = self.request_header(service_type="studio")
             request_url = self.config()["studioToolsUrl"]
             response = self.do_request(
@@ -1633,7 +2386,7 @@ class OTCA:
                 json_data=request_body,
                 timeout=None,
                 show_error=True,
-                failure_message="Failed to register tool -> '{}'!".format(request_body["name"]),
+                failure_message="Failed to register AI tool -> '{}'!".format(request_body["name"]),
             )
 
         return response
@@ -1792,7 +2545,7 @@ class OTCA:
 
         Yields:
             Iterator[iter]:
-                One tool at a time.
+                One prompt at a time.
 
         """
 
@@ -1803,7 +2556,7 @@ class OTCA:
     # end method definition
 
     def get_prompt(self, prompt_id: str) -> dict | None:
-        r"""Get a rule by its ID.
+        r"""Get a prompt by its ID.
 
         Args:
             prompt_id (str):
@@ -1837,7 +2590,7 @@ class OTCA:
     # end method definition
 
     def get_actions(self) -> list | None:
-        r"""Get all actions.
+        """Get all actions.
 
         Returns:
             list:
@@ -2071,5 +2824,55 @@ class OTCA:
             return
 
         yield from relationships
+
+    # end method definition
+
+    def is_ready(self, service: str, wait: bool = False) -> bool | None:
+        """Check if service is ready to be used.
+
+        Args:
+            service (str):
+                The name of the service to check.
+            wait (bool):
+                If True, will wait until the service is ready.
+                Default is False.
+
+        Returns:
+            bool | None:
+                True if ready, False if not, None if unknown service.
+
+        """
+
+        match service.lower():
+            case "studio":
+                request_url = self.config()["studioUrl"]
+
+            case "chat":
+                request_url = self.config()["chatUrl"]
+
+            case _:
+                self.logger.error("Service '%s' is not supported for readiness check!", service)
+                return None
+
+        if wait:
+            self.logger.info("Waiting for Aviator %s to be available at %s ...", service, request_url)
+
+        response = None
+        while not response:
+            response = self.do_request(
+                url=request_url,
+                method="GET",
+                max_retries=-1,
+                timeout=None,
+                show_error=False,
+                failure_message=f"Aviator {service} is not available!",
+                parse_request_response=False,
+            )
+
+            if not wait:
+                break
+
+        # Return True if we got a response, False if not:
+        return response is not None
 
     # end method definition

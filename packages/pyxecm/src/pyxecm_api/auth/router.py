@@ -64,9 +64,8 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> J
 async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]) -> JSONResponse:
     """Get the current user.
 
-    current_user:
-        type: User
-        description: The current user.
+    current_user (User):
+        The current user.
 
     """
 

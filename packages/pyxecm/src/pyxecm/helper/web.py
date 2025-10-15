@@ -36,8 +36,8 @@ REQUEST_FORM_HEADERS = {
     "User-Agent": USER_AGENT,
     "Content-Type": "application/x-www-form-urlencoded",
 }
-REQUEST_TIMEOUT = 120
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 120.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 2
 
 default_logger = logging.getLogger(MODULE_NAME)
@@ -109,9 +109,9 @@ class HTTP:
         method: str = "POST",
         payload: dict | None = None,
         headers: dict | None = None,
-        timeout: int = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         retries: int = REQUEST_MAX_RETRIES,
-        wait_time: int = REQUEST_RETRY_DELAY,
+        wait_time: float = REQUEST_RETRY_DELAY,
         wait_on_status: list | None = None,
         show_error: bool = True,
         stream: bool = False,
@@ -128,7 +128,7 @@ class HTTP:
             headers (dict, optional):
                 Request header. Defaults to None. If None then a default
                 value defined in REQUEST_FORM_HEADERS is used.
-            timeout (int, optional):
+            timeout (float | None, optional):
                 The timeout in seconds. Defaults to REQUEST_TIMEOUT.
             retries (int, optional):
                 The number of retries. If -1 then unlimited retries.
@@ -238,7 +238,7 @@ class HTTP:
             if retries == 0:
                 return None
 
-            if wait_time > 0:
+            if wait_time > 0.0:
                 self.logger.warning(
                     "Sleeping %s seconds and then trying once more...",
                     str(wait_time * try_counter),
@@ -255,9 +255,9 @@ class HTTP:
         self,
         url: str,
         filename: str,
-        timeout: int = REQUEST_TIMEOUT,
-        retries: int = REQUEST_MAX_RETRIES,
-        wait_time: int = REQUEST_RETRY_DELAY,
+        timeout: float = REQUEST_TIMEOUT,
+        retries: int | None = REQUEST_MAX_RETRIES,
+        wait_time: float = REQUEST_RETRY_DELAY,
         wait_on_status: list | None = None,
         chunk_size: int = 8192,
         show_error: bool = True,
@@ -269,11 +269,11 @@ class HTTP:
                 The URL to open / load.
             filename (str):
                 The filename to save the content.
-            timeout (int, optional):
+            timeout (float, optional):
                 The timeout in seconds.
             retries (int, optional):
                 The number of retries. If -1 then unlimited retries.
-            wait_time (int, optional):
+            wait_time (float, optional):
                 The number of seconds to wait after each try.
             wait_on_status (list, optional):
                 The list of status codes we want to wait on.

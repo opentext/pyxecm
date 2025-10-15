@@ -30,6 +30,7 @@ class KnowledgeGraph:
 
     WORKSPACE_ID_FIELD = "id"
     WORKSPACE_NAME_FIELD = "name"
+    WORKSPACE_DESCRIPTION_FIELD = "description"
     WORKSPACE_TYPE_FIELD = "wnf_wksp_type_id"
 
     def __init__(self, otcs_object: OTCS, ontology: dict[tuple[str, str, str], list[str]] | None = None) -> None:
@@ -76,16 +77,35 @@ class KnowledgeGraph:
         self._type_graph_inverted = self.invert_type_graph(self._type_graph)
 
         # This include the pandas data frames for the node and edge INSTANCES:
-        self._nodes = Data()  # columns=["id", "name", "type"])
-        self._edges = Data()  # (columns=["source", "target", "relationship"])
+        self._nodes = Data()  # columns=["id", "name", "type", "description", "attributes"])
+        self._edges = Data()  # (columns=["source_type", "source_id", "target_type", "target_id", "relationship_type", "relationship_semantics"])
 
         # Create a simple dictionary with all workspace types to easily
         # lookup the workspace type name (value) by the workspace type ID (key):
         workspace_types = self._otcs.get_workspace_types()
-        self.workspace_types = {
-            wt["data"]["properties"]["wksp_type_id"]: wt["data"]["properties"]["wksp_type_name"]
-            for wt in workspace_types["results"]
-        }
+        if workspace_types:
+            self._workspace_types = {
+                wt["data"]["properties"]["wksp_type_id"]: wt["data"]["properties"]["wksp_type_name"]
+                for wt in workspace_types.get("results", [])
+            }
+        else:
+            self._workspace_types = {}
+
+        self._attribute_schemas = {}
+        self._graph_ready = False
+
+    # end method definition
+
+    def is_graph_ready(self) -> bool:
+        """Return whether or not the graph has been built and is ready for queries.
+
+        Returns:
+            bool:
+                True if the graph is ready, False otherwise.
+
+        """
+
+        return self._graph_ready
 
     # end method definition
 
@@ -99,6 +119,28 @@ class KnowledgeGraph:
         """
 
         return self._nodes
+
+    # end method definition
+
+    def get_node_by_id(self, node_id: int) -> dict | None:
+        """Return the graph node with the given ID as a Data object.
+
+        Args:
+            node_id (int):
+                ID of the node to retrieve.
+
+        Returns:
+            dict | None:
+                Dictionary representation of the node of the Knowledge Graph, or None if not found.
+
+        """
+
+        data_frame = self._nodes.get_data_frame()
+        node_data = data_frame.loc[data_frame["id"] == node_id]
+        if not node_data.empty:
+            return node_data.to_dict(orient="records")[0]
+
+        return None
 
     # end method definition
 
@@ -138,6 +180,241 @@ class KnowledgeGraph:
         """
 
         return self._ontology
+
+    # end method definition
+
+    def get_workspace_types(self) -> dict:
+        """Return the workspace types dictionary.
+
+        Returns:
+            dict:
+                Dictionary mapping workspace type IDs to workspace type names.
+
+        """
+
+        return self._workspace_types
+
+    # end method definition
+
+    def get_workspace_type_names(self) -> list:
+        """Return all workspace type names as a list.
+
+        Returns:
+            list:
+                All workspace type names.
+
+        """
+
+        return list(self._workspace_types.values())
+
+    # end method definition
+
+    def get_workspace_type_name(self, workspace_type_id: str) -> str | None:
+        """Return the workspace type name for a given workspace type ID.
+
+        Args:
+            workspace_type_id (str):
+                The ID of the workspace type.
+
+        Returns:
+            str | None:
+                The name of the workspace type, or None if not found.
+
+        """
+
+        if self._workspace_types is None:
+            return None
+
+        return self._workspace_types.get(workspace_type_id, None)
+
+    # end method definition
+
+    def get_attribute_schemas(self) -> dict:
+        """Return the attribute schemas dictionary.
+
+        Returns:
+            dict:
+                Dictionary mapping attribute names to their schemas.
+
+        """
+
+        return self._attribute_schemas
+
+    # end method definition
+
+    def get_category_names(self) -> list:
+        """Return all category names as a list.
+
+        Returns:
+            list:
+                All category item names.
+
+        """
+
+        return list(self._attribute_schemas.keys())
+
+    # end method definition
+
+    def get_category_attributes(self, category: str) -> list:
+        """Return all attribute names as a list.
+
+        Attributes in a set use "<set_name>:<attribute_name>" as key.
+
+        Returns:
+            list:
+                All attribute names of a given category.
+
+        """
+
+        if not self._attribute_schemas:
+            self.build_attributes()
+
+        return list(self._attribute_schemas.get(category, {}).get("attributes", {}).keys())
+
+    # end method definition
+
+    def get_category_id(self, category: str) -> str | None:
+        """Return the attribute schemas dictionary.
+
+        Args:
+            category (str):
+                The category of the attribute.
+
+        """
+        return self.get_attribute_id(category=category)
+
+    # end method definition
+
+    def get_attribute_id(
+        self, category: str, attribute: str | None = None, set_attribute: str | None = None, row: int | None = None
+    ) -> str | None:
+        """Return the attribute schemas dictionary.
+
+        Args:
+            category (str):
+                The category of the attribute.
+            attribute (str):
+                The name of the attribute.
+            set_attribute (str | None, optional):
+                The set of the attribute.
+            row (int | None, optional):
+                The row number to retrieve (1-based index for set lines).
+
+        Returns:
+            str:
+                OTCS category ID or attribute ID.
+
+        """
+
+        if not self._attribute_schemas:
+            self.build_attributes()
+
+        # Lookup the category schema by the category name:
+        category = self._attribute_schemas.get(category, {})
+        if not category:
+            return None
+        if not attribute:
+            # If now specific attribute is requested return the category ID:
+            return category.get("id", None)
+        attributes = category.get("attributes", {})
+        # Construct the attribute lookup key. For set attributes we use the format "Set:Attribute".
+        lookup_key = attribute if not set_attribute else f"{set_attribute}:{attribute}"
+        if lookup_key not in attributes:
+            return None
+
+        if lookup_key not in attributes:
+            self.logger.error("Attribute '%s' not found in category '%s'!", lookup_key, category.get("id", "unknown"))
+            return None
+
+        key = attributes[lookup_key]
+
+        if row is not None and "_x_" in key:
+            # We have to adjust for 0-based index:
+            key = key.replace("_x_", "_{}_".format(row))
+        elif row is not None:
+            self.logger.warning("Row specified for non-multi-line set attribute - ignoring row.")
+
+        return key
+
+    # end method definition
+
+    def get_result_values(self, response: dict, key: str, sub_keys: list[str] | None = None) -> list | None:
+        """Read all values with a given key from the Knowledge Graph Query.
+
+        Args:
+            response (dict):
+                Knowledge Graph query result. Example:
+                28038: {
+                    'id': '28038',
+                    'name': 'C.E.B. Berlin SE (10020)',
+                    'attributes': {'Vendor': {...}}
+                    'path': ['Material', 'Purchase Order', 'Vendor']
+                }
+            key (str):
+                Key to find (e.g., "name", "attributes").
+            sub_keys (list[str] | None, optional):
+                Sub keys to lookup data in a dictionary like "attributes".
+
+        Returns:
+            list | None:
+                Value list of the item with the given key, or None if no value is found.
+
+        """
+
+        # First do some sanity checks:
+        if not response:
+            self.logger.debug("Empty query response - returning None")
+            return None
+
+        # Initialize results variable:
+        results = []
+
+        # Loop through all graph response values:
+        for value in response.values():
+            # Check if the key does actually exist in the current value:
+            if key not in value:
+                continue
+
+            item = value[key]
+
+            # If sub-keys exist, loop through them and expand sub-dicts:
+            if sub_keys:
+                for sub_key in sub_keys:
+                    if not isinstance(item, dict) or sub_key not in item:
+                        item = None
+                        break
+                    item = item[sub_key]
+
+            # If a final item is found after expansion add it to the result list:
+            if item is not None:
+                results.append(item)
+
+        # We want to return None instead of an empty list:
+        return results or None
+
+    # end method definition
+
+    def get_result_values_iterator(
+        self,
+        response: dict,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse through OTCS responses.
+
+        Args:
+            response (dict):
+                REST API response object.
+
+        Returns:
+            list | None:
+                Value list of the item with the given key, or None if no value is found.
+
+        """
+
+        # First do some sanity checks:
+        if not response:
+            return
+
+        yield from response.values()
 
     # end method definition
 
@@ -346,19 +623,30 @@ class KnowledgeGraph:
 
             workspace_id = self._otcs.get_result_value(response=workspace_node, key=self.WORKSPACE_ID_FIELD)
             workspace_name = self._otcs.get_result_value(response=workspace_node, key=self.WORKSPACE_NAME_FIELD)
-            workspace_type = self.workspace_types[
+            workspace_description = self._otcs.get_result_value(
+                response=workspace_node, key=self.WORKSPACE_DESCRIPTION_FIELD
+            )
+            # We use the cached names of the workspace types:
+            workspace_type = self._workspace_types[
                 self._otcs.get_result_value(response=workspace_node, key=self.WORKSPACE_TYPE_FIELD)
             ]
             data = {
                 "id": workspace_id,
                 "name": workspace_name,
+                "description": workspace_description,
                 "type": workspace_type,
                 **kwargs,  # ← allows adding more attributes from caller
             }
             if metadata:
-                response = self._otcs.get_workspace(node_id=workspace_id, fields="categories", metadata=True)
+                response = self._otcs.get_workspace(node_id=int(workspace_id), fields="categories", metadata=True)
                 if response:
                     data["attributes"] = self._otcs.extract_category_data(node=response)
+                else:
+                    self.logger.warning(
+                        "Workspace -> '%s' (%s) has no metadata! Cannot add it to the graph.",
+                        workspace_name,
+                        workspace_id,
+                    )
             with self._nodes.lock():
                 self._nodes.append(data)
             return (True, True)
@@ -407,8 +695,8 @@ class KnowledgeGraph:
                         "target_id": workspace_target_id,
                         "relationship_type": rel_type,
                         "relationship_semantics": self.get_semantic_labels(
-                            source_type=self.workspace_types.get(workspace_source_type, workspace_source_type),
-                            target_type=self.workspace_types.get(workspace_target_type, workspace_target_type),
+                            source_type=self._workspace_types.get(workspace_source_type, workspace_source_type),
+                            target_type=self._workspace_types.get(workspace_target_type, workspace_target_type),
                             rel_type=rel_type,
                         ),
                         **kwargs,  # ← allows adding more attributes from caller
@@ -432,6 +720,9 @@ class KnowledgeGraph:
             timeout=timeout,
             metadata=metadata,
         )
+
+        # mark the graph as ready:
+        self._graph_ready = True
 
         return result
 
@@ -474,7 +765,7 @@ class KnowledgeGraph:
         intermediate_types: list[str] | None = None,
         strict_intermediate_types: bool = False,
         ordered_intermediate_types: bool = False,
-    ) -> set[tuple[str, int]]:
+    ) -> dict:
         """Find target entities by using the Knowledge Graph.
 
         Given a source entity (like Material:M-789), find target entities (like Customer)
@@ -488,7 +779,7 @@ class KnowledgeGraph:
             target_type (str):
                 Desired result type (e.g. "Customer").
             target_value (str | int | None, optional):
-                The value or name of the source node (e.g. "M-789").
+                The value or name of the target node (e.g. "Global Trade AG").
             max_hops (int | None, optional):
                 Limit on graph traversal depth. If None (default) there's no limit.
             direction (str, optional):
@@ -502,8 +793,55 @@ class KnowledgeGraph:
                 Enforce order of intermediate types.
 
         Returns:
-            set:
-                Set of (name, id) tuples for matching nodes, e.g. {("Customer A", 123)}
+            dict:
+                Dictionary with node ID as key and values consisting of "name" and
+                optional "attributes" keys. "attributes" are just provided if the graph
+                was built with "metadata=True".
+
+        Example:
+        {
+            29023: {
+                'name': 'C.E.B. Berlin SE (10020)',
+                'attributes': {
+                    'Vendor': {
+                        'Locations': [
+                            {
+                                'Type': 'Stand. Address',
+                                'Street': 'Potsdamer Platz 1',
+                                'City': 'Berlin',
+                                'Country': 'Germany',
+                                'Postal code': '10785',
+                                'Valid from': '2016-01-31T11:00:00',
+                                'Valid to': '9999-12-31T11:00:00'
+                            }
+                        ],
+                        'Contacts': [
+                            {
+                                'BP No': '0000001101',
+                                'Name': 'Matthias Schwarz',
+                                'Department': '',
+                                'Function': '',
+                                'Phone': '',
+                                ...
+                            }
+                        ],
+                        'Name': 'C.E.B. Berlin SE',
+                        'Street': 'Potsdamer Platz 1',
+                        'Bank Accounts': [...],
+                        'City': 'Berlin',
+                        'Postal Code': '10785',
+                        'Country': 'Germany',
+                        'Purchasing Organization': ['1000 Innovate Germany'],
+                        'Number': '10020',
+                        'Key': '0000010020'
+                    }
+                }
+            },
+            29140: {
+                'name': 'C.E.B. New York Inc. (30010)',
+                'attributes': {...}
+            },
+            ...
 
         """
 
@@ -522,7 +860,7 @@ class KnowledgeGraph:
             & (nodes_df["name"].astype(str).str.contains(str(source_value), case=False, na=False, regex=False))
         ]
         if source_node.empty:
-            return set()
+            return {}
         start_id = source_node.iloc[0]["id"]
 
         #
@@ -530,7 +868,7 @@ class KnowledgeGraph:
         #
         visited = set()
         queue = deque([(start_id, 0, [])])  # (node_id, depth, path_types)
-        results = set()
+        results: dict[int, dict[str, object]] = {}
         # Cache of build_type_pathes results
         type_path_cache = {}
 
@@ -555,6 +893,7 @@ class KnowledgeGraph:
 
             current_type = node_row.iloc[0]["type"]
             current_name = node_row.iloc[0]["name"]
+            current_attributes = node_row.iloc[0].get("attributes", {})
 
             # Check if this node has been traversed before. If yes, skip.
             if current_id in visited:
@@ -626,7 +965,7 @@ class KnowledgeGraph:
                 if (
                     target_value is not None
                     and target_value != current_name  # exact match
-                    and target_value.lower() not in current_name.lower()  # partial match (substring)
+                    and str(target_value).lower() not in current_name.lower()  # partial match (substring)
                 ):
                     self.logger.debug(
                         "Target node -> '%s' (%d) has the right type -> '%s' but not matching name or attributes (%s)",
@@ -637,7 +976,13 @@ class KnowledgeGraph:
                     )
                     continue
 
-                results.add((current_name, current_id))
+                results[current_id] = {
+                    "id": current_id,
+                    "name": current_name,
+                    "type": target_type,
+                    "attributes": current_attributes,
+                    "path": path_types,
+                }
                 self.logger.debug(
                     "Found node -> '%s' (%d) of desired target type -> '%s'%s%s",
                     current_name,
@@ -702,14 +1047,15 @@ class KnowledgeGraph:
             # Get neighbor nodes with their types
             neighbor_rows = nodes_df[nodes_df["id"].isin(neighbor_ids)][["id", "type"]]
 
-            # Filter neighbors by allowed types
+            # Filter neighbors by allowed types and not visited before:
             filtered_neighbors = [
                 nid
                 for nid in neighbor_rows.itertuples(index=False)
                 if nid.type in allowed_types and nid.id not in visited
             ]
 
-            # Travers edges from current node to neighbors:
+            # Travers edges from current node to neighbors and
+            # add the neighbors to the processing queue for traversal:
             for neighbor in filtered_neighbors:
                 queue.append((neighbor.id, current_depth + 1, path_types))
         # end while queue
@@ -717,3 +1063,138 @@ class KnowledgeGraph:
         return results
 
     # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="build_attribute")
+    def build_attribute(self, node: dict, **kwargs: dict) -> tuple[bool, bool]:  # noqa: ARG002
+        """Build a dictionary of all attribute schemas in OTCS.
+
+        Args:
+            node (dict):
+                The category node to process.
+            path (list[str]):
+                The current path in the category tree.
+            kwargs (dict):
+                Optional additional parameters.
+
+        Returns:
+            bool:
+                Whether or not the operation was successful.
+            bool:
+                Whether or not we require further traversal.
+
+        """
+
+        if not node:
+            return (False, False)
+
+        success = True
+        traverse = True
+
+        node_id = self._otcs.get_result_value(response=node, key="id")
+        node_name = self._otcs.get_result_value(response=node, key="name")
+        node_type = self._otcs.get_result_value(response=node, key="type")
+        if node_type != self._otcs.ITEM_TYPE_CATEGORY:
+            success = False
+        if node_type not in [self._otcs.VOLUME_TYPE_CATEGORIES_VOLUME, self._otcs.ITEM_TYPE_CATEGORY_FOLDER]:
+            traverse = False
+
+        if success:
+            # Initialize the entry on the category level:
+            self._attribute_schemas[node_name] = {"id": node_id, "attributes": {}}
+            personal_volume = self._otcs.get_volume(volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE)
+            personal_volume_id = self._otcs.get_result_value(response=personal_volume, key="id")
+            # Retrieve the attribute schema for the given category.
+            # We use the Enterprise Vault (2000) as node_id to have a predictable
+            # node ID that is always available:
+            attributes = self._otcs.get_node_category_form(
+                node_id=personal_volume_id, category_id=node_id, operation="create"
+            )
+            if not attributes or "forms" not in attributes or not attributes["forms"]:
+                self.logger.error(
+                    "Cannot retrieve attribute schema for category -> '%s' (%s)!",
+                    node_name,
+                    node_id,
+                )
+                return (False, False)
+            attributes = attributes["forms"][0]["schema"]["properties"] if attributes else {}
+
+            for key, value in attributes.items():
+                if not key[0].isdigit() or "title" not in value:
+                    continue
+                self._attribute_schemas[node_name]["attributes"][value["title"]] = key
+                # Process sub-attributes in single-row set:
+                if "properties" in value:
+                    for sub_key, sub_value in value["properties"].items():
+                        if "title" not in sub_value:
+                            continue
+                        self._attribute_schemas[node_name]["attributes"][value["title"] + ":" + sub_value["title"]] = (
+                            sub_key
+                        )
+                # Process sub-attributes in multi-row set:
+                if "items" in value and "properties" in value["items"]:
+                    for sub_key, sub_value in value["items"]["properties"].items():
+                        if "title" not in sub_value:
+                            continue
+                        self._attribute_schemas[node_name]["attributes"][value["title"] + ":" + sub_value["title"]] = (
+                            sub_key
+                        )
+
+        return (success, traverse)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="build_attributes")
+    def build_attributes(self) -> dict:
+        """Build a dictionary of all attribute schemas in OTCS.
+
+        This method populates the `self._attribute_schemas` dictionary with
+        attribute schemas for each category found in the OTCS categories volume.
+
+        It allows for fast lookup of IDs of categories and their attributes
+        by their human-readable names that we use in the AttributesModel in
+        the Aviator tools.
+
+        Each dictionary entry has the following format:
+        {
+            'Category Name': {
+                'id': <category_id>,
+                'attributes': {
+                    'Attribute Title': 'attribute_key',
+                    ...
+                }
+            },
+            ...
+        }
+
+        Returns:
+            dict | None:
+                The number of processed and traversed nodes. Format:
+                {
+                    "processed": int,
+                    "traversed": int,
+                }
+
+
+        Example:
+        {
+            'Customer': {
+                'id': 20739,
+                'attributes': {}
+            },
+            ...
+        }
+
+        """
+
+        self.logger.info("Starting attribute data lookup build...")
+
+        result = self._otcs.traverse_node(
+            node=self._otcs.get_volume(volume_type=self._otcs.VOLUME_TYPE_CATEGORIES_VOLUME),
+            executables=[self.build_attribute],
+        )
+
+        self.logger.info("Attributes data lookup build completed.")
+
+        return result
+
+    # end class definition

@@ -2,10 +2,12 @@
 
 The settings in this section are used to configure the Customizer API Server.
 
---8<-- "customizerapisettings_doc.md"
+## Sample .env
 
-## Sample environment variables
-
-```
+```env
 --8<-- "customizerapisettings.env"
 ```
+
+## Documentation
+
+--8<-- "customizerapisettings_doc.md"

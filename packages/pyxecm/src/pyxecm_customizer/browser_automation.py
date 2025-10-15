@@ -90,8 +90,8 @@ except ModuleNotFoundError:
 # "wait until" strategy.
 DEFAULT_WAIT_UNTIL_STRATEGY = "networkidle"
 
-REQUEST_TIMEOUT = 30
-REQUEST_RETRY_DELAY = 2
+REQUEST_TIMEOUT = 30.0
+REQUEST_RETRY_DELAY = 2.0
 REQUEST_MAX_RETRIES = 3
 
 
@@ -182,7 +182,7 @@ class BrowserAutomation:
             self.screenshot_names,
             "screenshots",
         )
-        self.logger.debug("Creating Screenshot directory... -> %s", self.screenshot_directory)
+        self.logger.debug("Creating screenshot directory... -> %s", self.screenshot_directory)
         if self.take_screenshots and not os.path.exists(self.screenshot_directory):
             os.makedirs(self.screenshot_directory)
 
@@ -194,21 +194,21 @@ class BrowserAutomation:
             self.logger.info("Using HTTP proxy -> %s", os.getenv("HTTP_PROXY"))
 
         browser = browser or os.getenv("BROWSER", "webkit")
-        self.logger.info("Using Browser -> '%s'...", browser)
+        self.logger.info("Using browser -> '%s'...", browser)
 
         if not self.setup_playwright(browser=browser):
             self.logger.error("Failed to initialize Playwright browser automation!")
             return
 
-        self.logger.info("Creating Browser Context...")
+        self.logger.info("Creating browser context...")
         self.context: BrowserContext = self.browser.new_context(
             accept_downloads=True,
         )
 
-        self.logger.info("Creating Page...")
+        self.logger.info("Creating page...")
         self.page: Page = self.context.new_page()
         self.main_page = self.page
-        self.logger.info("Browser Automation initialized.")
+        self.logger.info("Browser automation initialized.")
 
     # end method definition
 
@@ -217,7 +217,12 @@ class BrowserAutomation:
 
         Args:
             browser (str):
-                Name of the browser engine.
+                Name of the browser engine. Supported:
+                * chromium
+                * chrome
+                * msedge
+                * webkit
+                * firefox
 
         Returns:
             bool:
@@ -232,6 +237,9 @@ class BrowserAutomation:
             self.logger.error("Failed to start Playwright!")
             return False
 
+        result = True
+
+        # Install and launch the selected browser in Playwright:
         match browser:
             case "chromium":
                 try:
@@ -239,10 +247,11 @@ class BrowserAutomation:
                         headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
                     )
                 except Exception:
-                    self.install_browser(browser=browser)
-                    self.browser: Browser = self.playwright.chromium.launch(
-                        headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
-                    )
+                    result = self.install_browser(browser=browser)
+                    if result:
+                        self.browser: Browser = self.playwright.chromium.launch(
+                            headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
+                        )
 
             case "chrome":
                 try:
@@ -253,13 +262,14 @@ class BrowserAutomation:
                         proxy=self.proxy,
                     )
                 except Exception:
-                    self.install_browser(browser=browser)
-                    self.browser: Browser = self.playwright.chromium.launch(
-                        channel="chrome",
-                        headless=self.headless,
-                        slow_mo=100 if not self.headless else None,
-                        proxy=self.proxy,
-                    )
+                    result = self.install_browser(browser=browser)
+                    if result:
+                        self.browser: Browser = self.playwright.chromium.launch(
+                            channel="chrome",
+                            headless=self.headless,
+                            slow_mo=100 if not self.headless else None,
+                            proxy=self.proxy,
+                        )
 
             case "msedge":
                 try:
@@ -270,13 +280,14 @@ class BrowserAutomation:
                         proxy=self.proxy,
                     )
                 except Exception:
-                    self.install_browser(browser=browser)
-                    self.browser: Browser = self.playwright.chromium.launch(
-                        channel="msedge",
-                        headless=self.headless,
-                        slow_mo=100 if not self.headless else None,
-                        proxy=self.proxy,
-                    )
+                    result = self.install_browser(browser=browser)
+                    if result:
+                        self.browser: Browser = self.playwright.chromium.launch(
+                            channel="msedge",
+                            headless=self.headless,
+                            slow_mo=100 if not self.headless else None,
+                            proxy=self.proxy,
+                        )
 
             case "webkit":
                 try:
@@ -284,10 +295,11 @@ class BrowserAutomation:
                         headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
                     )
                 except Exception:
-                    self.install_browser(browser=browser)
-                    self.browser: Browser = self.playwright.webkit.launch(
-                        headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
-                    )
+                    result = self.install_browser(browser=browser)
+                    if result:
+                        self.browser: Browser = self.playwright.webkit.launch(
+                            headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
+                        )
 
             case "firefox":
                 try:
@@ -295,16 +307,30 @@ class BrowserAutomation:
                         headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
                     )
                 except Exception:
-                    self.install_browser(browser=browser)
-                    self.browser: Browser = self.playwright.firefox.launch(
-                        headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
-                    )
-        return True
+                    result = self.install_browser(browser=browser)
+                    if result:
+                        self.browser: Browser = self.playwright.firefox.launch(
+                            headless=self.headless, slow_mo=100 if not self.headless else None, proxy=self.proxy
+                        )
+            case _:
+                self.logger.error("Unknown browser -> '%s'. Cannot install and launch it.", browser)
+                result = False
+
+        return result
 
     # end method definition
 
     def install_browser(self, browser: str) -> bool:
-        """Check if browser is already installed if not install it."""
+        """Install a browser with a provided name in Playwright.
+
+        Args:
+            browser (str):
+                Name of the browser to be installed.
+
+        Returns:
+            bool: True = installation successful, False = installation failed.
+
+        """
 
         self.logger.info("Installing Browser -> '%s'...", browser)
         process = subprocess.Popen(
@@ -314,12 +340,13 @@ class BrowserAutomation:
             shell=False,
         )
         output, error = process.communicate()
-        if process.returncode == 0:
-            self.logger.info("Installation completed successfullly.")
+        if process.returncode == 0:  # 0 = success
+            self.logger.info("Successfuly completed installation of browser -> '%s'.", browser)
             self.logger.debug(output.decode())
         else:
-            self.logger.error("Installation failed with -> %s", error.decode())
+            self.logger.error("Installation of browser -> '%s' failed! Error -> %s", browser, error.decode())
             self.logger.error(output.decode())
+            return False
 
         return True
 
@@ -634,6 +661,7 @@ class BrowserAutomation:
         wait_state: str = "visible",
         exact_match: bool | None = None,
         regex: bool = False,
+        occurrence: int = 1,
         iframe: str | None = None,
         repeat_reload: int | None = None,
         repeat_reload_delay: int = 60,
@@ -657,6 +685,9 @@ class BrowserAutomation:
                 If an exact matching is required. Default is None (not set).
             regex (bool, optional):
                 Should the name be interpreted as a regular expression?
+            occurrence (int, optional):
+                If multiple elements match the selector, this defines which one to return.
+                Default is 1 (the first one).
             iframe (str | None):
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
             repeat_reload (int | None):
@@ -674,17 +705,19 @@ class BrowserAutomation:
 
         """
 
-        failure_message = "Cannot find page element with selector -> '{}' ({}){}{}".format(
+        failure_message = "Cannot find page element with selector -> '{}' ({}){}{}{}".format(
             selector,
             selector_type,
             " and role type -> '{}'".format(role_type) if role_type else "",
             " in iframe -> '{}'".format(iframe) if iframe else "",
+            ", occurrence -> {}".format(occurrence) if occurrence > 1 else "",
         )
-        success_message = "Found page element with selector -> '{}' ('{}'){}{}".format(
+        success_message = "Found page element with selector -> '{}' ('{}'){}{}{}".format(
             selector,
             selector_type,
             " and role type -> '{}'".format(role_type) if role_type else "",
             " in iframe -> '{}'".format(iframe) if iframe else "",
+            ", occurrence -> {}".format(occurrence) if occurrence > 1 else "",
         )
 
         def do_find() -> Locator | None:
@@ -709,8 +742,13 @@ class BrowserAutomation:
             # are not yet loaded:
 
             try:
+                index = occurrence - 1  # convert to 0-based index
+                if index < 0:  # basic validation
+                    self.logger.error("Occurrence must be >= 1")
+                    return None
                 self.logger.debug(
-                    "Wait for locator to find element with selector -> '%s' (%s%s%s) and state -> '%s'%s...",
+                    "Wait for locator to find %selement with selector -> '%s' (%s%s%s) and state -> '%s'%s...",
+                    "occurrence #{} of ".format(occurrence) if occurrence > 1 else "",
                     selector,
                     "selector type -> '{}'".format(selector_type),
                     ", role type -> '{}'".format(role_type) if role_type else "",
@@ -718,7 +756,9 @@ class BrowserAutomation:
                     wait_state,
                     " in iframe -> '{}'".format(iframe) if iframe else "",
                 )
-                locator = locator.first
+
+                locator = locator.first if occurrence == 1 else locator.nth(index)
+                # Wait for the element to be in the desired state:
                 locator.wait_for(state=wait_state)
             except PlaywrightError as pe:
                 if show_error and repeat_reload is None:
@@ -763,6 +803,7 @@ class BrowserAutomation:
         selector: str,
         selector_type: str = "id",
         role_type: str | None = None,
+        occurrence: int = 1,
         scroll_to_element: bool = True,
         desired_checkbox_state: bool | None = None,
         is_navigation_trigger: bool = False,
@@ -793,6 +834,9 @@ class BrowserAutomation:
             role_type (str | None, optional):
                 ARIA role when using selector_type="role", e.g., "button", "textbox".
                 If irrelevant then None should be passed for role_type.
+            occurrence (int, optional):
+                If multiple elements match the selector, this defines which one to return.
+                Default is 1 (the first one).
             scroll_to_element (bool, optional):
                 Scroll the element into view.
             desired_checkbox_state (bool | None, optional):
@@ -879,6 +923,7 @@ class BrowserAutomation:
             role_type=role_type,
             exact_match=exact_match,
             regex=regex,
+            occurrence=occurrence,
             iframe=iframe,
             repeat_reload=repeat_reload,
             repeat_reload_delay=repeat_reload_delay,
@@ -977,6 +1022,7 @@ class BrowserAutomation:
         value: str | bool,
         selector_type: str = "id",
         role_type: str | None = None,
+        occurrence: int = 1,
         is_sensitive: bool = False,
         press_enter: bool = False,
         exact_match: bool | None = None,
@@ -998,6 +1044,9 @@ class BrowserAutomation:
             role_type (str | None, optional):
                 ARIA role when using selector_type="role", e.g., "button", "textbox".
                 If irrelevant then None should be passed for role_type.
+            occurrence (int, optional):
+                If multiple elements match the selector, this defines which one to return.
+                Default is 1 (the first one).
             is_sensitive (bool, optional):
                 True for suppressing sensitive information in logging.
             press_enter (bool, optional):
@@ -1028,6 +1077,7 @@ class BrowserAutomation:
             role_type=role_type,
             exact_match=exact_match,
             regex=regex,
+            occurrence=occurrence,
             iframe=iframe,
             show_error=True,
         )
@@ -1263,7 +1313,7 @@ class BrowserAutomation:
             return (None, 0)
 
         self.logger.info(
-            "Check if at least %d element%s found by selector -> %s (%s%s)%s%s%s...",
+            "Check if at least %d element%s found by selector -> '%s' (%s%s)%s%s%s...",
             min_count,
             "s are" if min_count > 1 else " is",
             selector,
@@ -1467,7 +1517,7 @@ class BrowserAutomation:
             return False
 
         if "Verify" in title:
-            self.logger.error("Site is asking for a Verification Token. You may need to whitelist your IP!")
+            self.logger.error("Site is asking for a verification token. You may need to whitelist your IP!")
             return False
         if "Login" in title:
             self.logger.error("Authentication failed. You may have given the wrong password!")
@@ -1502,11 +1552,11 @@ class BrowserAutomation:
     def end_session(self) -> None:
         """End the browser session and close the browser."""
 
-        self.logger.info("Close Browser Page...")
+        self.logger.info("Close browser page...")
         self.page.close()
-        self.logger.info("Close Browser Context...")
+        self.logger.info("Close browser context...")
         self.context.close()
-        self.logger.info("Close Browser...")
+        self.logger.info("Close browser...")
         self.browser.close()
         self.logged_in = False
         self.logger.info("Stop Playwright instance...")

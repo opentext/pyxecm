@@ -1484,10 +1484,11 @@ class Data:
             remainder = 0
 
         self.logger.info(
-            "Data frame has -> %s elements. We split it into -> %s partitions with -> %s rows and remainder -> %s...",
+            "Data frame has -> %s elements. We split it into -> %s partitions with -> %s row%s and remainder -> %s...",
             str(size),
             str(number),
             str(partition_size),
+            "s" if partition_size > 1 else "",
             str(remainder),
         )
 

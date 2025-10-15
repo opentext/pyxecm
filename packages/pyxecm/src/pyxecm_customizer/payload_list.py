@@ -796,6 +796,9 @@ class PayloadList:
 
         # end  def run_and_complete_payload()
 
+        # add delay here to allow for logging to work reliably for the the first payload
+        time.sleep(10)
+
         while not self._stopped:
             # Get runnable items as subset of the initial data frame:
             runnable_items: pd.DataFrame = self.pick_runnables()

@@ -12,7 +12,7 @@ import requests
 
 default_logger = logging.getLogger("pyxecm_customizer.translate")
 
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 60.0
 
 
 class Translator:

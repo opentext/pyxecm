@@ -56,8 +56,8 @@ REQUEST_FORM_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 2
 
 default_logger = logging.getLogger(MODULE_NAME)
@@ -71,6 +71,7 @@ class OTDS:
     _config = None
     _cookie = None
     _otds_ticket = None
+    _token = None
 
     def __init__(
         self,
@@ -79,7 +80,10 @@ class OTDS:
         port: int,
         username: str | None = None,
         password: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         otds_ticket: str | None = None,
+        oauth_token: str | None = None,
         bind_password: str | None = None,
         admin_partition: str = "otds.admin",
         logger: logging.Logger = default_logger,
@@ -97,8 +101,14 @@ class OTDS:
                 The OTDS user name. Optional if otds_ticket is provided.
             password (str, optional):
                 The OTDS password. Optional if otds_ticket is provided.
+            client_id (str | None, optional):
+                Client ID for grant type authentication.
+            client_secret (str | None, optional):
+                Client secret for grant type authentication.
             otds_ticket (str | None, optional):
-                Authentication ticket of OTDS.
+                Pre-known authentication ticket of OTDS.
+            oauth_token (str | None, optional):
+                Pre-known OAuth token for OTDS.
             bind_password (str | None, optional): TODO
             admin_partition (str, optional):
                 Name of the admin partition. Default is "otds.admin".
@@ -115,40 +125,22 @@ class OTDS:
         # Initialize otdsConfig as an empty dictionary
         otds_config = {}
 
-        if hostname:
-            otds_config["hostname"] = hostname
-        else:
-            otds_config["hostname"] = "otds"
-
-        if protocol:
-            otds_config["protocol"] = protocol
-        else:
-            otds_config["protocol"] = "http"
-
-        if port:
-            otds_config["port"] = port
-        else:
-            otds_config["port"] = 80
-
-        if username:
-            otds_config["username"] = username
-        else:
-            otds_config["username"] = "admin"
-
-        if password:
-            otds_config["password"] = password
-        else:
-            otds_config["password"] = ""
-
-        if bind_password:
-            otds_config["bindPassword"] = bind_password
-        else:
-            otds_config["bindPassword"] = ""
-
+        otds_config["hostname"] = hostname or "otds"
+        otds_config["protocol"] = protocol or "http"
+        otds_config["port"] = port or 80
+        otds_config["username"] = username or "admin"
+        otds_config["password"] = password or ""
+        otds_config["clientId"] = client_id or ""
+        otds_config["clientSecret"] = client_secret or ""
+        otds_config["bindPassword"] = bind_password or ""
         otds_config["adminPartition"] = admin_partition
 
+        # If a pre-existing OTDS ticket is provided we use it:
         if otds_ticket:
             self._cookie = {"OTDSTicket": otds_ticket}
+        # If a pre-existing OAuth token is provided we use it:
+        if oauth_token:
+            self._token = oauth_token
 
         otds_base_url = protocol + "://" + otds_config["hostname"]
         if str(port) not in ["80", "443"]:
@@ -163,9 +155,11 @@ class OTDS:
         otds_config["identityproviderprofiles"] = otds_rest_url + "/identityproviderprofiles"
         otds_config["accessRoleUrl"] = otds_rest_url + "/accessroles"
         otds_config["credentialUrl"] = otds_rest_url + "/authentication/credentials"
+        otds_config["tokenUrl"] = otds_rest_url + "/authentication/token"
+        otds_config["tokenInfoUrl"] = otds_rest_url + "/authentication/oauth/tokeninfo"
         otds_config["ticketforuserUrl"] = otds_rest_url + "/authentication/ticketforuser"
         otds_config["oauthClientUrl"] = otds_rest_url + "/oauthclients"
-        otds_config["tokenUrl"] = otds_base_url + "/oauth2/token"
+        otds_config["oauthTokenUrl"] = otds_base_url + "/oauth2/token"
         otds_config["resourceUrl"] = otds_rest_url + "/resources"
         otds_config["licenseUrl"] = otds_rest_url + "/licensemanagement/licenses"
         otds_config["usersUrl"] = otds_rest_url + "/users"
@@ -225,6 +219,71 @@ class OTDS:
 
     # end method definition
 
+    def get_access_token(self) -> str | None:
+        """Get the access token for OAuth2 authentication.
+
+        Returns:
+            str | None:
+                The access token, or None in case of an error.
+
+        """
+
+        return self._token
+
+    # end method definition
+
+    def set_access_token(self, token: str) -> str | None:
+        """Get the access token for OAuth2 authentication.
+
+        Args:
+            token (str):
+                The new token value.
+
+        Returns:
+            str | None:
+                The access token, or None in case of an error.
+
+        """
+
+        self._token = token
+
+        return self._token
+
+    # end method definition
+
+    def get_access_token_info(self, resource_id: str | None = None) -> str | None:
+        """Get the access token information for OAuth2 authentication.
+
+        Returns:
+            str | None:
+                The access token, or None in case of an error.
+
+        """
+
+        request_url = self.config()["tokenInfoUrl"]
+
+        token_info_body = {"token": self._token}
+        if resource_id:
+            token_info_body["resourceId"] = resource_id
+
+        self.logger.debug(
+            "Get OAuth token info%s; calling -> %s",
+            " for resource -> '{}'".format(resource_id) if resource_id else "",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=token_info_body,
+            timeout=None,
+            failure_message="Failed to get OAuth token info{}".format(
+                " for resource -> '{}'".format(resource_id) if resource_id else ""
+            ),
+        )
+
+    # end method definition
+
     def credentials(self) -> dict:
         """Return the credentials (username + password).
 
@@ -238,6 +297,42 @@ class OTDS:
             "userName": self.config()["username"],
             "password": self.config()["password"],
         }
+
+    # end method definition
+
+    def client_credentials(
+        self, grant_type: str = "client_credentials", scope: str | None = None, **kwargs: dict[str, str]
+    ) -> dict:
+        """Return the client credentials (client_id + client_secret).
+
+        Args:
+            grant_type (str, optional):
+                The grant type for the client credentials. Optional.
+                Defaults to "client_credentials".
+            scope (str | None, optional):
+                The scope for the client credentials. Optional.
+                Use "otdsssoticket" to get a standard / legacy OTDS ticket.
+            **kwargs:
+                Additional keyword arguments to add to the credentials dictionary.
+
+        Returns:
+            dict:
+                The dictionary with client_id and client_secret.
+
+        """
+
+        cred = {
+            "grant_type": grant_type,
+            "client_id": self.config()["clientId"],
+            "client_secret": self.config()["clientSecret"],
+        }
+
+        if scope:
+            cred["scope"] = scope
+
+        cred.update(dict(kwargs))
+
+        return cred
 
     # end method definition
 
@@ -379,7 +474,7 @@ class OTDS:
 
         """
 
-        return self.config()["tokenUrl"]
+        return self.config()["oauthTokenUrl"]
 
     # end method definition
 
@@ -461,6 +556,41 @@ class OTDS:
 
     # end method definition
 
+    def request_header(self, content_type: str = "application/json") -> dict:
+        """Return the request header used for requests.
+
+        Consists of Bearer access token and Content Type
+
+        Args:
+            service_type (str, optional):
+                Service type for which the header should be returned.
+                Either "chat" or "embed". "chat" is the default.
+
+            content_type (str, optional):
+                Custom content type for the request.
+                Typical values:
+                * application/json - Used for sending JSON-encoded data
+                * application/x-www-form-urlencoded - The default for HTML forms.
+                  Data is sent as key-value pairs in the body of the request, similar to query parameters.
+                * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
+
+        Returns:
+            dict: The request header values.
+
+        """
+
+        request_header = REQUEST_HEADERS
+
+        if content_type:
+            request_header["Content-Type"] = content_type
+
+        if self._token is not None:
+            request_header["Authorization"] = "Bearer {}".format(self._token)
+
+        return request_header
+
+    # end method definition
+
     def do_request(
         self,
         url: str,
@@ -469,7 +599,7 @@ class OTDS:
         data: dict | None = None,
         json_data: dict | None = None,
         files: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -495,7 +625,7 @@ class OTDS:
             files (dict | None, optional):
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 File-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -525,7 +655,7 @@ class OTDS:
         """
 
         if headers is None:
-            headers = REQUEST_HEADERS
+            headers = self.request_header()
 
         # In case of an expired session we reauthenticate and
         # try 1 more time. Session expiration should not happen
@@ -620,8 +750,11 @@ class OTDS:
             except requests.exceptions.ConnectionError:
                 if retries <= max_retries:
                     self.logger.warning(
-                        "Connection error. Retrying in %s seconds...",
-                        str(REQUEST_RETRY_DELAY),
+                        "Connection error (%s)! Retrying in %d seconds... %d/%d",
+                        url,
+                        REQUEST_RETRY_DELAY,
+                        retries,
+                        max_retries,
                     )
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
@@ -698,13 +831,21 @@ class OTDS:
 
     # end method definition
 
-    def authenticate(self, revalidate: bool = False) -> dict | None:
+    def authenticate(self, revalidate: bool = False, grant_type: str | None = None) -> dict | None:
         """Authenticate at Directory Services and retrieve OTDS ticket.
 
         Args:
             revalidate (bool, optional):
                 Determine if a re-athentication is enforced.
                 (e.g. if session has timed out with 401 error)
+            grant_type (str | None, optional):
+                The grant type to use for authentication.
+                Possible values are "password", "client_credentials", or None. Defaults to None.
+                If None is given, the method tries to determine the grant type automatically:
+                * If username and password are given, "password" is used.
+                * If client_id and client_secret are given, "client_credentials" is used.
+                * If both are given, "password" is used.
+                * If none of the above is given, an error is logged and None is returned.
 
         Returns:
             dict | None:
@@ -722,14 +863,44 @@ class OTDS:
 
         otds_ticket = "NotSet"
 
-        self.logger.debug("Requesting OTDS ticket from -> %s", self.credential_url())
+        self.logger.debug(
+            "Requesting OTDS ticket from -> %s using grant type -> '%s'...", self.credential_url(), grant_type
+        )
 
         response = None
+
+        if not grant_type:
+            if self.config()["username"] and self.config()["password"]:
+                grant_type = "password"
+            elif self.config()["clientId"] and self.config()["clientSecret"]:
+                grant_type = "client_credentials"
+            else:
+                self.logger.error(
+                    "Cannot determine grant type automatically - please provide username/password or client_id/client_secret for authentication."
+                )
+                return None
+
         try:
+            if grant_type == "client_credentials":
+                request_url = self.token_url()
+                headers = REQUEST_FORM_HEADERS
+                data = self.client_credentials()
+                json_data = None
+                result_value = "access_token"
+            elif grant_type == "password":
+                request_url = self.credential_url()
+                headers = REQUEST_HEADERS
+                data = None
+                json_data = self.credentials()
+                result_value = "ticket"
+            else:
+                self.logger.error("Unsupported grant type -> '%s' - exit", grant_type)
+                return None
             response = requests.post(
-                url=self.credential_url(),
-                json=self.credentials(),
-                headers=REQUEST_HEADERS,
+                url=request_url,
+                headers=headers,
+                data=data,
+                json=json_data,
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.RequestException as exception:
@@ -745,20 +916,27 @@ class OTDS:
             if not authenticate_dict:
                 return None
             else:
-                otds_ticket = authenticate_dict["ticket"]
-                self.logger.debug("Ticket -> %s", otds_ticket)
+                otds_ticket = authenticate_dict[result_value]
+                self.logger.debug("Ticket / token -> %s", otds_ticket)
         else:
             self.logger.error(
-                "Failed to request an OTDS ticket; error -> %s",
+                "Failed to request an OTDS ticket / access token; error -> %s",
                 response.text,
             )
             return None
 
         # Store authentication ticket:
-        self._cookie = {"OTDSTicket": otds_ticket}
         self._otds_ticket = otds_ticket
+        if grant_type == "password":
+            self._cookie = {"OTDSTicket": otds_ticket}
+            self._token = None
+            return self._cookie
+        elif grant_type == "client_credentials":
+            self._token = otds_ticket
+            self._cookie = None
+            return self._token
 
-        return self._cookie
+        return None
 
     # end method definition
 
@@ -783,7 +961,7 @@ class OTDS:
             dict | None:
                 Information about the impersonated user.
 
-        Example:
+        Example ticket based response:
         {
             'token': None,
             'userId': 'nwheeler@Content Server Members',
@@ -795,32 +973,69 @@ class OTDS:
             'continuationContext': None,
             'continuationData': None
         }
+        Example token based response:
+        {
+            'access_token': 'eyJraWQiOiJ...',
+            'issued_token_type': 'urn:ietf:params:oauth:token-type:access_token',
+            'token_type': 'Bearer',
+            'expires_in': 3600
+        }
 
         """
 
-        if not ticket:
-            ticket = self._otds_ticket
+        # Check if we have a token-based authentication:
+        if self._token is not None:
+            request_url = self.token_url()
 
-        request_url = self.config()["ticketforuserUrl"]
+            impersonate_post_body = self.client_credentials(
+                scope=None,
+                grant_type="urn:ietf:params:oauth:grant-type:token-exchange",
+                subject_token_type="urn:opentext.com:oauth:string:user_id",
+                subject_token=user_id + "@" + partition,
+            )
 
-        impersonate_post_body = {
-            "userName": user_id + "@" + partition,
-            "ticket": ticket,
-        }
+            self.logger.debug(
+                "Impersonate user -> '%s' with token -> '%s'; calling -> %s",
+                user_id,
+                self._token,
+                request_url,
+            )
 
-        self.logger.debug(
-            "Impersonate user -> '%s' ; calling -> %s",
-            user_id,
-            request_url,
-        )
+            response = self.do_request(
+                url=request_url,
+                method="POST",
+                headers=REQUEST_FORM_HEADERS,
+                data=impersonate_post_body,
+                timeout=None,
+                failure_message="Failed to impersonate as user -> '{}'".format(user_id),
+            )
+        else:  # ticket-based authentication
+            if not ticket:
+                ticket = self._otds_ticket
 
-        return self.do_request(
-            url=request_url,
-            method="POST",
-            json_data=impersonate_post_body,
-            timeout=None,
-            failure_message="Failed to impersonate as user -> '{}'".format(user_id),
-        )
+            request_url = self.config()["ticketforuserUrl"]
+
+            impersonate_post_body = {
+                "userName": user_id + "@" + partition,
+                "ticket": ticket,
+            }
+
+            self.logger.debug(
+                "Impersonate user -> '%s' with ticket -> '%s'; calling -> %s",
+                user_id,
+                ticket,
+                request_url,
+            )
+
+            response = self.do_request(
+                url=request_url,
+                method="POST",
+                json_data=impersonate_post_body,
+                timeout=None,
+                failure_message="Failed to impersonate as user -> '{}'".format(user_id),
+            )
+
+        return response
 
     # end method definition
 
@@ -903,8 +1118,9 @@ class OTDS:
         request_url = "{}?where_filter={}".format(self.config()["rolesUrl"], name)
 
         self.logger.debug(
-            "Get application Roles -> '%s'; calling -> %s",
+            "Get application role -> '%s' in partition -> '%s'; calling -> %s",
             name,
+            partition,
             request_url,
         )
 
@@ -912,7 +1128,7 @@ class OTDS:
             url=request_url,
             method="GET",
             timeout=None,
-            failure_message="Failed to get user partition -> '{}'".format(name),
+            failure_message="Failed to get application role -> '{}' in partition -> '{}'".format(name, partition),
             show_error=show_error,
         )
 
@@ -954,30 +1170,35 @@ class OTDS:
         if user:
             user_location = user["location"]
         else:
-            self.logger.error("Cannot find location for user -> '%s'", user_id)
+            self.logger.error(
+                "Cannot find user -> '%s' in partition -> '%s'! Cannot assign user to application role -> '%s'.",
+                user_id,
+                user_partition,
+                role_name,
+            )
             return False
 
-        role = self.get_application_role(role_name, role_partition)
+        role = self.get_application_role(name=role_name, partition=role_partition)
         if role:
-            rolelocation = role.get("location")
+            role_location = role.get("location")
         else:
-            self.logger.warning("Cannot find application role -> '%s' (%s)", role_name, role_partition)
+            self.logger.warning("Cannot find application role -> '%s' in partition -> '%s'!", role_name, role_partition)
             return False
 
         role_post_body_json = {
             "stringList": [
-                rolelocation,
+                role_location,
             ],
         }
 
         request_url = self.users_url() + "/" + user_location + "/roles"
 
         self.logger.debug(
-            "Assign application role -> '%s' (%s) to user -> '%s' (%s); calling -> %s",
-            role_name,
-            role_partition,
+            "Assign user -> '%s' (%s) to application role -> '%s' (%s); calling -> %s",
             user_id,
             user_partition,
+            role_name,
+            role_partition,
             request_url,
         )
 
@@ -986,18 +1207,18 @@ class OTDS:
             method="POST",
             json_data=role_post_body_json,
             timeout=None,
-            failure_message="Failed to assign application role -> '{}' to user -> '{}'".format(
-                role_name,
+            failure_message="Failed to assign user -> '{}' to application role -> '{}'!".format(
                 user_id,
+                role_name,
             ),
             parse_request_response=False,
         )
 
         if response and response.ok:
             self.logger.debug(
-                "Added application role -> '%s' to user -> '%s'",
-                role_name,
+                "Added user -> '%s' to application role -> '%s'.",
                 user_id,
+                role_name,
             )
             return True
 
@@ -1030,34 +1251,36 @@ class OTDS:
 
         """
 
-        group = self.get_group(group_id)
+        group = self.get_group(group=group_id)
         if group:
             group_location = group["location"]
         else:
-            self.logger.error("Cannot find location for group -> '%s'", group_id)
+            self.logger.error(
+                "Cannot find group -> '%s'! Cannot assign group to application role -> '%s'.", group_id, role_name
+            )
             return False
 
-        role = self.get_application_role(role_name, role_partition)
+        role = self.get_application_role(name=role_name, partition=role_partition)
         if role:
-            rolelocation = role.get("location")
+            role_location = role.get("location")
         else:
-            self.logger.warning("Cannot find application role -> '%s' (%s)", role_name, role_partition)
+            self.logger.warning("Cannot find application role -> '%s' in partition -> '%s'!", role_name, role_partition)
             return False
 
         role_post_body_json = {
             "stringList": [
-                rolelocation,
+                role_location,
             ],
         }
 
         request_url = self.groups_url() + "/" + group_location + "/roles"
 
         self.logger.debug(
-            "Assign application role -> '%s' (%s) to group -> '%s' (%s); calling -> %s",
-            role_name,
-            role_partition,
+            "Assign group -> '%s' (%s) to application role -> '%s' (%s); calling -> %s",
             group_id,
             group_partition,
+            role_name,
+            role_partition,
             request_url,
         )
 
@@ -1895,7 +2118,7 @@ class OTDS:
                 str(page_size),
                 request_url,
             )
-            failure_message = "Failed to get all groups in partition -> '{}'".format(
+            failure_message = "Failed to get all groups in partition -> '{}'!".format(
                 partition,
             )
         else:
@@ -2502,7 +2725,7 @@ class OTDS:
         for access_role_group in access_role_groups:
             if access_role_group["name"] == group:
                 self.logger.debug(
-                    "Group -> '%s' already added to access role -> '%s'",
+                    "Group -> '%s' already added to access role -> '%s'.",
                     group,
                     access_role,
                 )
@@ -2579,7 +2802,7 @@ class OTDS:
         # create payload for REST call:
         access_role = self.get_access_role(name)
         if not access_role:
-            self.logger.error("Failed to get access role -> '%s'", name)
+            self.logger.error("Failed to get access role -> '%s'! Cannot update its attributes.", name)
             return None
 
         access_role_put_body_json = {"attributes": attribute_list}
@@ -2841,7 +3064,7 @@ class OTDS:
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
             self.logger.error(
-                "Resource with ID -> '%s' does not exist or has no licenses",
+                "Resource with ID -> '%s' does not exist or has no licenses!",
                 resource_id,
             )
             return False
@@ -2852,7 +3075,7 @@ class OTDS:
                 break
         else:
             self.logger.error(
-                "Cannot find license -> '%s' for resource -> %s",
+                "Cannot find license -> '%s' for resource with ID -> '%s'!",
                 license_name,
                 resource_id,
             )
@@ -2862,7 +3085,7 @@ class OTDS:
         if user:
             user_location = user["location"]
         else:
-            self.logger.error("Cannot find location for user -> '%s'", user_id)
+            self.logger.error("Cannot find location for user -> '%s'!", user_id)
             return False
 
         license_post_body_json = {
@@ -2888,7 +3111,7 @@ class OTDS:
             method="POST",
             json_data=license_post_body_json,
             timeout=None,
-            failure_message="Failed to add license feature -> '{}' associated with resource -> '{}' to user -> '{}'".format(
+            failure_message="Failed to add license feature -> '{}' associated with resource ID -> '{}' to user -> '{}'".format(
                 license_feature,
                 resource_id,
                 user_id,
@@ -2898,7 +3121,7 @@ class OTDS:
 
         if response and response.ok:
             self.logger.debug(
-                "Added license feature -> '%s' to user -> '%s'",
+                "Added license feature -> '%s' to user -> '%s'.",
                 license_feature,
                 user_id,
             )
@@ -2952,7 +3175,7 @@ class OTDS:
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
             self.logger.error(
-                "Resource with ID -> '%s' does not exist or has no licenses",
+                "Resource with ID -> '%s' does not exist or has no licenses!",
                 resource_id,
             )
             return False
@@ -2992,7 +3215,7 @@ class OTDS:
             method="POST",
             json_data=license_post_body_json,
             timeout=None,
-            failure_message="Failed to add license feature -> '{}' associated with resource -> '{}' to partition -> '{}'".format(
+            failure_message="Failed to add license feature -> '{}' associated with resource ID -> '{}' to partition -> '{}'".format(
                 license_feature,
                 resource_id,
                 partition_name,
@@ -3080,7 +3303,7 @@ class OTDS:
         licenses = self.get_license_for_resource(resource_id)
         if not licenses:
             self.logger.error(
-                "Resource with ID -> '%s' does not exist or has no licenses",
+                "Resource with ID -> '%s' does not exist or has no licenses!",
                 resource_id,
             )
             return False
@@ -3823,7 +4046,7 @@ class OTDS:
         for user_partition in user_partitions:
             if user_partition["userPartition"] == "OAuthClients":
                 self.logger.error(
-                    "OAuthClients partition already added to role -> %s",
+                    "OAuthClients partition already added to role -> '%s'!",
                     access_role_name,
                 )
                 return None
@@ -3866,50 +4089,6 @@ class OTDS:
             show_warning=True,
             parse_request_response=False,
         )
-
-    # end method definition
-
-    def get_access_token(self, client_id: str, client_secret: str) -> str | None:
-        """Get the access token.
-
-        Args:
-            client_id (str):
-                The OAuth client name (= ID).
-            client_secret (str):
-                The OAuth client secret. This is typically returned
-                by add_oauth_client() method in ["secret"] field.
-
-        Returns:
-            str | None:
-                The access token, or None in case of an error.
-
-        """
-
-        encoded_client_secret = "{}:{}".format(client_id, client_secret).encode("utf-8")
-
-        request_header = {
-            "Authorization": "Basic " + base64.b64encode(encoded_client_secret).decode("utf-8"),
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        request_url = self.token_url()
-
-        response = requests.post(
-            url=request_url,
-            data={"grant_type": "client_credentials"},
-            headers=request_header,
-            timeout=REQUEST_TIMEOUT,
-        )
-
-        access_token = None
-        if response.ok:
-            access_token = self.parse_request_response(response)
-
-            if "access_token" in access_token:
-                access_token = access_token["access_token"]
-            else:
-                return None
-
-        return access_token
 
     # end method definition
 
@@ -4457,7 +4636,7 @@ class OTDS:
                 cert_content = cert_file.read()
                 if not cert_content:
                     self.logger.error(
-                        "No data in certificate file -> '%s'",
+                        "No data in certificate file -> '%s'!",
                         certificate_file,
                     )
                     return None
@@ -4486,7 +4665,7 @@ class OTDS:
                 cert_file_encoded = False
         except TypeError:
             self.logger.debug(
-                "Certificate file -> '%s' is not base64 encoded",
+                "Certificate file -> '%s' is not base64 encoded!",
                 certificate_file,
             )
             cert_file_encoded = False
@@ -4991,14 +5170,14 @@ class OTDS:
         resource = self.get_resource(resource_name)
         if not resource:
             self.logger.error(
-                "Resource -> '%s' not found - cannot consolidate",
+                "Resource -> '%s' not found - cannot consolidate!",
                 resource_name,
             )
             return False
 
         resource_dn = resource["resourceDN"]
         if not resource_dn:
-            self.logger.error("Resource DN is empty - cannot consolidate")
+            self.logger.error("Resource DN is empty - cannot consolidate!")
             return False
 
         consolidation_post_body_json = {

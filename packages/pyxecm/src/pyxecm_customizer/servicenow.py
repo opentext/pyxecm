@@ -44,7 +44,7 @@ USER_AGENT = (
 
 REQUEST_HEADERS = {"User-Agent": USER_AGENT, "Accept": "application/json", "Content-Type": "application/json"}
 
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 60.0
 
 KNOWLEDGE_BASE_PATH = os.path.join(tempfile.gettempdir(), "attachments")
 
@@ -650,11 +650,13 @@ class ServiceNow:
             data = self.parse_request_response(response)
             return int(data["result"]["stats"]["count"])
         except HTTPError:
-            self.logger.error("HTTP error occurred!")
+            self.logger.error("HTTP error occurred when trying to get the table count for table -> '%s'!", table_name)
         except RequestException:
-            self.logger.error("Request error occurred!")
+            self.logger.error(
+                "Request error occurred when trying to get the table count for table -> '%s'!", table_name
+            )
         except Exception:
-            self.logger.error("An error occurred!")
+            self.logger.error("An error occurred when trying to get the table count for table -> '%s'!", table_name)
 
         return None
 
@@ -1007,11 +1009,29 @@ class ServiceNow:
                 return attachments
 
         except HTTPError:
-            self.logger.error("HTTP error occurred!")
+            self.logger.error(
+                "HTTP error occurred when trying to get the attachments for article -> '%s' (%s) with URL -> %s and parameters -> %s!",
+                article_number,
+                article_sys_id,
+                request_url,
+                params,
+            )
         except RequestException:
-            self.logger.error("Request error occurred!")
+            self.logger.error(
+                "Request error occurred when trying to get the attachments for article -> '%s' (%s) with URL -> %s and parameters -> %s!",
+                article_number,
+                article_sys_id,
+                request_url,
+                params,
+            )
         except Exception:
-            self.logger.error("An error occurred!")
+            self.logger.error(
+                "An error occurred when trying to get the attachments for article -> '%s' (%s) with URL -> %s and parameters -> %s!",
+                article_number,
+                article_sys_id,
+                request_url,
+                params,
+            )
 
         return None
 

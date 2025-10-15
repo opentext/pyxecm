@@ -53,8 +53,8 @@ REQUEST_LOGIN_HEADERS = {
     "Accept": "application/json",
 }
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 2
 
 CONTENT_MANAGER_ROLE_ID = 5
@@ -303,7 +303,7 @@ class CoreShare:
         data: dict | None = None,
         json_data: dict | None = None,
         files: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -331,7 +331,7 @@ class CoreShare:
             files (dict | None, optional):
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -463,7 +463,7 @@ class CoreShare:
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     self.logger.error(
-                        "%s; timeout error.",
+                        "%s; timeout error!",
                         failure_message,
                     )
                     if retry_forever:
@@ -482,7 +482,7 @@ class CoreShare:
                     time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     self.logger.error(
-                        "%s; connection error.",
+                        "%s; connection error!",
                         failure_message,
                     )
                     if retry_forever:
@@ -2206,7 +2206,7 @@ class CoreShare:
 
         # Check if the photo file exists
         if not os.path.isfile(photo_path):
-            self.logger.error("Photo file -> %s not found!", photo_path)
+            self.logger.error("Photo file -> '%s' not found for Core Share user with ID -> %s!", photo_path, user_id)
             return None
 
         try:
@@ -2216,8 +2216,7 @@ class CoreShare:
         except OSError:
             # Handle any errors that occurred while reading the photo file
             self.logger.error(
-                "Error reading photo file -> %s",
-                photo_path,
+                "Error reading photo file -> '%s' for Core Share user with ID -> '%s'!", photo_path, user_id
             )
             return None
 
@@ -2238,7 +2237,7 @@ class CoreShare:
             headers=self.request_header_user(content_type=""),
             files=files,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to update profile photo of Core Share user with ID -> {}".format(
+            failure_message="Failed to update profile photo of Core Share user with ID -> '{}'".format(
                 user_id,
             ),
             user_credentials=True,
@@ -2668,7 +2667,7 @@ class CoreShare:
                         response = self.delete_document(item["id"])
                     else:
                         self.logger.error(
-                            "Unsupport resource type -> '%s'",
+                            "Unsupport resource type -> '%s'!",
                             item["resourceType"],
                         )
                         response = None
@@ -2756,7 +2755,7 @@ class CoreShare:
         )
 
         self.logger.debug(
-            "Revoke sharing of folder -> %s with group -> %s; calling -> %s",
+            "Revoke sharing of folder with ID -> '%s' with group with ID -> '%s'; calling -> %s",
             resource_id,
             group_id,
             request_url,
@@ -2767,7 +2766,7 @@ class CoreShare:
             method="DELETE",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to revoke sharing Core Share folder with ID -> {} with group with ID -> {}".format(
+            failure_message="Failed to revoke sharing Core Share folder with ID -> '{}' with group with ID -> '{}'!".format(
                 resource_id,
                 group_id,
             ),
@@ -2794,7 +2793,7 @@ class CoreShare:
         response = self.get_group_shares(group_id=group_id)
 
         if not response or not response["shares"]:
-            self.logger.info("Group -> %s has no shares to revoke!", group_id)
+            self.logger.info("Group -> %s has no shares to revoke.", group_id)
             return True
 
         success = True
@@ -2802,7 +2801,7 @@ class CoreShare:
         items = response["shares"]
         for item in items:
             self.logger.info(
-                "Revoke sharing of folder -> %s (%s) with group -> %s...",
+                "Revoke sharing of folder -> '%s' (%s) with group -> %s...",
                 item["name"],
                 item["id"],
                 group_id,

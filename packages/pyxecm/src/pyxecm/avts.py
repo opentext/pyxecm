@@ -33,8 +33,8 @@ USER_AGENT = (
 
 REQUEST_HEADERS = {"User-Agent": USER_AGENT, "accept": "application/json", "Content-Type": "application/json"}
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 20
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 2
 
 default_logger = logging.getLogger(MODULE_NAME)
@@ -157,7 +157,7 @@ class AVTS:
         data: dict | list | None = None,
         json_data: dict | None = None,
         files: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         failure_message: str = "",
         success_message: str = "",
@@ -181,7 +181,7 @@ class AVTS:
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple
                 ("filename", fileobj, "content_type").
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.

@@ -8,7 +8,6 @@ __email__ = "mdiefenb@opentext.com"
 
 import logging
 import os
-import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -23,9 +22,6 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from pyxecm.helper.otel_config import tracer
 from pyxecm_maintenance_page import run_maintenance_page
 
-from .agents.app import agent_routers
-from .agents.functions import register_all
-from .agents.otcm_knowledgegraph.functions import build_graph
 from .auth.router import router as auth_router
 from .common.functions import PAYLOAD_LIST
 from .common.metrics import payload_logs_by_payload, payload_logs_total
@@ -50,31 +46,20 @@ if os.path.isfile(os.path.join(api_settings.logfolder, api_settings.logfile)):
 elif not os.path.exists(api_settings.logfolder):
     os.makedirs(api_settings.logfolder)
 
-handlers = [logging.FileHandler(os.path.join(api_settings.logfolder, api_settings.logfile))]
-if api_settings.log_payload_processing:
-    handlers.append(logging.StreamHandler())
-
-logging.basicConfig(
-    format="%(asctime)s %(levelname)s [%(name)s] [%(threadName)s] %(message)s",
-    datefmt="%d-%b-%Y %H:%M:%S",
-    level=api_settings.loglevel,
-    handlers=handlers,
-)
-
 
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,  # noqa: ARG001
 ) -> AsyncGenerator:
-    """Lifespan Method for FASTAPI to handle the startup and shutdown process.
+    """Lifespan function for FASTAPI to handle the startup and shutdown process.
 
     Args:
         app (FastAPI):
-            The application.
+            The FastAPI application.
 
     """
 
-    logger.debug("Settings -> %s", api_settings)
+    logger.debug("API settings -> %s", api_settings)
 
     with tracer.start_as_current_span("import_payloads"):
         if api_settings.import_payload:
@@ -89,19 +74,17 @@ async def lifespan(
             # Optional Payload
             import_payload(payload_dir=api_settings.payload_dir_optional)
 
-    logger.info("Starting maintenance_page thread...")
+    logger.info("Starting maintenance page thread...")
     if api_settings.maintenance_page:
         run_maintenance_page()
 
-    if api_settings.csai_studio_integration:
-        logger.info("Registering Content Aviator tools...")
-        register_all()
-        threading.Thread(name="KnowledgeGraph", target=build_graph).start()
-
     yield
+
     logger.info("Shutdown")
     PAYLOAD_LIST.stop_payload_processing()
 
+
+# end function lifespan
 
 app = FastAPI(
     docs_url="/api",
@@ -114,7 +97,7 @@ app = FastAPI(
     openapi_tags=[
         {
             "name": "auth",
-            "description": "Authentication Endpoint - Users are authenticated against Opentext Directory Services",
+            "description": "Authentication Endpoint - Users are authenticated against OpenText Directory Services",
         },
         {
             "name": "payload",
@@ -156,8 +139,6 @@ if api_settings.csai:
     )
 
     app.include_router(router=v1_csai_router)
-    for agent_router in agent_routers:
-        app.include_router(prefix="/agents", router=agent_router)
 
 
 ## Add Prometheus Instrumentator for /metrics,
@@ -170,7 +151,7 @@ if api_settings.metrics:
 
 ## Start the API Server
 def run_api() -> None:
-    """Start the FASTAPI Webserver."""
+    """Start the FastAPI Webserver."""
 
     # Check if Temp and Log dir exists
     if not os.path.exists(api_settings.temp_dir):
@@ -183,27 +164,56 @@ def run_api() -> None:
         customizer_start_time = datetime.now(UTC).strftime(
             "%Y-%m-%d_%H-%M",
         )
-        api_settings.logfile = f"customizer_{customizer_start_time}.log"
+        api_settings.logfile = "customizer_{}.log".format(customizer_start_time)
 
     # Configure Logging for uvicorn
     log_config = uvicorn.config.LOGGING_CONFIG
 
     # Stdout
-    log_config["formatters"]["pyxecm"] = {
+    log_config["formatters"]["standard"] = {
         "()": "uvicorn.logging.DefaultFormatter",
         "fmt": "%(levelprefix)s [%(name)s] [%(threadName)s] %(message)s",
         "use_colors": True,
     }
-    log_config["handlers"]["pyxecm"] = {
-        "formatter": "pyxecm",
+
+    log_config["formatters"]["logfile"] = {
+        "()": "uvicorn.logging.DefaultFormatter",
+        "fmt": "%(asctime)s %(levelname)s [%(name)s] [%(threadName)s] %(message)s",
+        "datefmt": "%d-%b-%Y %H:%M:%S",
+        "use_colors": True,
+    }
+
+    log_config["formatters"]["accesslog"] = {
+        "()": "uvicorn.logging.AccessFormatter",
+        "fmt": '%(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+        "use_colors": False,
+    }
+
+    log_config["handlers"]["console"] = {
+        "formatter": "standard",
         "class": "logging.StreamHandler",
         "stream": "ext://sys.stdout",
     }
 
-    log_config["loggers"]["pyxecm"] = {
-        "handlers": ["pyxecm"],
+    log_config["handlers"]["file"] = {
+        "formatter": "logfile",
+        "class": "logging.FileHandler",
+        "filename": os.path.join(api_settings.logfolder, api_settings.logfile),
+        "mode": "a",
+    }
+
+    log_config["handlers"]["accesslog"] = {
+        "formatter": "accesslog",
+        "class": "logging.FileHandler",
+        "filename": os.path.join(api_settings.logfolder, "access.log"),
+        "mode": "a",
+    }
+
+    log_config["loggers"]["uvicorn.access"]["handlers"] = ["access", "accesslog"]
+
+    log_config["loggers"]["root"] = {
         "level": api_settings.loglevel,
-        "propagate": False,
+        "handlers": ["console", "file"],
     }
 
     logger.info("Starting processing thread...")

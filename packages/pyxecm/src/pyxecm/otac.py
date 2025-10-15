@@ -43,7 +43,7 @@ REQUEST_JSON_HEADERS = {
     "Content-Type": "application/json",
 }
 
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 60.0
 
 default_logger = logging.getLogger(MODULE_NAME)
 

@@ -60,23 +60,21 @@ nav:
       - Intelligent Viewing (OTIV): pyxecm/otiv.md
       - Media Management (OTMM): pyxecm/otmm.md
       - PowerDocs (OTPD): pyxecm/otpd.md
-      - Helper Python Classes:
-          - Assoc: pyxecm/assoc.md
-          - Data: pyxecm/data.md
-          - Web: pyxecm/web.md
-          - XML: pyxecm/xml.md
+      - Helper Classes: pyxecm/helper.md
+
   - pyxecm-api:
-      - API: pyxecm/api.md
-      - API Settings: customizerapisettings.md
+      - API: pyxecm-api/index.md
+      - API Settings: pyxecm-api/settings.md
+      
   - pyxecm-customizer:
-      - Customizer: pyxecm/customizer.md
-      - Customizer Settings: customizersettings.md
-      - Browser Automation: pyxecm/browser.md
-      - Payload: pyxecm/payload.md
-      - Payload Syntax: payload-syntax.md
-      - K8s: pyxecm/k8s.md
-      - Microsoft 365: pyxecm/m365.md
-      - Salesforce: pyxecm/salesforce.md
-      - SAP: pyxecm/sap.md
-      - SuccessFactors: pyxecm/successfactors.md
-      - Translate: pyxecm/translate.md
+      - Customizer: pyxecm-customizer/index.md
+      - Customizer Settings: pyxecm-customizer/settings.md
+      - Browser Automation: pyxecm-customizer/browser.md
+      - Payload: pyxecm-customizer/payload.md
+      - Payload Syntax: pyxecm-customizer/payload-syntax.md
+      - K8s: pyxecm-customizer/k8s.md
+      - Microsoft 365: pyxecm-customizer/m365.md
+      - Salesforce: pyxecm-customizer/salesforce.md
+      - SAP: pyxecm-customizer/sap.md
+      - SuccessFactors: pyxecm-customizer/successfactors.md
+      - Translate: pyxecm-customizer/translate.md

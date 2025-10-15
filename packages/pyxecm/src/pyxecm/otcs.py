@@ -14,6 +14,8 @@ __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
 import asyncio
+import hashlib
+import html
 import json
 import logging
 import mimetypes
@@ -26,6 +28,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -73,8 +76,8 @@ REQUEST_DOWNLOAD_HEADERS = {
     "Content-Type": "application/json",
 }
 
-REQUEST_TIMEOUT = 60
-REQUEST_RETRY_DELAY = 30
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 30.0
 REQUEST_MAX_RETRIES = 4
 
 default_logger = logging.getLogger(MODULE_NAME)
@@ -116,6 +119,7 @@ class OTCS:
 
     ITEM_TYPE_BUSINESS_WORKSPACE = 848
     ITEM_TYPE_CATEGORY = 131
+    ITEM_TYPE_CATEGORY_FOLDER = 132
     ITEM_TYPE_CHANNEL = 207
     ITEM_TYPE_CLASSIFICATION_TREE = 196
     ITEM_TYPE_CLASSIFICATION = 199
@@ -157,9 +161,11 @@ class OTCS:
         ITEM_TYPE_BUSINESS_WORKSPACE,
         ITEM_TYPE_COMPOUND_DOCUMENT,
         ITEM_TYPE_CLASSIFICATION,
+        ITEM_TYPE_CATEGORY_FOLDER,
         VOLUME_TYPE_ENTERPRISE_WORKSPACE,
         VOLUME_TYPE_CLASSIFICATION_VOLUME,
         VOLUME_TYPE_CONTENT_SERVER_DOCUMENT_TEMPLATES,
+        VOLUME_TYPE_CATEGORIES_VOLUME,
     ]
 
     PERMISSION_TYPES = [
@@ -187,6 +193,7 @@ class OTCS:
     _config: dict
     _otcs_ticket = None
     _otds_ticket = None
+    _otds_token = None
     _data: Data = None
     _thread_number = 3
     _download_dir = ""
@@ -323,6 +330,7 @@ class OTCS:
         resource_id: str = "",
         default_license: str = "X3",
         otds_ticket: str | None = None,
+        otds_token: str | None = None,
         base_path: str = "/cs/cs",
         support_path: str = "/cssupport",
         thread_number: int = 3,
@@ -357,6 +365,8 @@ class OTCS:
                 The name of the default user license. Default is "X3".
             otds_ticket (str, optional):
                 The authentication ticket of OTDS.
+            otds_token (str, optional):
+                The authentication token of OTDS.
             base_path (str, optional):
                 The base path segment of the Content Server URL.
                 This typically is /cs/cs on a Linux deployment or /cs/cs.exe
@@ -392,52 +402,16 @@ class OTCS:
         # Initialize otcs_config as an empty dictionary
         otcs_config = {}
 
-        if hostname:
-            otcs_config["hostname"] = hostname
-        else:
-            otcs_config["hostname"] = "otcs-admin-0"
-
-        if protocol:
-            otcs_config["protocol"] = protocol
-        else:
-            otcs_config["protocol"] = "http"
-
-        if port:
-            otcs_config["port"] = port
-        else:
-            otcs_config["port"] = 8080
-
+        otcs_config["hostname"] = hostname or "otcs-admin-0"
+        otcs_config["protocol"] = protocol or "http"
+        otcs_config["port"] = port or 8080
         otcs_config["publicUrl"] = public_url
-
-        if username:
-            otcs_config["username"] = username
-        else:
-            otcs_config["username"] = "admin"
-
-        if password:
-            otcs_config["password"] = password
-        else:
-            otcs_config["password"] = ""
-
-        if user_partition:
-            otcs_config["partition"] = user_partition
-        else:
-            otcs_config["partition"] = ""
-
-        if resource_name:
-            otcs_config["resource"] = resource_name
-        else:
-            otcs_config["resource"] = ""
-
-        if resource_id:
-            otcs_config["resourceId"] = resource_id
-        else:
-            otcs_config["resourceId"] = None
-
-        if default_license:
-            otcs_config["license"] = default_license
-        else:
-            otcs_config["license"] = ""
+        otcs_config["username"] = username or "admin"
+        otcs_config["password"] = password or ""
+        otcs_config["partition"] = user_partition or ""
+        otcs_config["resource"] = resource_name or ""
+        otcs_config["resourceId"] = resource_id or None
+        otcs_config["license"] = default_license or ""
 
         otcs_config["femeUri"] = feme_uri
 
@@ -500,7 +474,10 @@ class OTCS:
         otcs_config["holdsUrl"] = otcs_rest_url + "/v1/holds"
         otcs_config["holdsUrlv2"] = otcs_rest_url + "/v2/holds"
         otcs_config["validationUrl"] = otcs_rest_url + "/v1/validation/nodes/names"
-        otcs_config["aiUrl"] = otcs_rest_url + "/v2/ai/nodes"
+        otcs_config["aiUrl"] = otcs_rest_url + "/v2/ai"
+        otcs_config["aiNodesUrl"] = otcs_config["aiUrl"] + "/nodes"
+        otcs_config["aiChatUrl"] = otcs_config["aiUrl"] + "/chat"
+        otcs_config["aiContextUrl"] = otcs_config["aiUrl"] + "/context"
         otcs_config["recycleBinUrl"] = otcs_rest_url + "/v2/volumes/recyclebin"
         otcs_config["processUrl"] = otcs_rest_url + "/v2/processes"
         otcs_config["workflowUrl"] = otcs_rest_url + "/v2/workflows"
@@ -510,9 +487,11 @@ class OTCS:
         otcs_config["nodesFormUrl"] = otcs_rest_url + "/v1/forms/nodes"
         otcs_config["draftProcessFormUrl"] = otcs_rest_url + "/v1/forms/draftprocesses"
         otcs_config["processTaskUrl"] = otcs_rest_url + "/v1/forms/processes/tasks/update"
+        otcs_config["docGenUrl"] = otcs_url + "?func=xecmpfdocgen"
 
         self._config = otcs_config
         self._otds_ticket = otds_ticket
+        self._otds_token = otds_token
         self._data = Data(logger=self.logger)
         self._thread_number = thread_number
         self._download_dir = download_dir
@@ -567,6 +546,34 @@ class OTCS:
 
     # end method definition
 
+    def otcs_ticket_hashed(self) -> str | None:
+        """Return the hashed OTCS ticket.
+
+        Returns:
+            str | None:
+                The hashed OTCS ticket (which may be None).
+
+        """
+
+        if not self._otcs_ticket:
+            return None
+
+        # Encode the input string before hashing
+        encoded_string = self._otcs_ticket.encode("utf-8")
+
+        # Create a new SHA-512 hash object
+        sha512 = hashlib.sha512()
+
+        # Update the hash object with the input string
+        sha512.update(encoded_string)
+
+        # Get the hexadecimal representation of the hash
+        hashed_output = sha512.hexdigest()
+
+        return hashed_output
+
+    # end method definition
+
     def set_otcs_ticket(self, ticket: str) -> None:
         """Set the OTCS ticket.
 
@@ -590,6 +597,19 @@ class OTCS:
         """
 
         self._otds_ticket = ticket
+
+    # end method definition
+
+    def set_otds_token(self, token: str) -> None:
+        """Set the OTDS token.
+
+        Args:
+            token (str):
+                The new OTDS token.
+
+        """
+
+        self._otds_token = token
 
     # end method definition
 
@@ -903,7 +923,7 @@ class OTCS:
         data: dict | None = None,
         json_data: dict | None = None,
         files: dict | None = None,
-        timeout: int | None = REQUEST_TIMEOUT,
+        timeout: float | None = REQUEST_TIMEOUT,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -931,7 +951,7 @@ class OTCS:
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 The file-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple
                 ("filename", fileobj, "content_type").
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
@@ -1106,8 +1126,11 @@ class OTCS:
             except requests.exceptions.ConnectionError:
                 if retries <= max_retries:
                     self.logger.warning(
-                        "Connection error. Retrying in %s seconds...",
-                        str(REQUEST_RETRY_DELAY),
+                        "Connection error (%s)! Retrying in %d seconds... %d/%d",
+                        url,
+                        REQUEST_RETRY_DELAY,
+                        retries,
+                        max_retries,
                     )
                     retries += 1
 
@@ -1226,9 +1249,7 @@ class OTCS:
 
         """
 
-        if not response:
-            return None
-        if "results" not in response:
+        if not response or "results" not in response:
             return None
 
         results = response["results"]
@@ -1408,7 +1429,7 @@ class OTCS:
 
     def get_result_value(
         self,
-        response: dict,
+        response: dict | None,
         key: str,
         index: int = 0,
         property_name: str = "properties",
@@ -1421,8 +1442,8 @@ class OTCS:
         developer.opentext.com.
 
         Args:
-            response (dict):
-                REST API response object.
+            response (dict | None):
+                REST API response object. None is also handled.
             key (str):
                 Key to find (e.g., "id", "name").
             index (int, optional):
@@ -1435,7 +1456,7 @@ class OTCS:
                 Whether an error or just a warning should be logged.
 
         Returns:
-            str:
+            str | None:
                 Value of the item with the given key, or None if no value is found.
 
         """
@@ -1521,14 +1542,20 @@ class OTCS:
             data = results[index]["data"]
             if isinstance(data, dict):
                 # data is a dict - we don't need index value:
-                properties = data[property_name]
+                properties = data.get(property_name)
             elif isinstance(data, list):
                 # data is a list - this has typically just one item, so we use 0 as index
-                properties = data[0][property_name]
+                properties = data[0].get(property_name)
             else:
                 self.logger.error(
                     "Data needs to be a list or dict but it is -> %s",
                     str(type(data)),
+                )
+                return None
+            if not properties:
+                self.logger.error(
+                    "No properties found in data -> %s",
+                    str(data),
                 )
                 return None
             if key not in properties:
@@ -1669,8 +1696,8 @@ class OTCS:
                 Defaults to "data".
 
         Returns:
-            list | None:
-                Value list of the item with the given key, or None if no value is found.
+            iter:
+                Iterator object for iterating through the values.
 
         """
 
@@ -1834,6 +1861,31 @@ class OTCS:
                 time.sleep(30)
 
         request_url = self.config()["authenticationUrl"]
+
+        if self._otds_token and not revalidate:
+            self.logger.debug(
+                "Requesting OTCS ticket with existing OTDS token; calling -> %s",
+                request_url,
+            )
+            # Add the OTDS token to the request headers:
+            request_header = REQUEST_FORM_HEADERS | {"Authorization": f"Bearer {self._otds_token}"}
+
+            try:
+                response = requests.get(
+                    url=request_url,
+                    headers=request_header,
+                    timeout=10,
+                )
+                if response.ok:
+                    # read the ticket from the response header:
+                    otcs_ticket = response.headers.get("OTCSTicket")
+
+            except requests.exceptions.RequestException as exception:
+                self.logger.warning(
+                    "Unable to connect to -> %s; error -> %s",
+                    request_url,
+                    str(exception),
+                )
 
         if self._otds_ticket and not revalidate:
             self.logger.debug(
@@ -2138,7 +2190,8 @@ class OTCS:
         """Apply Content Server administration settings from XML file.
 
         Args:
-            xml_file_path (str): name + path of the XML settings file
+            xml_file_path (str):
+                The fully qualified path to the XML settings file.
 
         Returns:
             dict | None:
@@ -2178,7 +2231,7 @@ class OTCS:
                 headers=request_header,
                 files=llconfig_file,
                 timeout=None,
-                success_message="Admin settings in file -> '{}' have been applied".format(
+                success_message="Admin settings in file -> '{}' have been applied.".format(
                     xml_file_path,
                 ),
                 failure_message="Failed to import settings file -> '{}'".format(
@@ -2733,7 +2786,13 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_current_user")
     def get_current_user(self) -> dict | None:
-        """Get the current authenticated user."""
+        """Get the current authenticated user.
+
+        Returns:
+            dict | None:
+                Information for the current (authenticated) user.
+
+        """
 
         request_url = self.config()["authenticationUrl"]
 
@@ -2749,7 +2808,7 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get current user!",
+            failure_message="Failed to get current user",
         )
 
     # end method definition
@@ -2764,6 +2823,7 @@ class OTCS:
         email: str,
         title: str,
         base_group: int,
+        phone: str = "",
         privileges: list | None = None,
         user_type: int = 0,
     ) -> dict | None:
@@ -2784,7 +2844,9 @@ class OTCS:
                 The title of the user.
             base_group (int):
                 The base group id of the user (e.g. department)
-            privileges (list, optional):
+            phone (str, optional):
+                The business phone number of the user.
+            privileges (list | None, optional):
                 Possible values are Login, Public Access, Content Manager,
                 Modify Users, Modify Groups, User Admin Rights,
                 Grant Discovery, System Admin Rights
@@ -2808,6 +2870,7 @@ class OTCS:
             "first_name": first_name,
             "last_name": last_name,
             "business_email": email,
+            "business_phone": phone,
             "title": title,
             "group_id": base_group,
             "privilege_login": ("Login" in privileges),
@@ -2987,11 +3050,14 @@ class OTCS:
         """Update a user with a profile photo (which must be an existing node).
 
         Args:
-            user_id (int): The ID of the user.
-            photo_id (int): The node ID of the photo.
+            user_id (int):
+                The ID of the user.
+            photo_id (int):
+                The node ID of the photo.
 
         Returns:
-            dict | None: Node information or None if photo node is not found.
+            dict | None:
+                Node information or None if photo node is not found.
 
         """
 
@@ -3027,10 +3093,12 @@ class OTCS:
         that was introduced with version 23.4.
 
         Args:
-            user_name (str): user to test (login name)
+            user_name (str):
+                The user to test (login name) for proxy.
 
         Returns:
-            bool: True is user is proxy of current user. False if not.
+            bool:
+                True is user is proxy of current user. False if not.
 
         """
 
@@ -3956,7 +4024,7 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to get system usage privileges.",
+            failure_message="Failed to get system usage privileges",
         )
 
         if response:
@@ -4160,7 +4228,7 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to get system usage privileges.",
+            failure_message="Failed to get system usage privileges",
         )
 
         if response:
@@ -4306,9 +4374,9 @@ class OTCS:
     def get_node(
         self,
         node_id: int,
-        fields: (str | list) = "properties",  # per default we just get the most important information
+        fields: str | list = "properties",  # per default we just get the most important information
         metadata: bool = False,
-        timeout: int = REQUEST_TIMEOUT,
+        timeout: float = REQUEST_TIMEOUT,
     ) -> dict | None:
         """Get a node based on the node ID.
 
@@ -4335,7 +4403,7 @@ class OTCS:
                 The metadata will be returned under `results.metadata`, `metadata_map`,
                 and `metadata_order`.
                 Defaults to False.
-            timeout (int, optional):
+            timeout (float, optional):
                 Timeout for the request in seconds. Defaults to `REQUEST_TIMEOUT`.
 
         Returns:
@@ -5282,7 +5350,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_node")
-    def lookup_node(
+    def lookup_nodes(
         self,
         parent_node_id: int,
         category: str,
@@ -5290,7 +5358,7 @@ class OTCS:
         value: str,
         attribute_set: str | None = None,
     ) -> dict | None:
-        """Lookup the node under a parent node that has a specified value in a category attribute.
+        """Lookup nodes under a parent node that have a specified value in a category attribute.
 
         Args:
             parent_node_id (int):
@@ -5306,9 +5374,11 @@ class OTCS:
 
         Returns:
             dict | None:
-                Node wrapped in dictionary with "results" key or None if the REST API fails.
+                Node(s) wrapped in dictionary with "results" key or None if the REST API fails.
 
         """
+
+        results = {"results": []}
 
         # get_subnodes_iterator() returns a python generator that we use for iterating over all nodes
         # in an efficient way avoiding to retrieve all nodes at once (which could be a large number):
@@ -5392,25 +5462,29 @@ class OTCS:
                             if value in attribute_value:
                                 # Create a "results" dict that is compatible with normal REST calls
                                 # to not break get_result_value() method that may be called on the result:
-                                return {"results": node}
+                                results["results"].append(node)
                         elif value == attribute_value:
                             # Create a results dict that is compatible with normal REST calls
                             # to not break get_result_value() method that may be called on the result:
-                            return {"results": node}
+                            results["results"].append(node)
+                # end if set_key
                 else:
                     key = prefix + attribute_id
                     attribute_value = cat_data.get(key)
                     if not attribute_value:
-                        break
+                        continue
+                    # Is it a multi-value attribute (i.e. a list of values)?
                     if isinstance(attribute_value, list):
                         if value in attribute_value:
                             # Create a "results" dict that is compatible with normal REST calls
                             # to not break get_result_value() method that may be called on the result:
-                            return {"results": node}
+                            results["results"].append(node)
+                    # If not a multi-value attribute, check for equality:
                     elif value == attribute_value:
                         # Create a results dict that is compatible with normal REST calls
                         # to not break get_result_value() method that may be called on the result:
-                        return {"results": node}
+                        results["results"].append(node)
+                # end if set_key else
             # end for cat_data, cat_schema in zip(data, schema)
         # end for node in nodes
 
@@ -5422,7 +5496,7 @@ class OTCS:
             parent_node_id,
         )
 
-        return {"results": []}
+        return results if results["results"] else None
 
     # end method definition
 
@@ -6322,14 +6396,14 @@ class OTCS:
     def get_volume(
         self,
         volume_type: int,
-        timeout: int = REQUEST_TIMEOUT,
+        timeout: float = REQUEST_TIMEOUT,
     ) -> dict | None:
         """Get Volume information based on the volume type ID.
 
         Args:
             volume_type (int):
                 The ID of the volume type.
-            timeout (int, optional):
+            timeout (float | None, optional):
                 The timeout for the request in seconds.
 
         Returns:
@@ -6592,6 +6666,7 @@ class OTCS:
         external_modify_date: str | None = None,
         external_create_date: str | None = None,
         extract_zip: bool = False,
+        replace_existing: bool = False,
         show_error: bool = True,
     ) -> dict | None:
         """Fetch a file from a URL or local filesystem and uploads it to a OTCS parent.
@@ -6633,6 +6708,9 @@ class OTCS:
             extract_zip (bool, optional):
                 If True, automatically extract ZIP files and upload extracted directory. If False,
                 upload the unchanged Zip file.
+            replace_existing (bool, optional):
+                If True, replaces an existing file with the same name in the target folder. If False,
+                the upload will fail if a file with the same name already exists.
             show_error (bool, optional):
                 If True, treats the upload failure as an error. If False, no error is shown (useful if the file already exists).
 
@@ -6683,8 +6761,7 @@ class OTCS:
             file_content = response.content
 
         # If path_or_url specifies a directory or a zip file we want to extract
-        # it and then defer the upload to upload_directory_to_parent()
-
+        # it and then defer the upload to upload_directory_to_parent():
         elif os.path.exists(file_url) and (
             ((file_url.endswith(".zip") or mime_type == "application/x-zip-compressed") and extract_zip)
             or os.path.isdir(file_url)
@@ -6692,6 +6769,7 @@ class OTCS:
             return self.upload_directory_to_parent(
                 parent_id=parent_id,
                 file_path=file_url,
+                replace_existing=replace_existing,
             )
 
         elif os.path.exists(file_url):
@@ -6786,7 +6864,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="upload_directory_to_parent")
-    def upload_directory_to_parent(self, parent_id: int, file_path: str) -> dict | None:
+    def upload_directory_to_parent(self, parent_id: int, file_path: str, replace_existing: bool = True) -> dict | None:
         """Upload a directory or an uncompressed zip file to Content Server.
 
         IMPORTANT: if the path ends in a file then we assume it is a ZIP file!
@@ -6796,6 +6874,8 @@ class OTCS:
                 ID of the parent in Content Server.
             file_path (str):
                 File system path to the directory or zip file.
+            replace_existing (bool, optional):
+                If True, existing files are replaced by uploading a new version.
 
         Returns:
             dict | None:
@@ -6893,21 +6973,25 @@ class OTCS:
                     response = self.upload_directory_to_parent(
                         parent_id=current_parent_id,
                         file_path=full_file_path,
+                        replace_existing=replace_existing,
                     )
                     if response and not first_response:
                         first_response = response.copy()
                     continue
+                # Check if the file already exists:
                 response = self.get_node_by_parent_and_name(
                     parent_id=current_parent_id,
                     name=file_name,
                 )
                 if not response or not response["results"]:
+                    # File does not yet exist - upload new document:
                     response = self.upload_file_to_parent(
                         parent_id=current_parent_id,
                         file_url=full_file_path,
                         file_name=file_name,
                     )
-                else:
+                elif replace_existing:
+                    # Document does already exist - upload a new version if replace existing is requested:
                     existing_document_id = self.get_result_value(
                         response=response,
                         key="id",
@@ -7429,6 +7513,8 @@ class OTCS:
         node_id: int,
         file_path: str,
         version_number: str | int = "",
+        chunk_size: int = 8192,
+        overwrite: bool = True,
     ) -> bool:
         """Download a document from OTCS to local file system.
 
@@ -7440,6 +7526,12 @@ class OTCS:
             version_number (str | int, optional):
                 The version of the document to download.
                 If version = "" then download the latest version.
+            chunk_size (int, optional):
+                The chunk size to use when downloading the document in bytes.
+                Default is 8192 bytes.
+            overwrite (bool, optional):
+                If True, overwrite the file if it already exists. If False, do not overwrite
+                and return False if the file already exists.
 
         Returns:
             bool:
@@ -7449,23 +7541,29 @@ class OTCS:
         """
 
         if not version_number:
-            response = self.get_latest_document_version(node_id)
-            if not response:
-                self.logger.error(
-                    "Cannot get latest version of document with ID -> %d",
-                    node_id,
-                )
-                return False
-            version_number = response["data"]["version_number"]
-
-        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/versions/" + str(version_number) + "/content"
+            # we retrieve the latest version - using V1 REST API. V2 has issues here.:
+            #            request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/content"
+            request_url = self.config()["nodesUrl"] + "/" + str(node_id) + "/content"
+            self.logger.debug(
+                "Download document with node ID -> %d (latest version); calling -> %s",
+                node_id,
+                request_url,
+            )
+        else:
+            # we retrieve the given version - using V1 REST API. V2 has issues here.:
+            # request_url = (
+            #     self.config()["nodesUrlv2"] + "/" + str(node_id) + "/versions/" + str(version_number) + "/content"
+            # )
+            request_url = (
+                self.config()["nodesUrl"] + "/" + str(node_id) + "/versions/" + str(version_number) + "/content"
+            )
+            self.logger.debug(
+                "Download document with node ID -> %d and version number -> %d; calling -> %s",
+                node_id,
+                version_number,
+                request_url,
+            )
         request_header = self.request_download_header()
-
-        self.logger.debug(
-            "Download document with node ID -> %d; calling -> %s",
-            node_id,
-            request_url,
-        )
 
         response = self.do_request(
             url=request_url,
@@ -7482,6 +7580,18 @@ class OTCS:
         if response is None:
             return False
 
+        total_size = int(response.headers["Content-Length"]) if "Content-Length" in response.headers else None
+
+        content_encoding = response.headers.get("Content-Encoding", "").lower()
+        is_compressed = content_encoding in ("gzip", "deflate", "br")
+
+        if os.path.exists(file_path) and not overwrite:
+            self.logger.warning(
+                "File -> '%s' already exists and overwrite is set to False, not downloading document.",
+                file_path,
+            )
+            return False
+
         directory = os.path.dirname(file_path)
         if not os.path.exists(directory):
             self.logger.info(
@@ -7490,12 +7600,28 @@ class OTCS:
             )
             os.makedirs(directory)
 
+        bytes_downloaded = 0
         try:
             with open(file_path, "wb") as download_file:
-                download_file.writelines(response.iter_content(chunk_size=1024))
-        except Exception:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        download_file.write(chunk)
+                        bytes_downloaded += len(chunk)
+
+        except Exception as e:
             self.logger.error(
-                "Error while writing content to file -> %s",
+                "Error while writing content to file -> %s after %d bytes downloaded; error -> %s",
+                file_path,
+                bytes_downloaded,
+                str(e),
+            )
+            return False
+
+        if total_size and not is_compressed and bytes_downloaded != total_size:
+            self.logger.error(
+                "Downloaded size (%d bytes) does not match expected size (%d bytes) for file -> '%s'",
+                bytes_downloaded,
+                total_size,
                 file_path,
             )
             return False
@@ -7592,9 +7718,11 @@ class OTCS:
         search_term: str,
         look_for: str = "complexQuery",
         modifier: str = "",
+        within: str = "all",
         slice_id: int = 0,
         query_id: int = 0,
         template_id: int = 0,
+        location_id: int | None = None,
         limit: int = 100,
         page: int = 1,
     ) -> dict | None:
@@ -7619,12 +7747,20 @@ class OTCS:
                 - 'wordendswith'
                 If not specified or any value other than these options is given,
                 it is ignored.
+            within (str, optional):
+                The scope of the search. Possible values are:
+                - 'all': search in content and in metadata (default)
+                - 'content': search only in document content
+                - 'metadata': search only in item metadata
             slice_id (int, optional):
                 The ID of an existing search slice.
             query_id (int, optional):
                 The ID of a saved search query.
             template_id (int, optional):
                 The ID of a saved search template.
+            location_id (int | None, optional):
+                The ID of a folder or workspace to start a search from here.
+                None = unrestricted search (default).
             limit (int, optional):
                 The maximum number of results to return. Default is 100.
             page (int, optional):
@@ -7809,6 +7945,7 @@ class OTCS:
         search_post_body = {
             "where": search_term,
             "lookfor": look_for,
+            "within": within,
             "page": page,
             "limit": limit,
         }
@@ -7821,6 +7958,8 @@ class OTCS:
             search_post_body["query_id"] = query_id
         if template_id > 0:
             search_post_body["template_id"] = template_id
+        if location_id is not None:
+            search_post_body["location_id1"] = location_id
 
         request_url = self.config()["searchUrl"]
         request_header = self.request_form_header()
@@ -7847,10 +7986,13 @@ class OTCS:
         search_term: str,
         look_for: str = "complexQuery",
         modifier: str = "",
+        within: str = "all",
         slice_id: int = 0,
         query_id: int = 0,
         template_id: int = 0,
+        location_id: int | None = None,
         page_size: int = 100,
+        limit: int | None = None,
     ) -> iter:
         """Get an iterator object to traverse all search results for a given search.
 
@@ -7878,19 +8020,31 @@ class OTCS:
                 Defines a modifier for the search. Possible values are:
                 - 'synonymsof', 'relatedto', 'soundslike', 'wordbeginswith', 'wordendswith'.
                 If not specified or any value other than these options is given, it is ignored.
+            within (str, optional):
+                The scope of the search. Possible values are:
+                - 'all': search in content and in metadata (default)
+                - 'content': search only in document content
+                - 'metadata': search only in item metadata
             slice_id (int, optional):
                 The ID of an existing search slice.
             query_id (int, optional):
                 The ID of a saved search query.
             template_id (int, optional):
                 The ID of a saved search template.
+            location_id (int | None, optional):
+                The ID of a folder or workspace to start a search from here.
+                None = unrestricted search (default).
             page_size (int, optional):
                 The maximum number of results to return. Default is 100.
-                For the iterator this ois basically the chunk size.
+                For the iterator this is basically the chunk size.
+            limit (int | None = None), optional):
+                The maximum number of results to return in total.
+                If None (default) all results are returned.
+                If a number is provided only up to this number of results is returned.
 
         Returns:
-            dict | None:
-                The search response as a dictionary if successful, or None if the search fails.
+            iter:
+                The search response iterator object.
 
         """
 
@@ -7899,9 +8053,11 @@ class OTCS:
             search_term=search_term,
             look_for=look_for,
             modifier=modifier,
+            within=within,
             slice_id=slice_id,
             query_id=query_id,
             template_id=template_id,
+            location_id=location_id,
             limit=1,
             page=1,
         )
@@ -7912,6 +8068,9 @@ class OTCS:
             return
 
         number_of_results = response["collection"]["paging"]["total_count"]
+        if limit and number_of_results > limit:
+            number_of_results = limit
+
         if not number_of_results:
             self.logger.debug(
                 "Search -> '%s' does not have results! Cannot iterate over results.",
@@ -7934,9 +8093,11 @@ class OTCS:
                 search_term=search_term,
                 look_for=look_for,
                 modifier=modifier,
+                within=within,
                 slice_id=slice_id,
                 query_id=query_id,
                 template_id=template_id,
+                location_id=location_id,
                 limit=page_size,
                 page=page,
             )
@@ -7980,7 +8141,7 @@ class OTCS:
         request_header = self.cookie()
 
         self.logger.debug(
-            "Get external system connection -> %s; calling -> %s",
+            "Get external system connection -> '%s'; calling -> %s",
             connection_name,
             request_url,
         )
@@ -8170,7 +8331,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="deploy_workbench")
-    def deploy_workbench(self, workbench_id: int) -> dict | None:
+    def deploy_workbench(self, workbench_id: int) -> tuple[dict | None, int]:
         """Deploy an existing Workbench.
 
         Args:
@@ -8180,6 +8341,8 @@ class OTCS:
         Returns:
             dict | None:
                 The deploy response or None if the deployment fails.
+            int:
+                Error count. Should be 0 if fully successful.
 
         Example response:
         {
@@ -8227,8 +8390,12 @@ class OTCS:
             ),
         )
 
+        # Transport packages canalso partly fail to deploy.
+        # For such cases we determine the number of errors.
+        error_count = 0
+
         if not response or "results" not in response:
-            return None
+            return (None, 0)
 
         try:
             error_count = response["results"]["data"]["status"]["error_count"]
@@ -8239,7 +8406,7 @@ class OTCS:
             else:
                 success_count = response["results"]["data"]["status"]["success_count"]
                 self.logger.info(
-                    "Transport successfully deployed %d workbench items",
+                    "Transport successfully deployed %d workbench items.",
                     success_count,
                 )
 
@@ -8254,7 +8421,7 @@ class OTCS:
         except Exception as e:
             self.logger.debug(str(e))
 
-        return response
+        return (response, error_count)
 
     # end method definition
 
@@ -8309,11 +8476,18 @@ class OTCS:
         if extractions is None:
             extractions = []
 
+        while not self.is_ready():
+            self.logger.info(
+                "OTCS is not ready. Cannot deploy transport -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                package_name,
+            )
+            time.sleep(30)
+
         # Preparation: get volume IDs for Transport Warehouse (root volume and Transport Packages)
         response = self.get_volume(volume_type=self.VOLUME_TYPE_TRANSPORT_WAREHOUSE)
         transport_root_volume_id = self.get_result_value(response=response, key="id")
         if not transport_root_volume_id:
-            self.logger.error("Failed to retrieve transport root volume")
+            self.logger.error("Failed to retrieve transport root volume!")
             return None
         self.logger.debug(
             "Transport root volume ID -> %d",
@@ -8326,7 +8500,7 @@ class OTCS:
         )
         transport_package_volume_id = self.get_result_value(response=response, key="id")
         if not transport_package_volume_id:
-            self.logger.error("Failed to retrieve transport package volume")
+            self.logger.error("Failed to retrieve transport package volume!")
             return None
         self.logger.debug(
             "Transport package volume ID -> %d",
@@ -8345,20 +8519,20 @@ class OTCS:
         package_id = self.get_result_value(response=response, key="id")
         if package_id:
             self.logger.debug(
-                "Transport package -> '%s' does already exist; existing package ID -> %d",
+                "Transport package -> '%s' does already exist; existing package ID -> %d.",
                 package_name,
                 package_id,
             )
         else:
             self.logger.debug(
-                "Transport package -> '%s' does not yet exist, loading from -> %s",
+                "Transport package -> '%s' does not yet exist, loading from -> '%s'...",
                 package_name,
                 package_url,
             )
             # If we have string replacements configured execute them now:
             if replacements:
                 self.logger.debug(
-                    "Transport -> '%s' has replacements -> %s",
+                    "Transport -> '%s' has replacements -> %s.",
                     package_name,
                     str(replacements),
                 )
@@ -8368,13 +8542,13 @@ class OTCS:
                 )
             else:
                 self.logger.debug(
-                    "Transport -> '%s' has no replacements!",
+                    "Transport -> '%s' has no replacements.",
                     package_name,
                 )
             # If we have data extractions configured execute them now:
             if extractions:
                 self.logger.debug(
-                    "Transport -> '%s' has extractions -> %s",
+                    "Transport -> '%s' has extractions -> %s.",
                     package_name,
                     str(extractions),
                 )
@@ -8383,7 +8557,7 @@ class OTCS:
                     extractions=extractions,
                 )
             else:
-                self.logger.debug("Transport -> '%s' has no extractions!", package_name)
+                self.logger.debug("Transport -> '%s' has no extractions.", package_name)
 
             # Upload package to Transport Warehouse:
             response = self.upload_file_to_volume(
@@ -8395,7 +8569,7 @@ class OTCS:
             package_id = self.get_result_value(response=response, key="id")
             if not package_id:
                 self.logger.error(
-                    "Failed to upload transport package -> %s",
+                    "Failed to upload transport package -> '%s'!",
                     package_url,
                 )
                 return None
@@ -8438,7 +8612,7 @@ class OTCS:
             workbench_id = self.get_result_value(response=response, key="id")
             if workbench_id:
                 self.logger.debug(
-                    "Workbench -> '%s' does already exist but is not successfully deployed; existing workbench ID -> %d",
+                    "Workbench -> '%s' does already exist but is not successfully deployed; existing workbench ID -> %d.",
                     workbench_name,
                     workbench_id,
                 )
@@ -8454,14 +8628,14 @@ class OTCS:
                     )
                     return None
                 self.logger.debug(
-                    "Successfully created workbench -> '%s'; new workbench ID -> %d",
+                    "Successfully created workbench -> '%s'; new workbench ID -> %d.",
                     workbench_name,
                     workbench_id,
                 )
 
         # Step 3: Unpack Transport Package to Workbench
         self.logger.debug(
-            "Unpack transport package -> '%s' (%d) to workbench -> '%s' (%d)",
+            "Unpack transport package -> '%s' (%d) to workbench -> '%s' (%d)...",
             package_name,
             package_id,
             workbench_name,
@@ -8473,29 +8647,36 @@ class OTCS:
         )
         if not response:
             self.logger.error(
-                "Failed to unpack the transport package -> '%s'",
+                "Failed to unpack the transport package -> '%s'!",
                 package_name,
             )
             return None
         self.logger.debug(
-            "Successfully unpackaged to workbench -> '%s' (%s)",
+            "Successfully unpackaged to workbench -> '%s' (%s).",
             workbench_name,
             str(workbench_id),
         )
 
         # Step 4: Deploy Workbench
         self.logger.debug(
-            "Deploy workbench -> '%s' (%s)",
+            "Deploy workbench -> '%s' (%s)...",
             workbench_name,
             str(workbench_id),
         )
-        response = self.deploy_workbench(workbench_id=workbench_id)
-        if not response:
-            self.logger.error("Failed to deploy workbench -> '%s' (%s)", workbench_name, str(workbench_id))
+        response, errors = self.deploy_workbench(workbench_id=workbench_id)
+        if not response or errors > 0:
+            self.logger.error(
+                "Failed to deploy workbench -> '%s' (%s)!%s",
+                workbench_name,
+                str(workbench_id),
+                " {} error{} occured during deployment.".format(errors, "s" if errors > 1 else "")
+                if errors > 0
+                else "",
+            )
             return None
 
         self.logger.debug(
-            "Successfully deployed workbench -> '%s' (%s)",
+            "Successfully deployed workbench -> '%s' (%s).",
             workbench_name,
             str(workbench_id),
         )
@@ -8589,7 +8770,7 @@ class OTCS:
                     )
                     continue
                 self.logger.debug(
-                    "Replace -> %s with -> %s in Transport package -> %s",
+                    "Replace -> %s with -> %s in transport package -> %s",
                     replacement["placeholder"],
                     replacement["value"],
                     zip_file_folder,
@@ -8606,21 +8787,21 @@ class OTCS:
             )
             if found:
                 self.logger.debug(
-                    "Replacement -> %s has been completed successfully for Transport package -> %s",
+                    "Replacement -> %s has been completed successfully for transport package -> '%s'.",
                     replacement,
                     zip_file_folder,
                 )
                 modified = True
             else:
                 self.logger.warning(
-                    "Replacement -> %s not found in Transport package -> %s",
+                    "Replacement -> %s not found in transport package -> '%s'!",
                     replacement,
                     zip_file_folder,
                 )
 
         if not modified:
             self.logger.warning(
-                "None of the specified replacements have been found in Transport package -> %s. No need to create a new transport package.",
+                "None of the specified replacements have been found in transport package -> %s. No need to create a new transport package.",
                 zip_file_folder,
             )
             return False
@@ -8628,7 +8809,7 @@ class OTCS:
         # Create the new zip file and add all files from the directory to it
         new_zip_file_path = os.path.dirname(zip_file_path) + "/new_" + os.path.basename(zip_file_path)
         self.logger.debug(
-            "Content of transport -> '%s' has been modified - repacking to new zip file -> %s",
+            "Content of transport -> '%s' has been modified - repacking to new zip file -> '%s'...",
             zip_file_folder,
             new_zip_file_path,
         )
@@ -8645,13 +8826,13 @@ class OTCS:
         zip_ref.close()
         old_zip_file_path = os.path.dirname(zip_file_path) + "/old_" + os.path.basename(zip_file_path)
         self.logger.debug(
-            "Rename orginal transport zip file -> '%s' to -> '%s'",
+            "Rename orginal transport zip file -> '%s' to -> '%s'...",
             zip_file_path,
             old_zip_file_path,
         )
         os.rename(zip_file_path, old_zip_file_path)
         self.logger.debug(
-            "Rename new transport zip file -> '%s' to -> '%s'",
+            "Rename new transport zip file -> '%s' to -> '%s'...",
             new_zip_file_path,
             zip_file_path,
         )
@@ -8684,7 +8865,7 @@ class OTCS:
         """
 
         if not os.path.isfile(zip_file_path):
-            self.logger.error("Zip file -> '%s' not found.", zip_file_path)
+            self.logger.error("Zip file -> '%s' not found!", zip_file_path)
             return False
 
         # Extract the zip file to a temporary directory
@@ -8696,7 +8877,7 @@ class OTCS:
         for extraction in extractions:
             if "xpath" not in extraction:
                 self.logger.error(
-                    "Extraction needs an XPath but it is not specified. Skipping...",
+                    "Extraction needs an xpath but it is not specified! Skipping...",
                 )
                 continue
             # Check if the extraction is explicitly disabled:
@@ -8709,7 +8890,7 @@ class OTCS:
 
             xpath = extraction["xpath"]
             self.logger.debug(
-                "Using xpath -> %s to extract the data",
+                "Using xpath -> %s to extract the data.",
                 xpath,
             )
 
@@ -8721,7 +8902,7 @@ class OTCS:
             )
             if extracted_data:
                 self.logger.debug(
-                    "Extraction with XPath -> %s has been successfully completed for Transport package -> %s",
+                    "Extraction with xpath -> %s has been successfully completed for transport package -> '%s'.",
                     xpath,
                     zip_file_folder,
                 )
@@ -8729,7 +8910,7 @@ class OTCS:
                 extraction["data"] = extracted_data
             else:
                 self.logger.warning(
-                    "Extraction with XPath -> %s has not delivered any data for Transport package -> %s",
+                    "Extraction with xpath -> %s has not delivered any data for transport package -> '%s'!",
                     xpath,
                     zip_file_folder,
                 )
@@ -8751,6 +8932,36 @@ class OTCS:
             dict | None:
                 Business Object Types information (for all external systems)
                 or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/businessobjecttypes',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': [
+                {
+                    'data': {
+                        'properties': {
+                            'bo_type': 'account',
+                            'bo_type_id': 54,
+                            'bo_type_name': 'gw.account',
+                            'ext_system_id': 'Guidewire Policy Center',
+                            'is_default_Search': True,
+                            'workspace_type_id': 33
+                        }
+                    }
+                },
+                ...
+            ]
+        }
 
         """
 
@@ -9381,6 +9592,7 @@ class OTCS:
 
     # end method definition
 
+    @cache
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type")
     def get_workspace_type(
         self,
@@ -9401,8 +9613,11 @@ class OTCS:
                 Workspace Types or None if the request fails.
 
         Example:
-            ```json
-            ```
+            {
+                'icon_url': '/cssupport/otsapxecm/wksp_contract_cust.png',
+                'is_policies_enabled': False,
+                'workspace_type': 'Sales Contract'
+            }
 
         """
 
@@ -9580,7 +9795,7 @@ class OTCS:
     def get_workspace(
         self,
         node_id: int,
-        fields: (str | list) = "properties",  # per default we just get the most important information
+        fields: str | list = "properties",  # per default we just get the most important information
         metadata: bool = False,
     ) -> dict | None:
         """Get a workspace based on the node ID.
@@ -9594,11 +9809,11 @@ class OTCS:
                 Possible fields include:
                 - "properties" (can be further restricted by specifying sub-fields,
                   e.g., "properties{id,name,parent_id,description}")
-                - "categories"
-                - "versions" (can be further restricted by specifying ".element(0)" to
-                  retrieve only the latest version)
-                - "permissions" (can be further restricted by specifying ".limit(5)" to
-                  retrieve only the first 5 permissions)
+                - "business_properties" (all the information for the business object and the external system)
+                - "categories" (the category data of the workspace item)
+                - "workspace_references" (a list with the references to business objects in external systems)
+                - "display_urls" (a list with the URLs to external business systems)
+                - "wksp_info" (currently just the icon information of the workspace)
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".
@@ -9692,10 +9907,31 @@ class OTCS:
                                 'wksp_type_name': 'Vendor',
                                 'xgov_workspace_type': ''
                             }
+                            'display_urls': [
+                                {
+                                    'business_object_type': 'LFA1',
+                                    'business_object_type_id': 30,
+                                    'business_object_type_name': 'Customer',
+                                    'displayUrl': '/sap/bc/gui/sap/its/webgui?~logingroup=SPACE&~transaction=%2fOTX%2fRM_WSC_START_BO+KEY%3dpc%3AS3XljqcFfD0pakDIjUKul%3bOBJTYPE%3daccount&~OkCode=ONLI',
+                                    'external_system_id': 'TE1',
+                                    'external_system_name': 'SAP S/4HANA'
+                                }
+                            ]
                             'wksp_info':
                             {
                                 'wksp_type_icon': '/appimg/ot_bws/icons/16634%2Esvg?v=161194_13949'
                             }
+                            'workspace_references': [
+                                {
+                                    'business_object_id': '0000010020',
+                                    'business_object_type': 'LFA1',
+                                    'business_object_type_id': 30,
+                                    'external_system_id': 'TE1',
+                                    'has_default_display': True,
+                                    'has_default_search': True,
+                                    'workspace_type_id': 37
+                                }
+                            ]
                         },
                         'metadata': {...},
                         'metadata_order': {
@@ -9703,20 +9939,6 @@ class OTCS:
                         }
                     }
                 ],
-                'wksp_info': {
-                    'wksp_type_icon': '/appimg/ot_bws/icons/24643%2Esvg?v=161696_1252'
-                }
-                'workspace_references': [
-                    {
-                        'business_object_id': '0000010020',
-                        'business_object_type': 'LFA1',
-                        'business_object_type_id': 30,
-                        'external_system_id': 'TE1',
-                        'has_default_display': True,
-                        'has_default_search': True,
-                        'workspace_type_id': 37
-                    }
-                ]
             }
             ```
 
@@ -9762,6 +9984,8 @@ class OTCS:
         expanded_view: bool = True,
         page: int | None = None,
         limit: int | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
     ) -> dict | None:
         """Get all workspace instances of a given type.
 
@@ -9794,6 +10018,25 @@ class OTCS:
                 The page to be returned (if more workspace instances exist
                 than given by the page limit).
                 The default is None.
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant
+                impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)" to
+                  retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)" to
+                  retrieve only the first 5 permissions)
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                Whether to return metadata (data type, field length, min/max values,...)
+                about the data.
+                Metadata will be returned under `results.metadata`, `metadata_map`,
+                or `metadata_order`.
 
         Returns:
             dict | None:
@@ -9809,6 +10052,8 @@ class OTCS:
             expanded_view=expanded_view,
             page=page,
             limit=limit,
+            fields=fields,
+            metadata=metadata,
         )
 
     # end method definition
@@ -9819,6 +10064,9 @@ class OTCS:
         type_id: int | None = None,
         expanded_view: bool = True,
         page_size: int = 100,
+        limit: int | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
     ) -> iter:
         """Get an iterator object to traverse all workspace instances of a workspace type.
 
@@ -9849,6 +10097,29 @@ class OTCS:
             page_size (int | None, optional):
                 The maximum number of workspace instances that should be delivered in one page.
                 The default is 100. If None is given then the internal OTCS limit seems to be 500.
+            limit (int | None = None), optional):
+                The maximum number of workspaces to return in total.
+                If None (default) all workspaces are returned.
+                If a number is provided only up to this number of results is returned.
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant
+                impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)" to
+                  retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)" to
+                  retrieve only the first 5 permissions)
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                Whether to return metadata (data type, field length, min/max values,...)
+                about the data.
+                Metadata will be returned under `results.metadata`, `metadata_map`,
+                or `metadata_order`.
 
         Returns:
             iter:
@@ -9863,8 +10134,10 @@ class OTCS:
             type_id=type_id,
             name="",
             expanded_view=expanded_view,
-            page=1,
             limit=1,
+            page=1,
+            fields=fields,
+            metadata=metadata,
         )
         if not response or "results" not in response:
             # Don't return None! Plain return is what we need for iterators.
@@ -9873,9 +10146,12 @@ class OTCS:
             return
 
         number_of_instances = response["paging"]["total_count"]
+        if limit and number_of_instances > limit:
+            number_of_instances = limit
+
         if not number_of_instances:
             self.logger.debug(
-                "Workspace type -> %s does not have instances! Cannot iterate over instances.",
+                "Workspace type -> '%s' does not have instances! Cannot iterate over instances.",
                 type_name if type_name else str(type_id),
             )
             # Don't return None! Plain return is what we need for iterators.
@@ -9897,7 +10173,9 @@ class OTCS:
                 name="",
                 expanded_view=expanded_view,
                 page=page,
-                limit=page_size,
+                limit=page_size if limit is None else limit,
+                fields=fields,
+                metadata=metadata,
             )
             if not response or not response.get("results", None):
                 self.logger.warning(
@@ -9923,9 +10201,9 @@ class OTCS:
         expanded_view: bool = True,
         limit: int | None = None,
         page: int | None = None,
-        fields: (str | list) = "properties",  # per default we just get the most important information
+        fields: str | list = "properties",  # per default we just get the most important information
         metadata: bool = False,
-        timeout: int = REQUEST_TIMEOUT,
+        timeout: float = REQUEST_TIMEOUT,
     ) -> dict | None:
         """Lookup workspaces based on workspace type and workspace name.
 
@@ -9981,7 +10259,7 @@ class OTCS:
                 about the data.
                 Metadata will be returned under `results.metadata`, `metadata_map`,
                 or `metadata_order`.
-            timeout (int, optional):
+            timeout (float, optional):
                 Specific timeout for the request in seconds. The default is the standard
                 timeout value REQUEST_TIMEOUT used by the OTCS module.
 
@@ -10191,7 +10469,7 @@ class OTCS:
         external_system_name: str,
         business_object_type: str,
         business_object_id: str,
-        return_workspace_metadata: bool = False,
+        metadata: bool = False,
         show_error: bool = False,
     ) -> dict | None:
         """Get a workspace based on the business object of an external system.
@@ -10203,7 +10481,7 @@ class OTCS:
                 Type of the Business object, e.g. KNA1 for SAP customers
             business_object_id (str):
                 ID of the business object in the external system
-            return_workspace_metadata (bool, optional):
+            metadata (bool, optional):
                 Whether or not workspace metadata (categories) should be returned.
                 Default is False.
             show_error (bool, optional):
@@ -10285,7 +10563,7 @@ class OTCS:
             + "/boids/"
             + business_object_id
         )
-        if return_workspace_metadata:
+        if metadata:
             request_url += "?metadata"
 
         request_header = self.request_form_header()
@@ -10319,7 +10597,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_workspace")
-    def lookup_workspace(
+    def lookup_workspaces(
         self,
         type_name: str,
         category: str,
@@ -10327,11 +10605,12 @@ class OTCS:
         value: str,
         attribute_set: str | None = None,
     ) -> dict | None:
-        """Lookup the workspace that has a specified value in a category attribute.
+        """Lookup workspaces that have a specified value in a category attribute.
 
         Args:
             type_name (str):
-                The name of the workspace type.
+                The name of the workspace type. This is required to determine
+                the parent folder in which the workspaces of this type reside.
             category (str):
                 The name of the category.
             attribute (str):
@@ -10339,7 +10618,8 @@ class OTCS:
             value (str):
                 The lookup value that is matched agains the node attribute value.
             attribute_set (str | None, optional):
-                The name of the attribute set
+                The name of the attribute set. If None (default) the attribute to lookup
+                is supposed to be a top-level attribute.
 
         Returns:
             dict | None:
@@ -10358,9 +10638,41 @@ class OTCS:
             )
             return None
 
-        return self.lookup_node(
+        return self.lookup_nodes(
             parent_node_id=parent_id, category=category, attribute=attribute, value=value, attribute_set=attribute_set
         )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace")
+    def get_workspace_references(
+        self,
+        node_id: int,
+    ) -> list | None:
+        """Get a workspace rewferences to business objects in external systems.
+
+        Args:
+            node_id (int):
+                The node ID of the workspace to retrieve.
+
+        Returns:
+            list | None:
+                A List of references to business objects in external systems.
+
+        """
+
+        response = self.get_workspace(node_id=node_id, fields="workspace_references")
+
+        results = response.get("results")
+        if not results:
+            return None
+        data = results.get("data")
+        if not data:
+            return None
+
+        workspace_references: list = data.get("workspace_references")
+
+        return workspace_references
 
     # end method definition
 
@@ -10422,13 +10734,88 @@ class OTCS:
             headers=request_header,
             data=workspace_put_data,
             timeout=None,
-            warning_message="Cannot update reference for workspace ID -> {} with business object connection -> ({}, {}, {})".format(
+            warning_message="Cannot update reference for workspace ID -> {} with business object connection -> ('{}', '{}', {})".format(
                 workspace_id,
                 external_system_id,
                 bo_type,
                 bo_id,
             ),
-            failure_message="Failed to update reference for workspace ID -> {} with business object connection -> ({}, {}, {})".format(
+            failure_message="Failed to update reference for workspace ID -> {} with business object connection -> ('{}', '{}', {})".format(
+                workspace_id,
+                external_system_id,
+                bo_type,
+                bo_id,
+            ),
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_workspace_reference")
+    def delete_workspace_reference(
+        self,
+        workspace_id: int,
+        external_system_id: str | None = None,
+        bo_type: str | None = None,
+        bo_id: str | None = None,
+        show_error: bool = True,
+    ) -> dict | None:
+        """Delete reference of workspace to a business object in an external system.
+
+        Args:
+            workspace_id (int):
+                The ID of the workspace.
+            external_system_id (str | None, optional):
+                Identifier of the external system (None if no external system).
+            bo_type (str | None, optional):
+                Business object type (None if no external system)
+            bo_id (str | None, optional):
+                Business object identifier / key (None if no external system)
+            show_error (bool, optional):
+                Log an error if workspace cration fails. Otherwise log a warning.
+
+        Returns:
+            Request response or None in case of an error.
+
+        """
+
+        request_url = self.config()["businessWorkspacesUrl"] + "/" + str(workspace_id) + "/workspacereferences"
+        request_header = self.request_form_header()
+
+        if not external_system_id or not bo_type or not bo_id:
+            self.logger.error(
+                "Cannot update workspace reference - required Business Object information is missing!",
+            )
+            return None
+
+        self.logger.debug(
+            "Delete workspace reference of workspace ID -> %d with business object connection -> (%s, %s, %s); calling -> %s",
+            workspace_id,
+            external_system_id,
+            bo_type,
+            bo_id,
+            request_url,
+        )
+
+        workspace_put_data = {
+            "ext_system_id": external_system_id,
+            "bo_type": bo_type,
+            "bo_id": bo_id,
+        }
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            data=workspace_put_data,
+            timeout=None,
+            warning_message="Cannot delete reference for workspace ID -> {} with business object connection -> ({}, {}, {})".format(
+                workspace_id,
+                external_system_id,
+                bo_type,
+                bo_id,
+            ),
+            failure_message="Failed to delete reference for workspace ID -> {} with business object connection -> ({}, {}, {})".format(
                 workspace_id,
                 external_system_id,
                 bo_type,
@@ -10475,26 +10862,26 @@ class OTCS:
                 A description of the new workspace.
             workspace_type (int):
                 Type ID of the workspace, indicating its category or function.
-            category_data (dict, optional):
+            category_data (dict | None, optional):
                 Category and attribute data for the workspace.
-            classifications (list):
+            classifications (list | None, optional):
                 List of classification item IDs to apply to the new item.
-            external_system_id (str, optional):
+            external_system_id (str | None, optional):
                 External system identifier if linking the workspace to an external system.
-            bo_type (str, optional):
+            bo_type (str | None, optional):
                 Business object type, used if linking to an external system.
-            bo_id (str, optional):
+            bo_id (str | None, optional):
                 Business object identifier or key, used if linking to an external system.
-            parent_id (int, optional):
+            parent_id (int | None, optional):
                 ID of the parent workspace, required in special cases such as
                 sub-workspaces or location ambiguity.
-            ibo_workspace_id (int, optional):
+            ibo_workspace_id (int | None, optional):
                 ID of an existing workspace that is already linked to an external system.
                 Allows connecting multiple business objects (IBO).
-            external_create_date (str, optional):
+            external_create_date (str | None, optional):
                 Date of creation in the external system (format: YYYY-MM-DD).
                 None is the default.
-            external_modify_date (str, optional):
+            external_modify_date (str | None, optional):
                 Date of last modification in the external system (format: YYYY-MM-DD).
                 None is the default.
             show_error (bool, optional):
@@ -10670,16 +11057,16 @@ class OTCS:
             category_data (dict | None, optional):
                 Category and attribute data.
                 Default is None (attributes remain unchanged).
-            external_system_id (str, optional):
+            external_system_id (str | None, optional):
                 Identifier of the external system (None if no external system)
-            bo_type (str, optional):
+            bo_type (str | None, optional):
                 Business object type (None if no external system)
-            bo_id (str, optional):
+            bo_id (str | None, optional):
                 Business object identifier / key (None if no external system)
-            external_create_date (str, optional):
+            external_create_date (str | None, optional):
                 Date of creation in the external system
                 (format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
-            external_modify_date (str, optional):
+            external_modify_date (str | None, optional):
                 Date of last modification in the external system
                 (format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
             show_error (bool, optional):
@@ -10787,12 +11174,13 @@ class OTCS:
     def get_workspace_relationships(
         self,
         workspace_id: int,
-        relationship_type: str | list | None = None,
+        relationship_type: str | list = "child",
         related_workspace_name: str | None = None,
         related_workspace_type_id: int | list | None = None,
         limit: int | None = None,
         page: int | None = None,
-        fields: (str | list) = "properties",  # per default we just get the most important information
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
     ) -> dict | None:
         """Get the Workspace relationships to other workspaces.
 
@@ -10804,7 +11192,7 @@ class OTCS:
             workspace_id (int):
                 The ID of the workspace.
             relationship_type (str | list, optional):
-                Either "parent" or "child" (or None = unspecified which is the default).
+                Either "parent" or "child" ("child" is the default).
                 If both ("child" and "parent") are requested then use a
                 list like ["child", "parent"].
             related_workspace_name (str | None, optional):
@@ -10834,6 +11222,9 @@ class OTCS:
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".
+            metadata (bool, optional):
+                Whether or not workspace metadata (categories) should be returned.
+                Default is False.
 
         Returns:
             dict | None:
@@ -10928,7 +11319,13 @@ class OTCS:
             if isinstance(relationship_type, str):
                 query["where_relationtype"] = relationship_type
             elif isinstance(relationship_type, list):
-                query["where_rel_types"] = relationship_type
+                if any(rt not in ["parent", "child"] for rt in relationship_type):
+                    self.logger.error(
+                        "Illegal relationship type for related workspace type! Must be either 'parent' or 'child'. -> %s",
+                        relationship_type,
+                    )
+                    return None
+                query["where_rel_types"] = "{'" + ("','").join(relationship_type) + "'}"
             else:
                 self.logger.error(
                     "Illegal relationship type for related workspace type!",
@@ -10956,6 +11353,8 @@ class OTCS:
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=False)
         request_url += "?{}".format(encoded_query)
+        if metadata:
+            request_url += "&metadata"
 
         request_header = self.request_form_header()
 
@@ -10980,11 +11379,13 @@ class OTCS:
     def get_workspace_relationships_iterator(
         self,
         workspace_id: int,
-        relationship_type: str | list | None = None,
+        relationship_type: str | list = "child",
         related_workspace_name: str | None = None,
         related_workspace_type_id: int | list | None = None,
-        fields: (str | list) = "properties",  # per default we just get the most important information
+        fields: str | list = "properties",  # per default we just get the most important information
         page_size: int = 100,
+        limit: int | None = None,
+        metadata: bool = False,
     ) -> iter:
         """Get an iterator object to traverse all related workspaces for a workspace.
 
@@ -11005,7 +11406,7 @@ class OTCS:
             workspace_id (int):
                 The ID of the workspace.
             relationship_type (str | list, optional):
-                Either "parent" or "child" (or None = unspecified which is the default).
+                Either "parent" or "child" ("child" is the default).
                 If both ("child" and "parent") are requested then use a
                 list like ["child", "parent"].
             related_workspace_name (str | None, optional):
@@ -11015,14 +11416,12 @@ class OTCS:
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
-                Possible fields include:
+                Possible fields include (NOTE: "categories" is not supported in this method!!):
                 - "properties" (can be further restricted by specifying sub-fields,
                   e.g., "properties{id,name,parent_id,description}")
-                - "categories"
-                - "versions" (can be further restricted by specifying ".element(0)" to
-                  retrieve only the latest version)
-                - "permissions" (can be further restricted by specifying ".limit(5)" to
-                  retrieve only the first 5 permissions)
+                - "business_properties" (all the information for the business object and the external system)
+                - "workspace_references" (a list with the references to business objects in external systems)
+                - "wksp_info" (currently just the icon information of the workspace)
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".
@@ -11032,6 +11431,14 @@ class OTCS:
                 The default is None, in this case the internal OTCS limit seems
                 to be 500.
                 This is basically the chunk size for the iterator.
+            limit (int | None = None), optional):
+                The maximum number of workspaces to return in total.
+                If None (default) all workspaces are returned.
+                If a number is provided only up to this number of results is returned.
+            metadata (bool, optional):
+                Whether or not workspace metadata should be returned. These are
+                the system level metadata - not the categories of the workspace!
+                Default is False.
 
         Returns:
             iter:
@@ -11049,6 +11456,7 @@ class OTCS:
             limit=1,
             page=1,
             fields=fields,
+            metadata=metadata,
         )
         if not response or "results" not in response:
             # Don't return None! Plain return is what we need for iterators.
@@ -11057,6 +11465,9 @@ class OTCS:
             return
 
         number_of_related_workspaces = response["paging"]["total_count"]
+        if limit and number_of_related_workspaces > limit:
+            number_of_related_workspaces = limit
+
         if not number_of_related_workspaces:
             self.logger.debug(
                 "Workspace with node ID -> %d does not have related workspaces! Cannot iterate over related workspaces.",
@@ -11080,9 +11491,10 @@ class OTCS:
                 relationship_type=relationship_type,
                 related_workspace_name=related_workspace_name,
                 related_workspace_type_id=related_workspace_type_id,
-                limit=page_size,
+                limit=page_size if limit is None else limit,
                 page=page,
                 fields=fields,
+                metadata=metadata,
             )
             if not response or not response.get("results", None):
                 self.logger.warning(
@@ -11313,6 +11725,46 @@ class OTCS:
         Returns:
             dict | None:
                 Workspace Role Membership or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/businessworkspaces/80998/roles/81001/members',
+                        'method': 'POST',
+                        'name': ''
+                    }
+            },
+            'results': {
+                'data': {
+                    'properties': {
+                        'birth_date': None,
+                        'business_email': 'lwhite@terrarium.cloud',
+                        'business_fax': None,
+                        'business_phone': '+1 (345) 4626-333',
+                        'cell_phone': None,
+                        'deleted': False,
+                        'display_language': None,
+                        'display_name': 'Liz White',
+                        'first_name': 'Liz',
+                        'gender': None,
+                        'group_id': 16178,
+                        'group_name': 'Executive Leadership Team',
+                        'home_address_1': None,
+                        'home_address_2': None,
+                        'home_fax': None,
+                        'home_phone': None,
+                        'id': 15520,
+                        'initials': 'LW',
+                        'last_name': 'White',
+                        ...
+                    }
+                }
+            }
+        }
 
         """
 
@@ -12022,7 +12474,7 @@ class OTCS:
 
         Args:
             parent_id (int):
-                The node the category should be applied to.
+                The parent node of the new node to create.
             subtype (int, optional):
                 The subtype of the new node. Default is document.
             category_ids (int | list[int], optional):
@@ -12030,7 +12482,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Workspace Create Form data or None if the request fails.
+                Node create form data or None if the request fails.
 
         """
 
@@ -12058,6 +12510,151 @@ class OTCS:
             failure_message="Cannot get create form for parent ID -> {} and category IDs -> {}".format(
                 parent_id,
                 category_ids,
+            ),
+        )
+
+        return response
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_category_update_form")
+    def get_node_category_form(
+        self,
+        node_id: int,
+        category_id: int | None = None,
+        operation: str = "update",
+    ) -> dict | None:
+        """Get the node category update form.
+
+        Args:
+            node_id (int):
+                The ID of the node to update.
+            category_id (int | None, optional):
+                The ID of the category to update.
+            operation (str, optional):
+                The operation to perform. Default is "update". Other possible value is "create".
+
+        Returns:
+            dict | None:
+                Workspace Category Update Form data or None if the request fails.
+
+        Example:
+        {
+            'forms': [
+                {
+                    'data': {
+                        '20581_1': {'metadata_token': ''},
+                        '20581_10': None,
+                        '20581_11': None,
+                        '20581_12': None,
+                        '20581_13': None,
+                        '20581_14': [
+                            {
+                                '20581_14_x_15': None,
+                                '20581_14_x_16': None,
+                                '20581_14_x_17': None,
+                                '20581_14_x_18': None,
+                                '20581_14_x_19': None,
+                                '20581_14_x_20': None,
+                                '20581_14_x_21': None,
+                                '20581_14_x_22': None
+                            }
+                        ],
+                        '20581_14_1': None,
+                        '20581_2': None,
+                        '20581_23': [
+                            {
+                                '20581_23_x_25': None,
+                                '20581_23_x_26': None,
+                                '20581_23_x_27': None,
+                                '20581_23_x_28': None,
+                                '20581_23_x_29': None,
+                                '20581_23_x_30': None,
+                                '20581_23_x_31': None,
+                                '20581_23_x_32': None,
+                                '20581_23_x_37': None
+                            }
+                        ],
+                        '20581_23_1': None,
+                        '20581_3': None,
+                        '20581_33': {
+                            '20581_33_1_34': None,
+                            '20581_33_1_35': None,
+                            '20581_33_1_36': None
+                        },
+                        '20581_4': None,
+                        '20581_5': None,
+                        '20581_6': None,
+                        '20581_7': None,
+                        '20581_8': None,
+                        '20581_9': None
+                    },
+                    'options': {
+                        'fields': {...},
+                        'form': {...}
+                    },
+                    'schema': {
+                        'properties': {
+                            '20581_1': {
+                                'readonly': True,
+                                'required': False, 'type': 'object'},
+                            '20581_2': {
+                                'maxLength': 20,
+                                'multilingual': None,
+                                'readonly': False,
+                                'required': False,
+                                'title': 'Order Number',
+                                'type': 'string'
+                            },
+                            '20581_11': {
+                                'maxLength': 25,
+                                'multilingual': None,
+                                'readonly': False,
+                                'required': False,
+                                'title': 'Order Type',
+                                'type': 'string'
+                            },
+                            ... (more fields) ...
+                        },
+                        'type': 'object'
+                    }
+                }
+            ]
+        }
+
+        """
+
+        request_header = self.request_form_header()
+
+        # If no category ID is provided get the current category IDs of the node and take the first one.
+        # TODO: we need to be more clever here if multiple categories are assigned to a node.
+        if category_id is None:
+            category_ids = self.get_node_category_ids(node_id=node_id)
+            if not category_ids or not isinstance(category_ids, list):
+                self.logger.error("Cannot get category IDs for node with ID -> %s", str(node_id))
+                return None
+            category_id = category_ids[0]
+
+        self.logger.debug(
+            "Get category %s form for node ID  -> %s and category ID -> %s",
+            operation,
+            str(node_id),
+            str(category_id),
+        )
+
+        request_url = self.config()["nodesFormUrl"] + "/categories/{}?id={}&category_id={}".format(
+            operation, node_id, category_id
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Cannot get category {} form for node ID -> {} and category ID -> {}".format(
+                operation,
+                node_id,
+                category_id,
             ),
         )
 
@@ -12465,7 +13062,7 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Running Web Report with nickname -> '%s'; calling -> %s",
+            "Running web report with nickname -> '%s'; calling -> %s",
             nickname,
             request_url,
         )
@@ -12503,7 +13100,7 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Install CS Application -> '%s'; calling -> %s",
+            "Install OTCS application -> '%s'; calling -> %s",
             application_name,
             request_url,
         )
@@ -12514,7 +13111,7 @@ class OTCS:
             headers=request_header,
             data=install_cs_application_post_data,
             timeout=None,
-            failure_message="Failed to install CS Application -> '{}'".format(
+            failure_message="Failed to install OTCS application -> '{}'".format(
                 application_name,
             ),
         )
@@ -12783,6 +13380,64 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="check_user_node_permissions")
+    def check_user_node_permissions(self, node_ids: list[int]) -> dict | None:
+        """Check if the current user has permissions to access a given list of Content Server nodes.
+
+        This is using the AI endpoint has this method is typically used in Aviator use cases.
+
+        Args:
+            node_ids (list[int]):
+                List of node IDs to check.
+
+        Returns:
+            dict | None:
+                REST API response or None in case of an error.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/ai/nodes/permissions/check',
+                        'method': 'POST',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'ids': [...]
+            }
+        }
+
+        """
+
+        request_url = self.config()["aiUrl"] + "/permissions/check"
+        request_header = self.request_form_header()
+
+        permission_post_data = {"ids": node_ids}
+
+        if float(self.get_server_version()) < 25.4:
+            permission_post_data["user_hash"] = self.otcs_ticket_hashed()
+
+        self.logger.debug(
+            "Check if current user has permissions to access nodes -> %s; calling -> %s",
+            node_ids,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=permission_post_data,
+            failure_message="Failed to check if current user has permissions to access nodes -> {}".format(node_ids),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_categories")
     def get_node_categories(self, node_id: int, metadata: bool = True) -> dict | None:
         """Get categories assigned to a node.
@@ -12946,7 +13601,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                REST esponse with category data or None if the call to the REST API fails.
+                REST response with category data or None if the call to the REST API fails.
 
         """
 
@@ -13210,6 +13865,126 @@ class OTCS:
             return cat_id, attribute_definitions
 
         return -1, {}
+
+    # end method definition
+
+    def get_category_id_by_name(self, node_id: int, category_name: str) -> int | None:
+        """Get the category ID by its name.
+
+        Args:
+            node_id (int):
+                The ID of the node to get the categories for.
+            category_name (str):
+                The name of the category to get the ID for.
+
+        Returns:
+            int | None:
+                The category ID or None if the category is not found.
+
+        """
+
+        response = self.get_node_categories(node_id=node_id)
+        results = response["results"]
+        for result in results:
+            categories = result["metadata"]["categories"]
+            first_key = next(iter(categories))
+            if categories[first_key]["name"] == category_name:
+                return first_key
+        return None
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_category_as_dictionary")
+    def get_node_category_as_dictionary(
+        self, node_id: int, category_id: int | None = None, category_name: str | None = None
+    ) -> dict | None:
+        """Get a specific category assigned to a node in a streamlined Python dictionary form.
+
+        * The whole category data of a node is embedded into a python dict.
+        * Single-value / scalar attributes are key / value pairs in that dict.
+        * Multi-value attributes become key / value pairs with value being a list of strings or integers.
+        * Single-line sets become key /value pairs with value being a sub-dict.
+        * Attribute in single-line sets become key / value pairs in the sub-dict.
+        * Multi-line sets become key / value pairs with value being a list of dicts.
+        * Single-value attributes in multi-line sets become key / value pairs inside the dict at the row position in the list.
+        * Multi-value attributes in multi-line sets become key / value pairs inside the dict at the row position in the list
+          with value being a list of strings or integers.
+
+        See also extract_category_data() for an alternative implementation.
+
+        Args:
+            node_id (int):
+                The ID of the node to get the categories for.
+            category_id (int | None, optional):
+                The node ID of the category definition (in category volume). If not provided,
+                the category ID is determined by its name.
+            category_name (str | None, optional):
+                The name of the category to get the ID for.
+                If category_id is not provided, the category ID is determined by its name.
+
+        Returns:
+            dict | None:
+                REST response with category data or None if the call to the REST API fails.
+
+        """
+
+        if not category_id and not category_name:
+            self.logger.error("Either category ID or category name must be provided!")
+            return None
+
+        if not category_id:
+            category_id = self.get_category_id_by_name(node_id=node_id, category_name=category_name)
+
+        response = self.get_node_category(node_id=node_id, category_id=category_id)
+
+        data = response["results"]["data"]["categories"]
+        metadata = response["results"]["metadata"]["categories"]
+        category_key = next(iter(metadata))
+        _ = metadata.pop(category_key)
+
+        # Initialize the result dict:
+        result = {}
+
+        for key, attribute in metadata.items():
+            is_set = attribute["persona"] == "set"
+            is_multi_value = attribute["multi_value"]
+            attr_name = attribute["name"]
+            attr_key = attribute["key"]
+
+            if is_set:
+                set_name = attr_name
+                set_multi_value = is_multi_value
+
+            if not is_set and "x" not in attr_key:
+                result[attr_name] = data[key]
+                set_name = None
+            elif is_set:
+                # The current attribute is the set itself:
+                if not is_multi_value:
+                    result[attr_name] = {}
+                else:
+                    result[attr_name] = []
+                set_name = attr_name
+            elif not is_set and "x" in attr_key:
+                # We re inside a set and process the set attributes:
+                if not set_multi_value:
+                    # A single row set:
+                    attr_key = attr_key.replace("_x_", "_1_")
+                    result[set_name][attr_name] = data[attr_key]
+                else:
+                    # Collect all the row data:
+                    for index in range(1, 50):
+                        attr_key_index = attr_key.replace("_x_", "_" + str(index) + "_")
+                        # Do we have data for this row?
+                        if attr_key_index in data:
+                            if index > len(result[set_name]):
+                                result[set_name].append({attr_name: data[attr_key_index]})
+                            else:
+                                result[set_name][index - 1][attr_name] = data[attr_key_index]
+                        else:
+                            # No more rows
+                            break
+        return result
 
     # end method definition
 
@@ -13735,6 +14510,8 @@ class OTCS:
         * Multi-value attributes in multi-line sets become key / value pairs inside the dict at the row position in the list
           with value being a list of strings or integers.
 
+        See also get_node_category_as_dictionary() for an alternative implementation.
+
         Args:
             node (dict):
                 The typical node response of a node get REST API call that include the "categories" fields.
@@ -13806,20 +14583,52 @@ class OTCS:
 
         # Start of main method body:
 
-        if not node or "results" not in node:
+        if not node:
+            self.logger.error("Cannot extract category data. No node data provided!")
             return None
+
+        if "results" not in node:
+            # Support also iterators that have resolved the "results" already.
+            # In this case we wrap it in a "rsults" dict to make it look like
+            # a full response:
+            if "data" in node:
+                node = {"results": node}
+            else:
+                return None
+
+        # Some OTCS REST APIs may return a list of nodes in "results".
+        # We only support processing a single node here:
+        if isinstance(node["results"], list):
+            if len(node["results"]) > 1:
+                self.logger.warning("Response includes a node list. Extracting category data for the first node!")
+            node["results"] = node["results"][0]
 
         if "metadata" not in node["results"]:
-            self.logger.error("Cannot exteact metadata. Node method was called without the '&metadata' parameter!")
+            self.logger.error("Cannot extract category data. Method was called without the '&metadata' parameter!")
             return None
 
-        category_schemas = node["results"]["metadata"]["categories"]
+        metadata = node["results"]["metadata"]
+        if "categories" not in metadata:
+            self.logger.error(
+                "Cannot extract category data. No category data found in node response! Use 'categories' value for 'fields' parameter in the node call!"
+            )
+            return None
+        category_schemas = metadata["categories"]
 
         result_dict = {}
         current_dict = result_dict
         set_lookup = {}
         category_lookup = {}
         attribute_lookup = {}
+
+        # Some REST API return categories in different format. We adjust
+        # it on the fly here:
+        if isinstance(category_schemas, list):
+            new_schema = {}
+            for category_schema in category_schemas:
+                first_key = next(iter(category_schema))
+                new_schema[first_key] = category_schema
+            category_schemas = new_schema
 
         try:
             for category_key, category_schema in category_schemas.items():
@@ -13888,8 +14697,16 @@ class OTCS:
                                 self.logger.error("Type -> '%s' not handled yet!", attribute_type)
         except Exception as e:
             self.logger.error("Something went wrong with getting the data schema! Error -> %s", str(e))
+            return None
 
         category_datas = node["results"]["data"]["categories"]
+
+        if isinstance(category_datas, list):
+            new_data = {}
+            for category_data in category_datas:
+                first_key = next(iter(category_data))
+                new_data[first_key] = category_data
+            category_datas = new_data
 
         try:
             for category_data in category_datas.values():
@@ -13911,7 +14728,7 @@ class OTCS:
                             current_dict = set_data
                         elif isinstance(set_data, list):
                             row_number = get_row_number(attribute_key=attribute_key)
-                            self.logger.debug("Taget dict is row %d of multi-line set attribute.", row_number)
+                            self.logger.debug("Target dict is row %d of multi-line set attribute.", row_number)
                             if row_number > len(set_data):
                                 self.logger.debug("Add rows up to %d of multi-line set attribute...", row_number)
                                 for _ in range(row_number - len(set_data)):
@@ -13927,6 +14744,7 @@ class OTCS:
                     current_dict[attribute_name] = value
         except Exception as e:
             self.logger.error("Something went wrong while filling the data! Error -> %s", str(e))
+            return None
 
         return result_dict
 
@@ -14311,7 +15129,7 @@ class OTCS:
 
         Args:
             node_id (int):
-                The node ID of the Extended ECM workspace template.
+                The node ID of the Business Workspace template.
 
         Returns:
             dict | None:
@@ -16679,7 +17497,7 @@ class OTCS:
             "enabled": status,
         }
 
-        request_url = self.config()["aiUrl"] + "/{}".format(workspace_id)
+        request_url = self.config()["aiNodesUrl"] + "/{}".format(workspace_id)
         request_header = self.request_form_header()
 
         if status is True:
@@ -16704,6 +17522,181 @@ class OTCS:
             failure_message="Failed to change status for Content Aviator on workspace with ID -> {}".format(
                 workspace_id,
             ),
+        )
+
+    # end method definition
+
+    def aviator_chat(
+        self, context: str | None, messages: list[dict], where: list[dict] | None = None, inline_citation: bool = True
+    ) -> dict | None:
+        """Process a chat interaction with Content Aviator.
+
+        Args:
+            context (str | None):
+                Context for the current conversation. This includes the text chunks
+                provided by the RAG pipeline.
+            messages (list[dict]):
+                List of messages from conversation history.
+                Format example:
+                [
+                    {
+                        "author": "user", "content": "Summarize this workspace, please."
+                    },
+                    {
+                        "author": "ai", "content": "..."
+                    }
+                ]
+            where (list):
+                Metadata name/value pairs for the query.
+                Could be used to specify workspaces, documents, or other criteria in the future.
+                Values need to match those passed as metadata to the embeddings API.
+                Format example:
+                [
+                    {"workspaceID":"38673"},
+                    {"documentID":"38458"},
+                ]
+            inline_citation (bool, optional):
+                Whether or not inline citations should be used in the response. Default is True.
+
+        Returns:
+            dict:
+                Conversation status
+
+        Example:
+        {
+            'result': 'I am unable to provide the three main regulations for fuel, as the documents contain various articles and specifications related to fuel, but do not explicitly identify which three are the "main" ones.',
+            'references': [
+                {
+                    'chunks': [
+                        {
+                            'citation': None,
+                            'content': ['16. 1 Basic principles 16.'],
+                            'distance': 0.262610273676197,
+                            'source': 'Similarity'
+                        }
+                    ],
+                    'distance': 0.262610273676197,
+                    'metadata': {
+                        'content': {
+                            'chunks': ['16. 1 Basic principles 16.'],
+                            'source': 'Similarity'
+                        },
+                        'documentID': '39004',
+                        'workspaceID': '38673'
+                    }
+                },
+                {
+                    'chunks': [
+                        {
+                            'citation': None,
+                            'content': ['16. 1.'],
+                            'distance': 0.284182507756566,
+                            'source': 'Similarity'
+                        }
+                    ],
+                    'distance': 0.284182507756566,
+                    'metadata': {
+                        'content': {
+                            'chunks': ['16. 1.'],
+                            'source': 'Similarity'
+                        },
+                        'documentID': '38123',
+                        'workspaceID': '38673'
+                    }
+                }
+            ],
+            'context': 'Tool "get_context" called with arguments {"query":"Tell me about the calibration equipment"} and returned:',
+            'queryMetadata': {
+                'originalQuery': 'Tell me about the calibration equipment',
+                'usedQuery': 'Tell me about the calibration equipment'
+            }
+        }
+
+
+
+        """
+
+        request_url = self.config()["aiChatUrl"]
+        request_header = self.request_form_header()
+
+        chat_data = {}
+        if where:
+            chat_data["where"] = where
+
+        chat_data["context"] = context
+        chat_data["messages"] = messages
+        # "synonyms": self.config()["synonyms"],
+        chat_data["inlineCitation"] = inline_citation
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            #            data=chat_data,
+            data={"body": json.dumps(chat_data)},
+            timeout=None,
+            failure_message="Failed to chat with Content Aviator",
+        )
+
+    # end method definition
+
+    def aviator_context(
+        self, query: str, threshold: float = 0.5, limit: int = 10, data: list | None = None
+    ) -> dict | None:
+        """Get context based on the query text from Aviator's vector database.
+
+        Results are text-chunks and they will be permission-checked for the authenticated user.
+
+        Args:
+            query (str):
+                The query text to search for similar text chunks.
+            threshold (float, optional):
+                Similarity threshold between 0 and 1. Default is 0.5.
+            limit (int, optional):
+                Maximum number of results to return. Default is 10.
+            data (list | None, optional):
+                Additional data to pass to the embeddings API. Defaults to None.
+                This can include metadata for filtering the results.
+
+        Returns:
+            dict | None:
+                The response from the embeddings API or None if the request fails.
+
+        """
+
+        request_url = self.config()["aiContextUrl"]
+        request_header = self.request_form_header()
+
+        if not query:
+            self.logger.error("Query text is required for getting context from Content Aviator!")
+            return None
+
+        context_post_body = {
+            "query": query,
+            "threshold": threshold,
+            "limit": limit,
+        }
+        if data:
+            context_post_body["data"] = data
+        else:
+            context_post_body["data"] = []
+
+        self.logger.debug(
+            "Get context from Content Aviator for query -> '%s' (threshold: %f, limit: %d); calling -> %s",
+            query,
+            threshold,
+            limit,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            #            data={"body": json.dumps(context_post_body)},
+            data=context_post_body,
+            timeout=None,
+            failure_message="Failed to retrieve context from Content Aviator",
         )
 
     # end method definition
@@ -16788,7 +17781,8 @@ class OTCS:
             for subnode in subnodes:
                 subnode_id = self.get_result_value(response=subnode, key="id")
                 subnode_name = self.get_result_value(response=subnode, key="name")
-                self.logger.info("Traversing node -> '%s' (%s)", subnode_name, str(subnode_id))
+                subnode_type = self.get_result_value(response=subnode, key="type")
+                self.logger.info("Traversing %s node -> '%s' (%s)", subnode_type, subnode_name, subnode_id)
                 # Recursive call for current subnode:
                 result = self.traverse_node(
                     node=subnode,
@@ -16866,7 +17860,13 @@ class OTCS:
             task_queue.put((subnode, 0, traversal_data))
 
         def traverse_node_worker() -> None:
-            """Work on queue.
+            """Work on a shared queue.
+
+            Loops over these steps:
+            1. Get node from queue
+            2. Execute all executables for that node
+            3. If node is a container and executables indicate to traverse,
+               then enqueue all subnodes
 
             Returns:
                 None
@@ -16903,6 +17903,17 @@ class OTCS:
 
                     # Run all executables
                     for executable in executables or []:
+                        # The executables are functions or method from outside this class.
+                        # They need to return a tuple of two boolean values:
+                        # (result_success, result_traverse)
+                        # result_success indicates if the executable was successful (True)
+                        # or not (False). If False, the execution of the executables list
+                        # is stopped.
+                        # result_traverse indicates if the traversal should continue
+                        # into subnodes (True) or not (False).
+                        # If at least one executable returns result_traverse = True,
+                        # then the traversal into subnodes will be done (if the node is a container).
+                        # As this code is from outside this class, we better catch exceptions:
                         try:
                             result_success, result_traverse = executable(
                                 node=node,
@@ -17877,7 +18888,8 @@ class OTCS:
                 Defaults to None = filter not active.
             filter_subtypes (list | None, optional):
                 Additive filter criterium for item type.
-                Defaults to None = filter not active.
+                Defaults to None = filter not active. filter_subtypes = [] is different from None!
+                If an empty list is provided, the filter is effectively always True.
             filter_category (str | None, optional):
                 Additive filter criterium for existence of a category on the node.
                 The value of filter_category is the name of the category
@@ -17910,7 +18922,7 @@ class OTCS:
             self.logger.error("Illegal node - cannot apply filter!")
             return False
 
-        if filter_subtypes and node["type"] not in filter_subtypes:
+        if filter_subtypes is not None and node["type"] not in filter_subtypes:
             self.logger.debug(
                 "Node type -> '%s' is not in filter node types -> %s. Node -> '%s' failed filter test.",
                 node["type"],
@@ -18623,6 +19635,8 @@ class OTCS:
     def load_items(
         self,
         node_id: int,
+        workspaces: bool = True,
+        items: bool = True,
         filter_workspace_depth: int | None = None,
         filter_workspace_subtypes: list | None = None,
         filter_workspace_category: str | None = None,
@@ -18647,6 +19661,12 @@ class OTCS:
         Args:
             node_id (int):
                 The root Node ID the traversal should start at.
+            workspaces (bool, optional):
+                If True, workspaces are included in the data frame.
+                Defaults to True.
+            items (bool, optional):
+                If True, document items are included in the data frame.
+                Defaults to True.
             filter_workspace_depth (int | None, optional):
                 Additive filter criterium for workspace path depth.
                 Defaults to None = filter not active.
@@ -18695,9 +19715,30 @@ class OTCS:
             dict:
                 Stats with processed and traversed counters.
 
+        Side Effects:
+            The resulting data frame is stored in self._data. It will have the following columns:
+            - type which is either "item" or "workspace"
+            - workspace_type
+            - workspace_id
+            - workspace_name
+            - workspace_description
+            - workspace_outer_path
+            - workspace_<cat_id>_<attr_id> for each workspace attribute if workspace_metadata is True
+            - item_id
+            - item_type
+            - item_name
+            - item_description
+            - item_path
+            - item_download_name
+            - item_mime_type
+            - item_url
+            - item_<cat_id>_<attr_id> for each item attribute if item_metadata is True
+            - item_cat_<cat_id>_<attr_id> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is True
+            - item_cat_<cat_name>_<attr_name> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is False
+
         """
 
-        # Initiaze download threads for this subnode:
+        # Initiaze download threads for document items:
         download_threads = []
 
         def check_node_exclusions(node: dict, **kwargs: dict) -> tuple[bool, bool]:
@@ -18718,15 +19759,14 @@ class OTCS:
 
             """
 
-            exclude_node_ids = kwargs.get("exclude_node_ids")
-            if exclude_node_ids is None:
-                self.logger.error("Missing keyword arguments for executable in node traversal!")
-                return (False, False)
+            # Get the list of node IDs to exclude from the keyword arguments.
+            # If not provided, use an empty list as default which means no exclusions.
+            exclude_node_ids = kwargs.get("exclude_node_ids") or []
 
             node_id = self.get_result_value(response=node, key="id")
             node_name = self.get_result_value(response=node, key="name")
 
-            if node_id and exclude_node_ids is not None and (node_id in exclude_node_ids):
+            if node_id and (node_id in exclude_node_ids):
                 self.logger.info(
                     "Node -> '%s' (%s) is in exclusion list. Skip traversal of this node.",
                     node_name,
@@ -18753,13 +19793,36 @@ class OTCS:
 
             """
 
+            # This should actually not happen as the caller should
+            # check if workspaces are requested before calling this function.
+            if not workspaces:
+                # Success = False, Traverse = True
+                return (False, True)
+
             traversal_data = kwargs.get("traversal_data")
             filter_workspace_data = kwargs.get("filter_workspace_data")
             control_flags = kwargs.get("control_flags")
 
-            if not traversal_data or not filter_workspace_data or not control_flags:
-                self.logger.error("Missing keyword arguments for executable in node traversal!")
-                return False
+            if not traversal_data:
+                self.logger.error(
+                    "Missing keyword argument 'traversal_data' for executable 'check_node_workspace' in node traversal!"
+                )
+                # Success = False, Traverse = False
+                return (False, False)
+
+            if not filter_workspace_data:
+                self.logger.error(
+                    "Missing keyword argument 'filter_workspace_data' for executable 'check_node_workspace' in node traversal!"
+                )
+                # Success = False, Traverse = False
+                return (False, False)
+
+            if not control_flags:
+                self.logger.error(
+                    "Missing keyword argument 'control_flags' for executable 'check_node_workspace' in node traversal!"
+                )
+                # Success = False, Traverse = False
+                return (False, False)
 
             node_id = self.get_result_value(response=node, key="id")
             node_name = self.get_result_value(response=node, key="name")
@@ -18767,10 +19830,10 @@ class OTCS:
             node_type = self.get_result_value(response=node, key="type")
 
             #
-            # 1. Check if the traversal is already inside a workflow. Then we can skip
-            #    the workspace processing. We currently don't support sub-workspaces.
+            # 1. Check if the traversal is already inside a workspace. Then we can skip
+            #    the workspace processing as we currently don't support sub-workspaces.
             #
-            workspace_id = traversal_data["workspace_id"]
+            workspace_id = traversal_data.get("workspace_id")
             if workspace_id:
                 self.logger.debug(
                     "Found folder or workspace -> '%s' (%s) inside workspace with ID -> %d. So this container cannot be a workspace.",
@@ -18801,7 +19864,7 @@ class OTCS:
                 categories = None
 
             #
-            # 3. Apply the defined filters to the current node to see
+            # 3. Apply the defined workspace filters to the current node to see
             #    if we want to 'interpret' it as a workspace
             #
             # See if it is a node that we want to interpret as a workspace.
@@ -18818,6 +19881,13 @@ class OTCS:
                 filter_category=filter_workspace_data["filter_workspace_category"],
                 filter_attributes=filter_workspace_data["filter_workspace_attributes"],
             ):
+                self.logger.debug(
+                    "Node -> '%s' (%s) did not match workspace filter -> %s",
+                    node_name,
+                    node_id,
+                    str(filter_workspace_data),
+                )
+
                 # Success = False, Traverse = True
                 return (False, True)
 
@@ -18831,7 +19901,7 @@ class OTCS:
             #
             # 4. Create the data frame row from the node / traversal data:
             #
-            row = {}
+            row = {"type": "workspace"}
             row["workspace_type"] = node_type
             row["workspace_id"] = node_id
             row["workspace_name"] = node_name
@@ -18855,7 +19925,7 @@ class OTCS:
             traversal_data["workspace_description"] = node_description
             self.logger.debug("Updated traversal data -> %s", str(traversal_data))
 
-            # Success = True, Traverse = False
+            # Success = True, Traverse = True
             # We have traverse = True because we need to
             # keep traversing into the workspace folders.
             return (True, True)
@@ -18882,8 +19952,16 @@ class OTCS:
             filter_item_data = kwargs.get("filter_item_data")
             control_flags = kwargs.get("control_flags")
 
-            if not traversal_data or not filter_item_data or not control_flags:
-                self.logger.error("Missing keyword arguments for executable in node item traversal!")
+            if not traversal_data:
+                self.logger.error("Missing keyword argument 'traversal_data' for executable in node item traversal!")
+                return (False, False)
+
+            if not filter_item_data:
+                self.logger.error("Missing keyword argument 'filter_item_data' for executable in node item traversal!")
+                return (False, False)
+
+            if not control_flags:
+                self.logger.error("Missing keyword argument 'control_flags' for executable in node item traversal!")
                 return (False, False)
 
             node_id = self.get_result_value(response=node, key="id")
@@ -18918,7 +19996,7 @@ class OTCS:
                 categories = None
 
             #
-            # 2. Apply the defined filters to the current node to see
+            # 2. Apply the defined item filters to the current node to see
             #    if we want to add it to the data frame as an item.
             #
             # If filter_item_in_workspace is false, then documents
@@ -18935,10 +20013,17 @@ class OTCS:
                 filter_category=filter_item_data["filter_item_category"],
                 filter_attributes=filter_item_data["filter_item_attributes"],
             ):
+                self.logger.debug(
+                    "Node -> '%s' (%s) did not match item filter -> %s",
+                    node_name,
+                    node_id,
+                    str(filter_item_data),
+                )
+
                 # Success = False, Traverse = True
                 return (False, True)
 
-            # We only consider documents that are inside the defined "workspaces":
+            # Debug output where we found the item (inside or outside of workspace):
             if workspace_id:
                 self.logger.debug(
                     "Found %s item -> '%s' (%s) in depth -> %s inside workspace -> '%s' (%s).",
@@ -18971,15 +20056,19 @@ class OTCS:
                 if control_flags["download_documents"] and (
                     not os.path.exists(file_path) or not control_flags["skip_existing_downloads"]
                 ):
-                    #
-                    # Start anasynchronous Download Thread:
-                    #
+                    mime_type = self.get_result_value(response=node, key="mime_type")
+                    extract_after_download = mime_type == "application/x-zip-compressed" and extract_zip
                     self.logger.debug(
-                        "Downloading file -> '%s'...",
+                        "Downloading document -> '%s' (%s) to temp file -> '%s'%s...",
+                        node_name,
+                        mime_type,
                         file_path,
+                        " and extracting it after download" if extract_after_download else "",
                     )
 
-                    extract_after_download = node["mime_type"] == "application/x-zip-compressed" and extract_zip
+                    #
+                    # Start asynchronous Download Thread:
+                    #
                     thread = threading.Thread(
                         target=self.download_document_multi_threading,
                         args=(node_id, file_path, extract_after_download),
@@ -18989,7 +20078,8 @@ class OTCS:
                     download_threads.append(thread)
                 else:
                     self.logger.debug(
-                        "File -> %s has been downloaded before or download is not requested. Skipping download...",
+                        "Document -> '%s' has been downloaded to file -> %s before or download is not requested. Skipping download...",
+                        node_name,
                         file_path,
                     )
             # end if document
@@ -18998,26 +20088,36 @@ class OTCS:
             # Construct a dictionary 'row' that we will add
             # to the resulting data frame:
             #
-            row = {}
-            # First we include some key workspace data to associate
-            # the item with the workspace:
-            row["workspace_type"] = workspace_type
-            row["workspace_id"] = workspace_id
-            row["workspace_name"] = workspace_name
-            row["workspace_description"] = workspace_description
+            row = {"type": "item"}
+            if workspaces:
+                # First we include some key workspace data to associate
+                # the item with the workspace:
+                row["workspace_type"] = workspace_type
+                row["workspace_id"] = workspace_id
+                row["workspace_name"] = workspace_name
+                row["workspace_description"] = workspace_description
             # Then add item specific data:
             row["item_id"] = str(node_id)
             row["item_type"] = node_type
             row["item_name"] = node_name
             row["item_description"] = node_description
-            # We take the sub-path of the folder path inside the workspace
+            row["item_path"] = []
+            # We take the part of folder path which is inside the workspace
             # as the item path:
-            try:
-                # Item path are the list elements after the item that is the workspace name:
-                row["item_path"] = folder_path[folder_path.index(workspace_name) + 1 :]
-            except ValueError:
-                self.logger.warning("Cannot access folder path while processing -> '%s' (%s)!", node_name, node_id)
-                row["item_path"] = []
+            if (
+                folder_path and workspace_name and workspace_name in folder_path
+            ):  # check if folder_path is not empty, this can happy if document items are the workspace items
+                try:
+                    # Item path are the list elements after the item that is the workspace name:
+                    row["item_path"] = folder_path[folder_path.index(workspace_name) + 1 :]
+                except ValueError:
+                    self.logger.warning(
+                        "Cannot find workspace name -> '%s' in folder path -> %s while processing -> '%s' (%s)!",
+                        workspace_name,
+                        folder_path,
+                        node_name,
+                        node_id,
+                    )
             row["item_download_name"] = str(node_id) if node_type == self.ITEM_TYPE_DOCUMENT else ""
             row["item_mime_type"] = (
                 self.get_result_value(response=node, key="mime_type") if node_type == self.ITEM_TYPE_DOCUMENT else ""
@@ -19025,10 +20125,10 @@ class OTCS:
             # URL specific data:
             row["item_url"] = self.get_result_value(response=node, key="url") if node_type == self.ITEM_TYPE_URL else ""
             if item_metadata and categories and categories["results"]:
-                # Add columns for workspace node categories have been determined above.
+                # Add columns for item node categories have been determined above.
                 self.add_attribute_columns(row=row, categories=categories, prefix="item_cat_")
 
-            # Now we add the row to the Pandas Data Frame in the Data class:
+            # Now we add the item row to the Pandas Data Frame in the Data class:
             self.logger.info(
                 "Adding %s -> '%s' (%s) to data frame...",
                 "document" if node_type == self.ITEM_TYPE_DOCUMENT else "URL",
@@ -19038,7 +20138,9 @@ class OTCS:
             with self._data.lock():
                 self._data.append(row)
 
-            return True
+            # Success = True, Traverse = False
+            # We have traverse = False because document or URL items have no sub-items.
+            return (True, False)
 
         # end check_node_item()
 
@@ -19077,17 +20179,35 @@ class OTCS:
         }
 
         #
+        # Define the list of executables to call for each node:
+        #
+        executables = []
+        if workspaces:
+            executables.append(check_node_workspace)
+        if items:
+            executables.append(check_node_item)
+        if not executables:
+            self.logger.error("Neither workspaces nor items are requested to be loaded. Nothing to do!")
+            return None
+
+        #
         # Start the traversal of the nodes:
         #
         result = self.traverse_node_parallel(
             node=node_id,
+            # For each node we call these executables in this order to check if
+            # the node should be added to the resulting data frame:
             executables=[check_node_exclusions, check_node_workspace, check_node_item],
+            workers=workers,  # number of worker threads
             exclude_node_ids=exclude_node_ids,
             filter_workspace_data=filter_workspace_data,
             filter_item_data=filter_item_data,
             control_flags=control_flags,
-            workers=workers,  # number of worker threads
         )
+
+        # Wait for all download threads to complete:
+        for thread in download_threads:
+            thread.join()
 
         return result
 
@@ -19177,7 +20297,7 @@ class OTCS:
                 }
                 if message_override:
                     message.update(message_override)
-                self.logger.info(
+                self.logger.debug(
                     "Start Content Aviator embedding on -> '%s' (%s), type -> %s, crawl -> %s, wait for completion -> %s, workspaces -> %s, documents -> %s, images -> %s",
                     node_properties["name"],
                     node_properties["id"],
@@ -19188,7 +20308,7 @@ class OTCS:
                     document_metadata,
                     images,
                 )
-                self.logger.debug("Sending WebSocket message -> %s", message)
+                self.logger.debug("Sending WebSocket message -> %s...", message)
                 await websocket.send(message=json.dumps(message))
 
                 # Continuously listen for messages
@@ -19295,3 +20415,170 @@ class OTCS:
         return success
 
     # end method definition
+
+    def _get_document_template_raw(self, workspace_id: int) -> ET.Element | None:
+        """Get the raw template XML payload from a workspace.
+
+        Args:
+            workspace_id (int):
+                The ID of the workspace to generate the document from.
+
+        Returns:
+            ET.Element | None:
+                The XML Element with the payload to initiate a document generation, or None if an error occurred
+
+        """
+
+        request_url = self.config()["csUrl"]
+
+        request_header = self.request_form_header()
+        request_header["referer"] = "http://localhost"
+
+        data = {
+            "func": "xecmpfdocgen.PowerDocsPayload",
+            "wsId": str(workspace_id),
+            "hideHeader": "true",
+            "source": "CreateDocument",
+        }
+
+        self.logger.debug(
+            "Get document templates for workspace with ID -> %d; calling -> %s",
+            workspace_id,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=data,
+            timeout=None,
+            failure_message="Failed to get document templates for workspace with ID -> {}".format(workspace_id),
+            parse_request_response=False,
+        )
+
+        if response is None:
+            return None
+
+        try:
+            text = response.text
+            match = re.search(r'<textarea[^>]*name=["\']documentgeneration["\'][^>]*>(.*?)</textarea>', text, re.DOTALL)
+            textarea_content = match.group(1).strip() if match else ""
+            textarea_content = html.unescape(textarea_content)
+
+            # Load Payload into XML object
+            # payload is an XML formatted string, load it into an XML object for further processing
+
+            root = ET.Element("documentgeneration", format="pdf")
+            root.append(ET.fromstring(textarea_content))
+        except (ET.ParseError, AttributeError) as exc:
+            self.logger.error(
+                "Cannot parse document template XML payload for workspace with ID -> %d! Error -> %s",
+                workspace_id,
+                exc,
+            )
+            return None
+        else:
+            return root
+
+    # end method definition
+
+    def get_document_template_names(self, workspace_id: int, root: ET.Element | None = None) -> list[str] | None:
+        """Get the list of available template names from a workspace.
+
+        Args:
+            workspace_id (int):
+                The ID of the workspace to generate the document from.
+            root (ET.Element | None, optional):
+                The XML Element with the payload to initiate a document generation.
+
+        Returns:
+            list[str] | None:
+                A list of template names available in the workspace, or None if an error occurred.
+
+        """
+
+        if root is None:
+            root = self._get_document_template_raw(workspace_id=workspace_id)
+            if root is None:
+                self.logger.error(
+                    "Cannot get document templates for workspace with ID -> %d",
+                    workspace_id,
+                )
+                return None
+        template_names = [item.text for item in root.findall("startup/processing/templates/template")]
+
+        return template_names
+
+    # end method definition
+
+    def get_document_template(
+        self, workspace_id: int, template_name: str, input_values: dict | None = None
+    ) -> str | None:
+        """Get the template XML payload from a workspace and a given template name.
+
+        Args:
+            workspace_id (int):
+                The ID of the workspace to generate the document from.
+            template_name (str):
+                The name of the template to use for document generation.
+            input_values (dict | None, optional):
+                A dictionary with input values to replace in the template.
+
+        Returns:
+            str | None:
+                The XML string with the payload to initiate a document generation, or None if an error occurred.
+
+        """
+
+        root = self._get_document_template_raw(workspace_id=workspace_id)
+        if root is None:
+            self.logger.error(
+                "Cannot get document template for workspace with ID -> %d",
+                workspace_id,
+            )
+            return None
+
+        template_names = self.get_document_template_names(workspace_id=workspace_id, root=root)
+
+        if template_name not in template_names:
+            self.logger.error(
+                "Template name -> '%s' not found in workspace with ID -> %d! Available templates are: %s",
+                template_name,
+                workspace_id,
+                ", ".join(template_names),
+            )
+            return None
+
+        # remove startup/processing
+        startup = root.find("startup")
+        # Find the existing application element and update its sysid attribute
+        application = startup.find("application")
+        application.set("sysid", "3adfd3a4-718f-4b9c-ac93-72efbcdf17f1")
+
+        processing = startup.find("processing")
+
+        # Clear processing information
+        processing.clear()
+
+        modus = ET.SubElement(processing, "modus")
+        modus.text = "local"
+        editor = ET.SubElement(processing, "editor")
+        editor.text = "false"
+        template = ET.SubElement(processing, "template", type="Name")
+        template.text = template_name
+        channel = ET.SubElement(processing, "channel")
+        channel.text = "save"
+
+        # Add static query information for userId and asOfDate
+        if input_values:
+            query = ET.SubElement(startup, "query", type="value")
+            input_element = ET.SubElement(query, "input")
+
+            for column, value in input_values.items():
+                value_element = ET.SubElement(input_element, "value", column=column)
+                value_element.text = value
+
+        payload = ET.tostring(root, encoding="utf8").decode("utf8")
+
+        return payload

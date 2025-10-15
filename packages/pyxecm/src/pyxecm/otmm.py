@@ -47,7 +47,7 @@ REQUEST_HEADERS = {
     "User-Agent": USER_AGENT,
     "Content-Type": "application/x-www-form-urlencoded",
 }
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 60.0
 
 default_logger = logging.getLogger(MODULE_NAME)
 

@@ -205,7 +205,7 @@ class K8s:
                 self.logger.debug("Pod -> '%s' not found (may be deleted).", pod_name)
                 return None
             else:
-                self.logger.error("Failed to get Pod -> '%s'!", pod_name)
+                self.logger.error("Failed to get pod -> '%s'!", pod_name)
                 return None  # Unexpected error, return None
         return response
 
@@ -306,8 +306,9 @@ class K8s:
 
             except ApiException:
                 self.logger.error(
-                    "Failed to wait for pod -> '%s'",
+                    "Failed to wait for pod -> '%s' to reach state -> '%s'.",
                     pod_name,
+                    condition_name,
                 )
 
     # end method definition
@@ -320,7 +321,7 @@ class K8s:
         time_retry: int = 10,
         container: str | None = None,
         timeout: int = 60,
-    ) -> str:
+    ) -> str | None:
         """Execute a command inside a Kubernetes Pod (similar to kubectl exec on command line).
 
         See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#connect_get_namespaced_pod_exec
@@ -342,14 +343,15 @@ class K8s:
                 Each time a response is found in stdout or stderr we wait another timeout duration [60]
 
         Returns:
-            str:
+            str | None:
                 Response of the command or None if the call fails.
 
         """
 
         pod = self.get_pod(pod_name=pod_name)
         if not pod:
-            self.logger.error("Pod -> '%s' does not exist", pod_name)
+            self.logger.error("Pod -> '%s' does not exist. Cannot execute command -> %s", pod_name, command)
+            return None
 
         self.logger.debug("Execute command -> %s in pod -> '%s'", command, pod_name)
 
@@ -391,10 +393,10 @@ class K8s:
                 return response
 
         self.logger.error(
-            "Failed to execute command with %s retries -> %s in pod -> '%s'; error -> %s",
-            max_retry,
+            "Failed to execute command -> %s in pod -> '%s' after %d retries; error -> %s",
             command,
             pod_name,
+            max_retry,
             str(exception),
         )
 
@@ -409,7 +411,7 @@ class K8s:
         commands: list,
         timeout: int = 30,
         write_stderr_to_error_log: bool = True,
-    ) -> str:
+    ) -> str | None:
         """Execute a command inside a Kubernetes pod (similar to kubectl exec on command line).
 
         Other than exec_pod_command() method above this is an interactive execution using
@@ -432,17 +434,18 @@ class K8s:
                 Default is write to error log (True).
 
         Returns:
-            str:
+            str | None:
                 Response of the command or None if the call fails.
 
         """
 
-        pod = self.get_pod(pod_name=pod_name)
-        if not pod:
-            self.logger.error("Pod -> '%s' does not exist", pod_name)
-
         if not commands:
             self.logger.error("No commands to execute on pod ->'%s'!", pod_name)
+            return None
+
+        pod = self.get_pod(pod_name=pod_name)
+        if not pod:
+            self.logger.error("Pod -> '%s' does not exist. Cannot execute commands -> %s", pod_name, commands)
             return None
 
         # Get first command - this should be the shell:
@@ -499,7 +502,7 @@ class K8s:
 
     # end method definition
 
-    def delete_pod(self, pod_name: str) -> None:
+    def delete_pod(self, pod_name: str) -> V1Pod | None:
         """Delete a pod in the configured namespace (the namespace is defined in the class constructor).
 
         See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#delete_namespaced_pod
@@ -509,21 +512,14 @@ class K8s:
                 The name of the Kubernetes pod in the current namespace.
 
         Returns:
-            V1Status (object) or None if the call fails.
-            - api_version: The Kubernetes API version.
-            - kind: The Kubernetes object kind, which is always "Status".
-            - metadata: Additional metadata about the status object, such as the resource version.
-            - status: The status of the operation, which is either "Success" or an error status.
-            - message: A human-readable message explaining the status.
-            - reason: A short string that describes the reason for the status.
-            - code: An HTTP status code that corresponds to the status.
-            See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1Status.md
+            V1Pod (object) or None if the call fails.
 
         """
 
         pod = self.get_pod(pod_name=pod_name)
         if not pod:
-            self.logger.error("Pod -> '%s' does not exist!", pod_name)
+            self.logger.error("Pod -> '%s' does not exist! Cannot delete it.", pod_name)
+            return None
 
         try:
             response = self.get_core_v1_api().delete_namespaced_pod(
@@ -1105,7 +1101,7 @@ class K8s:
             rule_index += 1
 
         if not host:
-            self.logger.error("Cannot find host.")
+            self.logger.error("Cannot find host to upgrade the Kubernetes Ingress -> '%s'", ingress_name)
             return None
 
         body = [
@@ -1351,7 +1347,7 @@ class K8s:
                     body,
                     pretty="true",
                 )
-                self.logger.info("Triggered restart of deployment -> '%s'.", deployment_name)
+                self.logger.debug("Triggered restart of deployment -> '%s'.", deployment_name)
 
             except ApiException as api_exception:
                 self.logger.error(
@@ -1484,7 +1480,7 @@ class K8s:
 
         try:
             self.get_apps_v1_api().patch_namespaced_stateful_set(sts_name, self.get_namespace(), body, pretty="true")
-            self.logger.info("Triggered restart of stateful set -> '%s'.", sts_name)
+            self.logger.debug("Triggered restart of stateful set -> '%s'.", sts_name)
 
         except ApiException as api_exception:
             self.logger.error("Failed to restart stateful set -> '%s'; error -> %s!", sts_name, str(api_exception))

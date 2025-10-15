@@ -55,12 +55,16 @@ class XML:
     # end method definition
 
     @classmethod
-    def xml_to_dict(cls, xml_string: str) -> dict:
+    def xml_to_dict(cls, xml_string: str, encode: bool = False, include_attributes: bool = False) -> dict:
         """Parse XML string and return a dictionary without namespaces.
 
         Args:
             xml_string (str):
                 The XML string to process.
+            encode (bool, optional):
+                True if the XML string should be encoded to UTF-8 bytes. Defaults to False.
+            include_attributes (bool, optional):
+                True if XML attributes should be included in the dictionary. Defaults to False.
 
         Returns:
             dict:
@@ -80,20 +84,47 @@ class XML:
                     Dictionary representing the XML element
 
             """
+
             tag = cls.remove_xml_namespace(element.tag)
             children = list(element)
+            node_dict = {}
+
+            if element.attrib and include_attributes:
+                node_dict.update({"@{}".format(k): v for k, v in element.attrib.items()})
+
             if children:
-                return {
-                    tag: {
-                        cls.remove_xml_namespace(child.tag): xml_element_to_dict(child)[
-                            cls.remove_xml_namespace(child.tag)
-                        ]
-                        for child in children
-                    }
-                }
+                child_dict = {}
+                for child in children:
+                    child_tag = cls.remove_xml_namespace(child.tag)
+                    child_value = xml_element_to_dict(child)
 
-            return {tag: element.text.strip() if element.text else None}
+                    # child_dict is {child_tag: ...}, we want the value inside
+                    value = child_value[child_tag]
 
+                    # Handle multiple occurrences of the same tag:
+                    if child_tag in child_dict:
+                        # If the tag already exists, ensure it becomes a list
+                        if not isinstance(child_dict[child_tag], list):
+                            child_dict[child_tag] = [child_dict[child_tag]]
+                        child_dict[child_tag].append(value)
+                    else:
+                        child_dict[child_tag] = value
+
+                # Merge children into node_dict
+                node_dict.update(child_dict)
+
+            # Add text if present and meaningful
+            text = element.text.strip() if element.text and element.text.strip() else None
+            if text:
+                if node_dict:
+                    node_dict["#text"] = text
+                else:
+                    return {tag: text}
+
+            return {tag: node_dict if node_dict else text}
+
+        if encode:
+            xml_string = xml_string.encode("utf-8")
         root = etree.fromstring(xml_string)
 
         return xml_element_to_dict(root)

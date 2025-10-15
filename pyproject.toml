@@ -1,0 +1,128 @@
+[project]
+name = "pyxecm-dev"
+version = "0.0.0"
+requires-python = ">=3.13"
+dependencies = [
+    "pyxecm[pyvis,api,customizer]",
+    "pytest-xdist>=3.8.0",
+]
+
+[dependency-groups]
+dev = [
+  'pdoc3',
+  'mkdocs',
+  'mkdocstrings[python]',
+  'mkdocs-material',
+  'mkdocs-git-revision-date-localized-plugin',
+  'pymdown-extensions',
+  "ruff",
+  'python-decouple',
+  'settings-doc',
+  "pytest>=8.3.5",
+  "pytest-mock>=3.14.0",
+  "pytest-cov>=6.1.1",
+  "httpx>=0.28.1",
+  "requests-mock>=1.12.1",
+  "pytest-dotenv>=0.5.2",
+]
+
+[tool.uv.sources]
+pyxecm = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/*"]
+exclude = ["packages/seeds"]
+
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/rules/
+select = ["ALL"]
+
+# E4: Enforces Python-specific formatting and style rules, often related to imports and code layout (e.g., E402, module-level import not at top of file).
+# E7: Relates to errors in Python syntax or usage, such as invalid expressions.
+# E9: Catches Python runtime errors (e.g., undefined variables, unsupported operations).
+# F: Stands for "Flake8" rules, which include a broad range of Python style and error checks (e.g., unused imports, undefined variables, etc.).
+# FIX: Selects rules that Ruff can automatically fix (e.g., applying auto-corrections for code style violations).
+# I: Relates to "Import" rules, which enforce best practices for managing Python imports (e.g., sorting imports, unused imports, etc.).
+# UP032: Prevents Ruff from converting .format() calls to f-strings.
+# D204 and D205: Prevents Ruff from enforcing changes to empty lines after docstrings.
+
+ignore = [
+  "FIX002",
+  "TD002",
+  "TD003",
+  "BLE001",
+  "ERA001",
+  "S105",
+  "S106",
+  "S107",
+  "S113",
+  "S311",
+  "S314",
+  "S603",
+  "S608",
+  "RUF005",
+  "RUF012",
+  "E501",
+  "PERF203",
+  "PLW2901",
+  "PD002",
+  "UP032",
+  "D202",
+  "D203",
+  "D213",
+  "PLC0415",
+  "PLR0911",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+  "PLR2004",
+  "PTH",
+  "PTH123",
+  "PTH103",
+  "PTH104",
+  "PTH107",
+  "PTH110",
+  "PTH112",
+  "PTH113",
+  "PTH118",
+  "PTH119",
+  "PTH120",
+  "PTH122",
+  "FBT001",
+  "FBT002",
+  "RET504",
+  "RET505",
+  "C901",
+  "B019",
+  "TRY400",
+  "COM812",
+]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff]
+line-length = 120
+include = ["packages/**/*.py", "tests/**/*.py"]
+exclude = []
+
+[tool.ruff.lint.extend-per-file-ignores]
+"**/tests/*.py" = [
+    "INP001","D100","D103","ANN",
+    "S101", # asserts allowed in tests...
+    "ARG", # Unused function args -> fixtures nevertheless are functionally relevant...
+    "FBT", # Don't care about booleans as positional arguments in tests, e.g. via @pytest.mark.parametrize()
+    "PLR2004", # Magic value used in comparison, ...
+    "S311", # Standard pseudo-random generators are not suitable for cryptographic purposes
+]
+"**/**/test_*.py" = [
+    "INP001","D100","D103","ANN",
+    "S101", # asserts allowed in tests...
+    "ARG", # Unused function args -> fixtures nevertheless are functionally relevant...
+    "FBT", # Don't care about booleans as positional arguments in tests, e.g. via @pytest.mark.parametrize()
+    "PLR2004", # Magic value used in comparison, ...
+    "S311", # Standard pseudo-random generators are not suitable for cryptographic purposes
+]
+"**/__init__.py" = [
+  "D104"
+]

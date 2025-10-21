@@ -13998,13 +13998,15 @@ class OTCS:
         apply_action: str = "add_upgrade",
         add_version: bool = False,
         clear_existing_categories: bool = False,
+        attribute_values: dict | None = None,
     ) -> bool:
         """Assign a category to a Content Server node.
 
         Optionally turn on inheritance and apply category to sub-items
         (if node_id is a container / folder / workspace).
         If the category is already assigned to the node this method will
-        throw an error.
+        throw an error. 
+        Optionally set category attributes values.
 
         Args:
             node_id (int):
@@ -14025,6 +14027,9 @@ class OTCS:
                 True, if a document version should be added for the category change (default = False).
             clear_existing_categories (bool, optional):
                 Defines, whether or not existing (other) categories should be removed (default = False).
+            attribute_values (dict, optional):
+                Dictionary containing "attribute_id":"value" pairs, to be populated during the category assignment.
+                (In case of the category attriutes being set as "Required" in xECM, providing corresponding values for those attributes will resolve inability to assign the category).
 
         Returns:
             bool:
@@ -14049,6 +14054,9 @@ class OTCS:
             category_post_data = {
                 "category_id": category_id,
             }
+
+            if attribute_values is not None:
+                category_post_data.update(attribute_values)
 
             self.logger.debug(
                 "Assign category with ID -> %d to item with ID -> %d; calling -> %s",

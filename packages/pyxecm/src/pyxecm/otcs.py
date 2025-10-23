@@ -5054,9 +5054,9 @@ class OTCS:
             show_hidden (bool, optional):
                 Whether to list hidden items. Defaults to False.
             limit (int, optional):
-                The maximum number of results to return. Defaults to 100.
+                The maximum number of results to return (page size). Defaults to 100 (max).
             page (int, optional):
-                The page of results to retrieve. Defaults to 1 (first page).
+                The page of results to retrieve (page number). Defaults to 1 (first page).
             fields (str | list, optional):
                 Which fields to retrieve.
                 This can have a significant impact on performance.

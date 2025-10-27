@@ -500,6 +500,7 @@ class OTCS:
         self._use_numeric_category_identifier = use_numeric_category_identifier
         self._executor = ThreadPoolExecutor(max_workers=thread_number)
         self._workspace_type_lookup = {}
+        self._workspace_type_names = []
 
     # end method definition
 
@@ -1018,7 +1019,12 @@ class OTCS:
                     if success_message:
                         self.logger.info(success_message)
                     if parse_request_response and not stream:
-                        return self.parse_request_response(response_object=response)
+                        # There are cases where OTCS returns response.ok (200) but
+                        # because of restart or scaling of pods the response text is not
+                        # valid JSON. So parse_request_response() may raise an ConnectionError exception that
+                        # is handled in the exception block below (with waiting for readiness and retry logic)
+                        parsed_response = self.parse_request_response(response_object=response)
+                        return parsed_response
                     else:
                         return response
                 # Check if Session has expired - then re-authenticate and try once more
@@ -1123,17 +1129,20 @@ class OTCS:
                     else:
                         return None
             # end except Timeout
-            except requests.exceptions.ConnectionError:
+            except requests.exceptions.ConnectionError as connection_error:
                 if retries <= max_retries:
                     self.logger.warning(
-                        "Connection error (%s)! Retrying in %d seconds... %d/%d",
+                        "Cannot connect to OTCS at -> %s; error -> %s! Retrying in %d seconds... %d/%d",
                         url,
+                        str(connection_error),
                         REQUEST_RETRY_DELAY,
                         retries,
                         max_retries,
                     )
                     retries += 1
 
+                    # The connection error could have been caused by a restart of the OTCS pod or services.
+                    # So we better check if OTCS is ready to receive requests again before retrying:
                     while not self.is_ready():
                         self.logger.warning(
                             "Content Server is not ready to receive requests. Waiting for state change in %d seconds...",
@@ -1143,8 +1152,9 @@ class OTCS:
 
                 else:
                     self.logger.error(
-                        "%s; connection error",
+                        "%s; connection error -> %s",
                         failure_message,
+                        str(connection_error),
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries
@@ -1183,12 +1193,16 @@ class OTCS:
                 The response object delivered by the request call.
             additional_error_message (str):
                 Custom error message to include in logs.
-            show_error (bool):
-                If True, logs an error. If False, logs a warning.
+            show_error (bool, optional):
+                If True, logs an error / raises an exception. If False, logs a warning.
 
         Returns:
             dict | None:
                 Parsed response as a dictionary, or None in case of an error.
+
+        Raises:
+            requests.exceptions.ConnectionError:
+                If the response cannot be decoded as JSON.
 
         """
 
@@ -1214,12 +1228,13 @@ class OTCS:
                     exception,
                 )
             if show_error:
-                self.logger.error(message)
-            else:
-                self.logger.debug(message)
+                # Raise ConnectionError instead of returning None
+                raise requests.exceptions.ConnectionError(message) from exception
+            self.logger.warning(message)
             return None
-        else:
-            return dict_object
+        # end try-except block
+
+        return dict_object
 
     # end method definition
 
@@ -1710,9 +1725,9 @@ class OTCS:
         # than creating a list with all values at once.
         # This is especially important for large result sets.
         yield from (
-            item[data_name][property_name]
+            item[data_name][property_name] if property_name else item[data_name]
             for item in response["results"]
-            if isinstance(item.get(data_name), dict) and property_name in item[data_name]
+            if isinstance(item.get(data_name), dict) and (not property_name or property_name in item[data_name])
         )
 
     # end method definition
@@ -5054,9 +5069,9 @@ class OTCS:
             show_hidden (bool, optional):
                 Whether to list hidden items. Defaults to False.
             limit (int, optional):
-                The maximum number of results to return. Defaults to 100.
+                The maximum number of results to return (page size). Defaults to 100.
             page (int, optional):
-                The page of results to retrieve. Defaults to 1 (first page).
+                The page of results to retrieve (page number). Defaults to 1 (first page).
             fields (str | list, optional):
                 Which fields to retrieve.
                 This can have a significant impact on performance.
@@ -5408,11 +5423,10 @@ class OTCS:
                 continue
             category_key = next(iter(category_schema))
 
-            attribute_schema = next(
-                (cat_elem for cat_elem in category_schema.values() if cat_elem.get("name") == attribute),
-                None,
-            )
-            if not attribute_schema:
+            # There can be multiple attributes with the same name in a category
+            # if the category has sets:
+            attribute_schemas = [cat_elem for cat_elem in category_schema.values() if cat_elem.get("name") == attribute]
+            if not attribute_schemas:
                 self.logger.debug(
                     "Node -> '%s' (%s) does not have attribute -> '%s'. Skipping...",
                     node_name,
@@ -5420,73 +5434,81 @@ class OTCS:
                     attribute,
                 )
                 continue
-            attribute_key = attribute_schema["key"]
-            # Split the attribute key once (1) at the first underscore from the right.
-            # rsplit delivers a list and [-1] delivers the last list item:
-            attribute_id = attribute_key.rsplit("_", 1)[-1]
 
-            if attribute_set:
-                set_schema = next(
-                    (
-                        cat_elem
-                        for cat_elem in category_schema.values()
-                        if cat_elem.get("name") == attribute_set and cat_elem.get("persona") == "set"
-                    ),
-                    None,
-                )
-                if not set_schema:
-                    self.logger.debug(
-                        "Node -> '%s' (%s) does not have attribute set -> '%s'. Skipping...",
-                        node_name,
-                        node_id,
-                        attribute_set,
+            # Traverse the attribute schemas with the matching attribute name:
+            for attribute_schema in attribute_schemas:
+                attribute_key = attribute_schema["key"]
+                # Split the attribute key once (1) at the first underscore from the right.
+                # rsplit delivers a list and [-1] delivers the last list item:
+                attribute_id = attribute_key.rsplit("_", 1)[-1]
+
+                if attribute_set:  # is the attribute_set parameter provided?
+                    set_schema = next(
+                        (
+                            cat_elem
+                            for cat_elem in category_schema.values()
+                            if cat_elem.get("name") == attribute_set and cat_elem.get("persona") == "set"
+                        ),
+                        None,
                     )
-                    continue
-                set_key = set_schema["key"]
-            else:
-                set_schema = None
-                set_key = None
+                    if not set_schema:
+                        self.logger.debug(
+                            "Node -> '%s' (%s) does not have attribute set -> '%s'. Skipping...",
+                            node_name,
+                            node_id,
+                            attribute_set,
+                        )
+                        continue
+                    set_key = set_schema["key"]
+                else:  # no attribute set value provided via the attribute_set parameter:
+                    if "_x_" in attribute_key:
+                        # The lookup does not include a set name but this attribute key
+                        # belongs to a set attribute - so we can skip it:
+                        continue
+                    set_schema = None
+                    set_key = None
 
-            prefix = set_key + "_" if set_key else category_key + "_"
+                prefix = set_key + "_" if set_key else category_key + "_"
 
-            data = node["data"]["categories"]
-            for cat_data in data:
-                if set_key:
-                    for i in range(1, int(set_schema["multi_value_length_max"])):
-                        key = prefix + str(i) + "_" + attribute_id
+                data = node["data"]["categories"]
+                for cat_data in data:
+                    if set_key:
+                        for i in range(1, int(set_schema["multi_value_length_max"])):
+                            key = prefix + str(i) + "_" + attribute_id
+                            attribute_value = cat_data.get(key)
+                            if not attribute_value:
+                                break
+                            # Is it a multi-value attribute (i.e. a list of values)?
+                            if isinstance(attribute_value, list):
+                                if value in attribute_value:
+                                    # Create a "results" dict that is compatible with normal REST calls
+                                    # to not break get_result_value() method that may be called on the result:
+                                    results["results"].append(node)
+                            elif value == attribute_value:
+                                # Create a results dict that is compatible with normal REST calls
+                                # to not break get_result_value() method that may be called on the result:
+                                results["results"].append(node)
+                    # end if set_key
+                    else:
+                        key = prefix + attribute_id
                         attribute_value = cat_data.get(key)
                         if not attribute_value:
-                            break
+                            continue
                         # Is it a multi-value attribute (i.e. a list of values)?
                         if isinstance(attribute_value, list):
                             if value in attribute_value:
                                 # Create a "results" dict that is compatible with normal REST calls
                                 # to not break get_result_value() method that may be called on the result:
                                 results["results"].append(node)
+                        # If not a multi-value attribute, check for equality:
                         elif value == attribute_value:
                             # Create a results dict that is compatible with normal REST calls
                             # to not break get_result_value() method that may be called on the result:
                             results["results"].append(node)
-                # end if set_key
-                else:
-                    key = prefix + attribute_id
-                    attribute_value = cat_data.get(key)
-                    if not attribute_value:
-                        continue
-                    # Is it a multi-value attribute (i.e. a list of values)?
-                    if isinstance(attribute_value, list):
-                        if value in attribute_value:
-                            # Create a "results" dict that is compatible with normal REST calls
-                            # to not break get_result_value() method that may be called on the result:
-                            results["results"].append(node)
-                    # If not a multi-value attribute, check for equality:
-                    elif value == attribute_value:
-                        # Create a results dict that is compatible with normal REST calls
-                        # to not break get_result_value() method that may be called on the result:
-                        results["results"].append(node)
-                # end if set_key else
-            # end for cat_data, cat_schema in zip(data, schema)
-        # end for node in nodes
+                    # end if set_key ... else
+                # end for cat_data in data:
+            # end for attribute_schema in attribute_schemas:
+        # end for node in self.get_subnodes_iterator()
 
         self.logger.debug(
             "Couldn't find a node with the value -> '%s' in the attribute -> '%s' of category -> '%s' in parent with node ID -> %d.",
@@ -7516,7 +7538,7 @@ class OTCS:
         chunk_size: int = 8192,
         overwrite: bool = True,
     ) -> bool:
-        """Download a document from OTCS to local file system.
+        """Download a document (version) from OTCS to local file system.
 
         Args:
             node_id (int):
@@ -7541,8 +7563,7 @@ class OTCS:
         """
 
         if not version_number:
-            # we retrieve the latest version - using V1 REST API. V2 has issues here.:
-            #            request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/content"
+            # we retrieve the latest version - using V1 REST API. V2 has issues with downloading files:
             request_url = self.config()["nodesUrl"] + "/" + str(node_id) + "/content"
             self.logger.debug(
                 "Download document with node ID -> %d (latest version); calling -> %s",
@@ -7550,10 +7571,7 @@ class OTCS:
                 request_url,
             )
         else:
-            # we retrieve the given version - using V1 REST API. V2 has issues here.:
-            # request_url = (
-            #     self.config()["nodesUrlv2"] + "/" + str(node_id) + "/versions/" + str(version_number) + "/content"
-            # )
+            # we retrieve the given version - using V1 REST API. V2 has issues with downloading files:
             request_url = (
                 self.config()["nodesUrl"] + "/" + str(node_id) + "/versions/" + str(version_number) + "/content"
             )
@@ -7584,6 +7602,14 @@ class OTCS:
 
         content_encoding = response.headers.get("Content-Encoding", "").lower()
         is_compressed = content_encoding in ("gzip", "deflate", "br")
+
+        self.logger.debug(
+            "Downloading document with node ID -> %d to file -> '%s'; total size -> %s bytes; content encoding -> '%s'",
+            node_id,
+            file_path,
+            total_size,
+            content_encoding,
+        )
 
         if os.path.exists(file_path) and not overwrite:
             self.logger.warning(
@@ -7617,6 +7643,9 @@ class OTCS:
             )
             return False
 
+        # if we have a total size and the content is not compressed
+        # we can do a sanity check if the downloaded size matches
+        # the expected size:
         if total_size and not is_compressed and bytes_downloaded != total_size:
             self.logger.error(
                 "Downloaded size (%d bytes) does not match expected size (%d bytes) for file -> '%s'",
@@ -9458,7 +9487,7 @@ class OTCS:
         expand_workspace_info: bool = True,
         expand_templates: bool = True,
     ) -> dict | None:
-        """Get all workspace types configured in Extended ECM.
+        """Get all workspace types configured in OTCS.
 
         This REST API is very limited. It does not return all workspace type properties
         you can see in OTCS business admin page.
@@ -9639,11 +9668,11 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_name")
     def get_workspace_type_name(self, type_id: int) -> str | None:
-        """Get the name of a workspace type based on the provided type ID.
+        """Get the name of a workspace type based on the provided workspace type ID.
 
-        The name is taken from a OTCS global variable if recorded there.
+        The name is taken from a OTCS object variable self._workspace_type_lookup if recorded there.
         If not yet derived it is determined via the REST API and then stored
-        in the global list.
+        in self._workspace_type_lookup (as a lookup cache).
 
         Args:
             type_id (int):
@@ -9654,6 +9683,10 @@ class OTCS:
                 The name of the workspace type. Or None if the type ID
                 was ot found.
 
+        Side effects:
+            Caches the workspace type name in self._workspace_type_lookup
+            for future calls.
+
         """
 
         workspace_type = self._workspace_type_lookup.get(type_id)
@@ -9663,10 +9696,48 @@ class OTCS:
         workspace_type = self.get_workspace_type(type_id=type_id)
         type_name = workspace_type.get("workspace_type")
         if type_name:
+            # Update the lookup cache:
             self._workspace_type_lookup[type_id] = {"location": None, "name": type_name}
             return type_name
 
         return None
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_by_name")
+    def get_workspace_type_names(self, lower_case: bool = False, renew: bool = False) -> list[str] | None:
+        """Get a list of all workspace type names.
+
+        Args:
+            lower_case (bool):
+                Whether to return the names in lower case.
+            renew (bool):
+                Whether to renew the cached workspace type names.
+
+        Returns:
+            list[str] | None:
+                List of workspace type names or None if the request fails.
+
+        Side effects:
+            Caches the workspace type names in self._workspace_type_names
+            for future calls.
+
+        """
+
+        if self._workspace_type_names and not renew:
+            return self._workspace_type_names
+
+        workspace_types = self.get_workspace_types_iterator()
+        workspace_type_names = [
+            self.get_result_value(response=workspace_type, key="wksp_type_name") for workspace_type in workspace_types
+        ]
+        if lower_case:
+            workspace_type_names = [name.lower() for name in workspace_type_names]
+
+        # Update the cache:
+        self._workspace_type_names = workspace_type_names
+
+        return workspace_type_names
 
     # end method definition
 
@@ -13998,6 +14069,7 @@ class OTCS:
         apply_action: str = "add_upgrade",
         add_version: bool = False,
         clear_existing_categories: bool = False,
+        attribute_values: dict | None = None,
     ) -> bool:
         """Assign a category to a Content Server node.
 
@@ -14005,6 +14077,7 @@ class OTCS:
         (if node_id is a container / folder / workspace).
         If the category is already assigned to the node this method will
         throw an error.
+        Optionally set category attributes values.
 
         Args:
             node_id (int):
@@ -14025,6 +14098,9 @@ class OTCS:
                 True, if a document version should be added for the category change (default = False).
             clear_existing_categories (bool, optional):
                 Defines, whether or not existing (other) categories should be removed (default = False).
+            attribute_values (dict, optional):
+                Dictionary containing "attribute_id":"value" pairs, to be populated during the category assignment.
+                (In case of the category attributes being set as "Required" in xECM, providing corresponding values for those attributes will resolve inability to assign the category).
 
         Returns:
             bool:
@@ -14049,6 +14125,9 @@ class OTCS:
             category_post_data = {
                 "category_id": category_id,
             }
+
+            if attribute_values is not None:
+                category_post_data.update(attribute_values)
 
             self.logger.debug(
                 "Assign category with ID -> %d to item with ID -> %d; calling -> %s",
@@ -17286,6 +17365,7 @@ class OTCS:
 
         """
 
+        # If no sub-process ID is given, use the process ID:
         if subprocess_id is None:
             subprocess_id = process_id
 
@@ -17781,8 +17861,8 @@ class OTCS:
             for subnode in subnodes:
                 subnode_id = self.get_result_value(response=subnode, key="id")
                 subnode_name = self.get_result_value(response=subnode, key="name")
-                subnode_type = self.get_result_value(response=subnode, key="type")
-                self.logger.info("Traversing %s node -> '%s' (%s)", subnode_type, subnode_name, subnode_id)
+                subnode_type_name = self.get_result_value(response=subnode, key="type_name")
+                self.logger.info("Traversing %s node -> '%s' (%s)", subnode_type_name, subnode_name, subnode_id)
                 # Recursive call for current subnode:
                 result = self.traverse_node(
                     node=subnode,

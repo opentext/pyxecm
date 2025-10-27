@@ -98,6 +98,12 @@ REQUEST_MAX_RETRIES = 3
 class BrowserAutomation:
     """Class to automate settings via a browser interface."""
 
+    page: Page = None
+    browser: Browser = None
+    context: BrowserContext = None
+    playwright = None
+    proxy = None
+
     logger: logging.Logger = default_logger
 
     def __init__(
@@ -186,7 +192,6 @@ class BrowserAutomation:
         if self.take_screenshots and not os.path.exists(self.screenshot_directory):
             os.makedirs(self.screenshot_directory)
 
-        self.proxy = None
         if os.getenv("HTTP_PROXY"):
             self.proxy = {
                 "server": os.getenv("HTTP_PROXY"),
@@ -197,8 +202,9 @@ class BrowserAutomation:
         self.logger.info("Using browser -> '%s'...", browser)
 
         if not self.setup_playwright(browser=browser):
-            self.logger.error("Failed to initialize Playwright browser automation!")
-            return
+            msg = "Failed to initialize Playwright browser automation!"
+            self.logger.error(msg)
+            raise RuntimeError(msg)
 
         self.logger.info("Creating browser context...")
         self.context: BrowserContext = self.browser.new_context(
@@ -378,8 +384,12 @@ class BrowserAutomation:
 
     # end method definition
 
-    def take_screenshot(self) -> bool:
+    def take_screenshot(self, suffix: str = "") -> bool:
         """Take a screenshot of the current browser window and save it as PNG file.
+
+        Args:
+            suffix (str, optional):
+                Optional suffix to append to the screenshot filename.
 
         Returns:
             bool:
@@ -387,10 +397,8 @@ class BrowserAutomation:
 
         """
 
-        screenshot_file = "{}/{}-{:02d}.png".format(
-            self.screenshot_directory,
-            self.screenshot_names,
-            self.screenshot_counter,
+        screenshot_file = "{}/{}-{:02d}{}.png".format(
+            self.screenshot_directory, self.screenshot_names, self.screenshot_counter, suffix
         )
         self.logger.debug("Save browser screenshot to -> %s", screenshot_file)
 
@@ -681,6 +689,12 @@ class BrowserAutomation:
             wait_state (str, optional):
                 Defines if we wait for attached (element is part of DOM) or
                 if we wait for elem to be visible (attached, displayed, and has non-zero size).
+                Possible values are:
+                * "attached" - the element is present in the DOM.
+                * "detached" - the element is not present in the DOM.
+                * "visible" - the element is visible (attached, displayed, and has non-zero size).
+                * "hidden" - the element is hidden (attached, but not displayed).
+                Default is "visible".
             exact_match (bool | None, optional):
                 If an exact matching is required. Default is None (not set).
             regex (bool, optional):
@@ -705,14 +719,17 @@ class BrowserAutomation:
 
         """
 
-        failure_message = "Cannot find page element with selector -> '{}' ({}){}{}{}".format(
+        failure_message = "Cannot find {} page element with selector -> '{}' ({}){}{}{}{}".format(
+            "occurence #{} of".format(occurrence) if occurrence > 1 else "any",
             selector,
             selector_type,
             " and role type -> '{}'".format(role_type) if role_type else "",
             " in iframe -> '{}'".format(iframe) if iframe else "",
             ", occurrence -> {}".format(occurrence) if occurrence > 1 else "",
+            ", waiting for state -> '{}'".format(wait_state),
         )
-        success_message = "Found page element with selector -> '{}' ('{}'){}{}{}".format(
+        success_message = "Found {} page element with selector -> '{}' ('{}'){}{}{}".format(
+            "occurence #{} of".format(occurrence) if occurrence > 1 else "a",
             selector,
             selector_type,
             " and role type -> '{}'".format(role_type) if role_type else "",
@@ -811,6 +828,7 @@ class BrowserAutomation:
         is_page_close_trigger: bool = False,
         wait_until: str | None = None,
         wait_time: float = 0.0,
+        wait_state: str = "visible",
         exact_match: bool | None = None,
         regex: bool = False,
         hover_only: bool = False,
@@ -858,8 +876,17 @@ class BrowserAutomation:
                   This seems to be the safest one for OpenText Content Server.
                 * "domcontentloaded" - waits for the DOMContentLoaded event (HTML is parsed,
                   but subresources may still load).
-            wait_time (float):
-                Time in seconds to wait for elements to appear.
+            wait_time (float, optional):
+                Time in seconds to wait for elements to appear. Default is 0.0 (no wait).
+            wait_state (str, optional):
+                Defines if we wait for attached (element is part of DOM) or
+                if we wait for elem to be visible (attached, displayed, and has non-zero size).
+                Possible values are:
+                * "attached" - the element is present in the DOM.
+                * "detached" - the element is not present in the DOM.
+                * "visible" - the element is visible (attached, displayed, and has non-zero size).
+                * "hidden" - the element is hidden (attached, but not displayed).
+                Default is "visible".
             exact_match (bool | None, optional):
                 If an exact matching is required. Default is None (not set).
             regex (bool, optional):
@@ -896,6 +923,14 @@ class BrowserAutomation:
 
         """
 
+        if not selector:
+            failure_message = "Missing element selector! Cannot find page element!"
+            if show_error:
+                self.logger.error(failure_message)
+            else:
+                self.logger.warning(failure_message)
+            return False
+
         success = True  # Final return value
 
         # If no specific wait until strategy is provided in the
@@ -909,18 +944,14 @@ class BrowserAutomation:
             self.logger.info("Wait for %d milliseconds before clicking...", wait_time * 1000)
             self.page.wait_for_timeout(wait_time * 1000)
 
-        if not selector:
-            failure_message = "Missing element selector! Cannot find page element!"
-            if show_error:
-                self.logger.error(failure_message)
-            else:
-                self.logger.warning(failure_message)
-            return False
+            if self.take_screenshots:
+                self.take_screenshot(suffix="_wait_before_click")
 
         elem = self.find_elem(
             selector=selector,
             selector_type=selector_type,
             role_type=role_type,
+            wait_state=wait_state,
             exact_match=exact_match,
             regex=regex,
             occurrence=occurrence,
@@ -1222,7 +1253,7 @@ class BrowserAutomation:
             self.logger.error("Download failed; error -> %s", str(e))
             return None
 
-        self.logger.info("Download file to -> %s", save_path)
+        self.logger.info("Downloaded file to -> %s", save_path)
 
         return save_path
 
@@ -1273,13 +1304,13 @@ class BrowserAutomation:
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
             min_count (int):
                 Minimum number of required matches (# elements on page).
-            wait_time (float):
-                Time in seconds to wait for elements to appear.
+            wait_time (float, optional):
+                Time in seconds to wait for elements to appear. Default is 0.0 (no wait).
             wait_state (str, optional):
                 Defines if we wait for attached (element is part of DOM) or
                 if we wait for elem to be visible (attached, displayed, and has non-zero size).
-            show_error (bool):
-                Whether to log warnings/errors.
+            show_error (bool, optional):
+                Whether to log warnings/errors. Default is True.
 
         Returns:
             bool | None:
@@ -1306,10 +1337,9 @@ class BrowserAutomation:
             iframe=iframe,
         )
         if not locator:
-            if show_error:
-                self.logger.error(
-                    "Failed to check if elements -> '%s' (%s) exist! Locator is undefined.", selector, selector_type
-                )
+            self.logger.error(
+                "Failed to check if elements -> '%s' (%s) exist! Locator is undefined.", selector, selector_type
+            )
             return (None, 0)
 
         self.logger.info(
@@ -1369,8 +1399,9 @@ class BrowserAutomation:
             return (None, 0)
 
         self.logger.info(
-            "Found %s elements matching selector -> '%s' (%s%s).",
+            "Found %d element%s matching selector -> '%s' (%s%s).",
             count,
+            "s" if count > 1 else "",
             selector,
             "selector type -> '{}'".format(selector_type),
             ", role type -> '{}'".format(role_type) if role_type else "",
@@ -1386,7 +1417,7 @@ class BrowserAutomation:
 
         matching_elems = []
 
-        # Iterate over all elements found by the locator and checkif
+        # Iterate over all elements found by the locator and check if
         # they comply with the additional value conditions (if provided).
         # We collect all matching elements in a list:
         for i in range(count):
@@ -1424,8 +1455,9 @@ class BrowserAutomation:
         else:
             success = True
             self.logger.info(
-                "Found %d matching elements.%s",
+                "Found %d matching element%s.%s",
                 matching_elements_count,
+                "s" if matching_elements_count > 1 else "",
                 " This is {} the minimum {} element{} probed for.".format(
                     "exactly" if matching_elements_count == min_count else "more than",
                     min_count,
@@ -1542,9 +1574,9 @@ class BrowserAutomation:
 
         """
 
-        self.logger.debug("Setting default timeout to -> %s seconds...", str(wait_time))
+        self.logger.debug("Setting default timeout to -> %.2f seconds...", wait_time)
         self.page.set_default_timeout(wait_time * 1000)
-        self.logger.debug("Setting navigation timeout to -> %s seconds...", str(wait_time))
+        self.logger.debug("Setting navigation timeout to -> %.2f seconds...", wait_time)
         self.page.set_default_navigation_timeout(wait_time * 1000)
 
     # end method definition

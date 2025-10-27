@@ -358,44 +358,44 @@ class Guidewire:
         index: int = 0,
         show_error: bool = True,
     ) -> str | None:
-        """Read an item value from the REST API response.
+        """Read an item value from the Guidewire REST API response.
 
         Args:
             response (dict):
-                REST API response object.
+                Guidewire REST API response object.
             key (str):
                 Key to find (e.g., "id", "name").
             index (int, optional):
                 Index to use if a list of results is delivered (1st element has index 0).
                 Defaults to 0.
             show_error (bool, optional):
-                Whether an error or just a warning should be logged.
+                Whether an error or just a warning should be logged. Defaults to True.
 
         Returns:
-            str:
+            str | None:
                 Value of the item with the given key, or None if no value is found.
 
         """
 
         # First do some sanity checks:
         if not response:
-            self.logger.debug("Empty response - no results found!")
+            self.logger.debug("Empty Guidewire response - no results found!")
             return None
 
         # To support also iterators that yield from results,
-        # we wrap an attributea element into a data element
+        # we wrap an "attributes" element into a "data" element
         # to make the following code work like for direct REST responses:
         if "attributes" in response:
             response = {"data": response}
 
         if "data" not in response:
             if show_error:
-                self.logger.error("No 'data' key in REST response - returning None")
+                self.logger.error("No 'data' key in Guidewire REST response -> %s. Returning None.", str(response))
             return None
 
         results = response["data"]
         if not results:
-            self.logger.debug("No results found! Empty data element.")
+            self.logger.debug("No results found in the Guidewire response! Empty 'data' element.")
             return None
 
         # check if results is a list or a dict (both is possible - iterator responses will be dict):

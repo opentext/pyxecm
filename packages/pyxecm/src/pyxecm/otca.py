@@ -2240,9 +2240,14 @@ class OTCA:
                                 }
                             },
                         },
-                        "responseTemplate": {},
-                        "agents": ["retrieverAgent"],
-                    }
+                        "responseTemplate": {
+                            'scratchpad': {
+                                'item': {
+                                    'input': {'where': 'response.context_update.where'}
+                                }
+                            },
+                            "agents": ["retrieverAgent"],
+                        }
 
         Returns:
             dict: Tool details or None in case of an error.

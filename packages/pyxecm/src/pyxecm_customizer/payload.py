@@ -12127,7 +12127,7 @@ class Payload:
                 )
         else:  # BO found
             self.logger.debug(
-                "Retrieved ID -> %s for Salesforce object type -> '%s' (looking up -> '%s' in field -> '%s')",
+                "Retrieved business object ID -> %s for Salesforce object type -> '%s' (looking up -> '%s' in field -> '%s')",
                 bo_id,
                 object_type,
                 search_value,
@@ -12223,7 +12223,7 @@ class Payload:
             )
         else:  # BO found
             self.logger.info(
-                "Retrieved ID -> %s for Guidewire object type -> '%s' (looking up -> '%s' in field -> '%s').",
+                "Retrieved business object ID -> %s for Guidewire object type -> '%s' (looking up -> '%s' in field -> '%s').",
                 bo_id,
                 object_type,
                 search_value,
@@ -13570,24 +13570,27 @@ class Payload:
             for result in results:
                 if not result["success"]:
                     self.logger.info(
-                        "Thread -> '%s' had %s failures and completed %s workspaces successfully.",
+                        "Thread -> '%s' had %s failure%s and completed %s workspace%s successfully.",
                         result["thread_name"],
                         result["failure_counter"],
+                        "s" if result["failure_counter"] != 1 else "",
                         result["success_counter"],
+                        "s" if result["success_counter"] != 1 else "",
                     )
                     success = False  # mark the complete processing as "failure" for the status file.
                 else:
                     self.logger.info(
-                        "Thread -> '%s' completed %s workspaces successfully.",
+                        "Thread -> '%s' completed %s workspace%s successfully.",
                         result["thread_name"],
                         result["success_counter"],
+                        "s" if result["success_counter"] != 1 else "",
                     )
         else:  # no multi-threading
             for workspace in self._workspaces:
                 try:
                     result = self.process_workspace(workspace=workspace)
                 except Exception:
-                    self.logger.exception("Failed process workspace -> %s", workspace)
+                    self.logger.error("Failed to process workspace -> %s", workspace)
                     result = False
                 success = success and result  # if a single result is False then mark this in 'success' variable.
 
@@ -18558,8 +18561,8 @@ class Payload:
                     node_name=document_name,
                 )
                 if response["results"]:
-                    self.logger.warning(
-                        "Node -> '%s' does already exist in workspace folder with ID -> %s",
+                    self.logger.info(
+                        "Document -> '%s' does already exist in workspace folder with ID -> %s. Skipping...",
                         document_name,
                         workspace_folder_id,
                     )
@@ -18589,6 +18592,8 @@ class Payload:
                         workspace_id,
                         exec_as_user,
                     )
+            # end for workspace_instance in workspace_instances:
+        # end for doc_generator in self._doc_generators:
 
         if authenticated_user != "admin":
             # Impersonate as the admin user:
@@ -19185,18 +19190,19 @@ class Payload:
                     automation_type,
                     wait_until,
                 )
-            browser_automation_object = BrowserAutomation(
-                base_url=base_url,
-                user_name=user_name,
-                user_password=password,
-                automation_name=name,
-                take_screenshots=debug_automation,
-                headless=browser_automation.get("headless", self._browser_headless),
-                logger=self.logger,
-                wait_until=wait_until,
-                browser=browser_automation.get("browser"),  # None is acceptable
-            )
-            if not browser_automation_object:
+            try:
+                browser_automation_object = BrowserAutomation(
+                    base_url=base_url,
+                    user_name=user_name,
+                    user_password=password,
+                    automation_name=name,
+                    take_screenshots=debug_automation,
+                    headless=browser_automation.get("headless", self._browser_headless),
+                    logger=self.logger,
+                    wait_until=wait_until,
+                    browser=browser_automation.get("browser"),  # None is acceptable
+                )
+            except Exception:
                 self.logger.error(
                     "Cannot execute browser automation -> '%s'. Initialization of browser automation object failed!",
                     name,
@@ -19212,9 +19218,9 @@ class Payload:
             browser_automation_object.set_timeout(wait_time=wait_time)
             if "wait_time" in browser_automation:
                 self.logger.info(
-                    "%s automation wait time -> '%s' configured.",
+                    "%s automation wait time -> %.2f seconds.",
                     automation_type,
-                    str(wait_time),
+                    wait_time,
                 )
 
             # Initialize overall result status:
@@ -19392,6 +19398,7 @@ class Payload:
                         checkbox_state = automation_step.get("checkbox_state", None)
                         wait_until = automation_step.get("wait_until", None)
                         wait_time = automation_step.get("wait_time", 0.0)
+                        wait_state = automation_step.get("wait_state", "visible")
                         role_type = automation_step.get("role_type", None)
                         occurrence = automation_step.get("occurrence", 1)
                         scroll_to_element = automation_step.get("scroll_to_element", True)
@@ -19417,6 +19424,7 @@ class Payload:
                             is_page_close_trigger=close_window,
                             wait_until=wait_until,
                             wait_time=wait_time,
+                            wait_state=wait_state,
                             exact_match=exact_match,
                             regex=regex,
                             hover_only=hover_only,
@@ -19441,8 +19449,10 @@ class Payload:
                                 self.logger.warning(message)
                             continue
                         self.logger.info(
-                            "Successfully %s %s element selected by -> '%s' (%s%s).",
+                            "Successfully %s%s %s%s element selected by -> '%s' (%s%s).",
+                            "force " if force else "",
                             "clicked" if not hover_only else "hovered over",
+                            "occurrence #{} of ".format(occurrence) if occurrence > 1 else "",
                             "navigational" if navigation else "non-navigational",
                             selector,
                             "selector type -> '{}'".format(selector_type),
@@ -19555,7 +19565,7 @@ class Payload:
                             iframe=iframe,
                             min_count=min_count,
                             wait_time=wait_time,  # time to wait before the check is actually done
-                            show_error=not want_exist,  # if element is not found that we do not want to find it is not an error
+                            show_error=want_exist,  # if element is not found that we do not want to find it is not an error
                         )
                         # Check if we didn't get what we want:
                         if (not result and want_exist) or (result and not want_exist):

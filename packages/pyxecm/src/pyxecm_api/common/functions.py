@@ -2,15 +2,12 @@
 
 import logging
 import os
-import time
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends
 from pyxecm.otca import OTCA
 from pyxecm.otcs import OTCS
 from pyxecm_customizer import K8s, PayloadList, Settings
-from pyxecm_customizer.knowledge_graph import KnowledgeGraph
 
 from pyxecm_api.auth.functions import get_otcsticket
 from pyxecm_api.settings import CustomizerAPISettings, api_settings
@@ -21,100 +18,6 @@ logger = logging.getLogger("pyxecm_api")
 LOGS_LOCK = {}
 # Initialize the globel Payloadlist object
 PAYLOAD_LIST = PayloadList(logger=logger)
-
-# This object is initialized in the build_graph() function below.
-KNOWLEDGEGRAPH_OBJECT: KnowledgeGraph = None
-
-# The following ontology is fed into the knowledge graph tool description.
-# This is currently hard-coded. Ideally this should be derived from OTCM
-# or provided via a payload file:
-
-KNOWLEDGEGRAPH_ONTOLOGY = {
-    ("Vendor", "Material", "child"): ["offers", "supplies", "provides"],
-    ("Vendor", "Purchase Order", "child"): ["supplies", "provides"],
-    ("Vendor", "Purchase Contract", "child"): ["signs", "owns"],
-    ("Material", "Vendor", "parent"): ["is supplied by"],
-    ("Purchase Order", "Material", "child"): ["includes", "is part of"],
-    ("Customer", "Sales Order", "child"): ["has ordered"],
-    ("Customer", "Sales Contract", "child"): ["signs", "owns"],
-    ("Sales Order", "Customer", "parent"): ["belongs to", "is initiated by"],
-    ("Sales Order", "Material", "child"): ["includes", "consists of"],
-    ("Sales Order", "Delivery", "child"): ["triggers", "is followed by"],
-    ("Sales Order", "Production Order", "child"): ["triggers", "is followed by"],
-    ("Sales Contract", "Material", "child"): ["includes", "consists of"],
-    ("Production Order", "Material", "child"): ["includes", "consists of"],
-    ("Production Order", "Delivery", "child"): ["triggers", "is followed by"],
-    ("Production Order", "Goods Movement", "child"): ["triggers", "is followed by"],
-    ("Delivery", "Goods Movement", "child"): ["triggers", "is followed by"],
-    ("Delivery", "Material", "child"): ["triggers", "is followed by"],
-}
-
-
-### Functions
-
-
-def get_ontology() -> dict:
-    """Get the ontology for the knowledge graph.
-
-    Returns:
-        dict: The ontology as a dictionary.
-
-    """
-
-    return KNOWLEDGEGRAPH_ONTOLOGY
-
-
-def get_knowledgegraph_object() -> KnowledgeGraph:
-    """Get the Knowledge Graph object."""
-
-    global KNOWLEDGEGRAPH_OBJECT  # noqa: PLW0603
-
-    if KNOWLEDGEGRAPH_OBJECT is None:
-        KNOWLEDGEGRAPH_OBJECT = KnowledgeGraph(otcs_object=get_otcs_object(), ontology=KNOWLEDGEGRAPH_ONTOLOGY)
-
-    return KNOWLEDGEGRAPH_OBJECT
-
-
-def build_graph() -> None:
-    """Build the knowledge Graph. And keep it updated every hour."""
-
-    def build() -> None:
-        """Build the knowledge graph once."""
-
-        logger.info("Starting knowledge graph build...")
-        start_time = datetime.now(UTC)
-        result = get_knowledgegraph_object().build_graph(
-            workspace_type_exclusions=None,
-            workspace_type_inclusions=[
-                "Vendor",
-                "Purchase Contract",
-                "Purchase Order",
-                "Material",
-                "Customer",
-                "Sales Order",
-                "Sales Contract",
-                "Delivery",
-                "Goods Movement",
-            ],
-            workers=20,  # for multi-threaded traversal
-            filter_at_traversal=True,  # also filter for workspace types if following relationships
-            relationship_types=["child"],  # only go from parent to child
-            strategy="BFS",  # Breadth-First-Search
-            metadata=True,  # don't include workspace metadata
-        )
-        end_time = datetime.now(UTC)
-        logger.info(
-            "Knowledge graph completed in %s. Processed %d workspace nodes and traversed %d workspace relationships.",
-            str(end_time - start_time),
-            result["processed"],
-            result["traversed"],
-        )
-
-    # Endless loop to build knowledge graph and update it every hour:
-    while True:
-        build()
-        logger.info("Waiting for 1 hour before rebuilding the knowledge graph...")
-        time.sleep(3600)
 
 
 def get_k8s_object() -> K8s:

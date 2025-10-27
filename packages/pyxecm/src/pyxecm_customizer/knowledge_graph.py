@@ -267,14 +267,14 @@ class KnowledgeGraph:
         """
 
         if not self._attribute_schemas:
-            self.build_attributes()
+            self.build_categories()
 
         return list(self._attribute_schemas.get(category, {}).get("attributes", {}).keys())
 
     # end method definition
 
     def get_category_id(self, category: str) -> str | None:
-        """Return the attribute schemas dictionary.
+        """Return the category ID for a category name.
 
         Args:
             category (str):
@@ -288,7 +288,7 @@ class KnowledgeGraph:
     def get_attribute_id(
         self, category: str, attribute: str | None = None, set_attribute: str | None = None, row: int | None = None
     ) -> str | None:
-        """Return the attribute schemas dictionary.
+        """Return the attribute ID (or category ID if attribute is None).
 
         Args:
             category (str):
@@ -307,21 +307,18 @@ class KnowledgeGraph:
         """
 
         if not self._attribute_schemas:
-            self.build_attributes()
+            self.build_categories()
 
         # Lookup the category schema by the category name:
         category = self._attribute_schemas.get(category, {})
         if not category:
             return None
         if not attribute:
-            # If now specific attribute is requested return the category ID:
+            # If no specific attribute is requested return the category ID:
             return category.get("id", None)
         attributes = category.get("attributes", {})
         # Construct the attribute lookup key. For set attributes we use the format "Set:Attribute".
         lookup_key = attribute if not set_attribute else f"{set_attribute}:{attribute}"
-        if lookup_key not in attributes:
-            return None
-
         if lookup_key not in attributes:
             self.logger.error("Attribute '%s' not found in category '%s'!", lookup_key, category.get("id", "unknown"))
             return None
@@ -1065,8 +1062,8 @@ class KnowledgeGraph:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="build_attribute")
-    def build_attribute(self, node: dict, **kwargs: dict) -> tuple[bool, bool]:  # noqa: ARG002
-        """Build a dictionary of all attribute schemas in OTCS.
+    def build_attributes(self, node: dict, **kwargs: dict) -> tuple[bool, bool]:  # noqa: ARG002
+        """Build a dictionary of all attributes in a given category in OTCS.
 
         Args:
             node (dict):
@@ -1101,11 +1098,11 @@ class KnowledgeGraph:
         if success:
             # Initialize the entry on the category level:
             self._attribute_schemas[node_name] = {"id": node_id, "attributes": {}}
+            # Retrieve the attribute schema for the given category.
+            # We use the Personal Volume as node_id to have a predictable
+            # node ID that is always available:
             personal_volume = self._otcs.get_volume(volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE)
             personal_volume_id = self._otcs.get_result_value(response=personal_volume, key="id")
-            # Retrieve the attribute schema for the given category.
-            # We use the Enterprise Vault (2000) as node_id to have a predictable
-            # node ID that is always available:
             attributes = self._otcs.get_node_category_form(
                 node_id=personal_volume_id, category_id=node_id, operation="create"
             )
@@ -1144,7 +1141,7 @@ class KnowledgeGraph:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="build_attributes")
-    def build_attributes(self) -> dict:
+    def build_categories(self) -> dict:
         """Build a dictionary of all attribute schemas in OTCS.
 
         This method populates the `self._attribute_schemas` dictionary with
@@ -1186,14 +1183,14 @@ class KnowledgeGraph:
 
         """
 
-        self.logger.info("Starting attribute data lookup build...")
+        self.logger.debug("Start building attribute data lookup...")
 
         result = self._otcs.traverse_node(
             node=self._otcs.get_volume(volume_type=self._otcs.VOLUME_TYPE_CATEGORIES_VOLUME),
-            executables=[self.build_attribute],
+            executables=[self.build_attributes],
         )
 
-        self.logger.info("Attributes data lookup build completed.")
+        self.logger.debug("Attribute data lookup completed.")
 
         return result
 

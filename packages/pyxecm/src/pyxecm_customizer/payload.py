@@ -91,7 +91,7 @@ try:
     psycopg_installed = True
 except ModuleNotFoundError:
     default_logger.warning(
-        "Module psycopg is not installed. Customizer will not support database command execution!",
+        "Module psycopg is not installed. Customizer will not support database command execution.",
     )
     psycopg_installed = False
 
@@ -711,6 +711,18 @@ class Payload:
     _assignments = []
 
     """
+    _category_assignments: List of category assignments. Each element is a dict with these keys:
+    - enabled (bool, optional, default = True)
+    - categories (list of dicts) - syntax like for categories inside workspaces payload
+    - category_item (list | str) - either a list defining the path to the category item in the Categories volume or the nickname of the category item
+    - volume (int, optional) - the volume type ID - default is Enterprise Workspace with ID 141
+    - item (list | str) - either a list defining the path to the item in the Enterprise volume or the nickname of the item
+    - apply_to_sub_items (bool, optional, default = False)
+    - inheritance (bool, optional, default = False) - whether or not category inheritance should be turned on for the item
+    """
+    _category_assignments = []
+
+    """
     _doc_generators: List of document generators that use the Document Template capabilities of Content Server.
     Each element is a dict with these keys:
     - enabled (bool, optional, default = True)
@@ -1232,6 +1244,9 @@ class Payload:
     # Disable Status files
     upload_status_files: bool = True
 
+    # Enable / Disable the check of existing status files
+    status_file_check: bool = True
+
     def __init__(
         self,
         payload_source: str,
@@ -1252,6 +1267,7 @@ class Payload:
         stop_on_error: bool = False,
         aviator_enabled: bool = False,
         upload_status_files: bool = True,
+        status_file_check: bool = True,
         otawp_object: OTAWP | None = None,
         otca_object: OTCA | None = None,
         otkd_object: OTKD | None = None,
@@ -1303,6 +1319,9 @@ class Payload:
             upload_status_files (bool, optional):
                 Whether or not status file should be uploaded to the peronal workspace
                 of the admin user in Content Server.
+            status_file_check:
+                Whether or not the check for previous executions of previous exeuctions
+                of a payload sections is enabled or not.
             otawp_object (OTAWP):
                 An optional AppWorks Platform object.
             otca_object (OTCA):
@@ -1354,6 +1373,7 @@ class Payload:
         self._aviator_enabled = aviator_enabled
         self._http_object = HTTP(logger=self.logger)
         self.upload_status_files = upload_status_files
+        self.status_file_check = status_file_check
         self._otawp = otawp_object
 
     # end method definition
@@ -1519,6 +1539,7 @@ class Payload:
         self._permissions_post = self.get_payload_section("permissionsPost")
         self._workspace_permissions = self.get_payload_section("workspacePermissions")
         self._assignments = self.get_payload_section("assignments")
+        self._category_assignments = self.get_payload_section("categoryAssignments")
         self._security_clearances = self.get_payload_section("securityClearances")
         self._supplemental_markings = self.get_payload_section("supplementalMarkings")
         self._records_management_settings = self.get_payload_section(
@@ -2409,6 +2430,12 @@ class Payload:
 
         """
 
+        if not self.status_file_check:
+            self.logger.warning(
+                "Check for previously executed payload section disabled. Start processing %s", payload_section_name
+            )
+            return False
+
         message = "successfully" if prefix.startswith("success_") else "with failures"
 
         self.logger.info(
@@ -3276,7 +3303,8 @@ class Payload:
             if extraction.get("enabled", True) and "data" in extraction:
                 self._transport_extractions.append(extraction)
                 counter += 1
-        self.logger.info("Added -> %s transport extractions.", str(counter))
+        if counter > 0:
+            self.logger.info("Added -> %d transport extractions.", counter)
 
         return counter
 
@@ -3694,6 +3722,9 @@ class Payload:
                     case "assignments":
                         self._log_header_callback(text="Process Assignments")
                         self.process_assignments()
+                    case "categoryAssignments":
+                        self._log_header_callback(text="Process Category Assignments")
+                        self.process_category_assignments()
                     case "securityClearances":
                         self._log_header_callback(text="Process Security Clearances")
                         self.process_security_clearances()
@@ -5739,6 +5770,7 @@ class Payload:
                     # Write M365 group ID back into the payload (for the success file)
                     group["m365_id"] = existing_group["id"]
                     continue
+            # end if existing_groups and existing_groups["value"]
 
             self.logger.info(
                 "Creating a new Microsoft 365 group -> '%s'...",
@@ -7399,7 +7431,7 @@ class Payload:
                     multi_line_end_marker="%3D",
                     replacements=None,
                     max_retries=6,
-                    use_browser_automation=True,
+                    use_browser_automation=False,  # True, TODO: re-enable browser automation when Playwright is more stable
                     password=user_password,
                     password_field_id="passwordInput",
                     password_confirmation_field_id="confirmResetPassword",
@@ -11177,9 +11209,9 @@ class Payload:
                 )
                 success = False
                 continue
-            if workspace_type["templates"] == []:
+            if not workspace_type.get("templates", []):
                 self.logger.error(
-                    "Workspace type -> '%s' does not have templates. Skipping...",
+                    "Workspace type -> '%s' does not have any templates. Skipping...",
                     type_name,
                 )
                 success = False
@@ -13002,9 +13034,9 @@ class Payload:
                 type_name,
             )
             return False
-        if workspace_type["templates"] == []:
+        if not workspace_type.get("templates", []):
             self.logger.error(
-                "Workspace type -> '%s' does not have templates. Skipping to next workspace...",
+                "Workspace type -> '%s' does not have any templates. Skipping to next workspace...",
                 type_name,
             )
             return False
@@ -13507,9 +13539,9 @@ class Payload:
             df.get_data_frame()["nodeId"] = None
 
             self.logger.info(
-                "Created a data frame with -> %s rows from the workspaces list with -> %s elements.",
-                str(len(df)),
-                str(len(self._workspaces)),
+                "Created a data frame with -> %d rows from the workspaces list with -> %d elements.",
+                len(df),
+                len(self._workspaces),
             )
             df.print_info()
 
@@ -15102,9 +15134,9 @@ class Payload:
                 user_smartui_theme = user.get("smartui_theme", smartui_theme)
                 if user_smartui_theme != "cf":
                     response = self._otcs.update_user_profile(
-                        config_section="SmartUI",
                         field="theme",
                         value=user_smartui_theme,
+                        config_section="SmartUI",
                     )
                     if response is None:
                         self.logger.warning(
@@ -15374,6 +15406,22 @@ class Payload:
         else:
             self.logger.info(
                 "Profile for 'admin' user has been updated to enable messages for responsive container mode.",
+            )
+
+        response = self._otcs.update_user_profile(
+            field="theme",
+            value=smartui_theme,
+            config_section="SmartUI",
+        )
+        if response is None:
+            self.logger.warning(
+                "Profile for 'admin' user couldn't be updated to Smart View theme -> '%s'!",
+                smartui_theme,
+            )
+        else:
+            self.logger.info(
+                "Profile for 'admin' user has been updated to Smart View theme -> '%s'.",
+                smartui_theme,
             )
 
         self.write_status_file(
@@ -16371,6 +16419,7 @@ class Payload:
                     original_path = []
                     type = ...
                     url = "..."
+                    content = "..." # content of text documents
                     details = {
                         "scheduledbotdetails" : ...
                     } # additional parameters
@@ -16516,7 +16565,7 @@ class Payload:
                 case self._otcs.ITEM_TYPE_URL:  # URL
                     if item_url == "":
                         self.logger.error(
-                            "Item -> '%s' has type URL but the URL is not in the payload. Skipping...",
+                            "Item -> '%s' has type -> 'URL' but the URL is not in the payload. Skipping...",
                             item_name,
                         )
                         success = False
@@ -16524,7 +16573,7 @@ class Payload:
                 case self._otcs.ITEM_TYPE_SHORTCUT:  # Shortcut
                     if not original_id:
                         self.logger.error(
-                            "Item -> '%s' has type Shortcut but the original item is not in the payload. Skipping...",
+                            "Item -> '%s' has type -> 'Shortcut' but the original item is not in the payload. Skipping...",
                             item_name,
                         )
                         success = False
@@ -16533,7 +16582,7 @@ class Payload:
                     item_ids = item.get("ids", None)
                     if item_ids is None:
                         self.logger.error(
-                            "Item -> '%s' has type Collection but the list of collected items is not provided in payload. Skipping...",
+                            "Item -> '%s' has type -> 'Collection' but the list of collected items is not provided in payload. Skipping...",
                             item_name,
                         )
                         success = False
@@ -16543,13 +16592,24 @@ class Payload:
                         key not in item_details for key in ["xecmpfJobType", "scheduledbotdetails"]
                     ):  #  not in item_details:
                         self.logger.error(
-                            "Item -> '%s' has type Scheduled Bot but the mandatory details are not provided in payload (xecmpfJobType, scheduledbotdetails). Skipping...",
+                            "Item -> '%s' has type -> 'Scheduled Bot' but the mandatory details are not provided in payload (xecmpfJobType, scheduledbotdetails). Skipping...",
                             item_name,
                         )
                         success = False
                         continue
 
                     create_item_details["xecmpfJobType"] = item_details["xecmpfJobType"]
+                case self._otcs.ITEM_TYPE_DOCUMENT:  # Document with content
+                    item_content = item.get("content", None)
+                    item_mime_type = item.get("mimetype", "text/plain")
+                    item_encoding = item.get("encoding", "utf-8")
+                    if item_content is None:
+                        self.logger.error(
+                            "Item -> '%s' has type -> 'Document' but there's no content provided in payload. Skipping...",
+                            item_name,
+                        )
+                        success = False
+                        continue
 
             # Check if an item with the same name does already exist.
             # This can also be the case if the python container runs a 2nd time.
@@ -16566,15 +16626,25 @@ class Payload:
                     parent_id,
                 )
                 continue
-            response = self._otcs.create_item(
-                parent_id=int(parent_id),
-                item_type=item_type,
-                item_name=item_name,
-                item_description=item_description,
-                url=item_url,
-                original_id=int(original_id),
-                **create_item_details,
-            )
+            if item_type != self._otcs.ITEM_TYPE_DOCUMENT:
+                response = self._otcs.create_item(
+                    parent_id=int(parent_id),
+                    item_type=item_type,
+                    item_name=item_name,
+                    item_description=item_description,
+                    url=item_url,
+                    original_id=int(original_id),
+                    **create_item_details,
+                )
+            else:  # Handling for documents
+                response = self._otcs.upload_file_to_parent(
+                    parent_id=int(parent_id),
+                    file_name=item_name,
+                    mime_type=item_mime_type,
+                    content=item_content,
+                    encoding=item_encoding,
+                    description=item_description,
+                )
             node_id = self._otcs.get_result_value(response=response, key="id")
             if not node_id:
                 self.logger.error(
@@ -17536,6 +17606,280 @@ class Payload:
             success=success,
             payload_section_name=section_name,
             payload_section=self._assignments,
+        )
+
+        return success
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_category_assignments")
+    def process_category_assignments(self, section_name: str = "categoryAssignments") -> bool:
+        """Process category assignments for items (such as workspaces and items with nicknames).
+
+        Args:
+            section_name (str, optional):
+                The name of the payload section. It can be overridden
+                for cases where multiple sections of same type
+                are used (e.g. the "Post" sections).
+                This name is also used for the "success" status
+                files written to the Admin Personal Workspace.
+
+        Returns:
+            bool:
+                True if payload has been processed without errors, False otherwise
+
+        """
+
+        if not self._category_assignments:
+            self.logger.info(
+                "Payload section -> '%s' is empty. Skipping...",
+                section_name,
+            )
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(payload_section_name=section_name):
+            return True
+
+        success: bool = True
+
+        for category_assignment in self._category_assignments:
+            # Check if assignment has been explicitly disabled in payload
+            # (enabled = false). In this case we skip the element:
+            if not category_assignment.get("enabled", True):
+                self.logger.info(
+                    "Payload for category assignment -> '%s' is disabled. Skipping...",
+                    str(category_assignment),
+                )
+                continue
+
+            # item is mandatory and we give an error if it is missing.
+            # The category item can either be defined as a nickname or as a path
+            # in the category volume.
+            item = category_assignment.get("item")
+            if item is None:
+                self.logger.error(
+                    "Category assignment -> '%s' is missing a target item definition!",
+                    str(category_assignment),
+                )
+                success = False
+                continue
+            if isinstance(item, str):
+                # If item is a string, it must be a nickname:
+                item_node = self._otcs.get_node_from_nickname(nickname=item)
+                item_id = self._otcs.get_result_value(response=item_node, key="id")
+                if not item_id:
+                    self.logger.error(
+                        "Category assignment -> '%s' has an invalid item nickname -> '%s'!",
+                        str(category_assignment),
+                        item,
+                    )
+                    success = False
+                    continue
+                item_name = self._otcs.get_result_value(response=item_node, key="name")
+            elif isinstance(item, list):
+                # If item is a list, it must be a path in the Enterprise Workspace
+                # or in the provided volume:
+                item_volume = category_assignment.get("volume", self._otcs.VOLUME_TYPE_ENTERPRISE_WORKSPACE)
+                item_node = self._otcs.get_node_by_volume_and_path(
+                    volume_type=item_volume,
+                    path=item,
+                )
+                item_id = self._otcs.get_result_value(response=item_node, key="id")
+                if not item_id:
+                    self.logger.error(
+                        "Category assignment -> %s has an invalid item path -> '%s' defined!",
+                        str(category_assignment),
+                        str(item),
+                    )
+                    success = False
+                    continue
+                item_name = self._otcs.get_result_value(response=item_node, key="name")
+            else:
+                # If item is neither a string nor a list we have an invalid definition:
+                self.logger.error(
+                    "Category assignment -> %s has an invalid item -> %s defined!",
+                    str(category_assignment),
+                    str(item),
+                )
+                success = False
+                continue
+
+            # category_item is mandatory and we give an error if it is missing.
+            # The category item can either be defined as a nickname or as a path
+            # in the category volume.
+            category_item = category_assignment.get("category_item")
+            if not category_item:
+                self.logger.error(
+                    "Category assignment for item -> '%s' should have a category item defined!",
+                    item_name,
+                )
+                success = False
+                continue
+            if isinstance(category_item, str):
+                # If category_item is a string, it must be a nickname:
+                category_node = self._otcs.get_node_from_nickname(nickname=category_item)
+                category_id = self._otcs.get_result_value(response=category_node, key="id")
+                if not category_id:
+                    self.logger.error(
+                        "Category assignment for item -> '%s' has an invalid category nickname -> '%s' defined!",
+                        item_name,
+                        category_item,
+                    )
+                    success = False
+                    continue
+                category_name = self._otcs.get_result_value(response=category_node, key="name")
+            elif isinstance(category_item, list):
+                # If category_item is a list, it must be a path in the Categories Volume:
+                category_node = self._otcs.get_node_by_volume_and_path(
+                    volume_type=self._otcs.VOLUME_TYPE_CATEGORIES_VOLUME,
+                    path=category_item,
+                )
+                category_id = self._otcs.get_result_value(response=category_node, key="id")
+                if not category_id:
+                    self.logger.error(
+                        "Category assignment for item -> '%s' has an invalid category path -> '%s' defined!",
+                        item_name,
+                        category_item,
+                    )
+                    success = False
+                    continue
+                category_name = self._otcs.get_result_value(response=category_node, key="name")
+            else:
+                # If category_item is neither a string nor a list we have an invalid definition:
+                self.logger.error(
+                    "Category assignment -> '%s' has an invalid category item defined!",
+                    str(category_assignment),
+                )
+                success = False
+                continue
+
+            categories_payload = category_assignment.get("categories", {})
+            if not categories_payload:
+                self.logger.error(
+                    "Category assignment for item -> '%s' does not have have category / attribute data defined!",
+                    item_name,
+                )
+                success = False
+                continue
+
+            # Determine the category names in the payload. For this we use a
+            # comprehension to create a set (with the curly braces) of unique category
+            # names used in the payload that then is converted to a list:
+            category_names = list({category["name"] for category in categories_payload})
+            if len(category_names) == 0 or len(category_names) > 1:
+                self.logger.error(
+                    "Category data for item -> '%s' requires exactly one category instance!",
+                    item_name,
+                )
+                success = False
+                continue
+
+            if category_name != category_names[0]:
+                self.logger.error(
+                    "Category data for item -> '%s' requires category name -> '%s' to match the one in the payload -> '%s'!",
+                    item_name,
+                    category_name,
+                    category_names[0],
+                )
+                success = False
+                continue
+
+            apply_to_sub_items = category_assignment.get("apply_to_sub_items", False)
+            inheritance = category_assignment.get("inheritance", False)
+
+            response = self._otcs.get_node_categories(node_id=item_id)
+            if response and response["results"]:
+                item_category_names = [
+                    next(iter(item["metadata"]["categories"].values()))["name"]
+                    for item in response["results"]
+                    if item.get("metadata")
+                ]
+            else:
+                item_category_names = []
+
+            # Check if the category is not yet assigned to the target item:
+            if category_name not in item_category_names:
+                # Assign the category to the item:
+                self.logger.info(
+                    "Assign category -> '%s' (%d) to item -> '%s' (%d)...",
+                    category_name,
+                    category_id,
+                    item_name,
+                    item_id,
+                )
+                if not self._otcs.assign_category(
+                    node_id=item_id,
+                    category_id=category_id,
+                    apply_to_sub_items=apply_to_sub_items,
+                    inheritance=inheritance,
+                ):
+                    self.logger.error(
+                        "Failed to assign category -> '%s' (%d) to item -> '%s' (%d)!",
+                        category_name,
+                        category_id,
+                        item_name,
+                        item_id,
+                    )
+                    success = False
+                    continue
+                # Get the categories once more after assignment:
+                response = self._otcs.get_node_categories(node_id=item_id)
+            else:
+                self.logger.info(
+                    "Category -> '%s' (%d) is already assigned to item -> '%s' (%d). Skipping assignment...",
+                    category_name,
+                    category_id,
+                    item_name,
+                    item_id,
+                )
+
+            category_data = self.build_category_data(
+                categories_payload=categories_payload,
+                node_id=item_id,
+                response=response,
+                filter_category_name=category_name,
+            )
+
+            if category_data:
+                for category in category_data:
+                    self.logger.info(
+                        "Update item -> '%s' (%d) with category -> %s (%d)...",
+                        item_name,
+                        item_id,
+                        category_name,
+                        category_id,
+                    )
+                    response = self._otcs.set_category_values(
+                        node_id=item_id,
+                        category_id=category,
+                        category_data=self._otcs.flatten_categories_dict(category_data[category]),
+                    )
+                    if not response:
+                        self.logger.error(
+                            "Failed to update item -> '%s' (%d) with category -> %s (%d)",
+                            item_name,
+                            item_id,
+                            category_name,
+                            category_id,
+                        )
+                        success = False
+                        continue
+                # end for category in category_data
+            else:
+                self.logger.info(
+                    "No category data found for item -> '%s' (%d). Skipping update...",
+                    item_name,
+                    item_id,
+                )
+                success = False
+                continue
+
+        self.write_status_file(
+            success=success,
+            payload_section_name=section_name,
+            payload_section=self._category_assignments,
         )
 
         return success
@@ -21662,7 +22006,7 @@ class Payload:
                 )
                 success = False
                 continue
-            if data.get_data_frame() is None:  # important to use "is None" here!
+            if data.get_data_frame() is None or data.get_data_frame().empty:  # important to use "is None" here!
                 self.logger.error(
                     "Data source for bulk workspace type -> '%s' is empty!",
                     type_name,
@@ -21781,9 +22125,9 @@ class Payload:
                 )
                 success = False
                 continue
-            if workspace_type["templates"] == []:
+            if not workspace_type.get("templates", []):
                 self.logger.error(
-                    "Workspace type -> '%s' does not have templates. Skipping to next bulk workspace...",
+                    "Workspace type -> '%s' does not have any templates. Skipping to next bulk workspace...",
                     type_name,
                 )
                 success = False
@@ -23008,12 +23352,12 @@ class Payload:
                         )
                     else:
                         # if we couldn't determine the parent ID this means there are
-                        # now workspace instances for this workspace type. Then we set
+                        # no workspace instances for this workspace type. Then we set
                         # workspace_id = None and let the code go into the else case below:
                         workspace_id = None
 
                     if workspace_id:
-                        # Case 1: key given + key found = name irrelevant, item exist
+                        # Case 1: key given + key found => name is irrelevant, item exist
                         workspace_old_name = self._otcs_frontend.get_result_value(
                             response=response,
                             key="name",
@@ -23041,7 +23385,7 @@ class Payload:
                             key="modify_date",
                         )
                     else:
-                        # Case 2: key given + key not found = if name exist it is a name clash
+                        # Case 2: key given + key not found => if name exist it is a name clash
                         self.logger.info(
                             "Couldn't find existing workspace with the key value -> '%s' in category -> '%s' and attribute -> '%s' in folder with ID -> %s.",
                             key,
@@ -23063,7 +23407,7 @@ class Payload:
                         key="id",
                     )
                     if workspace_id:
-                        # Case 3: no key given + name found = item exist
+                        # Case 3: no key given + name found => item exists
                         self.logger.info(
                             "Found existing workspace -> '%s' (%s) with type ID -> %s.",
                             workspace_name,
@@ -23076,7 +23420,7 @@ class Payload:
                             key="modify_date",
                         )
                     else:
-                        # Case 4: no key given + name not found = item does not exist
+                        # Case 4: no key given + name not found => item does not exist
                         self.logger.info(
                             "No existing workspace with name -> '%s' and type ID -> %s.",
                             workspace_name,
@@ -23291,13 +23635,6 @@ class Payload:
                             categories=categories,
                             replacements=replacements,
                         )
-                        # response = self._otcs_frontend.get_node(node_id=workspace_id)
-                        # parent_id = self._otcs_frontend.get_result_value(response=response, key="parent_id")
-                        # workspace_category_data = self.prepare_item_create_form(
-                        #     parent_id=parent_id,
-                        #     categories=worker_categories,
-                        #     subtype=self._otcs_frontend.ITEM_TYPE_BUSINESS_WORKSPACE,
-                        # )
                         # Transform the payload structure into the format
                         # the OTCS REST API requires:
                         workspace_category_data = self.prepare_category_data(
@@ -23547,7 +23884,6 @@ class Payload:
                                 workspace_id=workspace_id,
                                 role_id=role_id,
                             )
-                    # TODO: complete the implementation...
                 # end if members...
 
                 # Depending on the bulk operations (create, update, delete)
@@ -24057,7 +24393,7 @@ class Payload:
                 )
                 success = False
                 continue
-            if data.get_data_frame() is None:  # important to use "is None" here!
+            if data.get_data_frame() is None or data.get_data_frame().empty:  # important to use "is None" here!
                 self.logger.warning(
                     "Data source for bulk workspace relationships from -> '%s' to -> '%s' is empty!",
                     from_sub_workspace if from_sub_workspace else from_workspace,
@@ -24797,10 +25133,177 @@ class Payload:
 
     # end method definition
 
+    def build_category_data(
+        self, categories_payload: list, node_id: int, response: dict, filter_category_name: str | None = None
+    ) -> dict | None:
+        """Build the category data structure for subsequent document upload REST calls.
+
+        Args:
+            categories_payload (list):
+                The payload information for the categories. Each list item is a dictionary
+                with these keys: name, attribute, value, set (optional), row (optional).
+            node_id (int):
+                The item to prepare the category data for.
+            response (dict):
+                The response from the OTCS API containing category information.
+            filter_category_name (str | None, optional):
+                If specified only this category is processed. Defaults to None.
+
+        Returns:
+            dict | None:
+                The category data structure for subsequent document upload REST calls.
+
+        """
+
+        # Initialize the result dict we will return at the end of the method
+        # and the list of inherited categories:
+        category_data = {}
+
+        categories = response["results"]
+
+        # we iterate over all parent categories that are inherited
+        # to the new document and try to find matching payload values...
+        for category in categories:
+            # We use the "metadata_order" which is a list of typically one
+            # element that includes the category ID:
+            metadata_order = category["metadata_order"]
+
+            # If it is not a list or empty we continue with the
+            # next inherited category:
+            if not metadata_order["categories"] or not isinstance(
+                metadata_order["categories"],
+                list,
+            ):
+                continue
+            category_id = metadata_order["categories"][0]
+
+            # We use the "metadata" dict to determine the category name
+            # the keys of the dict are the category ID and attribute IDs
+            # the first element in the dict is always the category itself.
+            metadata = category["metadata"]["categories"]
+            category_name = metadata[str(category_id)]["name"]
+
+            if filter_category_name and category_name != filter_category_name:
+                self.logger.info(
+                    "Source node ID -> %s has category -> '%s' (%s) but we are filtering for category -> '%s'. Skipping...",
+                    node_id,
+                    category_name,
+                    category_id,
+                    filter_category_name,
+                )
+                continue
+
+            # The following method returns two values: the category ID and
+            # a dict of the attributes. If the category is not found
+            # on the parent node it returns -1 for the category ID
+            # and an empty dict for the attribute definitions:
+            (
+                category_id,
+                attribute_definitions,
+            ) = self._otcs_frontend.get_node_category_definition(
+                node_id=node_id,
+                category_name=category_name,
+            )
+            if category_id == -1:
+                self.logger.error(
+                    "The item with ID -> %s does not have the specified category -> '%s' assigned. Skipping...",
+                    node_id,
+                    category_name,
+                )
+                continue
+
+            # We now initialize the substructure for this particular category:
+            category_data[str(category_id)] = {}
+
+            self.logger.debug(
+                "Processing the attributes in payload to find values for the category -> '%s' (%s)...",
+                category_name,
+                category_id,
+            )
+            # now we fill the prepared (but empty) category_data
+            # with the actual attribute values from the payload.
+            # For this we traverse all category dicts in the payload
+            # and check if they include data for the currently processed
+            # category:
+            for attribute in categories_payload:
+                attribute_name = attribute["attribute"]
+                set_name = attribute.get("set", "")
+                row = attribute.get("row", "")
+                if attribute["name"] != category_name:
+                    self.logger.debug(
+                        "Attribute -> '%s' does not belong to category -> '%s'. Skipping...",
+                        attribute_name,
+                        category_name,
+                    )
+                    continue
+                attribute_value = attribute["value"]
+
+                # Set attributes are constructed with <set>:<attribute>
+                # by method get_node_category_definition(). This is not
+                # an OTCS REST syntax but specific for payload.py
+                if set_name:
+                    attribute_name = set_name + ":" + attribute_name
+
+                if attribute_name not in attribute_definitions:
+                    self.logger.error(
+                        "Illegal attribute name -> '%s' in payload for category -> '%s'",
+                        attribute_name,
+                        category_name,
+                    )
+                    continue
+                attribute_type = attribute_definitions[attribute_name]["type"]
+                attribute_id = attribute_definitions[attribute_name]["id"]
+                # For multi-line sets the "x" is the placeholder for the
+                # row number. We need to replace it with the actual row number
+                # given in the payload:
+                if "_x_" in attribute_id:
+                    if not row:
+                        self.logger.error(
+                            "Row number is not specified in payload for attribute -> '%s' (%s)",
+                            attribute_name,
+                            attribute_id,
+                        )
+                        continue
+                    attribute_id = attribute_id.replace("_x_", "_" + str(row) + "_")
+
+                # Special treatment for type user: determine the ID for the login name.
+                # the ID is the actual value we have to put in the attribute:
+                if attribute_type == "user":
+                    user = self._otcs_frontend.get_user(
+                        name=attribute_value,
+                        show_error=True,
+                    )
+                    user_id = self._otcs_frontend.get_result_value(
+                        response=user,
+                        key="id",
+                    )
+                    if not user_id:
+                        self.logger.error(
+                            "Cannot find user with login name -> '%s'. Skipping...",
+                            attribute_value,
+                        )
+                        continue
+                    attribute_value = user_id
+                category_data[str(category_id)][attribute_id] = attribute_value
+            # end for attribute in categories_payload:
+
+            # If for none of the attributes of the current category ID a value was found
+            # in the payload we remove the dictionary entry to not cause problems
+            # for later category updates:
+            if not category_data[str(category_id)]:
+                del category_data[str(category_id)]
+        # end for inherited_category in inherited_categories:
+
+        self.logger.debug("Resulting category data -> %s", str(category_data))
+
+        return category_data
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="prepare_category_data")
     def prepare_category_data(
         self,
-        categories_payload: dict,
+        categories_payload: list,
         source_node_id: int,
         source_is_document: bool = False,
     ) -> dict | None:
@@ -25163,7 +25666,8 @@ class Payload:
                 )
             if (
                 data is None
-                or data.get_data_frame() is None  # the 2nd check is important for the "copy_data_source" case!
+                or data.get_data_frame() is None
+                or data.get_data_frame().empty  # the 2nd check is important for the "copy_data_source" case!
             ):  # important to use "is None" here!
                 self.logger.error(
                     "Failed to load data source -> '%s' for bulk documents!",
@@ -27480,7 +27984,8 @@ class Payload:
                 )
             if (
                 data is None
-                or data.get_data_frame() is None  # the 2nd check is important for the "copy_data_source" case!
+                or data.get_data_frame() is None
+                or data.get_data_frame().empty  # the 2nd check is important for the "copy_data_source" case!
             ):  # important to use "is None" here!
                 self.logger.error(
                     "Failed to load data source -> '%s' for bulk items!",
@@ -29427,7 +29932,7 @@ class Payload:
                 self.logger.error("Failed to load data source -> '%s' for bulk classification!", data_source_name)
                 success = False
                 continue
-            if data.get_data_frame() is None:  # important to use "is None" here!
+            if data.get_data_frame() is None or data.get_data_frame().empty:  # important to use "is None" here!
                 self.logger.error("Data source -> '%s' for bulk classification is empty!", data_source_name)
                 continue
 

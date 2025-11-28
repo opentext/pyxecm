@@ -239,8 +239,8 @@ class BrowserAutomation:
         try:
             self.logger.debug("Creating Playwright instance...")
             self.playwright = sync_playwright().start()
-        except Exception:
-            self.logger.error("Failed to start Playwright!")
+        except Exception as e:
+            self.logger.error("Failed to start Playwright! Error -> %s", str(e))
             return False
 
         result = True

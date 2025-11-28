@@ -1345,7 +1345,11 @@ class Customizer:
             )
             return
 
-        self.logger.info("Restart OTCS frontend and backend pods...")
+        self.logger.info("Restart of the OTCS service in all pods...")
+
+        #
+        # Distributed Agent Pods:
+        #
 
         # Get number of replicas or update it for da as it might change with dynamic scaling:
         otcs_da_scale = self.k8s_object.get_stateful_set_scale(
@@ -1363,7 +1367,7 @@ class Customizer:
         if not self.settings.k8s.sts_otcs_da_replicas:
             self.settings.k8s.sts_otcs_da_replicas = 0
 
-        # Restart all da:
+        # Restart all Distributed Agent Pods:
         for x in range(self.settings.k8s.sts_otcs_da_replicas):
             pod_name = self.settings.k8s.sts_otcs_da + "-" + str(x)
 
@@ -1384,6 +1388,10 @@ class Customizer:
                 ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"],
                 container="otcs-da-container",
             )
+
+        #
+        # Frontend Pods:
+        #
 
         # Get number of replicas or update it for frontends as it might change with dynamic scaling:
         otcs_frontend_scale = self.k8s_object.get_stateful_set_scale(
@@ -1423,6 +1431,10 @@ class Customizer:
                 container="otcs-frontend-container",
             )
 
+        #
+        # Backend (admin) Pods:
+        #
+
         # Restart all backends:
         for x in range(self.settings.k8s.sts_otcs_admin_replicas):
             pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
@@ -1445,7 +1457,7 @@ class Customizer:
                 container="otcs-admin-container",
             )
 
-        # Reauthenticate at frontend:
+        # Reauthenticate the OTCS frontend object:
         self.logger.info(
             "Re-authenticating to OTCS frontend after restart of frontend pods...",
         )
@@ -1456,7 +1468,7 @@ class Customizer:
             otcs_cookie = frontend.authenticate(revalidate=True)
         self.logger.info("OTCS frontend is ready again.")
 
-        # Reauthenticate at backend:
+        # Reauthenticate the OTCS backend object:
         self.logger.info(
             "Re-authenticating to OTCS backend after restart of backend pods...",
         )
@@ -1467,7 +1479,7 @@ class Customizer:
             otcs_cookie = backend.authenticate(revalidate=True)
         self.logger.info("OTCS backend is ready again.")
 
-        # Reactivate Kubernetes liveness probes in all pods:
+        # Reactivate Kubernetes liveness probes in all frontend pods:
         for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
             pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
 
@@ -1478,6 +1490,7 @@ class Customizer:
                 container="otcs-frontend-container",
             )
 
+        # Reactivate Kubernetes liveness probes in all backend pods:
         for x in range(self.settings.k8s.sts_otcs_admin_replicas):
             pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
 
@@ -1488,7 +1501,7 @@ class Customizer:
                 container="otcs-admin-container",
             )
 
-        self.logger.info("Restart OTCS frontend and backend pods has been completed.")
+        self.logger.info("Restart of OTCS service in all pods has been completed.")
 
         # optional, give some additional time to make sure service is responsive
         if extra_wait_time > 0:
@@ -1880,6 +1893,7 @@ class Customizer:
                     stop_on_error=self.settings.stop_on_error,
                     aviator_enabled=self.settings.aviator.enabled,
                     upload_status_files=self.settings.otcs.upload_status_files,
+                    status_file_check=self.settings.status_file_check,
                     otawp_object=self.otawp_object,
                     otca_object=self.otca_object,
                     otkd_object=self.otkd_object,

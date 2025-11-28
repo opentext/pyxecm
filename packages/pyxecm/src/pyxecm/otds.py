@@ -675,24 +675,23 @@ class OTDS:
                     timeout=timeout,
                 )
 
+                # Attempt to parse JSON safely:
+                try:
+                    response_json = response.json()
+                except ValueError:
+                    response_json = {}
+
+                # Check for expired OTDS ticket. This typically gives an error like this:
+                # status -> 400/Bad Request; error -> {"status":1034,"error":"Expired OTDS SSO ticket","errorDetails":null}
+                expired_token = response_json.get("error") == "Expired OTDS SSO ticket"
+
                 if response.ok:
                     if success_message:
                         self.logger.info(success_message)
-                    if parse_request_response:
-                        return self.parse_request_response(response)
-                    else:
-                        return response
+                    return self.parse_request_response(response) if parse_request_response else response
                 # Check if Session has expired - then re-authenticate and try once more
-                elif (
-                    (response.status_code == 401 and retries == 0)
-                    or (
-                        response.status_code == 400
-                        and retries == 0
-                        and "Expired OTDS SSO ticket"
-                        in response.text  # OTDS seems to return 400 and not 401 for token expiry (in some cases like impersonation)
-                    )
-                ):
-                    self.logger.info("Session has expired - try to re-authenticate...")
+                elif retries == 0 and (response.status_code == 401 or (response.status_code == 400 and expired_token)):
+                    self.logger.info("Session expired. Re-authenticating and retrying...")
                     self.authenticate(revalidate=True)
                     retries += 1
                     time.sleep(REQUEST_RETRY_DELAY / 10)  # Add a delay before retrying
@@ -831,7 +830,9 @@ class OTDS:
 
     # end method definition
 
-    def authenticate(self, revalidate: bool = False, grant_type: str | None = None) -> dict | None:
+    def authenticate(
+        self, revalidate: bool = False, grant_type: str | None = None, show_error: bool = True
+    ) -> dict | None:
         """Authenticate at Directory Services and retrieve OTDS ticket.
 
         Args:
@@ -846,6 +847,9 @@ class OTDS:
                 * If client_id and client_secret are given, "client_credentials" is used.
                 * If both are given, "password" is used.
                 * If none of the above is given, an error is logged and None is returned.
+            show_error (bool, optional):
+                Whether or not an error should be logged in case of a failed authentication.
+                If False, then only a warning is logged. Defaults to True.
 
         Returns:
             dict | None:
@@ -919,10 +923,16 @@ class OTDS:
                 otds_ticket = authenticate_dict[result_value]
                 self.logger.debug("Ticket / token -> %s", otds_ticket)
         else:
-            self.logger.error(
-                "Failed to request an OTDS ticket / access token; error -> %s",
-                response.text,
-            )
+            if show_error:
+                self.logger.error(
+                    "Failed to request an OTDS ticket / access token; error -> %s",
+                    response.text,
+                )
+            else:
+                self.logger.warning(
+                    "Failed to request an OTDS ticket / access token; warning -> %s",
+                    response.text,
+                )
             return None
 
         # Store authentication ticket:
@@ -1007,7 +1017,7 @@ class OTDS:
                 headers=REQUEST_FORM_HEADERS,
                 data=impersonate_post_body,
                 timeout=None,
-                failure_message="Failed to impersonate as user -> '{}'".format(user_id),
+                failure_message="Failed to impersonate as user -> '{}' with OTDS token".format(user_id),
             )
         else:  # ticket-based authentication
             if not ticket:
@@ -1032,7 +1042,7 @@ class OTDS:
                 method="POST",
                 json_data=impersonate_post_body,
                 timeout=None,
-                failure_message="Failed to impersonate as user -> '{}'".format(user_id),
+                failure_message="Failed to impersonate as user -> '{}' with OTDS ticket".format(user_id),
             )
 
         return response

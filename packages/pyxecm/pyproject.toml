@@ -42,7 +42,6 @@ classifiers = [
 [project.optional-dependencies]
 magic = ['python-magic']
 sap = ['pyrfc==3.3.1']
-pyvis = ["pyvis>=0.3.2"]
 customizer = [
   "kubernetes>=33.1.0",
   "playwright>=1.53.0",

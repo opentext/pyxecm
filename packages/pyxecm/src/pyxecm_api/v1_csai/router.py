@@ -4,14 +4,14 @@ import logging
 from http import HTTPStatus
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Body, Depends
+from fastapi.responses import JSONResponse
 from pyxecm.otcs import OTCS
 from pyxecm_customizer.k8s import K8s
 
 from pyxecm_api.auth.functions import get_authorized_user
 from pyxecm_api.auth.models import User
-from pyxecm_api.common.functions import get_k8s_object, get_otca_object, get_otcs_object, get_settings
+from pyxecm_api.common.functions import get_k8s_object, get_otcs_object, get_settings
 from pyxecm_api.settings import CustomizerAPISettings
 
 from .models import CSAIEmbedMetadata
@@ -115,42 +115,3 @@ def set_csai_config_data(
         k8s_object.restart_deployment(deployment)
 
     return get_csai_config_data(user=user, k8s_object=k8s_object, settings=settings)
-
-
-@router.get("/graph")
-def get_csai_graph(name: Annotated[str, Query(..., description="Name of the graph")]) -> HTMLResponse:
-    """Display the graph of the given name.
-
-    Args:
-        name (str):
-            The name of the CSAI graph.
-
-    Returns:
-        HTMLResponse: Visualization of the CSAI graph
-
-    """
-
-    # Get the Content Aviator object:
-    otca = get_otca_object(otcs_object=None)
-
-    # Get all graphs configured in Content Aviator:
-    graphs = otca.get_graphs()
-    # Find the graph (LangGraph) with the given name:
-    graph = [g for g in graphs if g["name"] == name]
-
-    if not graph:
-        logger.error("Couldn't find graph -> '%s' for visualization!", name)
-        raise HTTPException(status_code=404, detail="Graph -> '{}' not found!".format(name))
-
-    try:
-        filename = otca.visualize_graph(graph[0]["id"])
-
-        with open(filename) as f:
-            file_content = f.read()
-    except Exception as e:
-        logger.error("Error visualizing graph -> '%s': %s", name, str(e))
-        raise HTTPException(status_code=500, detail="Failed to visualize graph -> '{}'!".format(name)) from e
-
-    logger.info("Successfully visualized graph -> '%s'", name)
-
-    return HTMLResponse(status_code=200, content=file_content)

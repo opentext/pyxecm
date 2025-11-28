@@ -56,25 +56,19 @@ class Data:
             for logfilter in logger.filters:
                 self.logger.addFilter(logfilter)
 
-        if init_data is not None:
-            # if a data frame is passed to the constructor we
-            # copy its content to the new Data object
-
-            if isinstance(init_data, pd.DataFrame):
-                self._df: pd.DataFrame = init_data.copy()
-            elif isinstance(init_data, Data):
-                if init_data.get_data_frame() is not None:
-                    self._df: pd.DataFrame = init_data.get_data_frame().copy()
-            elif isinstance(init_data, list):
-                self._df: pd.DataFrame = pd.DataFrame(init_data)
-            elif isinstance(init_data, dict):
-                # it is important to wrap the dict in a list to avoid that more than 1 row is created
-                self._df: pd.DataFrame = pd.DataFrame([init_data])
-            else:
-                self.logger.error("Illegal initialization data for 'Data' class!")
-                self._df = None
+        if init_data is None:
+            self._df = pd.DataFrame()
+        elif isinstance(init_data, pd.DataFrame):
+            self._df = init_data.copy()
+        elif isinstance(init_data, Data):
+            self._df = init_data.get_data_frame().copy()
+        elif isinstance(init_data, list):
+            self._df = pd.DataFrame(init_data)
+        elif isinstance(init_data, dict):
+            self._df = pd.DataFrame([init_data])
         else:
-            self._df = None
+            error_message = "Illegal initialization data for 'Data' class!"
+            raise TypeError(error_message)
 
     # end method definition
 
@@ -125,6 +119,36 @@ class Data:
         """
 
         return self._df[column]
+
+    # end method definition
+
+    def __getattr__(self, attr: str) -> any:
+        """Delegate attribute access to the internal pandas DataFrame.
+
+        This method is only called if the attribute is not found
+        on the Data instance itself. It allows the Data class to
+        behave like a pandas DataFrame for most attributes.
+
+        Args:
+            attr (str): The attribute name being accessed.
+
+        Returns:
+            Any: The corresponding attribute from the internal DataFrame.
+
+        Raises:
+            AttributeError: If the attribute is not present on the DataFrame.
+
+        """
+
+        if self._df is None:
+            error_message = "'Data' object has no attribute -> '{}' (internal DataFrame is None)".format(attr)
+            raise AttributeError(error_message)
+
+        try:
+            return getattr(self._df, attr)
+        except AttributeError:
+            self.logger.error("'Data' object has no attribute -> '%s'", attr)
+            raise
 
     # end method definition
 

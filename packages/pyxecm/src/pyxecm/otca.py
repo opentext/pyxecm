@@ -55,16 +55,6 @@ DEFAULT_LLM_ATTRIBUTES = {
 
 default_logger = logging.getLogger(MODULE_NAME)
 
-try:
-    from pyvis.network import Network
-
-    pyvis_installed = True
-except ModuleNotFoundError:
-    default_logger.warning(
-        "Module pyvis is not installed. Customizer will not support graph visualization.",
-    )
-    pyvis_installed = False
-
 
 class OTCA:
     """Interact with Content Aviator / Aviator Studio REST API."""
@@ -84,12 +74,12 @@ class OTCA:
 
     def __init__(
         self,
-        chat_url: str,
-        embed_url: str,
-        studio_url: str,
-        otds_url: str,
-        client_id: str,
-        client_secret: str,
+        chat_url: str | None = None,
+        embed_url: str | None = None,
+        studio_url: str | None = None,
+        otds_url: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         content_system: dict | None = None,
         otcs_object: OTCS | None = None,
         synonyms: list | None = None,
@@ -271,7 +261,7 @@ class OTCA:
                 request_header["Authorization"] = "Bearer {}".format(self._chat_token_hashed)
             if content_system == "otcm":
                 request_header["Authorization"] = "Bearer {}".format(self._chat_token)
-            elif content_system == "xecm-direct" | content_system == "otcm-direct":
+            elif content_system in {"xecm-direct", "otcm-direct"}:
                 request_header["otcsticket"] = self._chat_token
 
         elif service_type == "embed":
@@ -1060,12 +1050,18 @@ class OTCA:
 
     # end method definition
 
-    def get_graph(self, graph_id: str) -> dict | None:
-        """Get a graph by its ID.
+    def get_graph(
+        self, graph_id: str | None = None, graph_name: str | None = None, show_error: bool = False
+    ) -> dict | None:
+        """Get a graph by its ID or by its name.
 
         Args:
-            graph_id (str):
-                The ID of the graph.
+            graph_id (str | None, optional):
+                The ID of the graph to retrieve the nodes for.
+            graph_name (str | None, optional):
+                Alternatively the name of the graph to retrieve the nodes for.
+            show_error (bool, optional):
+                Whether to show error messages in case of failure. Defaults to True.
 
         Returns:
             dict | None:
@@ -1084,6 +1080,26 @@ class OTCA:
 
         """
 
+        if not graph_name and not graph_id:
+            self.logger.error("Cannot get graph. Neither the graph ID nor the graph name are provided!")
+            return None
+
+        # If we only have the graph name but not the graph ID we lookup the ID first:
+        if not graph_id:
+            graphs = self.get_graphs()
+
+            if graphs is None:
+                return None
+
+            graph = next((g for g in graphs if g["name"] == graph_name), None)
+
+            if graph is None:
+                if show_error:
+                    self.logger.error("Graph -> '%s' not found!", graph_name)
+                return None
+
+            graph_id = graph["id"]
+
         request_url = self.config()["studioGraphsUrl"] + "/" + graph_id
         request_header = self.request_header(service_type="studio")
 
@@ -1092,18 +1108,38 @@ class OTCA:
             method="GET",
             headers=request_header,
             timeout=None,
-            show_error=True,
             failure_message="Failed get graphs",
+            show_error=show_error,
         )
 
     # end method definition
 
-    def get_graph_nodes(self, graph_id: str) -> list | None:
+    def get_graph_nodes(
+        self,
+        graph_id: str | None = None,
+        graph_name: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        retry_forever: bool = False,
+        show_error: bool = True,
+    ) -> list | None:
         """Get all nodes of a graph.
 
+        This method supports either the graph ID or the graph name as input.
+
         Args:
-            graph_id (str):
-                The ID of the Graph to retrieve the nodes for.
+            graph_id (str | None, optional):
+                The ID of the graph to retrieve the nodes for.
+            graph_name (str | None, optional):
+                Alternatively the name of the graph to retrieve the nodes for.
+            limit (int, optional):
+                Maximum number of nodes to retrieve. Defaults to 100.
+            offset (int, optional):
+                Offset for pagination. Defaults to 0.
+            retry_forever (bool, optional):
+                Whether to wait forever without timeout. Defaults to False.
+            show_error (bool, optional):
+                Whether to show error messages in case of failure. Defaults to True.
 
         Returns:
             list | None:
@@ -1130,7 +1166,27 @@ class OTCA:
 
         """
 
-        request_url = self.config()["studioGraphsUrl"] + "/" + graph_id + "/nodes"
+        if not graph_name and not graph_id:
+            self.logger.error("Cannot get graph nodes. Neither the graph ID nor the graph name are provided!")
+            return None
+
+        # If we only have the graph name but not the graph ID we lookup the ID first:
+        if not graph_id:
+            graphs = self.get_graphs()
+
+            if graphs is None:
+                return None
+
+            graph = next((g for g in graphs if g["name"] == graph_name), None)
+
+            if graph is None:
+                if show_error:
+                    self.logger.error("Graph -> '%s' not found!", graph_name)
+                return None
+
+            graph_id = graph["id"]
+
+        request_url = self.config()["studioGraphsUrl"] + "/" + graph_id + f"/nodes?limit={limit}&offset={offset}"
         request_header = self.request_header(service_type="studio")
 
         response = self.do_request(
@@ -1138,23 +1194,36 @@ class OTCA:
             method="GET",
             headers=request_header,
             timeout=None,
-            show_error=True,
             failure_message="Failed get list of graph nodes!",
+            retry_forever=retry_forever,
+            show_error=show_error,
         )
 
         if response is None:
             return None
 
-        return response.get("results", [])
+        response = [graph for graph in response.get("results", []) if graph["graphId"] == graph_id]
+
+        return response
 
     # end method definition
 
-    def get_graph_nodes_iterator(self, graph_id: str) -> iter:
+    def get_graph_nodes_iterator(
+        self,
+        graph_id: str | None = None,
+        graph_name: str | None = None,
+        limit: int = 100,
+    ) -> iter:
         """Get an iterator object that can be used to traverse graph nodes.
 
         Args:
-            graph_id (str):
-                The ID of the Graph to retrieve the nodes for.
+            graph_id (str | None, optional):
+                The ID of the graph to retrieve the nodes for.
+            graph_name (str | None, optional):
+                Alternatively the name of the graph to retrieve the nodes for.
+            limit (int, optional):
+                Maximum number of nodes to retrieve with one REST call.
+                Defaults to 100.
 
         Returns:
             iter:
@@ -1167,64 +1236,46 @@ class OTCA:
 
         """
 
-        nodes: list = self.get_graph_nodes(graph_id=graph_id)
+        offset = 0
 
-        yield from nodes
+        while True:
+            nodes: list = self.get_graph_nodes(graph_id=graph_id, graph_name=graph_name, limit=limit, offset=offset)
+            if nodes is None:
+                return
+            if len(nodes) == 0:
+                return
 
-    # end method definition
+            nodes = [node for node in nodes if node["graphId"] == graph_id]
 
-    def get_graph_nodes_by_name(self, name: str, retry_forever: bool = False) -> list | None:
-        """Get all nodes of a graph by name.
-
-        Args:
-            name (str):
-                The Name of the Graph to retrieve the nodes for.
-            retry_forever (bool, optional):
-                Whether to wait forever without timeout. Defaults to False.
-
-        Returns:
-            list | None:
-                A list of all nodes of the graph.
-
-        """
-
-        graphs = self.get_graphs()
-
-        if graphs is None:
-            return None
-
-        graph = next((g for g in graphs if g["name"] == name), None)
-
-        if graph is None:
-            self.logger.error("Graph -> '%s' not found!", name)
-            return None
-
-        request_url = self.config()["studioGraphsUrl"] + "/" + graph["id"] + "/nodes"
-        request_header = self.request_header(service_type="studio")
-
-        response = self.do_request(
-            url=request_url,
-            method="GET",
-            headers=request_header,
-            timeout=None,
-            show_error=True,
-            failure_message="Failed get list of graphs!",
-            retry_forever=retry_forever,
-        )
-
-        if response is None:
-            return None
-
-        return response.get("results", [])
+            yield from nodes
+            offset += limit
 
     # end method definition
 
-    def get_graph_edges(self, graph_id: str) -> list | None:
+    def get_graph_edges(
+        self,
+        graph_id: str | None = None,
+        graph_name: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        retry_forever: bool = False,
+        show_error: bool = True,
+    ) -> list | None:
         """Get all edges of a graph.
 
         Args:
-            graph_id (str):
-                The ID of the Graph to retrieve the edges for.
+            graph_id (str | None, optional):
+                The ID of the graph to retrieve the nodes for.
+            graph_name (str | None, optional):
+                Alternatively the name of the graph to retrieve the nodes for.
+            limit (int, optional):
+                Maximum number of edges to retrieve. Defaults to 100.
+            offset (int, optional):
+                Offset for pagination. Defaults to 0.
+            retry_forever (bool, optional):
+                Whether to wait forever without timeout. Defaults to False.
+            show_error (bool, optional):
+                Whether to show error messages in case of failure. Defaults to True.
 
         Returns:
             list | None:
@@ -1248,7 +1299,27 @@ class OTCA:
 
         """
 
-        request_url = self.config()["studioGraphsUrl"] + "/" + graph_id + "/edges"
+        if not graph_name and not graph_id:
+            self.logger.error("Cannot get graph edges. Neither the graph ID nor the graph name are provided!")
+            return None
+
+        # If we only have the graph name but not the graph ID we lookup the ID first:
+        if not graph_id:
+            graphs = self.get_graphs()
+
+            if graphs is None:
+                return None
+
+            graph = next((g for g in graphs if g["name"] == graph_name), None)
+
+            if graph is None:
+                if show_error:
+                    self.logger.error("Graph -> '%s' not found!", graph_name)
+                return None
+
+            graph_id = graph["id"]
+
+        request_url = self.config()["studioGraphsUrl"] + "/" + graph_id + f"/edges?limit={limit}&offset={offset}"
         request_header = self.request_header(service_type="studio")
 
         response = self.do_request(
@@ -1256,8 +1327,9 @@ class OTCA:
             method="GET",
             headers=request_header,
             timeout=None,
-            show_error=True,
             failure_message="Failed get list of graph edges!",
+            retry_forever=retry_forever,
+            show_error=show_error,
         )
 
         if response is None:
@@ -1267,12 +1339,19 @@ class OTCA:
 
     # end method definition
 
-    def get_graph_edges_iterator(self, graph_id: str) -> iter:
+    def get_graph_edges_iterator(
+        self, graph_id: str | None = None, graph_name: str | None = None, limit: int = 100
+    ) -> iter:
         """Get an iterator object that can be used to traverse graph edges.
 
         Args:
-            graph_id (str):
-                The ID of the Graph to retrieve the nodes for.
+            graph_id (str | None, optional):
+                The ID of the graph to retrieve the nodes for.
+            graph_name (str | None, optional):
+                Alternatively the name of the graph to retrieve the nodes for.
+            limit (int, optional):
+                Maximum number of nodes to retrieve with one REST call.
+                Defaults to 100.
 
         Returns:
             iter:
@@ -1285,77 +1364,20 @@ class OTCA:
 
         """
 
-        edges: list = self.get_graph_edges(graph_id=graph_id)
+        offset = 0
 
-        yield from edges
+        while True:
+            edges: list = self.get_graph_edges(graph_id=graph_id, graph_name=graph_name, limit=limit, offset=offset)
+            if edges is None:
+                return
+            if len(edges) == 0:
+                return
 
-    # end method definition
+            # filter edges with different graph id
+            edges = [edge for edge in edges if edge["graphId"] == graph_id]
 
-    def visualize_graph(self, graph_id: str) -> str:
-        """Visualize a graph.
-
-        Args:
-            graph_id (str):
-                The ID of the graph.
-
-        Returns:
-            str:
-                Filename of the generated html file
-
-        """
-
-        if not pyvis_installed:
-            self.logger.warning("Cannot visualize graph. Python module pyvis not installed!")
-            return None
-
-        graph = self.get_graph(graph_id=graph_id)
-        graph_id = graph["id"]
-        graph_name = graph["name"]
-        net = Network(notebook=False, directed=True, height="1000px", width="100%", filter_menu=True, select_menu=True)
-        net.heading = f"Aviator Studio graph: {graph_name}"
-        nodes = self.get_graph_nodes_iterator(graph_id=graph_id)
-        for node in nodes:
-            node_id = node["id"]
-            node_name = node["name"]
-            node_attributes = node["attributes"]
-            self._node_dictionary[(graph_id, node_id)] = node_name
-            if node_attributes and "APISchema" in node_attributes:
-                net.add_node(n_id=node_id, label=node_name, title=json.dumps(node, indent=2), color="green")
-            else:
-                net.add_node(n_id=node_id, label=node_name, title=json.dumps(node, indent=2))
-            relationships = self.get_graph_node_relationships_iterator(
-                graph_id=graph_id, node_id=node_id, relation_type="rules"
-            )
-            for relationship in relationships:
-                for rule in relationship["rules"] or []:
-                    net.add_node(
-                        n_id=rule["id"], label=rule["name"], title=json.dumps(rule, indent=2), shape="box", color="red"
-                    )
-                    net.add_edge(source=node_id, to=rule["id"])
-            relationships = self.get_graph_node_relationships_iterator(
-                graph_id=graph_id, node_id=node_id, relation_type="prompts"
-            )
-            for relationship in relationships:
-                for prompt in relationship["prompts"] or []:
-                    net.add_node(
-                        n_id=prompt["id"],
-                        label=prompt["name"],
-                        title=json.dumps(prompt, indent=2),
-                        shape="oval",
-                        color="green",
-                    )
-                    net.add_edge(source=node_id, to=prompt["id"])
-        edges = self.get_graph_edges_iterator(graph_id=graph_id)
-        for edge in edges:
-            edge_source_id = edge["sourceId"]
-            edge_target_id = edge["targetId"]
-            net.add_edge(source=edge_source_id, to=edge_target_id)
-
-        html_file = "{}.html".format(graph_name)
-        net.save_graph(html_file)
-        self.logger.info("Graph visualization saved to -> %s", html_file)
-
-        return html_file
+            yield from edges
+            offset += limit
 
     # end method definition
 
@@ -1372,7 +1394,7 @@ class OTCA:
 
     # end method definition
 
-    def import_configuration(self) -> bool:
+    def import_configuration(self, json_data: dict | None = None) -> bool:
         """Import Aviator Studio default configuration.
 
         Returns:
@@ -1388,6 +1410,7 @@ class OTCA:
             url=request_url,
             method="POST",
             headers=request_header,
+            json_data=json_data,
             timeout=None,
             show_error=True,
             parse_request_response=False,
@@ -1813,64 +1836,191 @@ class OTCA:
 
     # end method definition
 
-    def add_prompt(
+    def add_graph_node(
         self,
-        name: str,
-        template: str,
-        description: str,
-        llm_model: str,
+        graph_name: str,
+        node_name: str,
+        description: str = "",
+        klass_name: str = "",
+        type_id: int = 0,
         attributes: dict | None = None,
     ) -> dict | None:
-        """Add a prompt for a specific LLM.
+        """Add a node to a specific graph.
 
         Args:
-            name (str):
-                A given name fpor the prompt.
-            template (str):
-                The actual prompt string.
-            description (str):
-                An arbitrary desciption of the prompt.
-            llm_model (str):
-                The name of the LLM that has been registered by calling add_llm().
+            graph_name (str):
+                The name of the graph to add the node to.
+            node_name (str):
+                The name of the node to add.
+            description (str, optional):
+                An arbitrary description of the node. Defaults to "".
+            klass_name (str, optional):
+                The name of the klass to assign to the node. Defaults to "".
+            type_id (int, optional):
+                The type of the node. Defaults to 0.
             attributes (dict | None, optional):
-                * "type": the type of the prompt, e.g. "system"
+                The node attributes.
 
         Returns:
             dict | None:
-                The data of the created prompt. This includes the prompt ID and the prompt version.
+                The data of the created node.
 
         Example:
         {
-            'id': '9e491456-3b72-4fec-8e51-3af2b4f036fb',
-            'name': 'cat_prompt',
-            'template': 'Your name is Cat Aviator and you are an AI Assitant that answers questions and always ends answers with jokes about cats.',
-            'description': 'This is a Cat prompt',
-            'attributes': {'type': 'system'},
-            'llmModel': 'qwen3:8b',
-            'version': 1,
-            'promptId': '3c96c5e3-dfa2-4aa8-9ce3-2080e0726241'
+            "createdAt": "2025-10-28T17:14:17.979Z",
+            "updatedAt": "2025-10-28T17:14:17.979Z",
+            "id": "e5aad457-06d4-4de1-91d3-35d45c11ff4b",
+            "status": 0,
+            "name": "otcmDocgenGraph",
+            "description": "This is a test node added via OTCA API",
+            "graphId": "6bd500a0-4d2e-4c2b-b6e0-ffeff5e4db1f",
+            "discriminator": 0,
+            "version": 1,
+            "klassId": "730c7008-9401-4549-93b6-f6aab3198529",
+            "attributes": { "name": "otcm_docgen" }
         }
 
         """
 
-        request_url = self.config()["studioPromptsUrl"]
-        request_header = self.request_header(service_type="studio")
-        request_data = {
-            "name": name,
-            "template": template,
+        # Get graph ID by name
+        graph = self.get_graph(graph_name=graph_name)
+
+        if graph is None:
+            return None
+
+        graph_id = graph["id"]
+
+        klasses = self.get_klasses()
+        klass_id = next((k["id"] for k in klasses if k["name"] == klass_name), None)
+
+        node_data = {
+            "type": type_id,
+            "name": node_name,
+            "klassId": klass_id,
             "description": description,
-            "llmModel": llm_model,
-            "attributes": attributes,
+            "attributes": attributes or {},
         }
+
+        request_url = self.config()["studioGraphsUrl"] + "/" + graph_id + "/nodes"
+        request_header = self.request_header(service_type="studio")
 
         response = self.do_request(
             url=request_url,
             method="POST",
             headers=request_header,
-            json_data=request_data,
+            json_data=node_data,
             timeout=None,
             show_error=True,
-            failure_message="Failed to add prompt -> '%s' for LLM -> '{}'!".format(name),
+            failure_message="Failed to add node to graph -> '{}'!".format(graph_name),
+        )
+
+        return response
+
+    # end method definition
+
+    def add_graph_edge(
+        self,
+        graph_name: str,
+        source_node_name: str,
+        target_node_name: str,
+        type_id: int = 0,
+        attributes: dict | None = None,
+    ) -> dict | None:
+        """Add an edge to a specific graph.
+
+        Args:
+            graph_name (str):
+                The name of the graph to add the edge to.
+            source_node_name (str):
+                The name of the source node.
+            target_node_name (str):
+                The name of the target node.
+            type_id (int, optional):
+                The type of the edge. Defaults to 0.
+            attributes (dict | None, optional):
+                The edge attributes.
+
+        Returns:
+            dict | None:
+                The data of the created edge.
+
+        Example:
+        {
+            "createdAt": "2025-10-28T17:38:32.262Z",
+            "updatedAt": "2025-10-28T17:38:32.262Z",
+            "id": "59a30a6d-350f-4332-979c-384136e1ac99",
+            "status": 0,
+            "sourceId": "06e09a75-8f5e-4bb4-930f-be2bef3c2aba",
+            "targetId": "e464c402-f6dc-4868-892b-cbcd85154202",
+            "type": 0,
+            "attributes": {},
+            "graphId": "6bd500a0-4d2e-4c2b-b6e0-ffeff5e4db1f",
+            "version": 1
+        }
+
+        """
+
+        # Get graph ID by name
+        graph = self.get_graph(graph_name=graph_name)
+
+        if graph is None:
+            return None
+
+        graph_id = graph["id"]
+
+        source_node = self.get_models(model_type="nodes", where={"name": source_node_name, "graphId": graph_id})
+        target_node = self.get_models(model_type="nodes", where={"name": target_node_name, "graphId": graph_id})
+
+        if not source_node or not target_node:
+            self.logger.error(
+                "Could not find source node -> '%s' and target node -> '%s' in graph -> '%s'!",
+                source_node_name,
+                target_node_name,
+                graph_name,
+            )
+            return None
+
+        source_node = source_node[0]
+        target_node = target_node[0]
+
+        # Check for existing edge with same source, target, type, and attributes
+        existing_edges = [
+            e
+            for e in self.get_graph_edges_iterator(graph_id=graph_id)
+            if e["sourceId"] == source_node["id"] and e["targetId"] == target_node["id"]
+        ]
+
+        # Check if edge already exists in graph:
+        for target_edge in existing_edges:
+            if target_edge.get("attributes") == (attributes or {}) and target_edge.get("type") == type_id:
+                self.logger.info(
+                    "Edge from node -> '%s' to node -> '%s' with attributes (%s) and type (%s) already exists in graph -> '%s'. Skipping creation.",
+                    source_node_name,
+                    target_node_name,
+                    json.dumps(attributes),
+                    type_id,
+                    graph_name,
+                )
+                return target_edge
+
+        edge_data = {
+            "sourceId": source_node["id"],
+            "targetId": target_node["id"],
+            "type": type_id,
+            "attributes": attributes or {},
+        }
+        request_url = self.config()["studioGraphsUrl"] + "/" + graph_id + "/edges"
+        request_header = self.request_header(service_type="studio")
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=edge_data,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to add edge in graph -> '{}' from node -> '{}' to node -> '{}' !".format(
+                graph_name, source_node_name, target_node_name
+            ),
         )
 
         return response
@@ -1927,7 +2077,7 @@ class OTCA:
 
     # end method definition
 
-    def get_models(self, model_type: str) -> list | None:
+    def get_models(self, model_type: str, limit: int = 100, offset: int = 0, where: dict | None = None) -> list | None:
         """Get all model details by type.
 
         Args:
@@ -1942,6 +2092,13 @@ class OTCA:
                 * prompts
                 * rules
                 * klasses
+            limit (int, optional):
+                The maximum number of models to return. Default is 100.
+            offset (int, optional):
+                The number of models to skip before starting to collect the result set. Default is 0
+            where (dict | None, optional):
+                A dictionary with filter conditions.
+
 
         Returns:
             list | None:
@@ -1949,7 +2106,13 @@ class OTCA:
 
         """
 
-        request_url = self.config()["studioModelsUrl"] + "/" + model_type
+        request_url = self.config()["studioModelsUrl"] + "/" + model_type + f"?limit={limit}&offset={offset}"
+
+        if where:
+            where_json = json.dumps(where)
+            where_encoded = urllib.parse.quote(where_json)
+            request_url += f"&where={where_encoded}"
+
         request_header = self.request_header(service_type="studio")
 
         response = self.do_request(
@@ -1958,7 +2121,7 @@ class OTCA:
             headers=request_header,
             timeout=None,
             show_error=True,
-            failure_message="Failed to get list of models!",
+            failure_message="Failed to get list of models",
         )
 
         if response is None:
@@ -1968,7 +2131,7 @@ class OTCA:
 
     # end method definition
 
-    def get_models_iterator(self, model_type: str) -> iter:
+    def get_models_iterator(self, model_type: str, where: dict | None = None) -> iter:
         """Get an iterator object that can be used to traverse models.
 
         Args:
@@ -1983,6 +2146,8 @@ class OTCA:
                 * prompts
                 * rules
                 * klasses
+            where (dict | None, optional):
+                A dictionary with filter conditions.
 
         Returns:
             iter:
@@ -1995,9 +2160,18 @@ class OTCA:
 
         """
 
-        models: list = self.get_models(model_type=model_type)
+        limit = 100
+        offset = 0
 
-        yield from models
+        while True:
+            models: list = self.get_models(model_type=model_type, limit=limit, offset=offset, where=where)
+            if models is None:
+                return
+            if len(models) == 0:
+                return
+
+            yield from models
+            offset += limit
 
     # end method definition
 
@@ -2054,7 +2228,7 @@ class OTCA:
 
         """
 
-        models = self.get_models(model_type=model_type)
+        models = self.get_models_iterator(model_type=model_type, where={"name": name})
         if models:
             return next((model for model in models if model["name"] == name), None)
 
@@ -2364,26 +2538,39 @@ class OTCA:
 
         # Check if the tool already exists and need to be updated only:
         self.logger.debug("Check if AI tool -> '%s' is already registered...", request_body["name"])
-        model = self.get_model_by_type_and_name(model_type="tools", name=request_body["name"])
+        model = self.get_model_by_type_and_name(model_type="nodes", name=request_body["name"])
         if model:
             self.logger.info("Updating existing AI tool -> '%s'...", request_body["name"])
 
-            request_header = self.request_header(service_type="studio")
-            request_url = self.config()["studioToolsUrl"] + "/" + request_body["name"]
-            response = self.do_request(
-                url=request_url,
-                method="PUT",
-                headers=request_header,
-                json_data=request_body,
-                timeout=None,
-                show_error=True,
-                failure_message="Failed to update AI tool -> '{}'!".format(request_body["name"]),
-            )
+            ## Update the values that are defined in the request body:
+            if "description" in request_body:
+                model["description"] = request_body["description"]
+
+            for s in ["requestTemplate", "responseTemplate", "responseFormat", "APISchema"]:
+                if s in request_body:
+                    model["attributes"][s] = request_body[s]
+
+            def set_required_false(obj: dict) -> None:
+                if isinstance(obj, dict):
+                    for key, value in obj.items():
+                        if key == "required" and value is True:
+                            obj[key] = False
+                        else:
+                            set_required_false(value)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        set_required_false(item)
+
+            set_required_false(model["attributes"]["APISchema"])
+
+            response = self.update_model(model_type="tools", model_id=model["id"], request_body=model)
 
         else:
-            self.logger.info("Registering AI tool -> '%s'...", request_body["name"])
+            self.logger.info("Register AI tool -> '%s'...", request_body["name"])
+
             request_header = self.request_header(service_type="studio")
             request_url = self.config()["studioToolsUrl"]
+
             response = self.do_request(
                 url=request_url,
                 method="POST",
@@ -2394,6 +2581,170 @@ class OTCA:
                 failure_message="Failed to register AI tool -> '{}'!".format(request_body["name"]),
             )
 
+        return response
+
+    # end method definition
+
+    def register_prompt(
+        self,
+        name: str,
+        description: str,
+        template: str,
+        attributes: dict | None = None,
+    ) -> dict:
+        """Register an Agent in Content Aviator.
+
+        Requests are meant to be called as a service user. This would involve passing a service user's access token
+        (token from a particular OAuth confidential client, using client credentials grant).
+
+        Args:
+            name (str):
+                The name of the prompt.
+            description (str):
+                A description of the prompt.
+            template (str):
+                The prompt template for the agent.
+            attributes (dict | None, optional):
+                Additional attributes for the prompt.
+
+        Returns:
+            dict | None:
+                Prompt details or None in case of an error.
+
+        Example:
+            {
+                "agentID": "d6406846-76f8-4cd4-ba29-d3a666e8ad7c",
+                "name": "testagent"
+            }
+
+        """
+
+        request_body = {
+            "name": name,
+            "description": description,
+            "template": template,
+            "attributes": attributes or {},
+        }
+
+        # Check if prompt already exists, then update it if any settings are changed:
+        prompt = self.get_model_by_type_and_name(model_type="prompts", name=name)
+        if prompt:
+            # Check if any detail has changed so we need to update the prompt:
+            update_required = False
+            for k, v in request_body.items():
+                if prompt.get(k) != v:
+                    prompt[k] = v
+                    update_required = True
+
+            if update_required:
+                self.logger.info("Updating existing AI prompt -> '%s'...", name)
+                prompt = self.update_model(model_type="prompts", model_id=prompt["id"], request_body=prompt)
+
+            return prompt
+        # end if prompt:
+
+        self.logger.info("Register new AI prompt -> '%s'...", name)
+
+        request_header = self.request_header(service_type="studio")
+        request_url = self.config()["studioPromptsUrl"]
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=request_body,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to register AI prompt -> '{}'!".format(name),
+        )
+
+        return response
+
+    # end method definition
+
+    def register_agent(
+        self,
+        name: str,
+        description: str,
+        prompt_template: str,
+        graph_name: str = "supervisor",
+    ) -> dict | None:
+        """Register an Agent in Content Aviator.
+
+        Requests are meant to be called as a service user. This would involve passing a service user's access token
+        (token from a particular OAuth confidential client, using client credentials grant).
+
+        Args:
+            name (str):
+                The name of the agent.
+            description (str):
+                A description of the agent.
+            prompt_template (str):
+                The prompt template for the agent.
+            graph_name (str, optional):
+                The name of the graph to use. Defaults to "supervisor".
+
+        Returns:
+            dict:
+                Agent details or None in case of an error.
+
+        Example:
+            {
+                "agentID": "d6406846-76f8-4cd4-ba29-d3a666e8ad7c",
+                "name": "testagent"
+            }
+
+        """
+
+        prompt = self.register_prompt(
+            name=name + "_prompt",
+            description="Prompt for agent '{}'".format(name),
+            template=prompt_template,
+        )
+
+        if prompt is None or "id" not in prompt:
+            self.logger.error("Failed to create prompt for agent -> '%s'!", name)
+            return None
+
+        request_body = {
+            "name": name,
+            "description": description,
+            "graph": graph_name,
+            "tools": [],
+            "promptTemplateID": prompt["id"],
+        }
+
+        # Check if agent already exists, then update it if any settings are changed:
+        agent = self.get_model_by_type_and_name(model_type="nodes", name=name)
+        if agent:
+            # Check if any detail has changed so we need to update the prompt:
+            update_required = False
+            for k, v in request_body.items():
+                if agent.get(k) != v:
+                    agent[k] = v
+                    update_required = True
+
+            if update_required:
+                self.logger.info("Updating existing AI agent -> '%s'...", name)
+                agent = self.update_model(model_type="nodes", model_id=agent["id"], request_body=agent)
+
+            return agent
+        # end if agent:
+
+        self.logger.info("Register new AI agent -> '%s'...", name)
+
+        request_header = self.request_header(service_type="studio")
+        request_url = self.config()["studioAgentsUrl"]
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=request_body,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to register AI agent -> '{}'!".format(name),
+        )
         return response
 
     # end method definition
@@ -2591,6 +2942,109 @@ class OTCA:
         prompt = self.get_model(model_type="prompts", model_id=prompt_id)
 
         return prompt
+
+    # end method definition
+
+    def add_prompt(
+        self,
+        name: str,
+        template: str,
+        description: str,
+        llm_model: str,
+        attributes: dict | None = None,
+    ) -> dict | None:
+        """Add a prompt for a specific LLM.
+
+        Args:
+            name (str):
+                A given name fpor the prompt.
+            template (str):
+                The actual prompt string.
+            description (str):
+                An arbitrary desciption of the prompt.
+            llm_model (str):
+                The name of the LLM that has been registered by calling add_llm().
+            attributes (dict | None, optional):
+                * "type": the type of the prompt, e.g. "system"
+
+        Returns:
+            dict | None:
+                The data of the created prompt. This includes the prompt ID and the prompt version.
+
+        Example:
+        {
+            'id': '9e491456-3b72-4fec-8e51-3af2b4f036fb',
+            'name': 'cat_prompt',
+            'template': 'Your name is Cat Aviator and you are an AI Assitant that answers questions and always ends answers with jokes about cats.',
+            'description': 'This is a Cat prompt',
+            'attributes': {'type': 'system'},
+            'llmModel': 'qwen3:8b',
+            'version': 1,
+            'promptId': '3c96c5e3-dfa2-4aa8-9ce3-2080e0726241'
+        }
+
+        """
+
+        request_url = self.config()["studioPromptsUrl"]
+        request_header = self.request_header(service_type="studio")
+        request_data = {
+            "name": name,
+            "template": template,
+            "description": description,
+            "llmModel": llm_model,
+            "attributes": attributes,
+        }
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=request_data,
+            timeout=None,
+            show_error=True,
+            failure_message="Failed to add prompt -> '%s' for LLM -> '{}'!".format(name),
+        )
+
+        return response
+
+    # end method definition
+
+    def update_prompt(self, name: str, instructions: list[str] | str) -> dict | None:
+        """Update an existing prompt with additional instructions.
+
+        Args:
+            name (str):
+                Name of the existing prompt.
+            instructions (list[str] | str):
+                If the instructions is a string, it will replace the existing prompt template.
+                If the instructions is a list of strings, any missing instruction will be appended to the existing prompt template.
+
+        """
+
+        prompts = self.get_models(model_type="prompts", where={"name": name})
+
+        if prompts:
+            prompt = prompts[0]
+            prompt_id = prompt.get("id")
+
+        if prompt_id:
+            prompt = self.get_prompt(prompt_id)
+
+            if isinstance(instructions, list):
+                # Add any missing instructions to the prompt template:
+                missing_instructions = [instr for instr in instructions if instr not in prompt["template"]]
+                if missing_instructions:
+                    prompt["template"] += " ".join(missing_instructions)
+            else:
+                prompt["template"] = instructions
+
+            self.logger.info("Updating prompt -> '%s'", name)
+            self.logger.debug("Updating prompt data: %s", prompt)
+            self.update_model(model_type="prompts", model_id=prompt_id, request_body=prompt)
+
+        else:
+            self.logger.error("Prompt -> '%s' not found, cannot update!", name)
+            return None
 
     # end method definition
 
@@ -2838,7 +3292,7 @@ class OTCA:
         Args:
             service (str):
                 The name of the service to check.
-            wait (bool):
+            wait (bool, optional):
                 If True, will wait until the service is ready.
                 Default is False.
 
@@ -2856,7 +3310,7 @@ class OTCA:
                 request_url = self.config()["chatUrl"]
 
             case _:
-                self.logger.error("Service '%s' is not supported for readiness check!", service)
+                self.logger.error("Service -> '%s' is not supported for readiness check!", service)
                 return None
 
         if wait:

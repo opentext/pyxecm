@@ -7,7 +7,9 @@ from typing import Annotated
 from fastapi import Depends
 from pyxecm.otca import OTCA
 from pyxecm.otcs import OTCS
-from pyxecm_customizer import K8s, PayloadList, Settings
+from pyxecm_customizer.k8s import K8s
+from pyxecm_customizer.payload_list import PayloadList
+from pyxecm_customizer.settings import Settings
 
 from pyxecm_api.auth.functions import get_otcsticket
 from pyxecm_api.settings import CustomizerAPISettings, api_settings

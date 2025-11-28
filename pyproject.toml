@@ -3,7 +3,7 @@ name = "pyxecm-dev"
 version = "0.0.0"
 requires-python = ">=3.13"
 dependencies = [
-    "pyxecm[pyvis,api,customizer]",
+    "pyxecm[api,customizer]",
     "pytest-xdist>=3.8.0",
 ]
 

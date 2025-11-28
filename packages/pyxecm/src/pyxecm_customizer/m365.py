@@ -4270,7 +4270,7 @@ class M365:
                         return False
 
                     self.logger.info(
-                        "Open URL -> %s to verify account or email change...",
+                        "Open URL -> %s to verify account or email address change...",
                         url,
                     )
                     success = browser_automation_object.get_page(url=url)

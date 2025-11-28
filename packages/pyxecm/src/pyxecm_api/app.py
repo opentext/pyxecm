@@ -16,7 +16,6 @@ from importlib.metadata import version
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_fastapi_instrumentator import Instrumentator
 from pyxecm.helper.otel_config import tracer
@@ -132,12 +131,6 @@ if api_settings.ws_terminal:
     app.include_router(router=terminal_router)
 
 if api_settings.csai:
-    app.mount(
-        "/api/v1/csai/lib",
-        StaticFiles(packages=["pyxecm_api.v1_csai"]),
-        name="csai-statics",
-    )
-
     app.include_router(router=v1_csai_router)
 
 

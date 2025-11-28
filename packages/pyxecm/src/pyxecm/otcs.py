@@ -16,6 +16,7 @@ __email__ = "mdiefenb@opentext.com"
 import asyncio
 import hashlib
 import html
+import io
 import json
 import logging
 import mimetypes
@@ -79,6 +80,7 @@ REQUEST_DOWNLOAD_HEADERS = {
 REQUEST_TIMEOUT = 60.0
 REQUEST_RETRY_DELAY = 30.0
 REQUEST_MAX_RETRIES = 4
+
 
 default_logger = logging.getLogger(MODULE_NAME)
 
@@ -190,6 +192,11 @@ class OTCS:
     # The maximum length of an item name in OTCS:
     MAX_ITEM_NAME_LENGTH = 248
 
+    # Definitions for the workspace type ontology:
+    ONTOLOGY_TEMP_DIRECTORY = "ontology"
+    ONTOLOGY_FILE_NAME = "ontology.json"
+    ONTOLOGY_NICK_NAME = "ontology"
+
     _config: dict
     _otcs_ticket = None
     _otds_ticket = None
@@ -201,6 +208,7 @@ class OTCS:
     _workspace_type_lookup: dict | None = (
         None  # for efficient traversal. Keys = Type ID, Value = {type name, type location}
     )
+    _workspace_ontology = None
 
     # Handle concurrent HTTP requests that may run into 401 errors and
     # re-authentication at the same time:
@@ -337,6 +345,7 @@ class OTCS:
         download_dir: str | None = None,
         feme_uri: str | None = None,
         use_numeric_category_identifier: bool = True,
+        workspace_ontology: dict[tuple[str, str, str], list[str]] | None = None,
         logger: logging.Logger = default_logger,
     ) -> None:
         """Initialize the OTCS object.
@@ -385,6 +394,11 @@ class OTCS:
                 Parameter for load_items. Determines if the category ID is used
                 in the column name of the data frame (True) or a normalized
                 category name (False).
+            workspace_ontology (dict[tuple[str, str, str], list[str]]):
+                A dictionary mapping (source_type, target_type, rel_type) tuples
+                to a list of semantic relationship names. source_type and target_type
+                are workspace type names from OTCS. rel_type is either "parent" or "child".
+                It abstracts the graph structure at the type level.
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
 
@@ -488,6 +502,8 @@ class OTCS:
         otcs_config["draftProcessFormUrl"] = otcs_rest_url + "/v1/forms/draftprocesses"
         otcs_config["processTaskUrl"] = otcs_rest_url + "/v1/forms/processes/tasks/update"
         otcs_config["docGenUrl"] = otcs_url + "?func=xecmpfdocgen"
+        otcs_config["facetsUrl"] = otcs_rest_url + "/v2/facets"
+        otcs_config["facetBrowseUrl"] = otcs_rest_url + "/v3/app/container"
 
         self._config = otcs_config
         self._otds_ticket = otds_ticket
@@ -501,6 +517,7 @@ class OTCS:
         self._executor = ThreadPoolExecutor(max_workers=thread_number)
         self._workspace_type_lookup = {}
         self._workspace_type_names = []
+        self._workspace_ontology = workspace_ontology
 
     # end method definition
 
@@ -853,6 +870,161 @@ class OTCS:
 
     # end method definition
 
+    def get_workspace_ontology(self, force_reload: bool = False) -> dict[tuple[str, str, str], list[str]] | None:
+        """Get the relationship model for workspace types (ontology).
+
+        TODO: currently we cannot derive it from the workspace type definitions
+        as this information is not managed in OTCS - this will change with 26.2.
+
+        Returns:
+            dict[tuple[str, str, str], list[str]] | None:
+                Workspace ontology or None in case it is not provided via
+                the class __init__ method or not found as a JSON file in admin
+                Personal Workspace.
+
+        """
+
+        if force_reload:
+            self.load_workspace_ontology()
+            return self._workspace_ontology
+
+        if self._workspace_ontology or self.load_workspace_ontology():
+            return self._workspace_ontology
+
+        return None
+
+    # end method definition
+
+    def save_workspace_ontology(self) -> bool:
+        """Save the workspace ontology as JSON file into Admin's personal workspace.
+
+        Returns:
+            bool:
+                True = Success
+                False = Failure
+
+        """
+
+        if not self._workspace_ontology:
+            self.logger.error("The workspace ontology is empty! Cannot save it.")
+            return False
+
+        download_dir = os.path.join(tempfile.gettempdir(), self.ONTOLOGY_TEMP_DIRECTORY)
+        file_path = os.path.join(download_dir, self.ONTOLOGY_FILE_NAME)
+        with open(file_path, "w", encoding="utf-8") as ontology_file:
+            json.dump(self._workspace_ontology, ontology_file, indent=2)
+            self.logger.info(
+                "Workspace ontology -> '%s' has been saved to JSON file -> %s", self.ONTOLOGY_FILE_NAME, file_path
+            )
+
+        response = self._otcs.get_node_by_volume_and_path(
+            volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
+        )  # write to Personal Workspace of Admin (with Volume Type ID = 142)
+        target_folder_id = self._otcs.get_result_value(response=response, key="id")
+        if not target_folder_id:
+            target_folder_id = 2004  # use Personal Workspace of Admin as fallback
+
+        # Check if the ontology file has been uploaded before.
+        # This can happen if we re-run the OTCS pod or having multiple pods.
+        # In this case we add a version to the existing document:
+        response = self._otcs.get_node_by_parent_and_name(
+            parent_id=int(target_folder_id),
+            name=self.ONTOLOGY_FILE_NAME,
+            show_error=False,
+        )
+        target_document_id = self._otcs.get_result_value(response=response, key="id")
+        if target_document_id:
+            response = self._otcs.add_document_version(
+                node_id=int(target_document_id),
+                file_url=file_path,
+                file_name=self.ONTOLOGY_FILE_NAME,
+                mime_type="application/json",
+                description="Updated ontology file -> '{}' in admin workspace.".format(self.ONTOLOGY_FILE_NAME),
+            )
+        else:
+            response = self._otcs.upload_file_to_parent(
+                file_url=file_path,
+                file_name=self.ONTOLOGY_FILE_NAME,
+                mime_type="application/json",
+                parent_id=int(target_folder_id),
+                description="Workspace type ontology. Shows relationships between different workspace types in the system.",
+            )
+
+        if response:
+            self.logger.info(
+                "Ontology file -> '%s' has been written to Personal Workspace of admin user.",
+                self.ONTOLOGY_FILE_NAME,
+            )
+            return True
+
+        self.logger.error(
+            "Failed to write ontology file -> '%s' to Personal Workspace of admin user!",
+            self.ONTOLOGY_FILE_NAME,
+        )
+
+        return False
+
+    # end method definition
+
+    def load_workspace_ontology(self) -> bool:
+        """Load the workspace ontology from a JSON file in the Admin personal workspace.
+
+        Returns:
+            bool:
+                True = Success
+                False = Failure
+
+        """
+
+        # First, try to find the ontology file via a nickname. If not found fall back
+        # top a file in the Admin personal workspaces. If still not found return False:
+        response = self.get_node_from_nickname(nickname=self.ONTOLOGY_NICK_NAME)
+        if not response:
+            # If the file with the ontology nickname is not found we
+            # try to find the file in the Personal Workspace of the current user.
+            response = self._otcs.get_node_by_volume_and_path(
+                volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
+            )  # write to Personal Workspace of Admin (with Volume Type ID = 142)
+            folder_id = self._otcs.get_result_value(response=response, key="id")
+            if not folder_id:
+                folder_id = 2004  # use Personal Workspace of Admin as fallback
+
+            # Check if the ontology file is in the Personal Workspace of the admin user.
+            response = self._otcs.get_node_by_parent_and_name(
+                parent_id=int(folder_id),
+                name=self.ONTOLOGY_FILE_NAME,
+                show_error=False,
+            )
+        document_id = self._otcs.get_result_value(response=response, key="id")
+        if not document_id:
+            self.logger.warning("Ontology file not found - cannot load the ontology.")
+            return False
+
+        json_content = self.get_json_document(node_id=document_id)
+        if not json_content:
+            self.logger.error(
+                "Cannot load ontology from JSON document -> %s (%s)", self.ONTOLOGY_FILE_NAME, document_id
+            )
+            return False
+
+        try:
+            self._workspace_ontology = json.loads(json_content)
+        except json.JSONDecodeError as json_error:
+            self.logger.error(
+                "Invalid JSON input in document -> %s (%s); error -> %s",
+                self.ONTOLOGY_FILE_NAME,
+                document_id,
+                json_error,
+            )
+            return False
+
+        self.logger.info(
+            "Ontology file -> '%s' has been loaded from document with ID -> %s.", self.ONTOLOGY_FILE_NAME, document_id
+        )
+        return True
+
+    # end method definition
+
     def request_form_header(self) -> dict:
         """Deliver the request header used for the CRUD REST API calls.
 
@@ -934,6 +1106,7 @@ class OTCS:
         retry_forever: bool = False,
         parse_request_response: bool = True,
         stream: bool = False,
+        parse_error_response: bool = False,
     ) -> dict | None:
         """Call an OTCS REST API in a safe way.
 
@@ -977,6 +1150,8 @@ class OTCS:
                 into a dictionary. Defaults to True.
             stream (bool, optional):
                 Enable stream for response content (e.g. for downloading large files).
+            parse_error_response (bool, optional):
+                Whether the error response text should be interpreted as JSON and loaded. Defaults to False.
 
         Returns:
             dict | None:
@@ -1059,7 +1234,9 @@ class OTCS:
                             )
                         ),
                     )
-                    if parse_request_response:
+                    if parse_error_response:
+                        return self.parse_error_response(response_object=response)
+                    elif parse_request_response:
                         return self.parse_request_response(response_object=response)
                     else:
                         return response
@@ -1102,8 +1279,10 @@ class OTCS:
                             HTTPStatus(response.status_code).phrase,
                             response.text,
                         )
-
-                    return None
+                    if parse_error_response:
+                        return self.parse_error_response(response_object=response)
+                    else:
+                        return None
             # end try:
             except (
                 requests.exceptions.Timeout,
@@ -1208,6 +1387,65 @@ class OTCS:
 
         if not response_object:
             return None
+
+        if not response_object.text:
+            self.logger.warning("Response text is empty. Cannot decode response.")
+            return None
+
+        try:
+            dict_object = json.loads(response_object.text)
+        except json.JSONDecodeError as exception:
+            if additional_error_message:
+                message = "Cannot decode response as JSon. {}; response object -> {}; error -> {}".format(
+                    additional_error_message,
+                    response_object,
+                    exception,
+                )
+            else:
+                message = "Cannot decode response as JSon; response object -> {}; error -> {}".format(
+                    response_object,
+                    exception,
+                )
+            if show_error:
+                # Raise ConnectionError instead of returning None
+                raise requests.exceptions.ConnectionError(message) from exception
+            self.logger.warning(message)
+            return None
+        # end try-except block
+
+        return dict_object
+
+    # end method definition
+
+    def parse_error_response(
+        self,
+        response_object: object,
+        additional_error_message: str = "",
+        show_error: bool = True,
+    ) -> dict | None:
+        """Convert the text property of a request response object to a Python dict safely.
+
+        Handles exceptions to prevent fatal errors caused by corrupt responses,
+        such as those produced by Content Server during restarts or resource limits.
+        This method logs errors or warnings and bails out gracefully if an issue occurs.
+
+        Args:
+            response_object (object):
+                The response object delivered by the request call.
+            additional_error_message (str):
+                Custom error message to include in logs.
+            show_error (bool, optional):
+                If True, logs an error / raises an exception. If False, logs a warning.
+
+        Returns:
+            dict | None:
+                Parsed response as a dictionary, or None in case of an error.
+
+        Raises:
+            requests.exceptions.ConnectionError:
+                If the response cannot be decoded as JSON.
+
+        """
 
         if not response_object.text:
             self.logger.warning("Response text is empty. Cannot decode response.")
@@ -1453,7 +1691,7 @@ class OTCS:
         """Read an item value from the REST API response.
 
         This method handles the most common response structures delivered by the
-        V2 REST API of Extended ECM. For more details, refer to the documentation at
+        V2 REST API of OTCS. For more details, refer to the documentation at
         developer.opentext.com.
 
         Args:
@@ -1840,6 +2078,15 @@ class OTCS:
     ) -> dict | None:
         """Authenticate with Content Server and retrieves an OTCS ticket.
 
+        This method supports 3 ways of authentication (in this order):
+        1. OTDS TOKEN (if available)
+        2. OTDS TICKET (if available)
+        3. USERNAME + PASSWORD
+
+        The OTDS token, OTDS ticket or username + password must be available
+        in the OTCS object variables (provided in the init method of OTCS)
+        for authentication to succeed.
+
         Args:
             revalidate (bool, optional):
                 Determines if re-authentication is enforced (e.g., if the session
@@ -1865,9 +2112,6 @@ class OTCS:
             )
             return self.cookie()
 
-        # Clear the ticket:
-        otcs_ticket = None
-
         if wait_for_ready:
             while not self.is_ready():
                 self.logger.debug(
@@ -1877,7 +2121,32 @@ class OTCS:
 
         request_url = self.config()["authenticationUrl"]
 
-        if self._otds_token and not revalidate:
+        # We try 3 ways of authentication (in this order):
+        # 1. OTDS TOKEN (if available)
+        # 2. OTDS TICKET (if available)
+        # 3. USERNAME + PASSWORD
+
+        if (
+            not self._otds_token
+            and not self._otds_ticket
+            and (not self.config()["username"] or not self.config()["password"])
+        ):
+            self.logger.error(
+                "No OTDS token, OTDS ticket or username/password available for authentication! Cannot authenticate with OTCS.",
+            )
+            return None
+
+        self.logger.debug("Authenticating with OTCS at -> %s", request_url)
+        self.logger.debug(
+            "Using %s for authentication at OTCS...",
+            "OTDS token" if self._otds_token else "OTDS ticket" if self._otds_ticket else "username/password",
+        )
+
+        # Initialize the ticket to not set:
+        otcs_ticket = None
+
+        # Try with OTDS TOKEN first (if available):
+        if self._otds_token:  #  and not revalidate:
             self.logger.debug(
                 "Requesting OTCS ticket with existing OTDS token; calling -> %s",
                 request_url,
@@ -1889,11 +2158,17 @@ class OTCS:
                 response = requests.get(
                     url=request_url,
                     headers=request_header,
-                    timeout=10,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 if response.ok:
                     # read the ticket from the response header:
                     otcs_ticket = response.headers.get("OTCSTicket")
+                else:
+                    self.logger.warning(
+                        "Failed to request OTCS ticket with OTDS token; status -> %s; error -> %s",
+                        response.status_code,
+                        response.text,
+                    )
 
             except requests.exceptions.RequestException as exception:
                 self.logger.warning(
@@ -1901,8 +2176,11 @@ class OTCS:
                     request_url,
                     str(exception),
                 )
+                return None
+        # end if self._otds_token
 
-        if self._otds_ticket and not revalidate:
+        # Alternatively try with OTDS TICKET (if available):
+        if not otcs_ticket and self._otds_ticket:  # and not revalidate:
             self.logger.debug(
                 "Requesting OTCS ticket with existing OTDS ticket; calling -> %s",
                 request_url,
@@ -1914,11 +2192,17 @@ class OTCS:
                 response = requests.get(
                     url=request_url,
                     headers=request_header,
-                    timeout=10,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 if response.ok:
                     # read the ticket from the response header:
                     otcs_ticket = response.headers.get("OTCSTicket")
+                else:
+                    self.logger.warning(
+                        "Failed to request OTCS ticket with OTDS ticket; status -> %s; error -> %s",
+                        response.status_code,
+                        response.text,
+                    )
 
             except requests.exceptions.RequestException as exception:
                 self.logger.warning(
@@ -1926,16 +2210,29 @@ class OTCS:
                     request_url,
                     str(exception),
                 )
+                return None
+        # end if self._otds_ticket
 
         # Check if previous authentication was not successful.
-        # Then we do the normal username + password authentication:
+        # Then we try the normal username + password authentication:
         if not otcs_ticket:
+            if not self.config()["username"] or not self.config()["password"]:
+                # Check if basic authentication is just the "fallback" for
+                # a failed OTDS based authentication (ticket or token) above:
+                if self._otds_ticket or self._otds_token:
+                    self.logger.warning(
+                        "Cannot fallback to basic authentication at OTCS after OTDS based authentication failed as no username or password are provided."
+                    )
+                else:
+                    self.logger.error("Missing username or password for authentication! Cannot authenticate at OTCS.")
+                return None
+
             self.logger.debug(
-                "Requesting OTCS ticket with user/password; calling -> %s",
+                "Requesting OTCS ticket with username -> '%s' and password; calling -> %s",
+                self.config()["username"],
                 request_url,
             )
 
-            response = None
             try:
                 response = requests.post(
                     url=request_url,
@@ -1969,6 +2266,7 @@ class OTCS:
                     response.text,
                 )
                 return None
+        # end if not otcs_ticket
 
         # Store authentication ticket:
         self._otcs_ticket = otcs_ticket
@@ -2917,7 +3215,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_uesr")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_user")
     def update_user(self, user_id: int, field: str, value: str) -> dict | None:
         """Update a defined field for a user.
 
@@ -3332,7 +3630,7 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Adding favorite tab -> %s; calling -> %s",
+            "Adding favorite tab -> '%s'; calling -> %s",
             tab_name,
             request_url,
         )
@@ -4216,26 +4514,26 @@ class OTCS:
         Example:
             [
                 {
-                "deleted": false,
-                "id": 2010,
-                "name": "Custom View (146)",
-                "object_icon": "/cssupport/webdoc/customview.gif",
-                "object_name": "Custom View",
-                "object_type": 146,
-                "restricted": true,
-                "type": 4,
-                "type_name": "Privilege",
-                "usage_id": null,
-                "usage_name": null,
-                "usage_type": null,
-                "usage_type_name": null
+                    "deleted": false,
+                    "id": 2010,
+                    "name": "Custom View (146)",
+                    "object_icon": "/cssupport/webdoc/customview.gif",
+                    "object_name": "Custom View",
+                    "object_type": 146,
+                    "restricted": true,
+                    "type": 4,
+                    "type_name": "Privilege",
+                    "usage_id": null,
+                    "usage_name": null,
+                    "usage_type": null,
+                    "usage_type_name": null
                 },
                 ...
             ]
 
         """
-        request_header = self.request_form_header()
 
+        request_header = self.request_form_header()
         request_url = self.config()["privileges"] + "/object"
 
         response = self.do_request(
@@ -4793,25 +5091,9 @@ class OTCS:
         """Get a node based on the volume and path (list of container items).
 
         Args:
-            volume_type (int): Volume type ID (default is 141 = Enterprise Workspace)
-                "Records Management"                = 550
-                "Content Server Document Templates" = 20541
-                "O365 Office Online Volume"         = 1296
-                "Categories Volume"                 = 133
-                "Perspectives"                      = 908
-                "Perspective Assets"                = 954
-                "Facets Volume"                     = 901
-                "Transport Warehouse"               = 525
-                "Transport Warehouse Workbench"     = 528
-                "Transport Warehouse Package"       = 531
-                "Event Action Center Configuration" = 898
-                "Classification Volume"             = 198
-                "Support Asset Volume"              = 1309
-                "Physical Objects Workspace"        = 413
-                "Extended ECM"                      = 882
-                "Enterprise Workspace"              = 141
-                "Personal Workspace"                = 142
-                "Business Workspaces"               = 862
+            volume_type (int):
+                Volume type ID (default is 141 = Enterprise Workspace)
+                See OTCS class declaration for a list of available types.
             path (list, optional):
                 A list of container items (top down),
                 last item is name of to be retrieved item.
@@ -5364,6 +5646,201 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_nodes_by_parent_and_filters")
+    def get_nodes_by_parent_and_filters(
+        self,
+        parent_id: int,
+        name: str | None = None,
+        facet_values: dict[int, str] | None = None,
+        page_size: int = 100,
+        page: int = 1,
+    ) -> dict | None:
+        """Get the nodes under a given parent node ID with defined facet values.
+
+        NOTE: This is a V3 REST API that may not be aviable in older OTCS versions!
+
+        Args:
+            parent_id (int):
+                The ID of the parent node.
+            name (str | None, optional):
+                The name of the node to retrieve. Can also be a substring.
+            facet_values (dict[int, str] | None, optional):
+                Each dictionary item has:
+                * Key: facet ID (int)
+                * Value: filter value (str)
+            page_size (int, optional):
+                The maximum number of results to return (page size). Defaults to 100.
+            page (int, optional):
+                The page of results to retrieve (page number). Defaults to 1 (first page).
+
+        Returns:
+            dict | None:
+                Subnode information as a dictionary, or None if no nodes with
+                the given parent ID and facet filters are found.
+
+        """
+
+        # Add query parameters (these are NOT passed via JSon body!)
+        query = {}
+        if name:
+            query["where_name"] = name
+        if facet_values:
+            query["where_facet"] = ["{}:{}".format(k, v) for k, v in facet_values.items()]
+        if page > 1:
+            query["page"] = page
+        if page_size:
+            query["page_size"] = page_size
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["facetBrowseUrl"] + "/" + str(parent_id) + "?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get nodes of parent with ID -> %d%s%s (page -> %d, item limit -> %d); calling -> %s",
+            parent_id,
+            " and name -> '{}'".format(name) if name else "",
+            " and facet values -> {}".format(facet_values) if facet_values else "",
+            page,
+            page_size,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get nodes for parent with ID -> {}".format(
+                parent_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_nodes_by_parent_and_filters_iterator(
+        self,
+        parent_id: int,
+        name: str | None = None,
+        facet_values: dict[int, str] | None = None,
+        result_field: str = "contents",
+        page_size: int = 100,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse the filtered nodes.
+
+        NOTE: This is a V3 REST API that may not be aviable in older OTCS versions!
+
+        Using a generator avoids loading a large number of nodes into memory at once.
+        Instead you can iterate over the potential large list of filtered nodes.
+
+        Args:
+            parent_id (int):
+                The ID of the parent node.
+            name (str | None, optional):
+                The name of the node to retrieve. Can also be a substring.
+            facet_values (dict[int, str] | None, optional):
+                Each dictionary item has:
+                * Key: facet ID (int)
+                * Value: filter value (str)
+            result_field (str, optional):
+                This V3 REST API delivers multiple substructures for the matching nodes:
+            page_size (int, optional):
+                The maximum number of results to return (page size). Defaults to 100.
+
+        Example usage:
+            ```python
+            nodes = otcs_object.get_nodes_by_parent_and_filters_iterator(parent_node_id=15838, facet_filters={...})
+            for node in nodes:
+                logger.info("Node name -> '%s'", node["name"])
+            ```
+
+        Example iterator value:
+        {
+            'container': True,
+            'create_date': '2025-11-22T04:35:43Z',
+            'create_user_id': 28282,
+            'data': {
+                'actions': {...},
+                'annotations': {...},
+                'boattachinfo': {...},
+                'bwsinfo': {...},
+                'cadxref_doc_info': {...},
+                'claimed_doc_info': {...},
+                'rmiconsdata': {...},
+                'sestatus_doc_info': {...},
+                'sharing_info': {...},
+                'signedout_doc_info': {...},
+                'transmittal_data': {},
+                'xeng_tag_info': {...}
+            },
+            'description': '',
+            'favorite': False,
+            'hidden': False,
+            'icon': '/cssupport/otsapxecm/wksp_contract_vendor.png',
+            'icon_large': '/cssupport/otsapxecm/wksp_contract_vendor_large.png',
+            'id': 80524,
+            'image_url': '/appimg/ot_bws/icons/35671%2Esvg?v=161841_20331',
+            'mime_type': None,
+            'modify_date': '2025-11-22T04:35:49Z',
+            'name': '4500000007 - C.E.B. Berlin SE',
+            'openable': True,
+            'owner_user_id': 28282,
+            'parent_id': 34897,
+            'permissions_model': 'advanced',
+            'reserved': False,
+            'reserved_user_id': None,
+            'rm_enabled': True,
+            'size': 12,
+            'size_formatted': '12 Items',
+            'type': 848,
+            'type_name': 'Business Workspace',
+            'wksp_type_name': 'Purchase Order',
+            'wnf_att_xf3_4': '2016-02-01T00:00:00',
+            'wnf_att_xf3_5': 'C.E.B. Berlin SE',
+            'wnf_att_xf3_c': 'Berlin',
+            'wnf_att_xf3_d': 'Germany',
+            'wnf_att_xf3_f': 'Innovate Germany',
+            'wnf_att_xf3_g': 'Group Mgt.',
+            'wnf_att_xf3_k': '785.57',
+            'wnf_att_xf3_l': 'EUR',
+            'wnf_att_xf3_p': 'R-9010; R-9020; R-9030; R-9040; R-9050'
+        }
+
+        """
+
+        # Get the first page of items:
+        response = self.get_nodes_by_parent_and_filters(
+            parent_id=parent_id,
+            name=name,
+            facet_values=facet_values,
+            page=1,
+            page_size=page_size,
+        )
+
+        if not response or not response["results"]:
+            return
+
+        total_pages = response["results"]["paging"]["page_total"]
+
+        # Yield nodes one at a time
+        yield from response["results"][result_field]
+
+        for page in range(2, total_pages):
+            # Get the next page of sub node items:
+            response = self.get_nodes_by_parent_and_filters(
+                parent_id=parent_id,
+                name=name,
+                facet_values=facet_values,
+                page=page,
+                page_size=page_size,
+            )
+
+            # Yield nodes one at a time
+            yield from response["results"][result_field]
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_node")
     def lookup_nodes(
         self,
@@ -5372,6 +5849,7 @@ class OTCS:
         attribute: str,
         value: str,
         attribute_set: str | None = None,
+        substring: bool = False,
     ) -> dict | None:
         """Lookup nodes under a parent node that have a specified value in a category attribute.
 
@@ -5386,6 +5864,8 @@ class OTCS:
                 The lookup value that is matched agains the node attribute value.
             attribute_set (str | None, optional):
                 The name of the attribute set
+            substring (bool, optional):
+                Whether to match the value as a substring (True) or exact (False). Defaults to exact match.
 
         Returns:
             dict | None:
@@ -5484,7 +5964,9 @@ class OTCS:
                                     # Create a "results" dict that is compatible with normal REST calls
                                     # to not break get_result_value() method that may be called on the result:
                                     results["results"].append(node)
-                            elif value == attribute_value:
+                            elif substring and value in attribute_value:
+                                results["results"].append(node)
+                            elif not substring and value == attribute_value:
                                 # Create a results dict that is compatible with normal REST calls
                                 # to not break get_result_value() method that may be called on the result:
                                 results["results"].append(node)
@@ -5501,7 +5983,9 @@ class OTCS:
                                 # to not break get_result_value() method that may be called on the result:
                                 results["results"].append(node)
                         # If not a multi-value attribute, check for equality:
-                        elif value == attribute_value:
+                        elif substring and value in attribute_value:
+                            results["results"].append(node)
+                        elif not substring and value == attribute_value:
                             # Create a results dict that is compatible with normal REST calls
                             # to not break get_result_value() method that may be called on the result:
                             results["results"].append(node)
@@ -5701,6 +6185,135 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_facets")
+    def get_node_facets(
+        self, node_id: int, facet_values: dict[int, str] | None = None, facet_values_limit: int | None = None
+    ) -> dict | None:
+        """Get facets configured / enabled for a node.
+
+        Args:
+            node_id (int):
+                The ID of the Node.
+            facet_values (str, optional):
+                The current position in the facet tree (optional). Used
+                to determine remaining facet values if facets are already selected.
+                Specify selected facets using the following syntax:
+                '{facet id}:{value1}|{value2}|...' e.g. &where_facet=2101:331&where_facet=2100:23|9|17|20
+            facet_values_limit (int | None 0 None):
+                The maximum number of facet values to retrieve per facet.
+
+        Returns:
+            dict | None:
+                Information of the Node facets or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/facets/30607',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'data': {
+                    'facets': {
+                        '2330': {
+                            'display_count': True,
+                            'id': 2330,
+                            'name': 'Owner',
+                            'show_text_in_more': True,
+                            'total_displayable': 2
+                        },
+                        '29853': {
+                            'display_count': True,
+                            'id': 29853,
+                            'name': 'PO - Vendor',
+                            'show_text_in_more': True,
+                            'total_displayable': 35
+                        },
+                        '30136': {
+                            'display_count': True,
+                            'id': 30136,
+                            'name': 'PO - Material',
+                            'show_text_in_more': True,
+                            'total_displayable': 26
+                        },
+                        '30556': {
+                            'display_count': True,
+                            'id': 30556,
+                            'name': 'PO - Purchasing Organization',
+                            'show_text_in_more': True,
+                            'total_displayable': 7
+                        }
+                    },
+                    'values': {
+                        'available': [
+                            {
+                                '30136': [
+                                    {
+                                        'count': 1317,
+                                        'name': 'Fingerprint Scanner Pro Sense X-I',
+                                        'percentage': 85.4639844256976,
+                                        'value': 'Fingerprint Scanner Pro Sense X-I'
+                                    },
+                                    ...
+                                ]
+                            },
+                            {
+                                '30556': [...]
+                            },
+                            {
+                                '29853': [...]
+                            },
+                            {
+                                '2330': [...]
+                            }
+                        ],
+                        'selected': [...]
+                    }
+                }
+            }
+        }
+
+        """
+
+        # Add query parameters (these are NOT passed via JSon body!)
+        query = {}
+        if facet_values_limit:
+            query["top_values_limit"] = facet_values_limit
+        if facet_values:
+            query["where_facet"] = ["{}:{}".format(k, v) for k, v in facet_values.items()]
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["facetsUrl"] + "/" + str(node_id) + "?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get facets for node with ID -> %d%s; calling -> %s",
+            node_id,
+            " and preselected facets -> {}".format(facet_values) if facet_values else "",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get facets for node with ID -> {}".format(
+                node_id,
+            ),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_actions")
     def get_node_actions(
         self,
@@ -5857,9 +6470,10 @@ class OTCS:
         self,
         node_id: int,
         name: str,
-        description: str,
+        description: str | None = None,
         name_multilingual: dict | None = None,
         description_multilingual: dict | None = None,
+        parse_error_response: bool | None = False,
     ) -> dict | None:
         """Change the name and description of a node.
 
@@ -5869,12 +6483,14 @@ class OTCS:
                 to the node id for a volume.
             name (str):
                 New name of the node.
-            description (str):
+            description (str | None, optional):
                 New description of the node.
             name_multilingual (dict | None, optional):
                 The multi-lingual node names.
             description_multilingual (dict | None, optional):
                 The multi-lingual descriptions.
+            parse_error_response (bool | None, optional):
+                Whether to parse the request response or not. Defaults to False.
 
         Returns:
             dict | None:
@@ -5882,8 +6498,10 @@ class OTCS:
 
         """
 
-        rename_node_put_body = {"name": name, "description": description}
+        rename_node_put_body = {"name": name}
 
+        if description:
+            rename_node_put_body["description"] = description
         if name_multilingual:
             rename_node_put_body["name_multilingual"] = name_multilingual
         if description_multilingual:
@@ -5909,6 +6527,7 @@ class OTCS:
                 node_id,
                 name,
             ),
+            parse_error_response=parse_error_response,
         )
 
     # end method definition
@@ -6679,9 +7298,11 @@ class OTCS:
     def upload_file_to_parent(
         self,
         parent_id: int,
-        file_url: str,
+        file_url: str | None = None,
         file_name: str | None = None,
         mime_type: str | None = None,
+        file_content: str | bytes | None = None,
+        encoding: str = "utf-8",
         category_data: dict | None = None,
         classifications: list | None = None,
         description: str = "",
@@ -6695,6 +7316,11 @@ class OTCS:
 
         The parent should be a container item such as a folder or business workspace.
 
+        The file data can be provided in one of three ways:
+        1. Via a public URL (file_url starting with "http")
+        2. Via a local filesystem path (file_url pointing to an existing file or directory)
+        3. Via in-memory content using the file_content parameter (str or bytes)
+
         Args:
             parent_id (int):
                 The ID of the parent (folder) to upload the file to.
@@ -6705,6 +7331,11 @@ class OTCS:
             mime_type (str | None, optional):
                 The mime type of the file (e.g., 'application/pdf').
                 If the mime type is not provided the method tries to "guess" the mime type.
+            file_content (str | bytes | None):
+                The file content provided directly in memory. If a string is provided,
+                it will be encoded using the specified encoding.
+            encoding (str, optional):
+                The encoding used when file_content is a string (default: "utf-8").
             category_data (dict | None, optional):
                 Metadata or category data associated with the file. Example format:
                 {
@@ -6742,66 +7373,104 @@ class OTCS:
 
         """
 
-        if not file_name:
-            # if path_or_url does not end with a "/"
-            # we may get the missing file name from there:
-            file_name = os.path.basename(file_url)
-
-        if not file_name:
-            self.logger.error("Missing file name! Cannot upload file.")
+        # Validate mutually exclusive inputs:
+        if file_content is not None and file_url is not None:
+            self.logger.error("Provide either file URL or file content for uploading files, not both.")
+            return None
+        if file_content is None and file_url is None:
+            self.logger.error("Provide either file URL or file content for uploading files.")
             return None
 
-        # Make sure we don't have leading or trailing whitespace:
-        file_name = file_name.strip()
-
-        if file_url.startswith("http"):
-            # Download file from remote location specified by the file_url parameter
-            # this must be a public place without authentication:
-            self.logger.debug("Download file from URL -> %s", file_url)
-
-            try:
-                response = requests.get(url=file_url, headers=self.request_download_header(), timeout=1200)
-                response.raise_for_status()
-            except requests.exceptions.HTTPError:
-                self.logger.error("HTTP error with -> %s", file_url)
-                return None
-            except requests.exceptions.ConnectionError:
-                self.logger.error("Connection error with -> %s", file_url)
-                return None
-            except requests.exceptions.Timeout:
-                self.logger.error("Timeout error with -> %s", file_url)
-                return None
-            except requests.exceptions.RequestException:
-                self.logger.error("Request error with -> %s", file_url)
+        # Handle in-memory file content:
+        if file_content is not None:
+            if not file_name:
+                self.logger.error("Missing file name! Cannot upload in-memory file without a file name.")
                 return None
 
-            self.logger.debug(
-                "Successfully downloaded file -> %s; status code -> %s",
-                file_url,
-                response.status_code,
-            )
-            file_content = response.content
+            # Make sure we don't have leading or trailing whitespace:
+            file_name = file_name.strip()
 
-        # If path_or_url specifies a directory or a zip file we want to extract
-        # it and then defer the upload to upload_directory_to_parent():
-        elif os.path.exists(file_url) and (
-            ((file_url.endswith(".zip") or mime_type == "application/x-zip-compressed") and extract_zip)
-            or os.path.isdir(file_url)
-        ):
-            return self.upload_directory_to_parent(
-                parent_id=parent_id,
-                file_path=file_url,
-                replace_existing=replace_existing,
-            )
+            if isinstance(file_content, str):
+                # Encode text content to bytes using the provided encoding
+                file_bytes = file_content.encode(encoding)
+                if not mime_type:
+                    mime_type = "text/plain"
+            elif isinstance(file_content, bytes):
+                file_bytes = file_content
+            else:
+                self.logger.error("File content must be of type str or bytes! Cannot upload file.")
+                return None
 
-        elif os.path.exists(file_url):
-            self.logger.debug("Uploading local file -> %s", file_url)
-            file_content = open(file=file_url, mode="rb")  # noqa: SIM115
+            # Use an in-memory byte stream instead of a filesystem file
+            file_content = io.BytesIO(file_bytes)
 
+        # Handle file provided via URL or local filesystem
         else:
-            self.logger.warning("Cannot access file -> '%s'", file_url)
-            return None
+            if not file_url:
+                self.logger.error("Missing file URL! Cannot upload file.")
+                return None
 
+            if not file_name:
+                # if path_or_url does not end with a "/"
+                # we may get the missing file name from there:
+                file_name = os.path.basename(file_url)
+
+            if not file_name:
+                self.logger.error("Missing file name! Cannot upload file.")
+                return None
+
+            # Make sure we don't have leading or trailing whitespace:
+            file_name = file_name.strip()
+
+            if file_url.startswith("http"):
+                # Download file from remote location specified by the file_url parameter
+                # this must be a public place without authentication:
+                self.logger.debug("Download file from URL -> %s", file_url)
+
+                try:
+                    response = requests.get(url=file_url, headers=self.request_download_header(), timeout=1200)
+                    response.raise_for_status()
+                except requests.exceptions.HTTPError:
+                    self.logger.error("HTTP error with -> %s", file_url)
+                    return None
+                except requests.exceptions.ConnectionError:
+                    self.logger.error("Connection error with -> %s", file_url)
+                    return None
+                except requests.exceptions.Timeout:
+                    self.logger.error("Timeout error with -> %s", file_url)
+                    return None
+                except requests.exceptions.RequestException:
+                    self.logger.error("Request error with -> %s", file_url)
+                    return None
+
+                self.logger.debug(
+                    "Successfully downloaded file -> %s; status code -> %s",
+                    file_url,
+                    response.status_code,
+                )
+                file_content = response.content
+
+            # If path_or_url specifies a directory or a zip file we want to extract
+            # it and then defer the upload to upload_directory_to_parent():
+            elif os.path.exists(file_url) and (
+                ((file_url.endswith(".zip") or mime_type == "application/x-zip-compressed") and extract_zip)
+                or os.path.isdir(file_url)
+            ):
+                return self.upload_directory_to_parent(
+                    parent_id=parent_id,
+                    file_path=file_url,
+                    replace_existing=replace_existing,
+                )
+
+            elif os.path.exists(file_url):
+                self.logger.debug("Uploading local file -> %s", file_url)
+                file_content = open(file=file_url, mode="rb")  # noqa: SIM115
+
+            else:
+                self.logger.warning("Cannot access file -> '%s'", file_url)
+                return None
+
+        # Prepare upload payload:
         upload_post_data = {
             "type": str(self.ITEM_TYPE_DOCUMENT),
             "name": file_name,
@@ -6827,9 +7496,9 @@ class OTCS:
             }
 
         if not mime_type:
-            mime_type, _ = mimetypes.guess_type(file_url)
+            mime_type, _ = mimetypes.guess_type(file_name)
 
-        if not mime_type and magic_installed:
+        if not mime_type and magic_installed and file_url:
             try:
                 mime = magic.Magic(mime=True)
                 mime_type = mime.from_file(file_url)
@@ -6847,7 +7516,7 @@ class OTCS:
         # When we upload files using the 'files' parameter, the request must be encoded
         # as multipart/form-data, which allows binary data (like files) to be sent along
         # with other form data.
-        # The requests library sets this header correctly fwhen the 'files' parameter is provided.
+        # The requests library sets this header correctly when the 'files' parameter is provided.
         # So we just put the cookie in the header and trust the request library to add
         # the Content-Type = multipart/form-data :
         request_header = self.cookie()
@@ -9486,11 +10155,14 @@ class OTCS:
         self,
         expand_workspace_info: bool = True,
         expand_templates: bool = True,
+        show_error: bool = True,
     ) -> dict | None:
         """Get all workspace types configured in OTCS.
 
         This REST API is very limited. It does not return all workspace type properties
         you can see in OTCS business admin page.
+
+        This endpoint may throw an HTTP 500 error if no workspace types are in OTCS.
 
         Args:
             expand_workspace_info (bool, optional):
@@ -9498,6 +10170,11 @@ class OTCS:
             expand_templates (bool, optional):
                 Controls if the list of workspace templates
                 per workspace type is returned as well
+            show_error (bool, optional):
+                Controls if errors are shown to the caller. Defaults to True.
+                If no workspace types are configured in OTCS the endpoint may
+                return an HTTP 500 error. In such a case you may want to
+                set this parameter to False to avoid error messages in the log.
 
         Returns:
             dict | None:
@@ -9555,7 +10232,8 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get workspace types",
+            failure_message="Failed to get workspace types with URL -> {}".format(request_url),
+            show_error=show_error,
         )
 
     # end method definition
@@ -10052,6 +10730,8 @@ class OTCS:
         self,
         type_name: str | None = None,
         type_id: int | None = None,
+        name: str | None = None,
+        column_query: str | None = None,
         expanded_view: bool = True,
         page: int | None = None,
         limit: int | None = None,
@@ -10067,14 +10747,23 @@ class OTCS:
         and the type ID is ignored. This may not be what you want.
 
         Args:
-            type_name (str, optional):
+            type_name (str | None, optional):
                 The name of the workspace type. CAREFUL: the REST API seems to apply
                 a "starts with" filter, e.g. if you have two workspace types called
                 "Product" and "Product Version" then workspaces instances of both types
                 are returned if you provide "Product" for type_name !
                 Preferrable use type_id if you can!
-            type_id (int, optional):
+            type_id (int | None, optional):
                 The ID of the workspace_type.
+            name (str, optional):
+                Name of the workspace, if None then deliver all instances
+                of the given workspace type. If the name is provided
+                the prefixes 'contains_' and 'startswith_' are supported
+                like 'contains_Test' to find workspace that have 'Test'
+                in their name.
+            column_query (str | None, optional):
+                Specific query for custom columns (if columns are configured
+                for the folder the workspaces are in).
             expanded_view (bool, optional):
                 If False, then just search in recently accessed business workspace
                 for this name and type.
@@ -10119,7 +10808,8 @@ class OTCS:
         return self.get_workspace_by_type_and_name(
             type_name=type_name,
             type_id=type_id,
-            name="",
+            name=name,
+            column_query=column_query,
             expanded_view=expanded_view,
             page=page,
             limit=limit,
@@ -10133,6 +10823,8 @@ class OTCS:
         self,
         type_name: str | None = None,
         type_id: int | None = None,
+        name: str | None = None,
+        column_query: str | None = None,
         expanded_view: bool = True,
         page_size: int = 100,
         limit: int | None = None,
@@ -10161,6 +10853,15 @@ class OTCS:
                 Preferrable use type_id if you can!
             type_id (int, optional):
                 The ID of the workspace_type.
+            name (str, optional):
+                Name of the workspace, if None then deliver all instances
+                of the given workspace type. If the name is provided
+                the prefixes 'contains_' and 'startswith_' are supported
+                like 'contains_Test' to find workspace that have 'Test'
+                in their name.
+            column_query (str | None, optional):
+                Specific query for custom columns (if columns are configured
+                for the folder the workspaces are in).
             expanded_view (bool, optional):
                 If False, then just search in recently accessed business workspace
                 for this name and type.
@@ -10203,7 +10904,8 @@ class OTCS:
         response = self.get_workspace_by_type_and_name(
             type_name=type_name,
             type_id=type_id,
-            name="",
+            name=name,
+            column_query=column_query,
             expanded_view=expanded_view,
             limit=1,
             page=1,
@@ -10241,7 +10943,8 @@ class OTCS:
             response = self.get_workspace_by_type_and_name(
                 type_name=type_name,
                 type_id=type_id,
-                name="",
+                name=name,
+                column_query=column_query,
                 expanded_view=expanded_view,
                 page=page,
                 limit=page_size if limit is None else limit,
@@ -10268,7 +10971,8 @@ class OTCS:
         self,
         type_name: str = "",
         type_id: int | None = None,
-        name: str = "",
+        name: str | None = None,
+        column_query: str | None = None,
         expanded_view: bool = True,
         limit: int | None = None,
         page: int | None = None,
@@ -10294,12 +10998,15 @@ class OTCS:
                 The name of the workspace type.
             type_id (int, optional):
                 The ID of the workspace_type.
-            name (str, optional):
-                Name of the workspace, if "" then deliver all instances
+            name (str | None, optional):
+                Name of the workspace, if None then deliver all instances
                 of the given workspace type. If the name is provided
                 the prefixes 'contains_' and 'startswith_' are supported
                 like 'contains_Test' to find workspace that have 'Test'
                 in their name.
+            column_query (str | None, optional):
+                Specific query for custom columns (if columns are configured
+                for the folder the workspaces are in).
             expanded_view (bool, optional):
                 If False, then just search in recently
                 accessed business workspace for this name and type.
@@ -10330,6 +11037,7 @@ class OTCS:
                 about the data.
                 Metadata will be returned under `results.metadata`, `metadata_map`,
                 or `metadata_order`.
+                This is NOT categories & attributes!
             timeout (float, optional):
                 Specific timeout for the request in seconds. The default is the standard
                 timeout value REQUEST_TIMEOUT used by the OTCS module.
@@ -10423,6 +11131,8 @@ class OTCS:
             query["where_workspace_type_id"] = type_id
         if name:
             query["where_name"] = name
+        if column_query:
+            query["where_column_query"] = column_query
         if page and limit:
             query["page"] = page
             query["limit"] = limit
@@ -10522,7 +11232,7 @@ class OTCS:
         # deliver this information :-(
         # TODO: this implementation has the bad limitation that the parent cannot
         # be determined if no workspace instance exists! This should be
-        # reviewed once we have an REST API for Workspace Types.
+        # reviewed once we have an improved REST API for Workspace Types.
         response = self.get_workspace_by_type_and_name(
             type_name=type_name,
             type_id=type_id,
@@ -10675,6 +11385,7 @@ class OTCS:
         attribute: str,
         value: str,
         attribute_set: str | None = None,
+        substring: bool = False,
     ) -> dict | None:
         """Lookup workspaces that have a specified value in a category attribute.
 
@@ -10691,6 +11402,9 @@ class OTCS:
             attribute_set (str | None, optional):
                 The name of the attribute set. If None (default) the attribute to lookup
                 is supposed to be a top-level attribute.
+            substring (bool, optional):
+                If True, then the value is looked up as a substring of the attribute value.
+                If False (default), then the value must match the attribute value exactly.
 
         Returns:
             dict | None:
@@ -10710,7 +11424,12 @@ class OTCS:
             return None
 
         return self.lookup_nodes(
-            parent_node_id=parent_id, category=category, attribute=attribute, value=value, attribute_set=attribute_set
+            parent_node_id=parent_id,
+            category=category,
+            attribute=attribute,
+            value=value,
+            attribute_set=attribute_set,
+            substring=substring,
         )
 
     # end method definition
@@ -13455,7 +14174,7 @@ class OTCS:
     def check_user_node_permissions(self, node_ids: list[int]) -> dict | None:
         """Check if the current user has permissions to access a given list of Content Server nodes.
 
-        This is using the AI endpoint has this method is typically used in Aviator use cases.
+        This is using the AI endpoint as this method is typically used in Aviator use cases.
 
         Args:
             node_ids (list[int]):
@@ -14099,8 +14818,8 @@ class OTCS:
             clear_existing_categories (bool, optional):
                 Defines, whether or not existing (other) categories should be removed (default = False).
             attribute_values (dict, optional):
-                Dictionary containing "attribute_id":"value" pairs, to be populated during the category assignment.
-                (In case of the category attributes being set as "Required" in xECM, providing corresponding values for those attributes will resolve inability to assign the category).
+                Dictionary containing "attribute_id":"value" pairs, to be populated during
+                the category assignment. For mandatory attributes this is required to assign the category.
 
         Returns:
             bool:
@@ -14598,6 +15317,48 @@ class OTCS:
         Returns:
             dict | None:
                 The category data as a python data structure.
+
+        Example:
+            {
+                'Customer': {
+                    'Status': 'Customer',
+                    'Customer Number': '50030',
+                    'Name': 'CWT Frankfurt',
+                    'Street': '',
+                    'Country': 'Germany',
+                    'Postal code': '69483',
+                    'Sales organisation': [...],
+                    'City': 'Frankfurt',
+                    'Industry': [...],
+                    'Object Key': '0000050030',
+                    'Contacts': [
+                        {
+                            'BP No': None,
+                            'Name': None,
+                            'Department': None,
+                            'Function': None,
+                            'Phone': None,
+                            'Fax': None,
+                            'Email': None,
+                            'Building': None,
+                            'Floor': None,
+                            'Room': None,
+                            'Comments': None,
+                            'Valid from': None,
+                            'Valid to': None
+                        }
+                    ],
+                    'Sales Areas': [
+                        {
+                            'Sales Organisation': None,
+                            'Distribution Channel': None,
+                            'Division': None
+                        }
+                    ],
+                    'Rating': {...},
+                    'Locations': [...]
+                }
+            }
 
         """
 
@@ -17224,18 +17985,12 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="initiate_draft_process")
-    def initiate_draft_process(
-        self,
-        draftprocess_id: int,
-        comment: str = "",
-    ) -> dict | None:
+    def initiate_draft_process(self, draftprocess_id: int) -> dict | None:
         """Initiate a process (workflow instance) from a draft process.
 
         Args:
             draftprocess_id (int):
                 The ID of the draft process that has been created before with create_draft_process()
-            comment (str, optional):
-                The comment given with the initiation. Defaults to "".
 
         Returns:
             dict | None:
@@ -17277,7 +18032,6 @@ class OTCS:
 
         initiate_process_body_put_data = {
             "action": "Initiate",
-            "comment": comment,
         }
 
         return self.do_request(
@@ -17607,8 +18361,13 @@ class OTCS:
     # end method definition
 
     def aviator_chat(
-        self, context: str | None, messages: list[dict], where: list[dict] | None = None, inline_citation: bool = True
-    ) -> dict | None:
+        self,
+        context: str | None,
+        messages: list[dict],
+        where: list[dict] | None = None,
+        inline_citation: bool = True,
+        parse_request_response: bool = True,
+    ) -> dict | requests.Response | None:
         """Process a chat interaction with Content Aviator.
 
         Args:
@@ -17637,6 +18396,9 @@ class OTCS:
                 ]
             inline_citation (bool, optional):
                 Whether or not inline citations should be used in the response. Default is True.
+            parse_request_response (bool, optional):
+                Whether or not the response should be parsed and returned as a dictionary.
+                If False, the raw requests.Response object is returned. Default is
 
         Returns:
             dict:
@@ -17697,7 +18459,7 @@ class OTCS:
         """
 
         request_url = self.config()["aiChatUrl"]
-        request_header = self.request_form_header()
+        request_header = self.request_json_header()
 
         chat_data = {}
         if where:
@@ -17712,10 +18474,10 @@ class OTCS:
             url=request_url,
             method="POST",
             headers=request_header,
-            #            data=chat_data,
-            data={"body": json.dumps(chat_data)},
+            json_data=chat_data,
             timeout=None,
             failure_message="Failed to chat with Content Aviator",
+            parse_request_response=parse_request_response,
         )
 
     # end method definition
@@ -17884,6 +18646,7 @@ class OTCS:
         node: dict | int,
         executables: list[callable],
         workers: int = 3,
+        workers_name: str = "TraverseNodeWorker",
         strategy: str = "BFS",
         timeout: float = 1.0,
         **kwargs: dict,
@@ -17899,6 +18662,8 @@ class OTCS:
                 Callables to execute per node.
             workers (int, optional):
                 Number of parallel workers.
+            workers_name (str, optional):
+                Name prefix for worker threads.
             strategy (str, optional):
                 Either "DFS" for Depth First Search, or "BFS" for Breadth First Search.
                 "BFS" is the default.
@@ -18037,7 +18802,7 @@ class OTCS:
         # end method traverse_node_worker()
 
         # Start thread pool with limited concurrency
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="Traversal_Worker") as executor:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
             for i in range(workers):
                 self.logger.info("Starting worker -> %d...", i)
                 executor.submit(traverse_node_worker)
@@ -18509,6 +19274,7 @@ class OTCS:
         relationship_executables: list[callable] | None = None,
         relationship_types: list | None = None,
         workers: int = 3,
+        workers_name: str = "TraverseWorkspaceWorker",
         strategy: str = "BFS",
         max_depth: int | None = None,
         timeout: float = 60.0,
@@ -18540,6 +19306,8 @@ class OTCS:
                 The default that will be established if None is provided is ["child", "parent"].
             workers (int, optional):
                 Number of parallel workers.
+            workers_name (str, optional):
+                Name prefix for worker threads.
             strategy (str, optional):
                 Either "DFS" for Depth First Search, or "BFS" for Breadth First Search.
                 "BFS" is the default.
@@ -18591,9 +19359,9 @@ class OTCS:
             nonlocal initialization_done
             counter = 0
 
-            thread_name = threading.current_thread().name
+            # thread_name = threading.current_thread().name
 
-            self.logger.info("[%s] Initialize traversal queue...", thread_name)
+            self.logger.info("Initialize traversal queue...")
 
             # Enqueue initial nodes at depth 0:
             workspace_types = self.get_workspace_types_iterator(expand_workspace_info=False, expand_templates=False)
@@ -18609,8 +19377,7 @@ class OTCS:
                     workspace_type_inclusions=workspace_type_inclusions,
                 ):
                     self.logger.debug(
-                        "[%s] Skipping traversal initialization of workspace type -> '%s' (%d) as it does not match filter.",
-                        thread_name,
+                        "Skipping traversal initialization of workspace type -> '%s' (%d) as it does not match filter.",
                         wksp_type_name,
                         wksp_type_id,
                     )
@@ -18622,8 +19389,7 @@ class OTCS:
                     workspace_id = self.get_result_value(response=workspace_instance, key="id")
                     workspace_name = self.get_result_value(response=workspace_instance, key="name")
                     self.logger.debug(
-                        "[%s] Add workspace -> '%s' (%d), type -> '%s' (%d) to worker queue for traversal...",
-                        thread_name,
+                        "Add workspace -> '%s' (%d), type -> '%s' (%d) to worker queue for traversal...",
                         workspace_name,
                         workspace_id,
                         wksp_type_name,
@@ -18635,8 +19401,7 @@ class OTCS:
             # end for workspace_type ...
 
             self.logger.info(
-                "[%s] Initialization of traversal queue completed. Added %d workspaces in total to queue. Workers don't have to wait any more if queue is empty.",
-                thread_name,
+                "Initialization of traversal queue completed. Added %d workspaces in total to queue. Workers don't have to wait any more if queue is empty.",
                 counter,
             )
             initialization_done = True
@@ -18652,8 +19417,6 @@ class OTCS:
 
             """
 
-            thread_name = threading.current_thread().name
-
             nonlocal initialization_done
 
             while True:
@@ -18665,15 +19428,14 @@ class OTCS:
 
                 try:
                     self.logger.debug(
-                        "[%s] Try to retrieve a new workspace from the queue. Wait max %f seconds...",
-                        thread_name,
+                        "Try to retrieve a new workspace from the queue. Wait max %f seconds...",
                         timeout,
                     )
                     # We ony wait for a timeout if initializazion of queue by initialization thread is not yet completed.
                     workspace_node, current_depth = task_queue.get(timeout=timeout if not initialization_done else 0.1)
-                    self.logger.debug("[%s] Retrieved a new workspace from the queue.", thread_name)
+                    self.logger.debug("Retrieved a new workspace from the queue.")
                 except Empty:
-                    self.logger.info("[%s] No (more) workspaces to process - finishing...", thread_name)
+                    self.logger.info("No (more) workspaces to process - finishing...")
                     return  # Queue is empty - worker is done
 
                 try:
@@ -18693,8 +19455,7 @@ class OTCS:
                     with lock:
                         if workspace_id in processed_workspaces:
                             self.logger.debug(
-                                "[%s] Stop at workspace -> '%s' (%d) of type %s as it has been processed before.",
-                                thread_name,
+                                "Stop at workspace -> '%s' (%d) of type %s as it has been processed before.",
                                 workspace_name,
                                 workspace_id,
                                 "-> '{}' ({})".format(workspace_type_name, workspace_type_id)
@@ -18705,8 +19466,7 @@ class OTCS:
                         processed_workspaces[workspace_id] = workspace_name
 
                     self.logger.debug(
-                        "[%s] Processing workspace -> '%s' (%d) of type -> '%s' (%d) in depth -> %d",
-                        thread_name,
+                        "Processing workspace -> '%s' (%d) of type -> '%s' (%d) in depth -> %d",
                         workspace_name,
                         workspace_id,
                         workspace_type_name,
@@ -18727,8 +19487,7 @@ class OTCS:
                                 break
                         except Exception as e:
                             self.logger.error(
-                                "[%s] Failed to run workspace node executable on workspace -> '%s' (%s), error -> %s",
-                                thread_name,
+                                "Failed to run workspace node executable on workspace -> '%s' (%s), error -> %s",
                                 workspace_name,
                                 workspace_id,
                                 str(e),
@@ -18766,8 +19525,7 @@ class OTCS:
                                     workspace_type_inclusions=workspace_type_inclusions,
                                 ):
                                     self.logger.debug(
-                                        "[%s] Skipping traversal of related %s workspace as its type %s does not match filter.",
-                                        thread_name,
+                                        "Skipping traversal of related %s workspace as its type %s does not match filter.",
                                         rel_type,
                                         "-> '{}' ({})".format(related_workspace_type_name, related_workspace_type_id)
                                         if related_workspace_type_name
@@ -18775,8 +19533,7 @@ class OTCS:
                                     )
                                     continue  # the for loop
                                 self.logger.debug(
-                                    "[%s] Traversing related %s workspace -> '%s' (%d) of type %s in depth -> %d",
-                                    thread_name,
+                                    "Traversing related %s workspace -> '%s' (%d) of type %s in depth -> %d",
                                     rel_type,
                                     related_workspace_name,
                                     related_workspace_id,
@@ -18801,8 +19558,7 @@ class OTCS:
                                             break
                                     except Exception as e:
                                         self.logger.error(
-                                            "[%s] Failed to run workspace relationship executable on workspace -> '%s' (%d) and related workspace -> '%s' (%d), error -> %s",
-                                            thread_name,
+                                            "Failed to run workspace relationship executable on workspace -> '%s' (%d) and related workspace -> '%s' (%d), error -> %s",
                                             workspace_name,
                                             workspace_id,
                                             related_workspace_name,
@@ -18821,9 +19577,7 @@ class OTCS:
                     # end if traverse and "child" in relationship_types:
 
                 except Exception as worker_error:
-                    self.logger.error(
-                        "[%s] Worker thread crashed unexpectedly; error -> %s", thread_name, str(worker_error)
-                    )
+                    self.logger.error("Worker thread crashed unexpectedly; error -> %s", str(worker_error))
 
                 finally:
                     # Guarantee task_done() is called even if exceptions occur.
@@ -18835,11 +19589,11 @@ class OTCS:
         # end method traverse_node_worker()
 
         # Start thread that populates the task queue
-        init_thread = threading.Thread(target=init_traversal_queue, name="Traversal_Queue_Initializer")
+        init_thread = threading.Thread(target=init_traversal_queue, name="TraversalQueueInitializer")
         init_thread.start()
 
         # Start thread pool with limited concurrency
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="Workspace_Traversal_Worker") as executor:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
             for i in range(workers):
                 self.logger.info("Starting workspace traversal worker -> %d...", i)
                 executor.submit(traverse_workspace_worker)
@@ -19284,428 +20038,6 @@ class OTCS:
                     # into the data frame (in case it is a multi-value
                     # a)
                     row[column_header] = value
-
-        return True
-
-    # end method definition
-
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="load_items_old")
-    def load_items_old(
-        self,
-        node_id: int,
-        folder_path: list | None = None,
-        current_depth: int = 0,
-        workspace_type: int | None = None,
-        workspace_id: int | None = None,
-        workspace_name: str | None = None,
-        workspace_description: str | None = None,
-        filter_workspace_depth: int | None = None,
-        filter_workspace_subtypes: list | None = None,
-        filter_workspace_category: str | None = None,
-        filter_workspace_attributes: dict | list | None = None,
-        filter_item_depth: int | None = None,
-        filter_item_subtypes: list | None = None,
-        filter_item_category: str | None = None,
-        filter_item_attributes: dict | list | None = None,
-        filter_item_in_workspace: bool = True,
-        exclude_node_ids: list | None = None,
-        workspace_metadata: bool = True,
-        item_metadata: bool = True,
-        download_documents: bool = True,
-        skip_existing_downloads: bool = True,
-        extract_zip: bool = False,
-    ) -> bool:
-        """Create a Pandas Data Frame by traversing a given Content Server hierarchy.
-
-        This method collects workspace and document items.
-
-        Args:
-            node_id (int):
-                The currrent Node ID (in recursive processing).
-                Initially this is the starting node (root of the traversal).
-            folder_path (str, optional):
-                The current path from the starting node to the current node
-                (in recursive processing). Defaults to None.
-            current_depth (int):
-                The current depth in the tree that is traversed.
-            workspace_type (int | None, optional):
-                The type of the workspace (if already found in the hierarchy).
-                It is used for writing it in the data row of processed sub-items.
-                Defaults to None.
-            workspace_id (int | None, optional):
-                The ID of the workspace (if already found in the hierarchy).
-                It is used for writing it in the data row of processed sub-items.
-                Defaults to None.
-            workspace_name (str | None, optional):
-                The name of the workspace (if already found in the hierarchy).
-                It is used for writing it in the data row of processed sub-items.
-                Defaults to None.
-            workspace_description (str | None, optional):
-                The description of the workspace (if already found in the hierarchy).
-                It is used for writing it in the data row of processed sub-items.
-                Defaults to None.
-            filter_workspace_depth (int | None, optional):
-                Additive filter criterium for workspace path depth.
-                Defaults to None = filter not active.
-            filter_workspace_subtypes (list | None, optional):
-                Additive filter criterium for workspace type.
-                Defaults to None = filter not active.
-            filter_workspace_category (str | None, optional):
-                Additive filter criterium for workspace category.
-                Defaults to None = filter not active.
-            filter_workspace_attributes (dict | list, optional):
-                Additive filter criterium for workspace attribute values.
-                Defaults to None = filter not active
-            filter_item_depth (int | None, optional):
-                Additive filter criterium for item path depth.
-                Defaults to None = filter not active.
-            filter_item_subtypes (list | None, optional):
-                Additive filter criterium for item types.
-                Defaults to None = filter not active.
-            filter_item_category (str | None, optional):
-                Additive filter criterium for item category.
-                Defaults to None = filter not active.
-            filter_item_attributes (dict | list, optional):
-                Additive filter criterium for item attribute values.
-                Defaults to None = filter not active.
-            filter_item_in_workspace (bool, optional):
-                Defines if item filters should be applied to
-                items inside workspaces as well. If False,
-                then items inside workspaces are always included.
-            exclude_node_ids (list, optional):
-                List of node IDs to exclude from traversal.
-            workspace_metadata (bool, optional):
-                If True, include workspace metadata.
-            item_metadata (bool, optional):
-                if True, include item metadata.
-            download_documents (bool, optional):
-                Whether or not documents should be downloaded.
-            skip_existing_downloads (bool, optional):
-                If True, reuse already existing downloads in the file system.
-            extract_zip (bool, optional):
-                If True, documents that are downloaded with mime-type
-                "application/x-zip-compressed" will be extracted recursively.
-
-        Returns:
-            bool: True = success, False = Error
-
-        """
-
-        if folder_path is None:
-            folder_path = []  # required for list concatenation below
-
-        # Create folder if it does not exist
-        if not os.path.exists(self._download_dir):
-            os.makedirs(self._download_dir)
-
-        # Aquire and Release threading semaphore to limit parallel executions
-        # to not overload the source Content Server system:
-        with self._semaphore:
-            subnodes = self.get_subnodes_iterator(parent_node_id=node_id, page_size=100)
-
-        # Initialize traversal threads:
-        traversal_threads = []
-
-        for subnode in subnodes:
-            subnode = subnode.get("data").get("properties")
-
-            if exclude_node_ids is not None and (subnode["id"] in exclude_node_ids):
-                self.logger.info(
-                    "Node with ID -> %s and name -> '%s' is in exclusion list. Skip traversal of this node.",
-                    subnode["id"],
-                    subnode["name"],
-                )
-                continue
-            # Initiaze download threads for this subnode:
-            download_threads = []
-
-            match subnode["type"]:
-                case self.ITEM_TYPE_FOLDER | self.ITEM_TYPE_BUSINESS_WORKSPACE:  # folder or workspace
-                    # First we check if we have not found a workspace already during the traversal:
-                    if not workspace_id:
-                        # We try to avoid calculating the node categories more than once
-                        # by doing it here and use it for filtering _and_ for
-                        # data frame columns. We only need the category metadata if we
-                        # have category/attribute filters or if we want columns with attributze names instead of IDs:
-                        if workspace_metadata or filter_workspace_category or filter_workspace_attributes:
-                            categories = self.get_node_categories(
-                                node_id=subnode["id"],
-                                metadata=(
-                                    filter_workspace_category is not None
-                                    or filter_workspace_attributes is not None
-                                    or not self._use_numeric_category_identifier
-                                ),
-                            )
-                        else:
-                            categories = None
-
-                        # Second we apply the defined filters to the current node to see
-                        # if it is a node that we want to interpret as a workspace.
-                        # Only "workspaces" that comply with ALL provided filters are
-                        # considered and written into the data frame:
-                        found_workspace = self.apply_filter(
-                            node=subnode,
-                            node_categories=categories,
-                            current_depth=current_depth,
-                            filter_depth=filter_workspace_depth,
-                            filter_subtypes=filter_workspace_subtypes,
-                            filter_category=filter_workspace_category,
-                            filter_attributes=filter_workspace_attributes,
-                        )
-                    else:
-                        self.logger.debug(
-                            "Found folder or workspace -> '%s' (%s) inside workspace with ID -> %d. So this container cannot be a workspace.",
-                            subnode["name"],
-                            subnode["id"],
-                            workspace_id,
-                        )
-                        # otherwise the current node cannot be a workspace as we are
-                        # already in a workspace!
-                        # For future improvements we could look at supporting
-                        # sub-workspaces:
-                        found_workspace = False
-
-                    if found_workspace:
-                        self.logger.info(
-                            "Found workspace -> '%s' (%s) in depth -> %s. Adding to Data Frame...",
-                            subnode["name"],
-                            subnode["id"],
-                            current_depth,
-                        )
-                        # DON'T change workspace_id here!
-                        # This would break the for loop logic!
-
-                        #
-                        # Construct a dictionary 'row' that we will add
-                        # to the resulting data frame:
-                        #
-                        row = {}
-                        row["workspace_type"] = subnode["type"]
-                        row["workspace_id"] = subnode["id"]
-                        row["workspace_name"] = subnode["name"]
-                        row["workspace_description"] = subnode["description"]
-                        row["workspace_outer_path"] = folder_path
-                        # If we want (and have) metadata then add it as columns:
-                        if workspace_metadata and categories and categories.get("results", None):
-                            # Add columns for workspace node categories have been determined above.
-                            self.add_attribute_columns(row=row, categories=categories, prefix="workspace_cat_")
-
-                        # Now we add the article to the Pandas Data Frame in the Data class:
-                        with self._data.lock():
-                            self._data.append(row)
-                        subfolder = []  # now we switch to workspace inner path
-                    # end if found_workspace:
-                    else:  # we treat the current folder / workspace just as a container
-                        self.logger.info(
-                            "Node -> '%s' (%s) in depth -> %s is NOT a workspace as the filter criteria were not met. Keep traversing...",
-                            subnode["name"],
-                            subnode["id"],
-                            current_depth,
-                        )
-                        subfolder = folder_path + [subnode["name"]]
-
-                    # Recursive call to start threads for sub-items:
-                    thread = threading.Thread(
-                        target=self.load_items,
-                        args=(
-                            subnode["id"],  # node_id
-                            subfolder,  # folder_path
-                            current_depth + 1,  # current_depth
-                            (
-                                workspace_type  # pass down initial parameter value if subnode is not the workspace
-                                if not found_workspace
-                                else subnode["type"]
-                            ),  # workspace_type = subtype of the node we identified as a workspace
-                            (
-                                workspace_id  # pass down initial parameter value if subnode is not the workspace
-                                if not found_workspace
-                                else subnode["id"]
-                            ),  # workspace_id = ID of the node we identified as a workspace
-                            (
-                                workspace_name  # pass down initial parameter value if subnode is not the workspace
-                                if not found_workspace
-                                else subnode["name"]
-                            ),  # workspace_name
-                            (
-                                workspace_description  # pass down initial parameter value if subnode is not the workspace
-                                if not found_workspace
-                                else subnode["description"]
-                            ),  # workspace_description
-                            filter_workspace_depth,
-                            filter_workspace_subtypes,
-                            filter_workspace_category,
-                            filter_workspace_attributes,
-                            filter_item_depth,
-                            filter_item_subtypes,
-                            filter_item_category,
-                            filter_item_attributes,
-                            filter_item_in_workspace,
-                            exclude_node_ids,
-                            workspace_metadata,
-                            item_metadata,
-                            download_documents,
-                            skip_existing_downloads,
-                            extract_zip,
-                        ),
-                        name="traverse_node_{}".format(subnode["id"]),
-                    )
-                    thread.start()
-                    traversal_threads.append(thread)
-
-                case self.ITEM_TYPE_SHORTCUT:  # shortcuts
-                    pass
-
-                case self.ITEM_TYPE_RELATED_WORKSPACE:  # Related Workspaces - we don't want to run into loops!
-                    pass
-
-                case self.ITEM_TYPE_EMAIL_FOLDER:  # E-Mail folders
-                    pass
-
-                case self.ITEM_TYPE_FORUM:  # Forum
-                    pass
-
-                case self.ITEM_TYPE_DOCUMENT | self.ITEM_TYPE_URL:  # document or URL
-                    # We try to avoid calculating the node categories more than once
-                    # by doing it here and use it for filtering _and_ for data frame columns.
-                    # We only need the category metadata if we have category/attribute filters:
-                    if item_metadata or filter_item_category or filter_item_attributes:
-                        categories = self.get_node_categories(
-                            node_id=subnode["id"],
-                            metadata=(
-                                filter_item_category is not None
-                                or filter_item_attributes is not None
-                                or not self._use_numeric_category_identifier
-                            ),
-                        )
-                    else:
-                        categories = None
-
-                    # If filter_item_in_workspace is false, then documents
-                    # inside workspaces are included in the data frame unconditionally!
-                    if not workspace_id or filter_item_in_workspace:
-                        # We apply the defined filters to the current node. Only "documents"
-                        # that comply with ALL provided filters are considered and written into the data frame
-                        found_item = self.apply_filter(
-                            node=subnode,
-                            node_categories=categories,
-                            current_depth=current_depth,
-                            filter_depth=filter_item_depth,
-                            filter_subtypes=filter_item_subtypes,
-                            filter_category=filter_item_category,
-                            filter_attributes=filter_item_attributes,
-                        )
-                    else:
-                        found_item = True
-
-                    if not found_item:
-                        continue
-
-                    # We use the node ID as the filename to avoid any
-                    # issues with too long or not valid file names.
-                    # As the Pandas DataFrame has all information
-                    # this is easy to resolve at upload time.
-                    file_path = "{}/{}".format(self._download_dir, subnode["id"])
-
-                    # We only consider documents that are inside the defined "workspaces":
-                    if workspace_id:
-                        self.logger.debug(
-                            "Found %s item -> '%s' (%s) in depth -> %s inside workspace -> '%s' (%s).",
-                            "document" if subnode["type"] == self.ITEM_TYPE_DOCUMENT else "URL",
-                            subnode["name"],
-                            subnode["id"],
-                            current_depth,
-                            workspace_name,
-                            workspace_id,
-                        )
-                    else:
-                        self.logger.debug(
-                            "Found %s item -> '%s' (%s) in depth -> %s outside of workspace.",
-                            "document" if subnode["type"] == self.ITEM_TYPE_DOCUMENT else "URL",
-                            subnode["name"],
-                            subnode["id"],
-                            current_depth,
-                        )
-
-                    if subnode["type"] == self.ITEM_TYPE_DOCUMENT:
-                        # We download only if not downloaded before or if downloaded
-                        # before but forced to re-download:
-                        if download_documents and (not os.path.exists(file_path) or not skip_existing_downloads):
-                            #
-                            # Start anasynchronous Download Thread:
-                            #
-                            self.logger.debug(
-                                "Downloading file -> '%s'...",
-                                file_path,
-                            )
-
-                            extract_after_download = (
-                                subnode["mime_type"] == "application/x-zip-compressed" and extract_zip
-                            )
-                            thread = threading.Thread(
-                                target=self.download_document_multi_threading,
-                                args=(subnode["id"], file_path, extract_after_download),
-                                name="download_document_node_{}".format(subnode["id"]),
-                            )
-                            thread.start()
-                            download_threads.append(thread)
-                        else:
-                            self.logger.debug(
-                                "File -> %s has been downloaded before or download is not requested. Skipping download...",
-                                file_path,
-                            )
-                    # end if document
-
-                    #
-                    # Construct a dictionary 'row' that we will add
-                    # to the resulting data frame:
-                    #
-                    row = {}
-                    # First we include some key workspace data to associate
-                    # the item with the workspace:
-                    row["workspace_type"] = workspace_type
-                    row["workspace_id"] = workspace_id
-                    row["workspace_name"] = workspace_name
-                    row["workspace_description"] = workspace_description
-                    row["item_id"] = str(subnode["id"])
-                    row["item_type"] = subnode["type"]
-                    row["item_name"] = subnode["name"]
-                    row["item_description"] = subnode["description"]
-                    row["item_path"] = folder_path
-                    # Document specific data:
-                    row["item_download_name"] = str(subnode["id"]) if subnode["type"] == self.ITEM_TYPE_DOCUMENT else ""
-                    row["item_mime_type"] = subnode["mime_type"] if subnode["type"] == self.ITEM_TYPE_DOCUMENT else ""
-                    # URL specific data:
-                    row["item_url"] = subnode["url"] if subnode["type"] == self.ITEM_TYPE_URL else ""
-                    if item_metadata and categories and categories["results"]:
-                        # Add columns for workspace node categories have been determined above.
-                        self.add_attribute_columns(row=row, categories=categories, prefix="item_cat_")
-
-                    # Now we add the row to the Pandas Data Frame in the Data class:
-                    self.logger.info(
-                        "Adding %s -> '%s' (%s) to data frame...",
-                        "document" if subnode["type"] == self.ITEM_TYPE_DOCUMENT else "URL",
-                        row["item_name"],
-                        row["item_id"],
-                    )
-                    with self._data.lock():
-                        self._data.append(row)
-                case _:
-                    self.logger.warning(
-                        "Don't know what to do with item -> '%s' (%s) of type -> %s",
-                        subnode["name"],
-                        subnode["id"],
-                        subnode["type"],
-                    )
-            # end match subnode["type"]:
-
-            # Wait for all download threads to complete:
-            for thread in download_threads:
-                thread.join()
-        # end for subnode in subnodes:
-
-        # Wait for all traversal threads to complete:
-        for thread in traversal_threads:
-            thread.join()
 
         return True
 
@@ -20279,6 +20611,7 @@ class OTCS:
             # the node should be added to the resulting data frame:
             executables=[check_node_exclusions, check_node_workspace, check_node_item],
             workers=workers,  # number of worker threads
+            workers_name="LoadItemsWorker",
             exclude_node_ids=exclude_node_ids,
             filter_workspace_data=filter_workspace_data,
             filter_item_data=filter_item_data,
@@ -20436,9 +20769,6 @@ class OTCS:
 
         # end async def _inner()
 
-        event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop=event_loop)
-
         # Is this method called without the node data?
         # Then we get it with the node_id:
         if not node:
@@ -20459,6 +20789,8 @@ class OTCS:
             return False
 
         uri = self._config["femeUri"]
+        # The task will not immediately run, but only when we call
+        # event_loop.run_until_complete(task) below:
         task = _inner(
             uri=uri,
             node_properties=node_properties,
@@ -20473,8 +20805,26 @@ class OTCS:
             remove_existing=remove_existing,
         )
 
+        # event_loop = asyncio.new_event_loop()
+        # asyncio.set_event_loop(loop=event_loop)
+
         try:
-            event_loop.run_until_complete(task)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                # Running in FastAPI / Uvicorn context → schedule the coroutine
+                self.logger.debug("Detected running event loop, scheduling coroutine on existing loop.")
+                asyncio.create_task(task)  # noqa: RUF006
+            else:
+                # No running loop → safe to run normally
+                self.logger.debug("No running loop detected, running asyncio task directly.")
+                asyncio.run(task)
+
+        # event_loop.run_until_complete(task)
+
         except websockets.exceptions.ConnectionClosed:  # :
             self.logger.error("WebSocket connection was closed!")
             success = False
@@ -20490,7 +20840,7 @@ class OTCS:
             self.logger.error("Error during FEME WebSocket connection! -> %s", exc)
             success = False
 
-        event_loop.close()
+        #        event_loop.close()
 
         return success
 
@@ -20509,39 +20859,91 @@ class OTCS:
 
         """
 
-        request_url = self.config()["csUrl"]
-
-        request_header = self.request_form_header()
-        request_header["referer"] = "http://localhost"
-
-        data = {
-            "func": "xecmpfdocgen.PowerDocsPayload",
-            "wsId": str(workspace_id),
-            "hideHeader": "true",
-            "source": "CreateDocument",
-        }
-
-        self.logger.debug(
-            "Get document templates for workspace with ID -> %d; calling -> %s",
-            workspace_id,
-            request_url,
+        # Get available SmartUI Actions to check if we have SuccessFactors or generic XECM PowerDocs templates configured:
+        actions = self.get_node_actions(
+            node_id=workspace_id, filter_actions=["xecmforsfcreatedocument", "xecmpfcreatedocument"]
         )
+        if actions is None:
+            self.logger.error(
+                "Cannot get node actions for workspace with ID -> %d",
+                workspace_id,
+            )
+            return None
+        else:
+            actions = actions["results"][str(workspace_id)]["data"]
 
-        response = self.do_request(
-            url=request_url,
-            method="POST",
-            headers=request_header,
-            data=data,
-            timeout=None,
-            failure_message="Failed to get document templates for workspace with ID -> {}".format(workspace_id),
-            parse_request_response=False,
-        )
+        # SuccessFactors specific handling
+        if "xECMforSFCreateDocument" in actions:
+            request_url = self.config()["csUrl"]
 
+            request_header = self.request_form_header()
+            request_header["referer"] = "http://localhost"
+
+            data = {
+                "func": "xecmpfdocgen.PowerDocsPayload",
+                "wsId": str(workspace_id),
+                "hideHeader": "true",
+                "source": "CreateDocument",
+            }
+
+            self.logger.debug(
+                "Get document templates (SuccessFactors) for workspace with ID -> %d; calling -> %s",
+                workspace_id,
+                request_url,
+            )
+
+            response = self.do_request(
+                url=request_url,
+                method="POST",
+                headers=request_header,
+                data=data,
+                timeout=None,
+                failure_message="Failed to get document templates for workspace with ID -> {}".format(workspace_id),
+                parse_request_response=False,
+            )
+
+        # Generic XECM PowerDocs handling
+        elif "XECMPFCreateDocument" in actions:
+            request_url = (
+                self.config()["csUrl"]
+                + f"?func=xecmpfdocgen.XECMPFPowerDocsPayload&wsId={workspace_id}&hideHeader=true"
+            )
+
+            request_header = self.request_json_header()
+
+            self.logger.debug(
+                "Get document templates for workspace with ID -> %d; calling -> %s",
+                workspace_id,
+                request_url,
+            )
+
+            response = self.do_request(
+                url=request_url,
+                method="GET",
+                headers=request_header,
+                timeout=None,
+                failure_message="Failed to get document templates for workspace with ID -> {}".format(workspace_id),
+                parse_request_response=False,
+            )
+
+        else:
+            self.logger.error(
+                "No known document template action found for workspace with ID -> %d",
+                workspace_id,
+            )
+            return None
+
+        # Continue processing of the response - same for both template types
         if response is None:
             return None
 
         try:
             text = response.text
+            if text and "User is not authorized" in text:
+                self.logger.error(
+                    "The current user is not authorized to retrive document templates for document generation!"
+                )
+                return None
             match = re.search(r'<textarea[^>]*name=["\']documentgeneration["\'][^>]*>(.*?)</textarea>', text, re.DOTALL)
             textarea_content = match.group(1).strip() if match else ""
             textarea_content = html.unescape(textarea_content)
@@ -20578,6 +20980,7 @@ class OTCS:
 
         """
 
+        # If the XML root is not yet provided we get it now:
         if root is None:
             root = self._get_document_template_raw(workspace_id=workspace_id)
             if root is None:
@@ -20607,7 +21010,8 @@ class OTCS:
 
         Returns:
             str | None:
-                The XML string with the payload to initiate a document generation, or None if an error occurred.
+                The XML string with the payload to initiate a document generation,
+                or None if an error occurred.
 
         """
 
@@ -20632,13 +21036,13 @@ class OTCS:
 
         # remove startup/processing
         startup = root.find("startup")
-        # Find the existing application element and update its sysid attribute
-        application = startup.find("application")
-        application.set("sysid", "3adfd3a4-718f-4b9c-ac93-72efbcdf17f1")
 
-        processing = startup.find("processing")
+        # Check if SuccessFactors or generic XECM PowerDocs template:
+        application = startup.find("application")
+        is_successfactors = bool(application)
 
         # Clear processing information
+        processing = startup.find("processing")
         processing.clear()
 
         modus = ET.SubElement(processing, "modus")
@@ -20648,7 +21052,11 @@ class OTCS:
         template = ET.SubElement(processing, "template", type="Name")
         template.text = template_name
         channel = ET.SubElement(processing, "channel")
-        channel.text = "save"
+
+        if is_successfactors:
+            channel.text = "save"
+        else:
+            channel.text = "centralprint"
 
         # Add static query information for userId and asOfDate
         if input_values:
@@ -20662,3 +21070,5 @@ class OTCS:
         payload = ET.tostring(root, encoding="utf8").decode("utf8")
 
         return payload
+
+    # end method definition

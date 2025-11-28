@@ -420,6 +420,11 @@ class Settings(BaseSettings):
         description="Stop the payload processing when an error during the transport package deployment occours. This can be useful for debugging, to identify missing dependencies.",
     )
 
+    status_file_check: bool = Field(
+        default=True,
+        description="Check for previous exection of a payload section, set to False to force the execution",
+    )
+
     placeholder_values: dict = Field(default={})
 
     profiling: bool = Field(

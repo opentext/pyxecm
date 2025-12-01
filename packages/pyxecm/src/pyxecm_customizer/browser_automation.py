@@ -91,7 +91,7 @@ except ModuleNotFoundError:
 DEFAULT_WAIT_UNTIL_STRATEGY = "networkidle"
 
 REQUEST_TIMEOUT = 30.0
-REQUEST_RETRY_DELAY = 2.0
+REQUEST_RETRY_DELAY = 4.0
 REQUEST_MAX_RETRIES = 3
 
 
@@ -1543,7 +1543,7 @@ class BrowserAutomation:
         title = self.get_title()
         if not title:
             self.logger.error(
-                "Cannot read page title after login - you may have the wrong 'wait until' strategy configured! Strategy user -> '%s'.",
+                "Cannot read page title after login - you may have the wrong 'wait until' strategy configured! Strategy used -> '%s'.",
                 wait_until,
             )
             return False

@@ -16619,14 +16619,21 @@ class Payload:
                 name=item_name,
                 show_error=False,
             )
-            if self._otcs.get_result_value(response=response, key="name") == item_name:
+            # For non-document items we skip processing if they already exist:
+            if item_type != self._otcs.ITEM_TYPE_DOCUMENT:
+                if self._otcs.get_result_value(response=response, key="name") == item_name:
+                    self.logger.info(
+                        "Item with name -> '%s' does already exist in parent folder with ID -> %s. Skipping...",
+                        item_name,
+                        parent_id,
+                    )
+                    continue
                 self.logger.info(
-                    "Item with name -> '%s' does already exist in parent folder with ID -> %s.",
+                    "Create new item -> '%s' of type -> '%s' in parent with ID -> %s...",
                     item_name,
+                    item_type,
                     parent_id,
                 )
-                continue
-            if item_type != self._otcs.ITEM_TYPE_DOCUMENT:
                 response = self._otcs.create_item(
                     parent_id=int(parent_id),
                     item_type=item_type,
@@ -16636,12 +16643,25 @@ class Payload:
                     original_id=int(original_id),
                     **create_item_details,
                 )
-            else:  # Handling for documents
+            # Document does not yet exist - create a new one by upload:
+            elif self._otcs.get_result_value(response=response, key="name") != item_name:
+                self.logger.info("Uploading new document -> '%s' to parent with ID -> %s...", item_name, parent_id)
                 response = self._otcs.upload_file_to_parent(
                     parent_id=int(parent_id),
                     file_name=item_name,
                     mime_type=item_mime_type,
-                    content=item_content,
+                    file_content=item_content,
+                    encoding=item_encoding,
+                    description=item_description,
+                )
+            else:
+                node_id = self._otcs.get_result_value(response=response, key="id")
+                self.logger.info("Adding a version to existing document -> '%s' (%s)...", item_name, node_id)
+                response = self._otcs.add_document_version(
+                    node_id=int(node_id),
+                    file_name=item_name,
+                    mime_type=item_mime_type,
+                    file_content=item_content,
                     encoding=item_encoding,
                     description=item_description,
                 )
@@ -16658,7 +16678,7 @@ class Payload:
                 continue
 
             self.logger.info(
-                "Successfully created item -> '%s' with ID -> %s under parent%s.",
+                "Successfully created item -> '%s' (%s) under parent%s.",
                 item_name,
                 node_id,
                 " with nickname -> '{}'".format(parent_nickname)
@@ -21773,7 +21793,7 @@ class Payload:
                     "Add columns is missing name or source column. Column will not be added.",
                 )
                 continue
-            data.add_column(
+            result = data.add_column(
                 source_column=add_column["source_column"],
                 new_column=add_column["name"],
                 reg_exp=add_column.get("regex", add_column.get("reg_exp", None)),
@@ -21783,6 +21803,10 @@ class Payload:
                 group_chars=add_column.get("group_chars", None),
                 group_separator=add_column.get("group_separator", "."),
             )
+            if not result:
+                self.logger.error(
+                    "Failed to add column -> '%s' for data source -> '%s'", add_column["name"], data_source_name
+                )
 
         # Add columns with list values from a list of other columns
         # if specified in data_source:
@@ -21792,10 +21816,14 @@ class Payload:
                     "Add list columns is missing name or source columns. Column will not be added.",
                 )
                 continue
-            data.add_column_list(
+            result = data.add_column_list(
                 source_columns=add_column["source_columns"],
                 new_column=add_column["name"],
             )
+            if not result:
+                self.logger.error(
+                    "Failed to add list column -> '%s' for data source -> '%s'", add_column["name"], data_source_name
+                )
 
         # Add columns with list values from a list of other columns
         # if specified in data_source:
@@ -21805,7 +21833,7 @@ class Payload:
                     "Add concatenation columns is missing name or source columns. Column will not be added.",
                 )
                 continue
-            data.add_column_concat(
+            result = data.add_column_concat(
                 source_columns=add_column["source_columns"],
                 new_column=add_column["name"],
                 concat_char=add_column.get("concat_chars", ""),
@@ -21814,6 +21842,12 @@ class Payload:
                 capitalize=add_column.get("capitalize", False),
                 title=add_column.get("title", False),
             )
+            if not result:
+                self.logger.error(
+                    "Failed to add concatenated column -> '%s' for data source -> '%s'",
+                    add_column["name"],
+                    data_source_name,
+                )
 
         # Add columns with list values from a list of other columns
         # if specified in data_source:
@@ -21823,11 +21857,15 @@ class Payload:
                     "Add table columns is missing name or source columns. Column will not be added.",
                 )
                 continue
-            data.add_column_table(
+            result = data.add_column_table(
                 source_columns=add_column["source_columns"],
                 new_column=add_column["name"],
                 delimiter=add_column.get("list_splitter", ","),
             )
+            if not result:
+                self.logger.error(
+                    "Failed to add table column -> '%s' for data source -> '%s'", add_column["name"], data_source_name
+                )
 
         # Drop columns if specified in data_source:
         if columns_to_drop:

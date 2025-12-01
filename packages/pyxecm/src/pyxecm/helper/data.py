@@ -2995,9 +2995,13 @@ class Data:
             bool:
                 True = Success, False = Failure
 
+        Side effects:
+            self._df is modified in place.
+
         """
 
         if self._df is None:
+            self.logger.error("Data frame is not initialized. Cannot add column -> %s!", new_column)
             return False
 
         # Check that the new column does not yet exist
@@ -3009,10 +3013,10 @@ class Data:
             )
             return False
 
-        # first we handle the very simple case to not have
-        # a source column but just add an empty new column:
+        # first we handle the very simple case to not have a source column but just add an empty new column.
+        # It is important to add the index parameter as Series assignment is index-aligned, not positional:
         if not source_column:
-            self._df[new_column] = pd.Series(dtype=data_type)
+            self._df[new_column] = pd.Series(index=self._df.index, dtype=data_type)
             return True
 
         # Check if the source column exists
@@ -3124,7 +3128,7 @@ class Data:
         lower: bool = False,
         capitalize: bool = False,
         title: bool = False,
-    ) -> None:
+    ) -> bool:
         """Add a column as a concatenation of the values of multiple source columns.
 
         Args:
@@ -3144,7 +3148,11 @@ class Data:
                 Convert result to title case if True.
 
         Returns:
-            None. self._df is modified in place.
+            bool:
+                True = Success, False = Failure
+
+        Side effects:
+            self._df is modified in place.
 
         """
 
@@ -3164,13 +3172,55 @@ class Data:
             elif title:
                 concatenated = concatenated.title()
 
+            return concatenated
+
         # end method definition
 
+        #
+        # Validations:
+        #
+
+        # Check the data frame is initialized:
+        if self._df is None:
+            self.logger.error(
+                "Data frame is not initialized. Cannot add a column -> '%s' via concatenation!", new_column
+            )
+            return False
+        # Check we only do one case transformation as they are mutually exclusive:
+        if sum([upper, lower, capitalize, title]) > 1:
+            self.logger.warning("Only one case transformation can be applied for added data frame column.")
+        # Check that the new column does not yet exist:
+        if new_column in self._df.columns:
+            self.logger.error(
+                "New column -> '%s' does already exist in data frame! Cannot add it by concatenation of -> %s. Data frame has these columns -> %s",
+                new_column,
+                str(source_columns),
+                str(self._df.columns),
+            )
+            return False
+        # Check source columns are valid:
+        if not isinstance(source_columns, (list, tuple)) or not source_columns:
+            self.logger.error("Source columns must be a non-empty list of column names!")
+            return False
+        missing = [c for c in source_columns if c not in self._df.columns]
+        if missing:
+            self.logger.error(
+                "Missing source columns -> %s. Cannot concat it to values of new column -> '%s'!",
+                str(missing),
+                new_column,
+            )
+            return False
+
+        #
+        # Execute the transformation:
+        #
         self._df[new_column] = self._df.apply(concatenate, axis=1)
+
+        return True
 
     # end method definition
 
-    def add_column_list(self, source_columns: list, new_column: str) -> None:
+    def add_column_list(self, source_columns: list, new_column: str) -> bool:
         """Add a column with list objects.
 
         The list items are taken from a list of source columns (row by row).
@@ -3182,7 +3232,11 @@ class Data:
                 The name of the new column.
 
         Returns:
-            None. self._df is modified in place.
+            bool:
+                True = Success, False = Failure
+
+        Side effects:
+            self._df is modified in place.
 
         """
 
@@ -3190,7 +3244,37 @@ class Data:
             # Comprehension to create a list from all source column values:
             return [row[col] for col in source_columns]
 
+        #
+        # Validations:
+        #
+
+        # Check the data frame is initialized:
+        if self._df is None:
+            self.logger.error("Data frame is not initialized. Cannot add new list column -> '%s'!", new_column)
+            return False
+        # Check that the new column does not yet exist:
+        if new_column in self._df.columns:
+            self.logger.error("Column -> '%s' already exists in the data frame. Cannot add it!", new_column)
+            return False
+        # Check source columns are valid:
+        if not isinstance(source_columns, (list, tuple)) or not source_columns:
+            self.logger.error("Source columns must be a non-empty list of column names! Cannot add new list column.")
+            return False
+        missing = [c for c in source_columns if c not in self._df.columns]
+        if missing:
+            self.logger.error(
+                "Missing source columns -> %s. Cannot transform its values to a new list column -> '%s'!",
+                str(missing),
+                new_column,
+            )
+            return False
+
+        #
+        # Execute the transformation:
+        #
         self._df[new_column] = self._df.apply(create_list, axis=1)
+
+        return True
 
     # end method definition
 
@@ -3199,7 +3283,7 @@ class Data:
         source_columns: list,
         new_column: str,
         delimiter: str = ",",
-    ) -> None:
+    ) -> bool:
         """Add a column with tabular objects (list of dictionaries).
 
         The source columns should include lists. The resulting dictionary
@@ -3219,7 +3303,7 @@ class Data:
             {
                 "X": "2"
                 "Y": "B"
-            }
+            },
             {
                 "X": "3"
                 "Y": "C"
@@ -3233,7 +3317,7 @@ class Data:
             {
                 "X": "5"
                 "Y": "E"
-            }
+            },
             {
                 "X": "6"
                 "Y": "F"
@@ -3249,36 +3333,105 @@ class Data:
                 Character that delimits list items. Defaults to ",".
 
         Returns:
-            None. self._df is modified in place.
+            bool:
+                True = Success, False = Failure
+
+        Side effects:
+            self._df is modified in place.
 
         """
+
+        # Sub-method to pad lists to the desired length
+        def pad_list(lst: list, max_len: int) -> list:
+            """Pad lists to the same length. None is used as the filler.
+
+            Args:
+                lst (list):
+                    List to pad.
+                max_len (int):
+                    Desired length of the list.
+
+            Returns:
+                list:
+                    The padded list.
+
+            """
+
+            return lst + [None] * (max_len - len(lst))
+
+        # end sub-method
+
+        def create_table(row: pd.Series) -> list:
+            """Create a list of dictionaries representing the table value.
+
+            Args:
+                row (pd.Series):
+                    Current row to process.
+
+            Returns:
+                list:
+                    List of dictionaries representing the table value.
+
+            """
+
+            # Step 1: Determine maximum length across columns
+            max_len = max(len(row[col]) if isinstance(row[col], list) else 1 for col in source_columns)
+
+            # Step 2: Pad lists to the maximum length, leave scalar values as they are, don't change source columns:
+            table_values = {}  # list of values padded to max_len. We use a separate variable to not change source columns.
+            for col in source_columns:
+                val = row[col]
+                if isinstance(val, list):
+                    table_values[col] = pad_list(val, max_len)
+                elif not pd.isna(val):
+                    table_values[col] = [
+                        val,
+                    ] * max_len  # Repeat scalar value to match the max length
+                else:
+                    table_values[col] = [None] * max_len  # fill missing values
+
+            # Step 3: Create a list of dictionaries (table) for each row:
+            table = [{col: table_values[col][i] for col in source_columns} for i in range(max_len)]
+
+            return table
+
+        # end sub-method
+
+        #
+        # Validations:
+        #
+
+        # Check the data frame is initialized:
+        if self._df is None:
+            self.logger.error("Data frame is not initialized. Cannot add new table column -> '%s'!", new_column)
+            return False
+        # Check that the new column does not yet exist:
+        if new_column in self._df.columns:
+            self.logger.error("Column -> '%s' already exists in the data frame. Cannot add it!", new_column)
+            return False
+        # Check source columns are valid:
+        if not isinstance(source_columns, (list, tuple)) or not source_columns:
+            self.logger.error("Source columns must be a non-empty list of column names!")
+            return False
+        missing = [c for c in source_columns if c not in self._df.columns]
+        if missing:
+            self.logger.error(
+                "Missing source columns -> %s. Cannot transform it to table values in new column -> '%s'!",
+                str(missing),
+                new_column,
+            )
+            return False
+
+        #
+        # Execute the transformations:
+        #
 
         # Call the convert_to_lists method to ensure the columns are converted
         self.convert_to_lists(columns=source_columns, delimiter=delimiter)
 
-        # Sub-method to pad lists to the same length
-        def pad_list(lst: list, max_len: int) -> list:
-            return lst + [None] * (max_len - len(lst))
-
-        def create_table(row: pd.Series) -> list:
-            max_len = max(len(row[col]) if isinstance(row[col], list) else 1 for col in source_columns)
-
-            # Pad lists to the maximum length, leave scalar values as they are
-            for col in source_columns:
-                if isinstance(row[col], list):
-                    row[col] = pad_list(row[col], max_len)
-                elif not pd.isna(row[col]):
-                    row[col] = [
-                        row[col],
-                    ] * max_len  # Repeat scalar value to match the max length
-                else:
-                    row[col] = [None] * max_len
-            # Create a list of dictionaries for each row:
-            table = [{col: row[col][i] for col in source_columns} for i in range(max_len)]
-
-            return table
-
         # Apply the function to create a new column with table values:
         self._df[new_column] = self._df.apply(create_table, axis=1)
+
+        return True
 
     # end method definition

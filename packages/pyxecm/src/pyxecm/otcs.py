@@ -888,6 +888,8 @@ class OTCS:
             self.load_workspace_ontology()
             return self._workspace_ontology
 
+        # If the ontology is not yet initialized, we try to load
+        # it from a JSON file in the perosnal workspace of the admin user:
         if self._workspace_ontology or self.load_workspace_ontology():
             return self._workspace_ontology
 
@@ -909,6 +911,9 @@ class OTCS:
             self.logger.error("The workspace ontology is empty! Cannot save it.")
             return False
 
+        #
+        # 1. Dump the ontology data structure into a file in local file system:
+        #
         download_dir = os.path.join(tempfile.gettempdir(), self.ONTOLOGY_TEMP_DIRECTORY)
         file_path = os.path.join(download_dir, self.ONTOLOGY_FILE_NAME)
         with open(file_path, "w", encoding="utf-8") as ontology_file:
@@ -917,6 +922,9 @@ class OTCS:
                 "Workspace ontology -> '%s' has been saved to JSON file -> %s", self.ONTOLOGY_FILE_NAME, file_path
             )
 
+        #
+        # 2. Upload the local ontology JSON file to the admin workspace:
+        #
         response = self._otcs.get_node_by_volume_and_path(
             volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
         )  # write to Personal Workspace of Admin (with Volume Type ID = 142)
@@ -7324,9 +7332,9 @@ class OTCS:
         Args:
             parent_id (int):
                 The ID of the parent (folder) to upload the file to.
-            file_url (str):
+            file_url (str | None, optional):
                 The URL to download the file from, or a local file path.
-            file_name (str, optional):
+            file_name (str | None, optional):
                 The name of the file being uploaded.
             mime_type (str | None, optional):
                 The mime type of the file (e.g., 'application/pdf').
@@ -7729,23 +7737,35 @@ class OTCS:
     def add_document_version(
         self,
         node_id: int,
-        file_url: str,
-        file_name: str,
+        file_url: str | None = None,
+        file_name: str | None = None,
         mime_type: str | None = None,
+        file_content: str | bytes | None = None,
+        encoding: str = "utf-8",
         description: str = "",
     ) -> dict | None:
         """Fetch file from URL or local filesystem and upload it as a document version.
 
+        The version data can be provided in one of three ways:
+        1. Via a public URL (file_url starting with "http")
+        2. Via a local filesystem path (file_url pointing to an existing file or directory)
+        3. Via in-memory content using the file_content parameter (str or bytes)
+
         Args:
             node_id (int):
                 The ID of the document to add add version to.
-            file_url (str):
+            file_url (str | None, optional):
                 URL to download file from or the local file path.
-            file_name (str):
-                The name of the file.
+            file_name (str | None, optional):
+                The name of the file being uploaded as a new version.
             mime_type (str | None, optional):
                 The mime type of the file (e.g., 'application/pdf').
                 If the mime type is not provided the method tries to "guess" the mime type.
+            file_content (str | bytes | None):
+                The file content provided directly in memory. If a string is provided,
+                it will be encoded using the specified encoding.
+            encoding (str, optional):
+                The encoding used when file_content is a string (default: "utf-8").
             description (str, optional):
                 The description of the version (default = no description).
 
@@ -7759,52 +7779,102 @@ class OTCS:
         if description and len(description) > 255:
             description = description[:255]
 
-        if file_url.startswith("http"):
-            # Download file from remote location specified by the file_url parameter
-            # this must be a public place without authentication:
-            self.logger.debug("Download file from URL -> %s", file_url)
-
-            try:
-                response = requests.get(
-                    url=file_url,
-                    headers=self.request_download_header(),
-                    timeout=None,
-                )
-                response.raise_for_status()
-            except requests.exceptions.HTTPError:
-                self.logger.error("HTTP error with -> %s", file_url)
-                return None
-            except requests.exceptions.ConnectionError:
-                self.logger.error("Connection error with -> %s", file_url)
-                return None
-            except requests.exceptions.Timeout:
-                self.logger.error("Timeout error with -> %s", file_url)
-                return None
-            except requests.exceptions.RequestException:
-                self.logger.error("Request error -> %s", file_url)
-                return None
-
-            self.logger.debug(
-                "Successfully downloaded file -> %s; status code -> %s",
-                file_url,
-                response.status_code,
-            )
-            file_content = response.content
-
-        elif os.path.exists(file_url):
-            self.logger.debug("Upload local file -> '%s'", file_url)
-            file_content = open(file=file_url, mode="rb")  # noqa: SIM115
-
-        else:
-            self.logger.warning("Cannot access file -> '%s'", file_url)
+        # Validate mutually exclusive inputs:
+        if file_content is not None and file_url is not None:
+            self.logger.error("Provide either file URL or file content for uploading files, not both.")
+            return None
+        if file_content is None and file_url is None:
+            self.logger.error("Provide either file URL or file content for uploading files.")
             return None
 
+        # Handle in-memory file content:
+        if file_content is not None:
+            if not file_name:
+                self.logger.error("Missing file name! Cannot upload in-memory file without a file name.")
+                return None
+
+            # Make sure we don't have leading or trailing whitespace:
+            file_name = file_name.strip()
+
+            if isinstance(file_content, str):
+                # Encode text content to bytes using the provided encoding
+                file_bytes = file_content.encode(encoding)
+                if not mime_type:
+                    mime_type = "text/plain"
+            elif isinstance(file_content, bytes):
+                file_bytes = file_content
+            else:
+                self.logger.error("File content must be of type str or bytes! Cannot upload file.")
+                return None
+
+            # Use an in-memory byte stream instead of a filesystem file
+            file_content = io.BytesIO(file_bytes)
+
+        # Handle file provided via URL or local filesystem
+        else:
+            if not file_url:
+                self.logger.error("Missing file URL! Cannot upload file.")
+                return None
+
+            if not file_name:
+                # if path_or_url does not end with a "/"
+                # we may get the missing file name from there:
+                file_name = os.path.basename(file_url)
+
+            if not file_name:
+                self.logger.error("Missing file name! Cannot upload document version.")
+                return None
+
+            # Make sure we don't have leading or trailing whitespace:
+            file_name = file_name.strip()
+
+            if file_url.startswith("http"):
+                # Download file from remote location specified by the file_url parameter
+                # this must be a public place without authentication:
+                self.logger.debug("Download file from URL -> %s", file_url)
+
+                try:
+                    response = requests.get(
+                        url=file_url,
+                        headers=self.request_download_header(),
+                        timeout=None,
+                    )
+                    response.raise_for_status()
+                except requests.exceptions.HTTPError:
+                    self.logger.error("HTTP error with -> %s", file_url)
+                    return None
+                except requests.exceptions.ConnectionError:
+                    self.logger.error("Connection error with -> %s", file_url)
+                    return None
+                except requests.exceptions.Timeout:
+                    self.logger.error("Timeout error with -> %s", file_url)
+                    return None
+                except requests.exceptions.RequestException:
+                    self.logger.error("Request error -> %s", file_url)
+                    return None
+
+                self.logger.debug(
+                    "Successfully downloaded file -> %s; status code -> %s",
+                    file_url,
+                    response.status_code,
+                )
+                file_content = response.content
+
+            elif os.path.exists(file_url):
+                self.logger.debug("Upload local file -> '%s' as new version.", file_url)
+                file_content = open(file=file_url, mode="rb")  # noqa: SIM115
+
+            else:
+                self.logger.warning("Cannot access file -> '%s'", file_url)
+                return None
+
+        # Prepare add version payload:
         upload_post_data = {"description": description}
 
         if not mime_type:
             mime_type, _ = mimetypes.guess_type(file_url)
 
-        if not mime_type and magic_installed:
+        if not mime_type and magic_installed and file_url:
             try:
                 mime = magic.Magic(mime=True)
                 mime_type = mime.from_file(file_url)
@@ -7828,7 +7898,7 @@ class OTCS:
         request_header = self.cookie()
 
         self.logger.debug(
-            "Upload file -> '%s' with mime type -> '%s' as new version to document node with ID -> %d; calling -> %s",
+            "Upload file -> '%s' with mime type -> '%s' as new version to document with ID -> %d; calling -> %s",
             file_name,
             mime_type,
             node_id,
@@ -8289,7 +8359,7 @@ class OTCS:
 
         directory = os.path.dirname(file_path)
         if not os.path.exists(directory):
-            self.logger.info(
+            self.logger.debug(
                 "Download directory -> '%s' does not exist, creating it.",
                 directory,
             )
@@ -18624,7 +18694,7 @@ class OTCS:
                 subnode_id = self.get_result_value(response=subnode, key="id")
                 subnode_name = self.get_result_value(response=subnode, key="name")
                 subnode_type_name = self.get_result_value(response=subnode, key="type_name")
-                self.logger.info("Traversing %s node -> '%s' (%s)", subnode_type_name, subnode_name, subnode_id)
+                self.logger.debug("Traversing %s node -> '%s' (%s)", subnode_type_name, subnode_name, subnode_id)
                 # Recursive call for current subnode:
                 result = self.traverse_node(
                     node=subnode,
@@ -18730,7 +18800,7 @@ class OTCS:
                 try:
                     node, current_depth, traversal_data = task_queue.get(timeout=timeout)
                 except Empty:
-                    self.logger.info("[%s] No (more) nodes to process - finishing...", thread_name)
+                    self.logger.debug("[%s] No (more) nodes to process - finishing...", thread_name)
                     return  # Queue is empty - worker is done
 
                 try:
@@ -18742,7 +18812,7 @@ class OTCS:
                     node_name = self.get_result_value(response=node, key="name")
                     node_type = self.get_result_value(response=node, key="type")
 
-                    self.logger.info(
+                    self.logger.debug(
                         "[%s] Traversing node -> '%s' (%s) at depth %d", thread_name, node_name, node_id, current_depth
                     )
 
@@ -18804,7 +18874,7 @@ class OTCS:
         # Start thread pool with limited concurrency
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
             for i in range(workers):
-                self.logger.info("Starting worker -> %d...", i)
+                self.logger.debug("Starting worker -> %d...", i)
                 executor.submit(traverse_node_worker)
 
             # Wait for all tasks to complete
@@ -19046,7 +19116,7 @@ class OTCS:
                 workspace_type_exclusions=workspace_type_exclusions,
                 workspace_type_inclusions=workspace_type_inclusions,
             ):
-                self.logger.info(
+                self.logger.debug(
                     "Skipping traversal initialization of workspace type -> '%s' (%d) as it does not match filter.",
                     wksp_type_name,
                     wksp_type_id,
@@ -19400,9 +19470,9 @@ class OTCS:
                 # end for workspace_instances...
             # end for workspace_type ...
 
-            self.logger.info(
-                "Initialization of traversal queue completed. Added %d workspaces in total to queue. Workers don't have to wait any more if queue is empty.",
-                counter,
+            self.logger.debug(
+                "Initialization of traversal queue completed. Added %s workspaces in total to queue. Workers don't have to wait any more if queue is empty.",
+                f"{counter:,}",
             )
             initialization_done = True
 
@@ -19435,7 +19505,7 @@ class OTCS:
                     workspace_node, current_depth = task_queue.get(timeout=timeout if not initialization_done else 0.1)
                     self.logger.debug("Retrieved a new workspace from the queue.")
                 except Empty:
-                    self.logger.info("No (more) workspaces to process - finishing...")
+                    self.logger.debug("No (more) workspaces to process - finishing...")
                     return  # Queue is empty - worker is done
 
                 try:
@@ -19599,12 +19669,12 @@ class OTCS:
                 executor.submit(traverse_workspace_worker)
 
             # Wait for all tasks to complete
-            self.logger.info("Waiting for workers to complete...")
+            self.logger.debug("Waiting for workers to complete...")
             task_queue.join()
-        self.logger.info("All workers have completed their tasks!")
+        self.logger.debug("All workers have completed their tasks!")
 
         # Ensure initializer is finished before we return
-        self.logger.info("Waiting for the initializer thread to finish...")
+        self.logger.debug("Waiting for the initializer thread to finish...")
         init_thread.join()
 
         return results
@@ -20179,7 +20249,7 @@ class OTCS:
             node_name = self.get_result_value(response=node, key="name")
 
             if node_id and (node_id in exclude_node_ids):
-                self.logger.info(
+                self.logger.debug(
                     "Node -> '%s' (%s) is in exclusion list. Skip traversal of this node.",
                     node_name,
                     node_id,

@@ -1920,6 +1920,7 @@ class OTMM:
             asset_name = asset.get("name")
             # Store name as asset_name
             asset["asset_name"] = asset_name
+            asset["asset_title"] = asset.get("OTMM_CUSTOM_FIELD_TITLE") or asset_name
             # We cannot fully trust the deliver_service_url -
             # instead we construct a URL that should always work:
             asset_download_url = self.config()["assetsUrl"] + "/" + asset_id + "/contents"

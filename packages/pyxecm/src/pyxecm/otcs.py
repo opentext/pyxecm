@@ -19665,7 +19665,7 @@ class OTCS:
         # Start thread pool with limited concurrency
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
             for i in range(workers):
-                self.logger.info("Starting workspace traversal worker -> %d...", i)
+                self.logger.debug("Starting workspace traversal worker -> %d...", i)
                 executor.submit(traverse_workspace_worker)
 
             # Wait for all tasks to complete

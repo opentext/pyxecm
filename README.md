@@ -39,8 +39,8 @@ for node in nodes["results"]:
 
 ## Quick start - Customizer usage
 
-- Create an `.env` file as described here: [sample-environment-variables](docs/pyxecm-customizer/settings/#sample-env)
-- Create an payload file to define what the customizer should do, as described here [payload-syntax](doc/pyxecm-customizer/payload-syntax/)
+- Create an `.env` file as described here: [sample-environment-variables](docs/pyxecm-customizer/payload-syntax.md)
+- Create an payload file to define what the customizer should do, as described here [payload-syntax](docs/pyxecm-customizer/payload-syntax.md)
 
 ```bash
 pip install pyxecm[customizer]

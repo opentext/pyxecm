@@ -15652,6 +15652,8 @@ class OTCS:
                         # of the category:
                         current_dict = category_lookup[truncate_before_underscore(attribute_key=attribute_key, n=1)]
                     current_dict[attribute_name] = value
+                # end for attribute_key, value in category_data.items():
+            # end for for category_data in category_datas.values():
         except Exception as e:
             self.logger.error("Something went wrong while filling the data! Error -> %s", str(e))
             return None
@@ -19431,7 +19433,7 @@ class OTCS:
 
             # thread_name = threading.current_thread().name
 
-            self.logger.info("Initialize traversal queue...")
+            self.logger.debug("Initialize traversal queue...")
 
             # Enqueue initial nodes at depth 0:
             workspace_types = self.get_workspace_types_iterator(expand_workspace_info=False, expand_templates=False)

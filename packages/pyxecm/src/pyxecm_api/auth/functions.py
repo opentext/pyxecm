@@ -62,6 +62,7 @@ async def get_current_user(
             groups=["otadmins@otds.admin"],
             is_admin=True,
             is_sysadmin=True,
+            is_tenantadmin=False,
         )
 
     if token and token.startswith("*OTDSSSO*"):
@@ -75,12 +76,20 @@ async def get_current_user(
         if response.ok:
             response = json.loads(response.text)
 
+            # Check if user is tenant admin
+            tenant_admin = False
+            for attr in response["user"].get("values", []):
+                if attr.get("name") == "oTType" and "TenantAdminUser" in attr.get("values", []):
+                    tenant_admin = True
+                    break
+
             return User(
                 id=response["user"]["id"],
                 full_name=response["user"]["name"],
                 groups=get_groups(response, token),
                 is_admin=response["isAdmin"],
                 is_sysadmin=response["isSysAdmin"],
+                is_tenantadmin=tenant_admin,
             )
 
     raise HTTPException(
@@ -91,9 +100,9 @@ async def get_current_user(
 
 
 async def get_authorized_user(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-    """Check if the user is authorized (member of the Group otadmin@otds.admin)."""
+    """Check if the user is authorized (member of the Group otadmin@otds.admin or should be a tenantAdmin user)."""
 
-    if "otadmins@otds.admin" not in current_user.groups:
+    if "otadmins@otds.admin" not in current_user.groups and not current_user.is_tenantadmin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User {current_user.id} is not authorized",

@@ -1920,7 +1920,6 @@ class OTMM:
             asset_name = asset.get("name")
             # Store name as asset_name
             asset["asset_name"] = asset_name
-            asset["asset_title"] = asset.get("OTMM_CUSTOM_FIELD_TITLE") or asset_name
             # We cannot fully trust the deliver_service_url -
             # instead we construct a URL that should always work:
             asset_download_url = self.config()["assetsUrl"] + "/" + asset_id + "/contents"
@@ -1974,8 +1973,14 @@ class OTMM:
                         self._download_dir,
                     )
 
-            # Add additional metadata to asset and add to new list
+            # Add additional custom metadata to the asset.
             asset.update(self.prepare_asset_data(asset_id=asset_id))
+            # Create a common title field for all assets that either
+            # uses the OTMM title custom field or the asset name. We
+            # have to do this AFTER calling prepare_asset_data() to
+            # have the custom field available:
+            asset["asset_title"] = asset.get("OTMM_CUSTOM_FIELD_TITLE") or asset_name
+        # end for asset in worker_asset_list:
 
         # Now we add the assets processed by the worker
         # to the Pandas Data Frame in the Data class:

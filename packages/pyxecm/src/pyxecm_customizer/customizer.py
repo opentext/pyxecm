@@ -1371,7 +1371,7 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_da_replicas):
             pod_name = self.settings.k8s.sts_otcs_da + "-" + str(x)
 
-            self.logger.info("Deactivate liveness probe for pod -> '%s'...", pod_name)
+            self.logger.info("Deactivate liveness probe for distributed agent pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "touch /tmp/keepalive"],
@@ -1413,7 +1413,7 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
             pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
 
-            self.logger.info("Deactivate liveness probe for pod -> '%s'...", pod_name)
+            self.logger.info("Deactivate liveness probe for frontend pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "touch /tmp/keepalive"],
@@ -1439,7 +1439,7 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_admin_replicas):
             pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
 
-            self.logger.info("Deactivate liveness probe for pod -> '%s'...", pod_name)
+            self.logger.info("Deactivate liveness probe for admin pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "touch /tmp/keepalive"],
@@ -1483,7 +1483,7 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
             pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
 
-            self.logger.info("Reactivate liveness probe for pod -> '%s'...", pod_name)
+            self.logger.info("Reactivate liveness probe for frontend pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "rm /tmp/keepalive"],
@@ -1494,11 +1494,22 @@ class Customizer:
         for x in range(self.settings.k8s.sts_otcs_admin_replicas):
             pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
 
-            self.logger.info("Reactivate liveness probe for pod -> '%s'...", pod_name)
+            self.logger.info("Reactivate liveness probe for backend pod -> '%s'...", pod_name)
             self.k8s_object.exec_pod_command(
                 pod_name,
                 ["/bin/sh", "-c", "rm /tmp/keepalive"],
                 container="otcs-admin-container",
+            )
+
+        # Reactivate Kubernetes liveness probes in all distributed agent pods:
+        for x in range(self.settings.k8s.sts_otcs_da_replicas):
+            pod_name = self.settings.k8s.sts_otcs_da + "-" + str(x)
+
+            self.logger.info("Reactivate liveness probe for distributed agent pod -> '%s'...", pod_name)
+            self.k8s_object.exec_pod_command(
+                pod_name,
+                ["/bin/sh", "-c", "rm /tmp/keepalive"],
+                container="otcs-da-container",
             )
 
         self.logger.info("Restart of OTCS service in all pods has been completed.")

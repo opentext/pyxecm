@@ -11,3 +11,4 @@ class User(BaseModel):
     groups: list[str] | None = None
     is_admin: bool = False
     is_sysadmin: bool = False
+    is_tenantadmin: bool = False

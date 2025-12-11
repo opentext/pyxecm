@@ -14274,7 +14274,7 @@ class OTCS:
 
         """
 
-        request_url = self.config()["aiUrl"] + "/permissions/check"
+        request_url = self.config()["aiUrl"] + "/nodes/permissions/check"
         request_header = self.request_form_header()
 
         permission_post_data = {"ids": node_ids}

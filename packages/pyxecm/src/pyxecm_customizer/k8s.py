@@ -1026,33 +1026,12 @@ class K8s:
         hostname: str,
         service_name: str,
         service_port: int,
+        path: str = "/",
     ) -> V1Ingress:
-        """Update a backend service and port of an Kubernetes Ingress.
+        """Update a backend service and port of a Kubernetes Ingress.
 
-        "spec": {
-            "rules": [
-                {
-                    "host": host,
-                    "http": {
-                        "paths": [
-                            {
-                                "path": "/",
-                                "pathType": "Prefix",
-                                "backend": {
-                                    "service": {
-                                        "name": <service_name>,
-                                        "port": {
-                                            "name": None,
-                                            "number": <service_port>,
-                                        },
-                                    },
-                                },
-                            }
-                        ]
-                    },
-                }
-            ]
-        }
+        This method updates the backend service and port for a specific hostname and path
+        in a Kubernetes Ingress. It supports multiple paths configured for a host.
 
         Args:
             ingress_name (str):
@@ -1063,13 +1042,12 @@ class K8s:
                 The new backend service name.
             service_port (int):
                 The new backend service port.
+            path (str):
+                The path to match for the backend service update. Defaults to "/".
 
         Returns:
             V1Ingress (object):
                 The updated Kubernetes Ingress object or None if the call fails.
-                This is NOT a dict but an object - you have to use the "." syntax
-                to access to returned elements
-                See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1Ingress.md
 
         """
 
@@ -1080,43 +1058,47 @@ class K8s:
         host = ""
         rules = ingress.spec.rules
         rule_index = 0
+        path_index = -1
         for rule in rules:
             if hostname in rule.host:
                 host = rule.host
-                path = rule.http.paths[0]
-                backend = path.backend
-                service = backend.service
+                for i, rule_path in enumerate(rule.http.paths):
+                    if rule_path.path == path:
+                        path_index = i
+                        backend = rule_path.backend
+                        service = backend.service
 
-                self.logger.debug(
-                    "Replace backend service -> '%s' (%s) with new backend service -> '%s' (%s)",
-                    service.name,
-                    service.port.number,
-                    service_name,
-                    service_port,
-                )
+                        self.logger.debug(
+                            "Replace backend service -> '%s' (%s) with new backend service -> '%s' (%s)",
+                            service.name,
+                            service.port.number,
+                            service_name,
+                            service_port,
+                        )
 
-                service.name = service_name
-                service.port.number = service_port
-                break
+                        service.name = service_name
+                        service.port.number = service_port
+                        break
+                if path_index != -1:
+                    break
             rule_index += 1
 
-        if not host:
-            self.logger.error("Cannot find host to upgrade the Kubernetes Ingress -> '%s'", ingress_name)
+        if not host or path_index == -1:
+            self.logger.error(
+                "Cannot find host and path to upgrade the Kubernetes Ingress -> '%s'",
+                ingress_name,
+            )
             return None
 
         body = [
             {
                 "op": "replace",
-                "path": "/spec/rules/{}/http/paths/0/backend/service/name".format(
-                    rule_index,
-                ),
+                "path": "/spec/rules/{}/http/paths/{}/backend/service/name".format(rule_index, path_index),
                 "value": service_name,
             },
             {
                 "op": "replace",
-                "path": "/spec/rules/{}/http/paths/0/backend/service/port/number".format(
-                    rule_index,
-                ),
+                "path": "/spec/rules/{}/http/paths/{}/backend/service/port/number".format(rule_index, path_index),
                 "value": service_port,
             },
         ]

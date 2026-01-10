@@ -202,7 +202,7 @@ class CustomizerSettingsOTPD(BaseModel):
         description="Username of the API user to configure OTPD",
         validation_alias=AliasChoices("username", "user"),
     )
-    password: SecretStr = Field(default="", description="Password of the API user to configure OTPD")
+    password: SecretStr = Field(default=SecretStr(""), description="Password of the API user to configure OTPD")
     url: HttpUrl | None = Field(default=None, description="URL of the OTPD service")
 
     db_importfile: str = Field(default="", description="Path to the OTPD import file")

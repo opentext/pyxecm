@@ -96,7 +96,7 @@ except ModuleNotFoundError:
 
 
 class OTCS:
-    """Used to automate stettings in OpenText Content Management."""
+    """Used to automate settings in OpenText Content Management."""
 
     logger: logging.Logger = default_logger
 
@@ -2482,6 +2482,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_server_version")
+    @cache
     def get_server_version(self) -> str | None:
         """Get Content Server version.
 
@@ -5659,7 +5660,7 @@ class OTCS:
         self,
         parent_id: int,
         name: str | None = None,
-        facet_values: dict[int, str] | None = None,
+        facet_values: dict[int, int | str | list[int | str]] | None = None,
         page_size: int = 100,
         page: int = 1,
     ) -> dict | None:
@@ -5672,10 +5673,12 @@ class OTCS:
                 The ID of the parent node.
             name (str | None, optional):
                 The name of the node to retrieve. Can also be a substring.
-            facet_values (dict[int, str] | None, optional):
+            facet_values (dict[int, int | str | list[int | str]] | None, optional):
                 Each dictionary item has:
                 * Key: facet ID (int)
-                * Value: filter value (str)
+                * Value: filter value (int or str or list). If a list is given,
+                  multiple values are OR'ed together using a | (pipe).
+                Defaults to None (no facet filtering). Multiple facet_values are AND'ed together.
             page_size (int, optional):
                 The maximum number of results to return (page size). Defaults to 100.
             page (int, optional):
@@ -5693,10 +5696,19 @@ class OTCS:
         if name:
             query["where_name"] = name
         if facet_values:
-            query["where_facet"] = ["{}:{}".format(k, v) for k, v in facet_values.items()]
+            where_facet = []
+            for k, v in facet_values.items():
+                # Edge case: empty list []: ignore this facet filter and continue:
+                if not v:
+                    continue
+                # Join list values with pipe (this is a facet OR operation). Scalar values are used as string:
+                value = "|".join(str(item) for item in v) if isinstance(v, list) else str(v)
+                where_facet.append("{}:{}".format(k, value))
+            if where_facet:
+                query["where_facet"] = where_facet
         if page > 1:
             query["page"] = page
-        if page_size:
+        if page_size > 0:
             query["page_size"] = page_size
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
@@ -5858,6 +5870,9 @@ class OTCS:
         value: str,
         attribute_set: str | None = None,
         substring: bool = False,
+        fields: str | list | None = None,
+        page_size: int = 25,
+        stop_at_first_match: bool = False,
     ) -> dict | None:
         """Lookup nodes under a parent node that have a specified value in a category attribute.
 
@@ -5867,13 +5882,34 @@ class OTCS:
             category (str):
                 The name of the category.
             attribute (str):
-                The name of the attribute that includes the value to match with
+                The name of the attribute that includes the value to match with.
             value (str):
-                The lookup value that is matched agains the node attribute value.
+                The lookup value that is matched against the node attribute value.
             attribute_set (str | None, optional):
                 The name of the attribute set
             substring (bool, optional):
                 Whether to match the value as a substring (True) or exact (False). Defaults to exact match.
+            fields (str | list | None, optional):
+                Which fields to retrieve.
+                This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)" to
+                  retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)" to
+                  retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to None which is internally set to ["properties", "categories"].
+            page_size (int, optional):
+                The number of subnodes that are requested per request.
+                For the lookup nodes this is basically the chunk size.
+            stop_at_first_match (bool, optional):
+                Whether to stop the lookup at the first match found. Defaults to False.
+                This can improve performance if only one match is needed.
 
         Returns:
             dict | None:
@@ -5881,23 +5917,34 @@ class OTCS:
 
         """
 
+        # Create a "results" dict that is compatible with normal REST calls
+        # to not break get_result_value() method that may be called on the result:
         results = {"results": []}
+
+        if fields is None:
+            fields = ["properties", "categories"]
 
         # get_subnodes_iterator() returns a python generator that we use for iterating over all nodes
         # in an efficient way avoiding to retrieve all nodes at once (which could be a large number):
         for node in self.get_subnodes_iterator(
-            parent_node_id=parent_node_id,
-            fields=["properties", "categories"],
-            metadata=True,
+            parent_node_id=parent_node_id, fields=fields, metadata=True, page_size=page_size
         ):
+            #
+            # 1: Get the category and attribute schemas for the requested category name and attribute name:
+            #
+
             node_name = self.get_result_value(node, "name")
             node_id = self.get_result_value(node, "id")
-            schema = node["metadata"]["categories"]
+            category_schemas = node["metadata"]["categories"]
             # Get the the matching category. For this we check that the name
             # of the first dictionary (representing the category itself) has
             # the requested name:
             category_schema = next(
-                (cat_elem for cat_elem in schema if next(iter(cat_elem.values()), {}).get("name") == category),
+                (
+                    cat_elem
+                    for cat_elem in category_schemas
+                    if next(iter(cat_elem.values()), {}).get("name") == category
+                ),
                 None,
             )
             if not category_schema:
@@ -5909,12 +5956,16 @@ class OTCS:
                     value,
                 )
                 continue
+
+            # The first entry is the category itself:
             category_key = next(iter(category_schema))
 
             # There can be multiple attributes with the same name in a category
             # if the category has sets:
-            attribute_schemas = [cat_elem for cat_elem in category_schema.values() if cat_elem.get("name") == attribute]
-            if not attribute_schemas:
+            attribute_keys = [
+                cat_elem["key"] for cat_elem in category_schema.values() if cat_elem.get("name") == attribute
+            ]
+            if not attribute_keys:
                 self.logger.debug(
                     "Node -> '%s' (%s) does not have attribute -> '%s'. Skipping...",
                     node_name,
@@ -5923,61 +5974,73 @@ class OTCS:
                 )
                 continue
 
-            # Traverse the attribute schemas with the matching attribute name:
-            for attribute_schema in attribute_schemas:
-                attribute_key = attribute_schema["key"]
+            if attribute_set:  # is the attribute_set parameter provided?
+                set_schema = next(
+                    (
+                        cat_elem
+                        for cat_elem in category_schema.values()
+                        if cat_elem.get("name") == attribute_set and cat_elem.get("persona") == "set"
+                    ),
+                    None,
+                )
+                if not set_schema:
+                    self.logger.debug(
+                        "Node -> '%s' (%s) does not have attribute set -> '%s'. Skipping...",
+                        node_name,
+                        node_id,
+                        attribute_set,
+                    )
+                    continue
+                set_key = set_schema["key"]
+                set_max_len = int(set_schema["multi_value_length_max"])
+            else:  # no attribute set value provided via the attribute_set parameter:
+                set_schema = None
+                set_key = None
+                set_max_len = None
+
+            # Calculate the prefix for the attribute key(s):
+            prefix = set_key + "_" if set_key else category_key + "_"
+
+            #
+            # 2: Now we have the attribute keys to retrieve the attribute value(s)
+            #    from the node data to compare with the lookup value:
+            #
+
+            # category_data is a list which each element representing the data of a different category:
+            category_data = node["data"]["categories"]
+            node_matched = False
+
+            # Traverse the attribute keys for the attributes with the matching attribute name:
+            for attribute_key in attribute_keys:
+                # The lookup does not include a set name but this attribute key
+                # belongs to a set attribute - so we can skip it:
+                if not set_key and "_x_" in attribute_key:
+                    continue
+
                 # Split the attribute key once (1) at the first underscore from the right.
                 # rsplit delivers a list and [-1] delivers the last list item:
                 attribute_id = attribute_key.rsplit("_", 1)[-1]
 
-                if attribute_set:  # is the attribute_set parameter provided?
-                    set_schema = next(
-                        (
-                            cat_elem
-                            for cat_elem in category_schema.values()
-                            if cat_elem.get("name") == attribute_set and cat_elem.get("persona") == "set"
-                        ),
-                        None,
-                    )
-                    if not set_schema:
-                        self.logger.debug(
-                            "Node -> '%s' (%s) does not have attribute set -> '%s'. Skipping...",
-                            node_name,
-                            node_id,
-                            attribute_set,
-                        )
-                        continue
-                    set_key = set_schema["key"]
-                else:  # no attribute set value provided via the attribute_set parameter:
-                    if "_x_" in attribute_key:
-                        # The lookup does not include a set name but this attribute key
-                        # belongs to a set attribute - so we can skip it:
-                        continue
-                    set_schema = None
-                    set_key = None
-
-                prefix = set_key + "_" if set_key else category_key + "_"
-
-                data = node["data"]["categories"]
-                for cat_data in data:
+                # Loop over all category data entries to find the attribute value(s):
+                for cat_data in category_data:
                     if set_key:
-                        for i in range(1, int(set_schema["multi_value_length_max"])):
+                        for i in range(1, set_max_len):
+                            # Construct the full key for the attribute value:
                             key = prefix + str(i) + "_" + attribute_id
-                            attribute_value = cat_data.get(key)
-                            if not attribute_value:
+                            if key not in cat_data:
+                                # if the set row does not exist we can break:
                                 break
+                            attribute_value = cat_data.get(key)
                             # Is it a multi-value attribute (i.e. a list of values)?
                             if isinstance(attribute_value, list):
                                 if value in attribute_value:
-                                    # Create a "results" dict that is compatible with normal REST calls
-                                    # to not break get_result_value() method that may be called on the result:
-                                    results["results"].append(node)
-                            elif substring and value in attribute_value:
-                                results["results"].append(node)
-                            elif not substring and value == attribute_value:
-                                # Create a results dict that is compatible with normal REST calls
-                                # to not break get_result_value() method that may be called on the result:
-                                results["results"].append(node)
+                                    node_matched = True
+                                    break
+                            elif (substring and value in attribute_value) or (
+                                not substring and value == attribute_value
+                            ):
+                                node_matched = True
+                                break
                     # end if set_key
                     else:
                         key = prefix + attribute_id
@@ -5987,28 +6050,32 @@ class OTCS:
                         # Is it a multi-value attribute (i.e. a list of values)?
                         if isinstance(attribute_value, list):
                             if value in attribute_value:
-                                # Create a "results" dict that is compatible with normal REST calls
-                                # to not break get_result_value() method that may be called on the result:
-                                results["results"].append(node)
+                                node_matched = True
                         # If not a multi-value attribute, check for equality:
-                        elif substring and value in attribute_value:
-                            results["results"].append(node)
-                        elif not substring and value == attribute_value:
-                            # Create a results dict that is compatible with normal REST calls
-                            # to not break get_result_value() method that may be called on the result:
-                            results["results"].append(node)
+                        elif (substring and value in attribute_value) or (not substring and value == attribute_value):
+                            node_matched = True
+                    if node_matched:
+                        break
                     # end if set_key ... else
                 # end for cat_data in data:
-            # end for attribute_schema in attribute_schemas:
+                if node_matched:
+                    break
+            # end for attribute_key in attribute_keys:
+
+            if node_matched:
+                results["results"].append(node)
+                if stop_at_first_match:
+                    break
         # end for node in self.get_subnodes_iterator()
 
-        self.logger.debug(
-            "Couldn't find a node with the value -> '%s' in the attribute -> '%s' of category -> '%s' in parent with node ID -> %d.",
-            value,
-            attribute,
-            category,
-            parent_node_id,
-        )
+        if not results["results"]:
+            self.logger.debug(
+                "Couldn't find a node with the value -> '%s' in the attribute -> '%s' of category -> '%s' in parent with node ID -> %d.",
+                value,
+                attribute,
+                category,
+                parent_node_id,
+            )
 
         return results if results["results"] else None
 
@@ -11456,6 +11523,9 @@ class OTCS:
         value: str,
         attribute_set: str | None = None,
         substring: bool = False,
+        fields: str | list | None = None,
+        page_size: int = 25,
+        stop_at_first_match: bool = False,
     ) -> dict | None:
         """Lookup workspaces that have a specified value in a category attribute.
 
@@ -11475,10 +11545,31 @@ class OTCS:
             substring (bool, optional):
                 If True, then the value is looked up as a substring of the attribute value.
                 If False (default), then the value must match the attribute value exactly.
+            fields (str | list | None, optional):
+                Which fields to retrieve.
+                This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)" to
+                  retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)" to
+                  retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to None which is internal set to ["properties", "categories"].
+            page_size (int, optional):
+                The number of subnodes that are requested per request.
+                For the lookup nodes this is basically the chunk size.
+            stop_at_first_match (bool, optional):
+                Whether to stop the lookup at the first match found. Defaults to False.
+                This can improve performance if only one match is needed.
 
         Returns:
             dict | None:
-                Node wrapped in dictionary with "results" key or None if the REST API fails.
+                Node(s) wrapped in dictionary with "results" key or None if the REST API fails.
 
         """
 
@@ -11500,6 +11591,9 @@ class OTCS:
             value=value,
             attribute_set=attribute_set,
             substring=substring,
+            fields=fields,
+            page_size=page_size,
+            stop_at_first_match=stop_at_first_match,
         )
 
     # end method definition
@@ -14294,6 +14388,64 @@ class OTCS:
             headers=request_header,
             data=permission_post_data,
             failure_message="Failed to check if current user has permissions to access nodes -> {}".format(node_ids),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_context")
+    def get_node_context(self, node_ids: list[int], attributes: int = -1, environment: bool = True) -> dict | None:
+        """Retrieve metadata for the IDs passed in to provide context for Aviator.
+
+        Args:
+            node_ids (list[int]):
+                One or more node IDs. MUST be specified unless only wanting the environment description.
+            attributes (int, optional):
+                Total number (approx) of how many attributes to retrieve. Any negative number means all attributes, 0 means no attributes, positive numbers will be a limit we'll try to limit to. (Default: -1 / all attributes)
+            environment (bool, optional):
+                Include the environment description in the response. (Default: True)
+
+
+        Returns:
+            dict | None:
+                REST API response or None in case of an error.
+
+        Example:
+        {
+        "links": {},
+        "results": {
+                "node information": {},
+                "user information": {},
+                "environment information": "string"
+            }
+        }
+
+        """
+
+        if float(self.get_server_version()) < 25.4:
+            self.logger.warning("The get_node_context method is only available for OTCS version 25.4 and higher.")
+            return None
+
+        request_url = self.config()["aiUrl"] + "/nodecontext"
+        request_header = self.request_form_header()
+
+        post_data = {
+            "ids": node_ids,
+            "numberofattributes": attributes,
+            "environmentDescription": environment,
+        }
+
+        self.logger.debug(
+            "Get node context for nodes -> %s; calling -> %s",
+            node_ids,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=post_data,
+            failure_message="Failed to get node context for nodes -> {}".format(node_ids),
         )
 
     # end method definition

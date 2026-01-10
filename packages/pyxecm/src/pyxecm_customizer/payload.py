@@ -3187,7 +3187,7 @@ class Payload:
             return workspace_id
         else:
             self.logger.info(
-                "Workspace of type -> '%s' and name -> '%s' does not yet exist.",
+                "Workspace of type -> '%s' and name -> '%s' does not yet exist. Cannot determine its ID.",
                 workspace["type_name"],
                 workspace["name"],
             )
@@ -23383,6 +23383,8 @@ class Payload:
                             attribute=att_name,
                             attribute_set=set_name,
                             value=key,
+                            page_size=100,
+                            stop_at_first_match=True,
                         )
                         workspace_id = self._otcs_frontend.get_result_value(
                             response=response,
@@ -27373,7 +27375,7 @@ class Payload:
                     "Check if document -> '%s' is already in target folder with ID -> %s%s...",
                     document_name,
                     parent_id,
-                    " (using key -> {})".format(key) if key is not None else "",
+                    " (using key -> '{}')".format(key) if key is not None else "",
                 )
                 # Initialize variables - this is important!
                 document_old_name = None
@@ -27407,6 +27409,8 @@ class Payload:
                             attribute=att_name,
                             attribute_set=set_name,
                             value=key,
+                            page_size=100,
+                            stop_at_first_match=True,
                         )
                         document_id = self._otcs_frontend.get_result_value(
                             response=response,
@@ -28654,7 +28658,7 @@ class Payload:
                     "Check if item -> '%s' is already in target folder with ID -> %s%s...",
                     item_name,
                     parent_id,
-                    " (using key -> {})".format(key) if key is not None else "",
+                    " (using key -> '{}')".format(key) if key is not None else "",
                 )
                 # Initialize variables - this is important!
                 item_old_name = None
@@ -28688,6 +28692,8 @@ class Payload:
                             attribute=att_name,
                             attribute_set=set_name,
                             value=key,
+                            page_size=100,
+                            stop_at_first_match=True,
                         )
                         item_id = self._otcs_frontend.get_result_value(
                             response=response,
@@ -30633,6 +30639,8 @@ class Payload:
                         attribute=att_name,
                         attribute_set=set_name,
                         value=key,
+                        page_size=100,
+                        stop_at_first_match=True,
                     )
                     classification_id = self._otcs_frontend.get_result_value(
                         response=response,

@@ -1073,7 +1073,9 @@ class Customizer:
         )
 
         # wait until the OTPD pod is in ready state
-        self.k8s_object.wait_pod_condition(self.settings.k8s.pod_otpd, "Ready")
+        if self.k8s_object:
+            self.logger.info("Waiting for PowerDocs to become ready...")
+            self.k8s_object.wait_pod_condition(self.settings.k8s.pod_otpd, "Ready")
 
         # We have a race condition here. Even if the pod is ready
         # it may not yet have fully initialized its database.

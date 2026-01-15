@@ -66,11 +66,11 @@ import requests
 import yaml
 from dateutil.parser import parse
 from lark import exceptions as lark_exceptions  # used by hcl2
+from opentelemetry import trace
 
 # OpenText specific modules:
 from pyxecm import AVTS, OTAC, OTAWP, OTCA, OTCS, OTDS, OTIV, OTKD, OTMM, OTPD, CoreShare
 from pyxecm.helper import HTTP, XML, Data
-from pyxecm.helper.otel_config import trace, tracer
 
 from .browser_automation import BrowserAutomation
 from .exceptions import PayloadImportError, StopOnError
@@ -82,6 +82,7 @@ from .sap import SAP
 from .servicenow import ServiceNow
 from .successfactors import SuccessFactors
 
+tracer = trace.get_tracer(__name__)
 default_logger = logging.getLogger("pyxecm_customizer.payload")
 
 
@@ -9292,9 +9293,9 @@ class Payload:
                     oauth_client_secret = None
                 case "Salesforce":
                     connection_type = "SF"
-                    auth_method = "OAUTH"
-                    username = None
-                    password = None
+                    auth_method = "BASIC"
+                    oauth_client_id = None
+                    oauth_client_secret = None
                 case "Guidewire":
                     connection_type = "GWInstance"
                     auth_method = "BASIC"
@@ -15297,7 +15298,7 @@ class Payload:
                         )
                         continue
 
-                    response = self._otcs.add_favorite(node_id=favorite_id)
+                    response = self._otcs.add_user_favorite(node_id=favorite_id)
                     if response is None:
                         self.logger.warning(
                             "Favorite -> '%s' (%s) couldn't be added for user -> '%s'!",

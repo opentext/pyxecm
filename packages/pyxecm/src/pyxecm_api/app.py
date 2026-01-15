@@ -16,9 +16,11 @@ from importlib.metadata import version
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from prometheus_fastapi_instrumentator import Instrumentator
-from pyxecm.helper.otel_config import tracer
 from pyxecm_maintenance_page import run_maintenance_page
 
 from .auth.router import router as auth_router
@@ -33,8 +35,8 @@ from .v1_otcs.router import router as v1_otcs_router
 from .v1_payload.functions import import_payload
 from .v1_payload.router import router as v1_payload_router
 
+tracer = trace.get_tracer(__name__)
 logger = logging.getLogger("CustomizerAPI")
-
 
 # Check if Logfile and folder exists and is unique
 if os.path.isfile(os.path.join(api_settings.logfolder, api_settings.logfile)):
@@ -110,6 +112,8 @@ app = FastAPI(
 )
 
 FastAPIInstrumentor.instrument_app(app)
+RequestsInstrumentor().instrument()
+ThreadingInstrumentor().instrument()
 
 ## Add Middlewares
 app.add_middleware(

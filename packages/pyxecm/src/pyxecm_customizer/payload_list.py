@@ -18,8 +18,8 @@ import traceback
 from datetime import UTC, datetime
 
 import pandas as pd
+from opentelemetry import trace
 from pydantic import ValidationError
-from pyxecm.helper.otel_config import trace, tracer
 
 # OpenText specific modules:
 from pyxecm_customizer.customizer import Customizer
@@ -27,6 +27,7 @@ from pyxecm_customizer.exceptions import StopOnError
 from pyxecm_customizer.log import LogCountFilter
 from pyxecm_customizer.payload import load_payload
 
+tracer = trace.get_tracer(__name__)
 default_logger = logging.getLogger("pyxecm_customizer.payload_list")
 
 

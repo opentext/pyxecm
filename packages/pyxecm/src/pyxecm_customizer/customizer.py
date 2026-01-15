@@ -17,15 +17,16 @@ import requests
 
 # OpenText specific modules:
 import yaml
+from opentelemetry import trace
 from pydantic import HttpUrl
 from pyxecm import AVTS, OTAC, OTAWP, OTCA, OTCS, OTDS, OTIV, OTKD, OTPD, CoreShare
-from pyxecm.helper.otel_config import tracer
 
 from .k8s import K8s
 from .m365 import M365
 from .payload import Payload
 from .settings import Settings
 
+tracer = trace.get_tracer(__name__)
 default_logger = logging.getLogger("pyxecm_customizer")
 
 

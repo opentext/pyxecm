@@ -29,6 +29,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+import warnings
 import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -40,9 +41,11 @@ from queue import Empty, LifoQueue, Queue
 
 import requests
 import websockets
+from opentelemetry import trace
 
 from pyxecm.helper import XML, Data
-from pyxecm.helper.otel_config import trace, tracer
+
+tracer = trace.get_tracer(__name__)
 
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
@@ -169,6 +172,32 @@ class OTCS:
         VOLUME_TYPE_CONTENT_SERVER_DOCUMENT_TEMPLATES,
         VOLUME_TYPE_CATEGORIES_VOLUME,
     ]
+
+    ITEM_TYPE_LOOKUP = {
+        "Business Workspace": ITEM_TYPE_BUSINESS_WORKSPACE,
+        "Collection": ITEM_TYPE_COLLECTION,
+        "Compound Document": ITEM_TYPE_COMPOUND_DOCUMENT,
+        "Category": ITEM_TYPE_CATEGORY,
+        "Category Folder": ITEM_TYPE_CATEGORY_FOLDER,
+        "Classification": ITEM_TYPE_CLASSIFICATION,
+        "Classification Tree": ITEM_TYPE_CLASSIFICATION_TREE,
+        "Document": ITEM_TYPE_DOCUMENT,
+        "Folder": ITEM_TYPE_FOLDER,
+        "Generation": ITEM_TYPE_GENERATION,
+        "Project": ITEM_TYPE_PROJECT,
+        "Related Workspace": ITEM_TYPE_RELATED_WORKSPACE,
+        "Search Query": ITEM_TYPE_SEARCH_QUERY,
+        "Shortcut": ITEM_TYPE_SHORTCUT,
+        "Task List": ITEM_TYPE_TASK_LIST,
+        "Task Group": ITEM_TYPE_TASK_GROUP,
+        "Task": ITEM_TYPE_TASK,
+        "URL": ITEM_TYPE_URL,
+        "Virtual Folder": ITEM_TYPE_VIRTUAL_FOLDER,
+        "Wiki": ITEM_TYPE_WIKI,
+        "Wiki Page": ITEM_TYPE_WIKI_PAGE,
+        "Workflow Map": ITEM_TYPE_WORKFLOW_MAP,
+        "Workflow Status": ITEM_TYPE_WORKFLOW_STATUS,
+    }
 
     PERMISSION_TYPES = [
         "see",
@@ -475,6 +504,7 @@ class OTCS:
         otcs_config["businessWorkspacesUrl"] = otcs_rest_url + "/v2/businessworkspaces"
         otcs_config["uniqueNamesUrl"] = otcs_rest_url + "/v2/uniquenames"
         otcs_config["favoritesUrl"] = otcs_rest_url + "/v2/members/favorites"
+        otcs_config["recentlyAccessedUrl"] = otcs_rest_url + "/v2/members/accessed"
         otcs_config["webReportsUrl"] = otcs_rest_url + "/v1/webreports"
         otcs_config["csApplicationsUrl"] = otcs_rest_url + "/v2/csapplications"
         otcs_config["xEngProjectTemplateUrl"] = otcs_rest_url + "/v2/xengcrt/projecttemplate"
@@ -3584,8 +3614,117 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_favorite")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_favorites")
+    def get_user_favorites(
+        self,
+        where_name: str | None = None,
+        expand: str | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
+        sort: str | None = None,
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict | None:
+        """Get the favorites for the current (authenticated) user.
+
+        Args:
+            where_name (str | None = None):
+                Name of the user (login).
+            expand (str | None = None):
+                Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
+                or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)"
+                  to retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)"
+                  to retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            sort (str | None = None):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Format can be sort = name, sort = order, sort = tab_id. If the prefix of asc or desc is not used
+                then asc will be assumed.
+                Default is None.
+            limit (int, optional):
+                The maximum number of results per page.
+            page (int, optional):
+                The page number to retrieve.
+
+        Returns:
+            dict | None:
+                Request response or None if the favorite request has failed.
+
+        """
+
+        # Add query parameters (embedded in the URL)
+        query = {}
+        if where_name:
+            query["where_name"] = where_name
+        if expand:
+            query["expand"] = expand
+        if fields:
+            query["fields"] = fields
+        if metadata:
+            query["expand"] = expand
+        if sort:
+            query["sort"] = sort
+        if limit:
+            query["limit"] = limit
+        if page:
+            query["page"] = page
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["favoritesUrl"] + "?" + encoded_query
+        if metadata:
+            request_url += "&metadata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Getting favorites for current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get favorites for current user",
+        )
+
+    # end method definition
+
     def add_favorite(self, node_id: int) -> dict | None:
+        """Add a favorite for the current (authenticated) user.
+
+        Deprecated: use add_user_favorite() instead.
+        """
+
+        warnings.warn(
+            message="Method add_favorite() is deprecated, use add_user_favorite() instead.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.add_user_favorite(node_id=node_id)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_favorite")
+    def add_user_favorite(self, node_id: int) -> dict | None:
         """Add a favorite for the current (authenticated) user.
 
         Args:
@@ -3617,8 +3756,23 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_favorite_tab")
     def add_favorite_tab(self, tab_name: str, order: int) -> dict | None:
+        """Add a favorite for the current (authenticated) user.
+
+        Deprecated: use add_user_favorite_tab() instead.
+        """
+
+        warnings.warn(
+            message="Method add_favorite_tab() is deprecated, use add_user_favorite_tab() instead.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.add_user_favorite_tab(tab_name=tab_name, order=order)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_favorite_tab")
+    def add_user_favorite_tab(self, tab_name: str, order: int) -> dict | None:
         """Add a favorite tab for the current (authenticated) user.
 
         Args:
@@ -3651,6 +3805,111 @@ class OTCS:
             data=favorite_tab_post_body,
             timeout=None,
             failure_message="Failed to add favorite tab -> {}".format(tab_name),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_recently_accessed")
+    def get_user_recently_accessed(
+        self,
+        where_name: str | None = None,
+        where_type: list[int] | None = None,
+        where_parent_id: int | None = None,
+        expand: str | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
+        sort: str | None = None,
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict | None:
+        """Get the recently accessed items for the current (authenticated) user.
+
+        Args:
+            where_name (str | None = None):
+                Name of the user (login).
+            where_type (list[int] | None = None):
+                List of node types to filter the results by.
+                (144 for document, 749 for email and so on)
+            where_parent_id (int | None = None):
+                Filter results by parent node ID.
+            expand (str | None = None):
+                Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
+                or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)"
+                  to retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)"
+                  to retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            sort (str | None = None):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Format can be sort = name, sort = order, sort = tab_id. If the prefix of asc or desc is not used
+                then asc will be assumed.
+                Default is None.
+            limit (int, optional):
+                The maximum number of results per page.
+            page (int, optional):
+                The page number to retrieve.
+
+        Returns:
+            dict | None:
+                Request response or None if the favorite request has failed.
+
+        """
+
+        # Add query parameters (embedded in the URL)
+        query = {}
+        if where_name:
+            query["where_name"] = where_name
+        if where_type:
+            query["where_type"] = where_type
+        if where_parent_id:
+            query["where_parent_id"] = where_parent_id
+        if expand:
+            query["expand"] = expand
+        if fields:
+            query["fields"] = fields
+        if metadata:
+            query["expand"] = expand
+        if sort:
+            query["sort"] = sort
+        if limit:
+            query["limit"] = limit
+        if page:
+            query["page"] = page
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["recentlyAccessedUrl"] + "?" + encoded_query
+        if metadata:
+            request_url += "&metadata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Getting recently accessed items for current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get recently accessed items for current user",
         )
 
     # end method definition
@@ -8883,47 +9142,12 @@ class OTCS:
 
         """
 
-        # First we probe how many items we have:
-        response = self.search(
-            search_term=search_term,
-            look_for=look_for,
-            modifier=modifier,
-            within=within,
-            slice_id=slice_id,
-            query_id=query_id,
-            template_id=template_id,
-            location_id=location_id,
-            limit=1,
-            page=1,
-        )
-        if not response or "results" not in response:
-            # Don't return None! Plain return is what we need for iterators.
-            # Natural Termination: If the generator does not yield, it behaves
-            # like an empty iterable when used in a loop or converted to a list:
-            return
+        page = 1
+        remaining = limit
 
-        number_of_results = response["collection"]["paging"]["total_count"]
-        if limit and number_of_results > limit:
-            number_of_results = limit
+        while True:
+            effective_limit = min(page_size, remaining) if remaining is not None else page_size
 
-        if not number_of_results:
-            self.logger.debug(
-                "Search -> '%s' does not have results! Cannot iterate over results.",
-                str(search_term),
-            )
-            # Don't return None! Plain return is what we need for iterators.
-            # Natural Termination: If the generator does not yield, it behaves
-            # like an empty iterable when used in a loop or converted to a list:
-            return
-
-        # If the container has many items we need to go through all pages
-        # Adding page_size - 1 ensures that any remainder from the division is
-        # accounted for, effectively rounding up. Integer division (//) performs floor division,
-        # giving the desired number of pages:
-        total_pages = (number_of_results + page_size - 1) // page_size
-
-        for page in range(1, total_pages + 1):
-            # Get the next page of sub node items:
             response = self.search(
                 search_term=search_term,
                 look_for=look_for,
@@ -8933,21 +9157,27 @@ class OTCS:
                 query_id=query_id,
                 template_id=template_id,
                 location_id=location_id,
-                limit=page_size,
+                limit=effective_limit,
                 page=page,
             )
-            if not response or not response.get("results", None):
-                self.logger.warning(
-                    "Failed to retrieve search results for search term -> '%s' (page -> %d)",
-                    search_term,
-                    page,
-                )
+
+            results = response.get("results") if response else None
+            if not results:
+                return  # natural iterator termination
+
+            yield from results
+
+            if remaining is not None:
+                remaining -= len(results)
+                if remaining <= 0:
+                    return
+
+            # Fewer results than requested means this was the last page
+            if len(results) < effective_limit:
                 return
 
-            # Yield nodes one at a time
-            yield from response["results"]
-
-        # end for page in range(1, total_pages + 1)
+            page += 1
+        # end while True
 
     # end method definition
 
@@ -9298,8 +9528,7 @@ class OTCS:
 
         """
 
-        t = trace.get_current_span()
-        t.set_attributes(
+        trace.get_current_span().set_attributes(
             {
                 "package.url": package_url,
                 "package.name": package_name,
@@ -11877,8 +12106,6 @@ class OTCS:
 
         """
 
-        t = trace.get_current_span()
-
         create_workspace_post_data = {
             "template_id": str(workspace_template_id),
             "name": workspace_name,
@@ -11941,7 +12168,7 @@ class OTCS:
             str(create_workspace_post_data),
             request_url,
         )
-        t.set_attributes(
+        trace.get_current_span().set_attributes(
             {
                 "workspace.name": workspace_name,
                 "workspace.type": workspace_type,
@@ -11971,7 +12198,7 @@ class OTCS:
 
         node_id = self.get_result_value(response=response, key="id")
         if node_id:
-            t.set_attribute("workspace.id", node_id)
+            trace.get_current_span().set_attribute("workspace.id", node_id)
 
         if node_id and classifications:
             self.assign_classifications(node_id=node_id, classifications=classifications)
@@ -14978,7 +15205,7 @@ class OTCS:
                     result[attr_name] = []
                 set_name = attr_name
             elif not is_set and "x" in attr_key:
-                # We re inside a set and process the set attributes:
+                # We are inside a set and process the set attributes:
                 if not set_multi_value:
                     # A single row set:
                     attr_key = attr_key.replace("_x_", "_1_")

@@ -12,13 +12,14 @@ import os
 from collections.abc import AsyncGenerator
 
 import anyio
-from pyxecm.helper.otel_config import tracer
+from opentelemetry import trace
 from pyxecm_customizer.exceptions import PayloadImportError
 from pyxecm_customizer.payload import load_payload
 
 from pyxecm_api.common.functions import PAYLOAD_LIST
 from pyxecm_api.settings import api_settings
 
+tracer = trace.get_tracer(__name__)
 logger = logging.getLogger("pyxecm_api.v1_payload")
 
 # Initialize the globel Payloadlist object

@@ -5920,6 +5920,7 @@ class OTCS:
         parent_id: int,
         name: str | None = None,
         facet_values: dict[int, int | str | list[int | str]] | None = None,
+        sort: str | None = None,
         page_size: int = 100,
         page: int = 1,
     ) -> dict | None:
@@ -5938,6 +5939,9 @@ class OTCS:
                 * Value: filter value (int or str or list). If a list is given,
                   multiple values are OR'ed together using a | (pipe).
                 Defaults to None (no facet filtering). Multiple facet_values are AND'ed together.
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Default is None.
             page_size (int, optional):
                 The maximum number of results to return (page size). Defaults to 100.
             page (int, optional):
@@ -5965,6 +5969,8 @@ class OTCS:
                 where_facet.append("{}:{}".format(k, value))
             if where_facet:
                 query["where_facet"] = where_facet
+        if sort:
+            query["sort"] = sort
         if page > 1:
             query["page"] = page
         if page_size > 0:
@@ -6003,6 +6009,7 @@ class OTCS:
         parent_id: int,
         name: str | None = None,
         facet_values: dict[int, str] | None = None,
+        sort: str | None = None,
         result_field: str = "contents",
         page_size: int = 100,
     ) -> iter:
@@ -6022,6 +6029,9 @@ class OTCS:
                 Each dictionary item has:
                 * Key: facet ID (int)
                 * Value: filter value (str)
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Default is None.
             result_field (str, optional):
                 This V3 REST API delivers multiple substructures for the matching nodes:
             page_size (int, optional):
@@ -6093,6 +6103,7 @@ class OTCS:
             parent_id=parent_id,
             name=name,
             facet_values=facet_values,
+            sort=sort,
             page=1,
             page_size=page_size,
         )
@@ -6111,6 +6122,7 @@ class OTCS:
                 parent_id=parent_id,
                 name=name,
                 facet_values=facet_values,
+                sort=sort,
                 page=page,
                 page_size=page_size,
             )
@@ -11538,20 +11550,24 @@ class OTCS:
                 )
         elif type_name:
             self.logger.debug(
-                "Get all workspace instances of type -> '%s'; calling -> %s",
+                "Get %s workspace instances of type -> '%s'; calling -> %s",
+                "all" if expanded_view else "recently accessed",
                 type_name,
                 request_url,
             )
-            failure_message = "Failed to get all workspace instances of type -> '{}'".format(
+            failure_message = "Failed to get {} workspace instances of type -> '{}'".format(
+                "all" if expanded_view else "recently accessed",
                 type_name,
             )
         else:
             self.logger.debug(
-                "Get all workspace instances with type ID -> %d; calling -> %s",
+                "Get %s workspace instances with type ID -> %d; calling -> %s",
+                "all" if expanded_view else "recently accessed",
                 type_id,
                 request_url,
             )
-            failure_message = "Failed to get all workspace instances with type ID -> {}".format(
+            failure_message = "Failed to get {} workspace instances with type ID -> {}".format(
+                "all" if expanded_view else "recently accessed",
                 type_id,
             )
 

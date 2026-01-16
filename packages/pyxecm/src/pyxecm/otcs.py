@@ -2617,15 +2617,15 @@ class OTCS:
                 0 - Regular User
                 17 - Service User
                 Defaults to 0 -> (Regular User)
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 Name of the user (login).
-            where_first_name (str | None = None):
+            where_first_name (str | None, optional):
                 First name of the user.
-            where_last_name (str | None = None):
+            where_last_name (str | None, optional):
                 Last name of the user.
-            where_business_email (str | None = None):
+            where_business_email (str | None, optional):
                 Business email address of the user.
-            query_string (str | None = None):
+            query_string (str | None, optional):
                 Filters the results, returning the users with the specified query string
                 in any of the following fields: log-in name, first name, last name, email address,
                 and groups with the specified query string in the group name.
@@ -2636,7 +2636,7 @@ class OTCS:
                 for groups to see if that value is contained within any of those properties.
                 This differs from the user search that is performed in Classic UI where it
                 searches for a specific property that begins with the value provided by the user.
-            sort (str | None = None):
+            sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = id, sort = name, sort = first_name, sort = last_name,
                 sort = group_id, sort = mailaddress. If the prefix of asc or desc is not used
@@ -2830,15 +2830,15 @@ class OTCS:
                 0 - Regular User
                 17 - Service User
                 Defaults to 0 -> (Regular User)
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 Name of the user (login).
-            where_first_name (str | None = None):
+            where_first_name (str | None, optional):
                 First name of the user.
-            where_last_name (str | None = None):
+            where_last_name (str | None, optional):
                 Last name of the user.
-            where_business_email (str | None = None):
+            where_business_email (str | None, optional):
                 Business email address of the user.
-            query_string (str | None = None):
+            query_string (str | None, optional):
                 Filters the results, returning the users with the specified query string
                 in any of the following fields: log-in name, first name, last name, email address,
                 and groups with the specified query string in the group name.
@@ -2849,7 +2849,7 @@ class OTCS:
                 for groups to see if that value is contained within any of those properties.
                 This differs from the user search that is performed in Classic UI where it
                 searches for a specific property that begins with the value provided by the user.
-            sort (str | None = None):
+            sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = id, sort = name, sort = first_name, sort = last_name,
                 sort = group_id, sort = mailaddress. If the prefix of asc or desc is not used
@@ -3653,7 +3653,7 @@ class OTCS:
                 The metadata will be returned under `results.metadata`, `metadata_map`,
                 and `metadata_order`.
                 Defaults to False.
-            sort (str | None = None):
+            sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = name, sort = order, sort = tab_id. If the prefix of asc or desc is not used
                 then asc will be assumed.
@@ -3855,7 +3855,7 @@ class OTCS:
                 The metadata will be returned under `results.metadata`, `metadata_map`,
                 and `metadata_order`.
                 Defaults to False.
-            sort (str | None = None):
+            sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = name, sort = order, sort = tab_id. If the prefix of asc or desc is not used
                 then asc will be assumed.
@@ -3926,9 +3926,9 @@ class OTCS:
         """Get a list of Content Server groups.
 
         Args:
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 The name of the group to look up.
-            sort (str | None = None):
+            sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = id, sort = name, sort = group_id.
                 If the prefix of asc or desc is not used then asc will be assumed.
@@ -4069,9 +4069,9 @@ class OTCS:
             ```
 
         Args:
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 Name of the user (login).
-            sort (str | None = None):
+            sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name ).
                 Format can be sort = id, sort = name, sort = group_id.
                 If the prefix of asc or desc is not used then asc will be assumed.
@@ -11099,6 +11099,7 @@ class OTCS:
         name: str | None = None,
         column_query: str | None = None,
         expanded_view: bool = True,
+        sort: str | None = None,
         page: int | None = None,
         limit: int | None = None,
         fields: str | list = "properties",  # per default we just get the most important information
@@ -11135,6 +11136,9 @@ class OTCS:
                 for this name and type.
                 If True, (this is the default) then search in all
                 workspaces for this name and type.
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Default is None.
             limit (int | None, optional):
                 The maximum number of workspace instances that should be delivered
                 in one page.
@@ -11177,6 +11181,7 @@ class OTCS:
             name=name,
             column_query=column_query,
             expanded_view=expanded_view,
+            sort=sort,
             page=page,
             limit=limit,
             fields=fields,
@@ -11192,6 +11197,7 @@ class OTCS:
         name: str | None = None,
         column_query: str | None = None,
         expanded_view: bool = True,
+        sort: str | None = None,
         page_size: int = 100,
         limit: int | None = None,
         fields: str | list = "properties",  # per default we just get the most important information
@@ -11232,10 +11238,13 @@ class OTCS:
                 If False, then just search in recently accessed business workspace
                 for this name and type.
                 If True, (this is the default) then search in all workspaces for this name and type.
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Default is None.
             page_size (int | None, optional):
                 The maximum number of workspace instances that should be delivered in one page.
                 The default is 100. If None is given then the internal OTCS limit seems to be 500.
-            limit (int | None = None), optional):
+            limit (int | None, optional):
                 The maximum number of workspaces to return in total.
                 If None (default) all workspaces are returned.
                 If a number is provided only up to this number of results is returned.
@@ -11266,45 +11275,11 @@ class OTCS:
 
         """
 
-        # Send a minimum "probe" to determine the total number of instances:
-        response = self.get_workspace_by_type_and_name(
-            type_name=type_name,
-            type_id=type_id,
-            name=name,
-            column_query=column_query,
-            expanded_view=expanded_view,
-            limit=1,
-            page=1,
-            fields=fields,
-            metadata=metadata,
-        )
-        if not response or "results" not in response:
-            # Don't return None! Plain return is what we need for iterators.
-            # Natural Termination: If the generator does not yield, it behaves
-            # like an empty iterable when used in a loop or converted to a list:
-            return
+        page = 1
+        remaining = limit
 
-        number_of_instances = response["paging"]["total_count"]
-        if limit and number_of_instances > limit:
-            number_of_instances = limit
-
-        if not number_of_instances:
-            self.logger.debug(
-                "Workspace type -> '%s' does not have instances! Cannot iterate over instances.",
-                type_name if type_name else str(type_id),
-            )
-            # Don't return None! Plain return is what we need for iterators.
-            # Natural Termination: If the generator does not yield, it behaves
-            # like an empty iterable when used in a loop or converted to a list:
-            return
-
-        # If the group has many members we need to go through all pages
-        # Adding page_size - 1 ensures that any remainder from the division is
-        # accounted for, effectively rounding up. Integer division (//) performs floor division,
-        # giving the desired number of pages:
-        total_pages = (number_of_instances + page_size - 1) // page_size
-
-        for page in range(1, total_pages + 1):
+        while True:
+            effective_limit = min(page_size, remaining) if remaining is not None else page_size
             # Get the next page of sub node items:
             response = self.get_workspace_by_type_and_name(
                 type_name=type_name,
@@ -11312,23 +11287,30 @@ class OTCS:
                 name=name,
                 column_query=column_query,
                 expanded_view=expanded_view,
+                sort=sort,
+                limit=effective_limit,
                 page=page,
-                limit=page_size if limit is None else limit,
                 fields=fields,
                 metadata=metadata,
             )
-            if not response or not response.get("results", None):
-                self.logger.warning(
-                    "Failed to retrieve workspace instances for workspace type -> %s (page -> %d)",
-                    type_name if type_name else str(type_id),
-                    page,
-                )
+
+            results = response.get("results") if response else None
+            if not results:
+                return  # natural iterator termination
+
+            yield from results
+
+            if remaining is not None:
+                remaining -= len(results)
+                if remaining <= 0:
+                    return
+
+            # Fewer results than requested means this was the last page
+            if len(results) < effective_limit:
                 return
 
-            # Yield nodes one at a time
-            yield from response["results"]
-
-        # end for page in range(1, total_pages + 1)
+            page += 1
+        # end while True
 
     # end method definition
 
@@ -11340,6 +11322,7 @@ class OTCS:
         name: str | None = None,
         column_query: str | None = None,
         expanded_view: bool = True,
+        sort: str | None = None,
         limit: int | None = None,
         page: int | None = None,
         fields: str | list = "properties",  # per default we just get the most important information
@@ -11378,6 +11361,9 @@ class OTCS:
                 accessed business workspace for this name and type.
                 If True (this is the default), then search in all
                 workspaces for this name and type.
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Default is None.
             limit (int | None, optional):
                 The maximum number of workspace instances that should be delivered in one page.
                 The default is None, in this case the internal OTCS limit seems to be 500.
@@ -11487,6 +11473,15 @@ class OTCS:
             )
             return None
 
+        # The REST API seems to not properly handle just passing the type name if expanded_view is False,
+        # so we first need to resolve the type ID if only the type name is given and expanded_view is False:
+        if type_name and not type_id and not expanded_view:
+            response = self.get_workspace_type_by_name(type_name=type_name)
+            type_id = self.get_result_value(response=response, key="wksp_type_id")
+            if not type_id:
+                self.logger.error("Cannot determine workspace type ID for type name -> '%s'", type_name)
+                return None
+
         # Add query parameters (these are NOT passed via JSon body!)
         query = {
             "expanded_view": expanded_view,
@@ -11499,6 +11494,8 @@ class OTCS:
             query["where_name"] = name
         if column_query:
             query["where_column_query"] = column_query
+        if sort:
+            query["sort"] = sort
         if page and limit:
             query["page"] = page
             query["limit"] = limit
@@ -18904,8 +18901,6 @@ class OTCS:
                 'usedQuery': 'Tell me about the calibration equipment'
             }
         }
-
-
 
         """
 

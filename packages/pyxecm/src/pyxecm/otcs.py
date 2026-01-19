@@ -504,7 +504,9 @@ class OTCS:
         otcs_config["businessWorkspacesUrl"] = otcs_rest_url + "/v2/businessworkspaces"
         otcs_config["uniqueNamesUrl"] = otcs_rest_url + "/v2/uniquenames"
         otcs_config["favoritesUrl"] = otcs_rest_url + "/v2/members/favorites"
+        otcs_config["reservedNodesUrl"] = otcs_rest_url + "/v2/members/reserved"
         otcs_config["recentlyAccessedUrl"] = otcs_rest_url + "/v2/members/accessed"
+        otcs_config["memberofUrl"] = otcs_rest_url + "/v2/members/memberof"
         otcs_config["webReportsUrl"] = otcs_rest_url + "/v1/webreports"
         otcs_config["csApplicationsUrl"] = otcs_rest_url + "/v2/csapplications"
         otcs_config["xEngProjectTemplateUrl"] = otcs_rest_url + "/v2/xengcrt/projecttemplate"
@@ -2928,12 +2930,18 @@ class OTCS:
 
     @cache
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user")
-    def get_user(self, name: str, user_type: int = 0, show_error: bool = False) -> dict | None:
+    def get_user(
+        self, name: str | None = None, user_id: int | None = None, user_type: int = 0, show_error: bool = False
+    ) -> dict | None:
         """Get a Content Server user based on the login name and type.
 
         Args:
-            name (str):
-                Name of the user (login).
+            name (str | None, optional):
+                Name of the user (login). If empty or None, this parameter is ignored and
+                the 'user_id' parameter is used to retrieve the user.
+            user_id (int | None, optional):
+                ID of the user to retrieve. If provided, this parameter takes precedence
+                over the 'name' parameter.
             user_type (int, optional):
                 Type ID of user:
                 0 - Regular User
@@ -3034,17 +3042,24 @@ class OTCS:
 
         """
 
-        # Add query parameters (embedded in the URL)
-        # Using type = 0 for OTCS groups or type = 17 for service user:
-        query = {"where_type": user_type, "where_name": name}
-        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
-        request_url = self.config()["membersUrlv2"] + "?{}".format(encoded_query)
+        if user_id is None and name is None:
+            self.logger.error("No user name or ID provided. Cannot find user!")
+            return None
+
+        if user_id is None:
+            # Add query parameters (embedded in the URL)
+            # Using type = 0 for OTCS groups or type = 17 for service user:
+            query = {"where_type": user_type, "where_name": name}
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url = self.config()["membersUrlv2"] + "?{}".format(encoded_query)
+        else:
+            request_url = self.config()["membersUrlv2"] + "/" + str(user_id)
 
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get user with login name -> '%s'%s; calling -> %s",
-            name,
+            "Get user with %s%s; calling -> %s",
+            "login name -> '{}'".format(name) if name is not None else "user ID -> '{}'".format(user_id),
             ", type -> 'service user'" if user_type == 17 else "",
             request_url,
         )
@@ -3054,8 +3069,14 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get user with login -> '{}' and type -> {}".format(name, user_type),
-            warning_message="Couldn't find user with login -> '{}' and type -> {}".format(name, user_type),
+            failure_message="Failed to get user with {} and type -> {}".format(
+                "login name -> '{}'".format(name) if name is not None else "user ID -> {}".format(user_id),
+                user_type,
+            ),
+            warning_message="Couldn't find user with {} and type -> {}".format(
+                "login name -> '{}'".format(name) if name is not None else "user ID -> {}".format(user_id),
+                user_type,
+            ),
             show_error=show_error,
         )
 
@@ -3302,7 +3323,7 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_profile")
     def get_user_profile(self) -> dict | None:
-        """Update a defined field for a user profile.
+        """Get the user profile.
 
         IMPORTANT: this method needs to be called by the authenticated user
 
@@ -3397,6 +3418,39 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_photo")
+    def get_user_photo(self, user_id: int) -> dict | None:
+        """Get the profile photo of a user.
+
+        Args:
+            user_id (int):
+                The ID of the user.
+
+        Returns:
+            dict | None:
+                Node information or None if photo node is not found.
+
+        """
+
+        request_url = self.config()["membersUrl"] + "/" + str(user_id) + "/photo"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get photo of user ID -> %d; calling -> %s",
+            user_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get photo of user with ID -> {}".format(user_id),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_user_photo")
     def update_user_photo(self, user_id: int, photo_id: int) -> dict | None:
         """Update a user with a profile photo (which must be an existing node).
@@ -3485,7 +3539,7 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_proxies")
     def get_user_proxies(self, use_v2: bool = False) -> dict | None:
-        """Get list of user proxies.
+        """Get list of user proxies for the current user.
 
         This method needs to be called as the user the proxy is acting for.
 
@@ -3910,6 +3964,213 @@ class OTCS:
             headers=request_header,
             timeout=None,
             failure_message="Failed to get recently accessed items for current user",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_reserved_nodes")
+    def get_user_reserved_nodes(
+        self,
+        where_name: str | None = None,
+        expand: str | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
+        sort: str | None = None,
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict | None:
+        """Get the reserved nodes for the current (authenticated) user.
+
+        Args:
+            where_name (str | None = None):
+                Name of the user (login).
+            expand (str | None = None):
+                Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
+                or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)"
+                  to retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)"
+                  to retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
+                Format can be sort = name, sort = order, sort = tab_id. If the prefix of asc or desc is not used
+                then asc will be assumed.
+                Default is None.
+            limit (int, optional):
+                The maximum number of results per page.
+            page (int, optional):
+                The page number to retrieve.
+
+        Returns:
+            dict | None:
+                Request response or None if the favorite request has failed.
+
+        """
+
+        # Add query parameters (embedded in the URL)
+        query = {}
+        if where_name:
+            query["where_name"] = where_name
+        if expand:
+            query["expand"] = expand
+        if fields:
+            query["fields"] = fields
+        if metadata:
+            query["expand"] = expand
+        if sort:
+            query["sort"] = sort
+        if limit:
+            query["limit"] = limit
+        if page:
+            query["page"] = page
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["reservedNodesUrl"] + "?" + encoded_query
+        if metadata:
+            request_url += "&metadata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Getting reserved nodes for current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get reserved nodes for current user",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_favorites")
+    def get_user_memberof(
+        self,
+        expand: str | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict | None:
+        """Get the groups the current (authenticated) user is a member of.
+
+        Args:
+            expand (str | None = None):
+                Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
+                or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)"
+                  to retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)"
+                  to retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            limit (int, optional):
+                The maximum number of results per page.
+            page (int, optional):
+                The page number to retrieve.
+
+        Returns:
+            dict | None:
+                Request response or None if the favorite request has failed.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/members/memberof?fields=properties&limit=20&page=1',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': [
+                {
+                    'data': {
+                        'properties': {
+                            'deleted': False,
+                            'id': 19935,
+                            'initials': 'I',
+                            'leader_id': None,
+                            'name': 'Innovate',
+                            'name_formatted': 'Innovate',
+                            'type': 1,
+                            'type_name': 'Group'
+                        }
+                    }
+                },
+                ...
+            ]
+        }
+
+        """
+
+        # Add query parameters (embedded in the URL)
+        query = {}
+        if expand:
+            query["expand"] = expand
+        if fields:
+            query["fields"] = fields
+        if metadata:
+            query["expand"] = expand
+        if limit:
+            query["limit"] = limit
+        if page:
+            query["page"] = page
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["memberofUrl"] + "?" + encoded_query
+        if metadata:
+            request_url += "&metadata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Getting groups the current user is a member of; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get groups the current user is a member of",
         )
 
     # end method definition
@@ -8828,7 +9089,7 @@ class OTCS:
         slice_id: int = 0,
         query_id: int = 0,
         template_id: int = 0,
-        location_id: int | None = None,
+        location_id: int | list[int] | None = None,
         limit: int = 100,
         page: int = 1,
     ) -> dict | None:
@@ -9065,7 +9326,11 @@ class OTCS:
         if template_id > 0:
             search_post_body["template_id"] = template_id
         if location_id is not None:
-            search_post_body["location_id1"] = location_id
+            if isinstance(location_id, int):
+                search_post_body["location_id1"] = location_id
+            else:
+                for idx, loc_id in enumerate(location_id, start=1):
+                    search_post_body["location_id" + str(idx)] = loc_id
 
         request_url = self.config()["searchUrl"]
         request_header = self.request_form_header()

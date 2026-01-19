@@ -694,7 +694,7 @@ class OTDS:
                     self.logger.info("Session expired. Re-authenticating and retrying...")
                     self.authenticate(revalidate=True)
                     retries += 1
-                    time.sleep(REQUEST_RETRY_DELAY / 10)  # Add a delay before retrying
+                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
                 else:
                     # Handle plain HTML responses to not pollute the logs
                     content_type = response.headers.get("content-type", None)

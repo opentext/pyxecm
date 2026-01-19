@@ -17,7 +17,7 @@ class MaintenancePageSettings(BaseSettings):
     footer: str = Field(default="")
 
     loglevel: Literal["INFO", "DEBUG", "WARNING", "ERROR"] = "INFO"
-    host: str = Field(default="0.0.0.0", frozen=True)  # noqa: S104
+    host: str | list[str] = Field(default=["::","0.0.0.0"], frozen=True)  # noqa: S104
     port: int = Field(default=5555, frozen=True)
     templates_dir: str = Field(default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates"))
 

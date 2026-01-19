@@ -26,7 +26,7 @@ class CustomizerAPISettings(BaseSettings):
         default=None,
         description="Optional API KEY that can be specified that has access to the Customizer API, bypassing the OTDS authentication.",
     )
-    bind_address: str = Field(default="0.0.0.0", description="Interface to bind the Customizer API.")  # noqa: S104
+    bind_address: str | list[str] = Field(default=["::","0.0.0.0"], description="Interface to bind the Customizer API. Supports IPv4, IPv6")  # noqa: S104
     bind_port: int = Field(default=8000, description="Port to bind the Customizer API to")
     workers: int = Field(default=1, description="Number of workers to use for the API background tasks")
     root_path: str = Field(default="", description="Root path for the Customizer API")

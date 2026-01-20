@@ -14840,14 +14840,18 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="check_user_node_permissions")
-    def check_user_node_permissions(self, node_ids: list[int]) -> dict | None:
-        """Check if the current user has permissions to access a given list of Content Server nodes.
+    def check_user_node_permissions(self, node_ids: list[int], user_id: int | None = None) -> dict | None:
+        """Check if the current user (or a specified user) has permissions to access a given list of Content Server nodes.
 
         This is using the AI endpoint as this method is typically used in Aviator use cases.
 
         Args:
             node_ids (list[int]):
                 List of node IDs to check.
+            user_id (int | None, optional):
+                The user ID to check permissions for. If None, the current user is used.
+                This can only execurted by an administrator or Business Administrator.
+                Default: None (current user)
 
         Returns:
             dict | None:
@@ -14873,17 +14877,25 @@ class OTCS:
 
         """
 
-        request_url = self.config()["aiUrl"] + "/nodes/permissions/check"
         request_header = self.request_form_header()
 
-        permission_post_data = {"ids": node_ids}
+        # Different endpoints for current user vs a specific user:
+        if user_id is None:
+            # Use the current user:
+            request_url = self.config()["aiUrl"] + "/nodes/permissions/check"
 
-        if float(self.get_server_version()) < 25.4:
-            permission_post_data["user_hash"] = self.otcs_ticket_hashed()
+            permission_post_data = {"ids": node_ids}
+
+            if float(self.get_server_version()) < 25.4:
+                permission_post_data["user_hash"] = self.otcs_ticket_hashed()
+        else:
+            # Use the specific user:
+            request_url = self.config()["nodesUrlv2"] + "/permissions/check"
+            permission_post_data = {"ids": node_ids, "right_id": user_id}
 
         self.logger.debug(
             "Check if current user has permissions to access nodes -> %s; calling -> %s",
-            node_ids,
+            str(node_ids),
             request_url,
         )
 

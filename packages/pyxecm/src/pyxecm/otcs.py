@@ -1040,7 +1040,7 @@ class OTCS:
             self.logger.warning("Ontology file not found - cannot load the ontology.")
             return False
 
-        json_content = self.get_json_document(node_id=document_id)
+        json_content = self.get_json_document(node_id=int(document_id))
         if not json_content:
             self.logger.error(
                 "Cannot load ontology from JSON document -> %s (%s)", self.ONTOLOGY_FILE_NAME, document_id
@@ -8295,7 +8295,7 @@ class OTCS:
                         key="id",
                     )
                     response = self.add_document_version(
-                        node_id=existing_document_id,
+                        node_id=int(existing_document_id),
                         file_url=full_file_path,
                         file_name=file_name,
                     )
@@ -13901,17 +13901,18 @@ class OTCS:
         # we use seperate methods to set the values for each category separately and classifiions
         # See: https://developer.opentext.com/ce/products/extended-ecm/documentation/content-server-rest-api-implementation-notes/7
         if category_data:
-            for category in category_data:
+            for category_id in category_data:
                 self.logger.debug(
                     "Update item %s, category ID -> %s with new category data -> %s",
                     "-> '{}' ({})".format(item_name, node_id) if item_name else "with ID -> {}".format(node_id),
-                    str(category),
-                    str(category_data[category]),
+                    str(category_id),
+                    str(category_data[category_id]),
                 )
+                category = category_data[category_id]
                 response = self.set_category_values(
                     node_id=node_id,
-                    category_id=category,
-                    category_data=self.flatten_categories_dict(category_data[category]),
+                    category_id=category_id,
+                    category_data=self.flatten_categories_dict(category),
                 )
 
         if classifications:
@@ -15948,9 +15949,15 @@ class OTCS:
                 show_warning=not show_error,
             )
 
+        if not category_id:
+            self.logger.error("Category ID is not specified! Cannot set category values on node with ID -> %d", node_id)
+            return None
+
         if not category_data:
             self.logger.error(
-                "No category data provided to set for category ID -> %d on node -> %d", category_id, node_id
+                "No category data provided! Cannot set values for category ID -> %d on node with ID -> %d",
+                int(category_id),
+                int(node_id),
             )
             return None
 
@@ -15967,7 +15974,7 @@ class OTCS:
         response = set_category_values_sub(show_error=False)
 
         if not response:
-            self.logger.debug("Failed to set category values, trying to assign category to node first.")
+            self.logger.warning("Failed to set category values, trying to assign category to node first.")
 
             if self.assign_category(node_id=node_id, category_id=category_id, inheritance=inheritance):
                 response = set_category_values_sub(show_error=True)
@@ -15998,6 +16005,12 @@ class OTCS:
                 Response of the request or None in case of an error.
 
         """
+
+        if not category_id:
+            self.logger.error(
+                "Category ID is not specified! Cannot set category inheritance on node with ID -> %s", str(node_id)
+            )
+            return None
 
         request_url = (
             self.config()["nodesUrlv2"] + "/" + str(node_id) + "/categories/" + str(category_id) + "/inheritance"
@@ -16340,7 +16353,7 @@ class OTCS:
                         # If it is not a set attribute we reset current_dict to the top-level attributes
                         # of the category:
                         current_dict = category_lookup[truncate_before_underscore(attribute_key=attribute_key, n=1)]
-                    current_dict[attribute_name] = value
+                    current_dict[attribute_name] = value if value is not None else ""
                 # end for attribute_key, value in category_data.items():
             # end for for category_data in category_datas.values():
         except Exception as e:
@@ -19983,7 +19996,7 @@ class OTCS:
 
                     if filter_at_traversal and not self._check_filter(
                         workspace_type_name=related_workspace_type_name,
-                        workspace_type_id=related_workspace_type_id,
+                        workspace_type_id=int(related_workspace_type_id),
                         workspace_type_exclusions=workspace_type_exclusions,
                         workspace_type_inclusions=workspace_type_inclusions,
                     ):

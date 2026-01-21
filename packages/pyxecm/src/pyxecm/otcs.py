@@ -13890,9 +13890,8 @@ class OTCS:
                 headers=request_header,
                 data={"body": json.dumps(update_item_put_data)} if body else update_item_put_data,
                 timeout=None,
-                failure_message="Failed to update item -> '{}' ({})".format(
-                    item_name,
-                    node_id,
+                failure_message="Failed to update item {}".format(
+                    "-> '{}' ({})".format(item_name, node_id) if item_name else "with ID -> {}".format(node_id),
                 ),
             )
         else:
@@ -14894,7 +14893,8 @@ class OTCS:
             permission_post_data = {"ids": node_ids, "right_id": user_id}
 
         self.logger.debug(
-            "Check if current user has permissions to access nodes -> %s; calling -> %s",
+            "Check if %s has permissions to access nodes -> %s; calling -> %s",
+            str(user_id) if user_id is not None else "current user",
             str(node_ids),
             request_url,
         )
@@ -14904,7 +14904,9 @@ class OTCS:
             method="POST",
             headers=request_header,
             data=permission_post_data,
-            failure_message="Failed to check if current user has permissions to access nodes -> {}".format(node_ids),
+            failure_message="Failed to check if {} has permissions to access nodes -> {}".format(
+                "user with ID -> " + str(user_id) if user_id is not None else "current user", node_ids
+            ),
         )
 
     # end method definition
@@ -15946,12 +15948,18 @@ class OTCS:
                 show_warning=not show_error,
             )
 
+        if not category_data:
+            self.logger.error(
+                "No category data provided to set for category ID -> %d on node -> %d", category_id, node_id
+            )
+            return None
+
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/categories/" + str(category_id)
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Set values -> %s for category ID -> %d on node -> %s...",
-            category_data,
+            "Set values -> %s for category ID -> %d on node -> %d...",
+            str(category_data),
             category_id,
             node_id,
         )
@@ -16186,6 +16194,9 @@ class OTCS:
             self.logger.error("Cannot extract category data. Method was called without the '&metadata' parameter!")
             return None
 
+        #
+        # 1. Process the Category & Attribute Schemas
+        #
         metadata = node["results"]["metadata"]
         if "categories" not in metadata:
             self.logger.error(
@@ -16274,10 +16285,17 @@ class OTCS:
                                     current_dict[attribute_name] = False
                             case _:
                                 self.logger.error("Type -> '%s' not handled yet!", attribute_type)
+                        # end match attribute_type
+                    # end if persona == "category":
+                # end for attribute_key, attribute_schema in category_schema.items():
+            # end for category_key, category_schema in category_schemas.items():
         except Exception as e:
             self.logger.error("Something went wrong with getting the data schema! Error -> %s", str(e))
             return None
 
+        #
+        # 2. Process the Category & Attribute Data
+        #
         category_datas = node["results"]["data"]["categories"]
 
         if isinstance(category_datas, list):
@@ -16290,6 +16308,8 @@ class OTCS:
         try:
             for category_data in category_datas.values():
                 for attribute_key, value in category_data.items():
+                    if attribute_key.endswith("_multilingual"):
+                        continue  # We skip multilingual data entries
                     attribute_name = attribute_lookup[replace_row_number_with_x(attribute_key=attribute_key)]
                     self.logger.debug(
                         "Add value -> '%s' to %sattribute -> '%s' (%s)",

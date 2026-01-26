@@ -64,14 +64,6 @@ class OTCA:
 
     logger: logging.Logger = default_logger
 
-    _config: dict
-    _context = ""
-    _embed_token: str | None = None
-    _chat_token: str | None = None
-    _chat_token_hashed: str | None = None
-    _studio_token: str | None = None
-    _node_dictionary: dict = {}
-
     def __init__(
         self,
         chat_url: str | None = None,
@@ -162,6 +154,13 @@ class OTCA:
 
         self._config = otca_config
         self.otcs_object = otcs_object
+
+        self._context = ""
+        self._embed_token: str | None = None
+        self._chat_token: str | None = None
+        self._chat_token_hashed: str | None = None
+        self._studio_token: str | None = None
+        self._node_dictionary: dict = {}
 
     # end method definition
 

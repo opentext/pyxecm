@@ -53,10 +53,6 @@ class OTAC:
 
     logger: logging.Logger = default_logger
 
-    _config = None
-    _soap_token: str = ""
-    _otac_ticket = None
-
     def __init__(
         self,
         protocol: str,
@@ -147,6 +143,9 @@ class OTAC:
 
         self._config = otac_config
         self._otac_ticket = otds_ticket
+        self._soap_token: str = ""
+
+    # end method definition
 
     def config(self) -> dict:
         """Return the configuration dictionary.
@@ -156,6 +155,8 @@ class OTAC:
 
         """
         return self._config
+
+    # end method definition
 
     def hostname(self) -> str:
         """Return the Archive Center hostname.

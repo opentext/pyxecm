@@ -66,12 +66,9 @@ SOAP_FAULT_INDICATOR = "Fault"
 class OTAWP:
     """Class OTAWP is used to automate settings in OpenText AppWorks Platform (OTAWP)."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _config: dict
-    _config = None
-    _cookie = None
-    _otawp_ticket = None
+    logger: logging.Logger = default_logger
 
     @classmethod
     def resource_payload(
@@ -384,6 +381,8 @@ class OTAWP:
         otawp_config["serverUrl"] = server_url
 
         self._config = otawp_config
+        self._cookie = None
+        self._otawp_ticket = None
 
         self.set_organization(otawp_config["organization"])
 

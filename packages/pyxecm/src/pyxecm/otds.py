@@ -66,12 +66,9 @@ default_logger = logging.getLogger(MODULE_NAME)
 class OTDS:
     """Class OTDS is used to automate stettings in OpenText Directory Services (OTDS)."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _config = None
-    _cookie = None
-    _otds_ticket = None
-    _token = None
+    logger: logging.Logger = default_logger
 
     def __init__(
         self,
@@ -136,11 +133,16 @@ class OTDS:
         otds_config["adminPartition"] = admin_partition
 
         # If a pre-existing OTDS ticket is provided we use it:
+        self._otds_ticket = otds_ticket
         if otds_ticket:
             self._cookie = {"OTDSTicket": otds_ticket}
+        else:
+            self._cookie = None
         # If a pre-existing OAuth token is provided we use it:
         if oauth_token:
             self._token = oauth_token
+        else:
+            self._token = None
 
         otds_base_url = protocol + "://" + otds_config["hostname"]
         if str(port) not in ["80", "443"]:

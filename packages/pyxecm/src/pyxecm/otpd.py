@@ -61,10 +61,9 @@ request_headers = {
 class OTPD:
     """Class OTPD is used to automate stettings in OpenText Extended ECM PowerDocs."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _config = None
-    _jsessionid = None
+    logger: logging.Logger = default_logger
 
     def __init__(
         self,
@@ -141,6 +140,7 @@ class OTPD:
         otpd_config["importDatabaseUrl"] = otpd_servermanager_url + "/servlet/import"
 
         self._config = otpd_config
+        self._jsessionid = None
 
     # end method definition
 

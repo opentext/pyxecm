@@ -55,6 +55,8 @@ default_logger = logging.getLogger(MODULE_NAME)
 class OTMM:
     """Class OTMM is used to automate data extraction from OTMM."""
 
+    # Only class variables or class-wide constants should be defined here:
+
     PRODUCT_LOOKUP_DOMAIN = "OTMM.DOMAIN.OTM_PRODUCT"
     PRODUCT_METADATA_TABLE = "OTM.TABLE.PRODUCT_TABLE_FIELD"
     PRODUCT_METADATA_FIELD = "PRODUCT_CHAR_ID"
@@ -63,21 +65,6 @@ class OTMM:
     PRODUCT_NEW_METADATA_FIELD = "OTMM.COLUMN.PRODUCT_NEW.TAB"
 
     logger: logging.Logger = default_logger
-
-    _config: dict
-    _access_token = None
-    _data: Data = None
-    _thread_number = 3
-    _download_dir = ""
-    _business_unit_exclusions = None
-    _business_unit_inclusions = None
-    _product_exclusions = None
-    _product_inclusions = None
-    _asset_exclusions = None
-    _asset_inclusions = None
-
-    _asset_download_locks: dict = {}
-    _asset_download_locks_lock = threading.Lock()
 
     def __init__(
         self,
@@ -176,6 +163,11 @@ class OTMM:
         self._product_inclusions = product_inclusions
         self._asset_exclusions = asset_exclusions
         self._asset_inclusions = asset_inclusions
+
+        self._access_token = None
+
+        self._asset_download_locks: dict = {}
+        self._asset_download_locks_lock = threading.Lock()
 
     # end method definition
 

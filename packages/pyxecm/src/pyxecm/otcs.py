@@ -101,6 +101,8 @@ except ModuleNotFoundError:
 class OTCS:
     """Used to automate settings in OpenText Content Management."""
 
+    # Only class variables or class-wide constants should be defined here:
+
     logger: logging.Logger = default_logger
 
     VOLUME_TYPE_BOT_CONFIGURATION = 898
@@ -225,28 +227,6 @@ class OTCS:
     ONTOLOGY_TEMP_DIRECTORY = "ontology"
     ONTOLOGY_FILE_NAME = "ontology.json"
     ONTOLOGY_NICK_NAME = "ontology"
-
-    _config: dict
-    _otcs_ticket = None
-    _otds_ticket = None
-    _otds_token = None
-    _data: Data = None
-    _thread_number = 3
-    _download_dir = ""
-    _use_numeric_category_identifier: bool = True  # for load_items()
-    _workspace_type_lookup: dict | None = (
-        None  # for efficient traversal. Keys = Type ID, Value = {type name, type location}
-    )
-    _workspace_ontology = None
-
-    # Handle concurrent HTTP requests that may run into 401 errors and
-    # re-authentication at the same time:
-    _authentication_lock = threading.Lock()
-    _authentication_condition = threading.Condition(_authentication_lock)
-    _authentication_semaphore = threading.Semaphore(
-        1,
-    )  # only 1 thread should handle the re-authentication
-    _session_lock = threading.Lock()
 
     @classmethod
     def cleanse_item_name(cls, item_name: str, max_length: int | None = None) -> str:
@@ -538,6 +518,7 @@ class OTCS:
         otcs_config["facetBrowseUrl"] = otcs_rest_url + "/v3/app/container"
 
         self._config = otcs_config
+        self._otcs_ticket = None  # will be set by authenticate()
         self._otds_ticket = otds_ticket
         self._otds_token = otds_token
         self._data = Data(logger=self.logger)
@@ -545,11 +526,20 @@ class OTCS:
         self._download_dir = download_dir
         self._semaphore = threading.BoundedSemaphore(value=thread_number)
         self._last_session_renewal = 0
-        self._use_numeric_category_identifier = use_numeric_category_identifier
+        self._use_numeric_category_identifier: bool = use_numeric_category_identifier
         self._executor = ThreadPoolExecutor(max_workers=thread_number)
-        self._workspace_type_lookup = {}
+        self._workspace_type_lookup: dict = {}
         self._workspace_type_names = []
         self._workspace_ontology = workspace_ontology
+
+        # Handle concurrent HTTP requests that may run into 401 errors and
+        # re-authentication at the same time:
+        self._authentication_lock = threading.Lock()
+        self._authentication_condition = threading.Condition(self._authentication_lock)
+        self._authentication_semaphore = threading.Semaphore(
+            1,
+        )  # only 1 thread should handle the re-authentication
+        self._session_lock = threading.Lock()
 
     # end method definition
 

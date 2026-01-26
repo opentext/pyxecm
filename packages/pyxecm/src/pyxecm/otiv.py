@@ -19,9 +19,9 @@ default_logger = logging.getLogger(MODULE_NAME)
 class OTIV:
     """Class OTIV is used to manage stettings for OpenText Intelligent Viewing."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _config: dict
+    logger: logging.Logger = default_logger
 
     def __init__(
         self,

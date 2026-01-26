@@ -6,6 +6,8 @@ This code implements a class called "Data" which is a wrapper
 to Pandas data frame.
 """
 
+from __future__ import annotations  # to allow using `Data` within class definitions
+
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"
 __credits__ = ["Kai-Philip Gatzweiler"]
@@ -28,10 +30,9 @@ default_logger = logging.getLogger("pyxecm.helper.data")
 class Data:
     """Used to automate data loading for the customizer."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _df: pd.DataFrame
-    _lock: threading.Lock = threading.Lock()
+    logger: logging.Logger = default_logger
 
     def __init__(
         self,
@@ -55,6 +56,8 @@ class Data:
             self.logger = logger.getChild("data")
             for logfilter in logger.filters:
                 self.logger.addFilter(logfilter)
+
+        self._lock: threading.Lock = threading.Lock()
 
         if init_data is None:
             self._df = pd.DataFrame()
@@ -299,11 +302,11 @@ class Data:
 
     # end method definition
 
-    def append(self, add_data: pd.DataFrame | list | dict) -> bool:
+    def append(self, add_data: pd.DataFrame | list | dict | Data) -> bool:
         """Append additional data to the data frame.
 
         Args:
-            add_data (pd.DataFrame | list | dict):
+            add_data (pd.DataFrame | list | dict | Data):
                 Additional data. Can be pd.DataFrame or list of dicts (or Data).
 
         Returns:
@@ -549,7 +552,7 @@ class Data:
             if self._df is None:
                 self._df = df
             else:
-                self._df = pd.concat([self._df, df])
+                self._df = pd.concat([self._df, df], ignore_index=True)
             self.logger.info(
                 "After loading JSON file -> '%s', the data frame has %s row(s) and %s column(s)",
                 json_path,
@@ -1011,7 +1014,7 @@ class Data:
             if self._df is None:
                 self._df = df
             else:
-                self._df = pd.concat([self._df, df])
+                self._df = pd.concat([self._df, df], ignore_index=True)
         except FileNotFoundError:
             self.logger.error(
                 "CSV file -> '%s' not found. Please check the file path.",
@@ -1121,7 +1124,7 @@ class Data:
             if self._df is None:
                 self._df = df
             else:
-                self._df = pd.concat([self._df, df])
+                self._df = pd.concat([self._df, df], ignore_index=True)
             self.logger.info("XML file -> '%s' loaded successfully!", xml_path)
         except FileNotFoundError:
             self.logger.error("XML file -> '%s' not found.", xml_path)
@@ -3433,5 +3436,48 @@ class Data:
         self._df[new_column] = self._df.apply(create_table, axis=1)
 
         return True
+
+    # end method definition
+
+    def drop_rows(self, mask: pd.Series) -> None:
+        """Drop rows from the DataFrame based on a boolean mask.
+
+        Args:
+            mask (pd.Series):
+                A boolean Series where True indicates the rows to drop.
+
+        """
+
+        self._df = self._df[~mask]
+
+    # end method definition
+
+    def get_match_mask(self, match_with: Data | pd.DataFrame, on_columns: list[str]) -> pd.Series:
+        """Find rows in this Data object that match another Data object or DataFrame.
+
+        Args:
+            match_with (Data | pd.DataFrame):
+                The source of rows to match against.
+            on_columns (list[str]):
+                The columns to use for the comparison key.
+
+        Returns:
+            pd.Series:
+                A boolean Series where True indicates a match.
+
+        """
+
+        # Ternary normalization
+        match_df = match_with.get_data_frame() if isinstance(match_with, Data) else match_with
+
+        if len(on_columns) == 1:
+            # Optimized path for single-column (e.g., Node 'id')
+            col = on_columns[0]
+            return self._df[col].isin(match_df[col])
+        else:
+            # Optimized path for composite keys (e.g., Edge triple)
+            match_index = pd.MultiIndex.from_frame(match_df[on_columns])
+            self_index = pd.MultiIndex.from_frame(self._df[on_columns])
+            return self_index.isin(match_index)
 
     # end method definition

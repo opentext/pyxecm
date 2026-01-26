@@ -64,11 +64,9 @@ GROUP_ADMIN_ROLE_ID = 3
 class CoreShare:
     """Class CoreShare is used to retrieve and automate settings and objects (users, groups) in Core Share."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _config: dict
-    _access_token_user = None
-    _access_token_admin = None
+    logger: logging.Logger = default_logger
 
     def __init__(
         self,
@@ -164,6 +162,9 @@ class CoreShare:
             + "&password="
             + urllib.parse.quote(password)
         )
+
+        self._access_token_user = None
+        self._access_token_admin = None
 
         self._config = core_share_config
 

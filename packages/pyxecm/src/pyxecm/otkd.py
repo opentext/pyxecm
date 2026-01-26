@@ -60,10 +60,9 @@ default_logger = logging.getLogger(MODULE_NAME)
 class OTKD:
     """Class OTKD is used to communicate Knowledge Discovery via REST API."""
 
-    logger: logging.Logger = default_logger
+    # Only class variables or class-wide constants should be defined here:
 
-    _config = None
-    _otkd_token = None
+    logger: logging.Logger = default_logger
 
     def __init__(
         self,
@@ -121,6 +120,7 @@ class OTKD:
         otkd_config["authenticationUrl"] = otkd_config["restUrl"] + "/access/token"
 
         self._config = otkd_config
+        self._otkd_token = None
 
     # end method definition
 

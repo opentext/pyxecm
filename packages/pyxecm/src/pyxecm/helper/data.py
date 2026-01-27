@@ -114,12 +114,19 @@ class Data:
         """Return the column corresponding to the key from the data frame.
 
         Args:
-            column (str): The name of the data frame column.
+            column (str):
+                The name of the data frame column. This can also be used
+                to filter by a mask, e.g. data['column_name'] == 'value'
 
         Returns:
-            pd.Series: The column of the data frame with the given name.
+            pd.Series:
+                The column of the data frame with the given name.
 
         """
+
+        if self._df is None or self._df.empty:
+            msg = "Data frame is empty or not initialized!"
+            raise KeyError(msg)
 
         return self._df[column]
 

@@ -518,6 +518,9 @@ class Payload:
     # _workspace_types (list): Workspace types are not in payload but imported with transport package:
     _workspace_types = []
 
+    # _workspace_types (list): Workspace types are not in payload but imported with transport package:
+    _ontologies = []
+
     """
     _workspace_templates (list): actually these are also imported via transport
     but used if we want to define standard members on template basis.
@@ -1511,6 +1514,7 @@ class Payload:
         )
         self._workspace_templates = self.get_payload_section("workspaceTemplates")
         self._workspaces = self.get_payload_section("workspaces")
+        self._ontologies = self.get_payload_section("ontologies")
         self._bulk_datasources = self.get_payload_section("bulkDatasources")
         self._bulk_workspaces = self.get_payload_section("bulkWorkspaces")
         self._bulk_workspace_relationships = self.get_payload_section(
@@ -2715,6 +2719,10 @@ class Payload:
         """Get all workspaces in payload."""
         return self._workspaces
 
+    def get_ontologies(self) -> list:
+        """Get all ontologies in payload."""
+        return self._ontologies
+
     def get_otcs_frontend(self) -> object:
         """Get OTCS Frontend oject."""
         return self._otcs_frontend
@@ -3580,6 +3588,16 @@ class Payload:
                             "Process Workspace Templates (Template Role Assignments)",
                         )
                         self.process_workspace_templates()
+                    case "ontologies":
+                        self._log_header_callback("Process Ontologies")
+                        otcs_version = float(self._otcs.get_server_version())
+                        if otcs_version >= 26.2:
+                            self.process_ontologies()
+                        else:
+                            self.logger.warning(
+                                "Ontologies are only supported in OTCS version 26.2 and higher! Current version is %s. Skipping...",
+                                str(otcs_version),
+                            )
                     case "workspaces":
                         # If a payload file (e.g. additional ones) does not have
                         # transportPackages then it can happen that the self._business_object_types and
@@ -13476,6 +13494,172 @@ class Payload:
                 result["success"] = False
 
         results.append(result)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_ontologies")
+    def process_ontologies(self, section_name: str = "ontologies") -> bool:
+        """Process ontologies in payload and update the workspace types in Content Server.
+
+        Args:
+            section_name (str, optional):
+                The name of the payload section. It can be overridden
+                for cases where multiple sections of same type
+                are used (e.g. the "Post" sections).
+                This name is also used for the "success" status
+                files written to the Admin Personal Workspace.
+
+        Returns:
+            bool:
+                True, if payload has been processed without errors, False otherwise.
+
+        """
+
+        if not self._workspaces:
+            self.logger.info(
+                "Payload section -> '%s' is empty. Skipping...",
+                section_name,
+            )
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(payload_section_name=section_name):
+            return True
+
+        success: bool = True
+
+        for ontology in self._ontologies:
+            ontology_name = ontology.get("name")
+            if not ontology_name:
+                self.logger.error(
+                    "Ontology payload -> %s has no name! Skipping to next ontology...",
+                    str(ontology),
+                )
+                success = False
+                continue
+
+            # Check if element has been explicitly disabled in payload
+            # (enabled = false). In this case we skip the element:
+            if not ontology.get("enabled", True):
+                self.logger.info(
+                    "Payload for ontology -> '%s' is disabled. Skipping...",
+                    ontology_name,
+                )
+                continue
+
+            entities = ontology.get("entities", [])
+            if not entities:
+                self.logger.warning(
+                    "Ontology -> '%s' has no entities defined in payload! Skipping to next ontology...",
+                    ontology_name,
+                )
+                continue
+            relationships = ontology.get("relationships", [])
+            if not relationships:
+                self.logger.warning(
+                    "Ontology -> '%s' has no relationships defined in payload! Skipping to next ontology...",
+                    ontology_name,
+                )
+                continue
+
+            for entity in entities:
+                workspace_type_name = entity.get("name")
+                if not workspace_type_name:
+                    self.logger.error(
+                        "Ontology -> '%s' has an entity -> %s without a name! Skipping to next entity...",
+                        ontology_name,
+                        str(entity),
+                    )
+                    success = False
+                    continue
+                workspace_type = self._otcs.get_workspace_type_by_name(
+                    type_name=workspace_type_name,
+                )
+                if not workspace_type:
+                    self.logger.error(
+                        "Ontology -> '%s' references workspace type -> '%s' that doesn't exist! Skipping to next entity...",
+                        ontology_name,
+                        workspace_type_name,
+                    )
+                    success = False
+                    continue
+                workspace_type_id = self._otcs.get_result_value(response=workspace_type, key="wksp_type_id")
+                workspace_type_node_id = self._otcs.get_result_value(response=workspace_type, key="config_node_id")
+                synonyms = entity.get("synonyms", [])
+                if synonyms:
+                    # As we don't have a datastructure in OTCM for Workspace Type synonyms we just write them
+                    # into the description field:
+                    response = self._otcs.update_item(
+                        node_id=workspace_type_node_id, item_description="Synonyms: " + ", ".join(synonyms)
+                    )
+                    if not response:
+                        self.logger.error(
+                            "Failed to update synonyms (stored in description) for workspace type -> '%s'!",
+                            workspace_type_name,
+                        )
+                        success = False
+                # Build the data structure required for updating the workspace type
+                # with the ontology information:
+                entity_relations = []
+                for rel in relationships:
+                    if rel.get("source_type") != workspace_type_name:
+                        # We only want the relationships originating from the
+                        # workspace type we are currently processing:
+                        continue
+                    target_wksp_type_name = rel.get("target_type")
+                    target_wksp_type = self._otcs.get_workspace_type_by_name(
+                        type_name=target_wksp_type_name,
+                    )
+                    if not target_wksp_type:
+                        self.logger.error(
+                            "Ontology -> '%s' references target workspace type -> '%s' that doesn't exist! Skipping to next relationship...",
+                            ontology_name,
+                            target_wksp_type_name,
+                        )
+                        success = False
+                        continue
+                    target_wksp_type_id = self._otcs.get_result_value(response=target_wksp_type, key="wksp_type_id")
+                    entity_relations.append(
+                        {
+                            "target_wksp_type_id": int(target_wksp_type_id),
+                            "rel_type": rel.get(
+                                "direction", "child"
+                            ).title(),  # the REST API requires Child and Parent capitalized
+                            "predicates": [
+                                predicate if isinstance(predicate, dict) else {"en": predicate}
+                                for predicate in rel.get("predicates", [])
+                            ],  # the REST API supports multi-lingual. If the payload has plain strings as elements we interpret this as english only
+                        }
+                    )
+                # end for rel in relationships
+
+                # Update the workspace type with the relationships:
+                response = self._otcs.update_workspace_type_relations(
+                    type_id=workspace_type_id, relations=entity_relations
+                )
+                if not response:
+                    self.logger.error(
+                        "Failed to update workspace type relations for workspace type -> '%s'!",
+                        workspace_type_name,
+                    )
+                    success = False
+                    continue
+                self.logger.info(
+                    "Successfully updated workspace type -> '%s' with %d relations.",
+                    workspace_type_name,
+                    len(entity_relations),
+                )
+            # end for entity in entities
+        # end for ontology in self._ontologies
+
+        self.write_status_file(
+            success=success,
+            payload_section_name=section_name,
+            payload_section=self._ontologies,
+        )
+
+        return success
 
     # end method definition
 

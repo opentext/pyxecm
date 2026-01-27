@@ -51,6 +51,8 @@ default_logger = logging.getLogger(MODULE_NAME)
 class OTAC:
     """Class OTAC is used to automate stettings in OpenText Archive Center."""
 
+    # Only class variables or class-wide constants should be defined here:
+
     logger: logging.Logger = default_logger
 
     def __init__(

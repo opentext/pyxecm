@@ -10846,16 +10846,11 @@ class OTCS:
 
         """
 
-        request_url = self.config()["businessWorkspaceTypesUrlv2"]
-        if expand_templates:
-            request_url += "?expand_templates=true"
-        else:
-            request_url += "?expand_templates=false"
-        if expand_workspace_info:
-            request_url += "&expand_wksp_info=true"
-        else:
-            request_url += "&expand_wksp_info=false"
+        query = {"expand_templates": expand_templates, "expand_wksp_info": expand_workspace_info}
 
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["businessWorkspaceTypesUrlv2"] + "?{}".format(encoded_query)
         request_header = self.request_form_header()
 
         self.logger.debug("Get workspace types; calling -> %s", request_url)
@@ -11049,6 +11044,56 @@ class OTCS:
         self._workspace_type_names = workspace_type_names
 
         return workspace_type_names
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_workspace_type_relations")
+    def update_workspace_type_relations(
+        self,
+        type_id: int,
+        relations: list[dict],
+    ) -> dict | None:
+        """Update workspace type configured in OTCS.
+
+        Currently its main purpose is to update the onotology relations
+        for a given workspace type.
+
+        This method can only be used with OTCM 26.2 or newer!
+
+        Args:
+            type_id (int):
+                The workspace type ID.
+            relations (list[dict]):
+                List of ontology relations to set for the workspace type.
+                This is a list of dictionaries with the following structure:
+                {
+                    "target_wksp_type_id": int,
+                    "rel_type": either "child" or "parent"
+                    "predicates": list of predicate strings,
+                }
+
+        Returns:
+            dict | None:
+                Workspace Types or None if the request fails.
+
+        """
+
+        request_url = self.config()["businessWorkspaceTypesUrlv2"] + "/" + str(type_id)
+        request_header = self.request_form_header()
+
+        workspace_type_put_body = {"relations": relations}
+
+        self.logger.debug("Update workspace type with ID -> %d; calling -> %s", type_id, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            #            data=workspace_type_put_body,
+            data={"body": json.dumps(workspace_type_put_body)},
+            timeout=None,
+            failure_message="Failed to update workspace type with ID -> {}".format(type_id),
+        )
 
     # end method definition
 
@@ -11719,6 +11764,8 @@ class OTCS:
                                 'mime_type': None,
                                 'original_id': 0,
                                 ...
+                                'wnf_wksp_type_id': 16,
+                                'wnf_wksp_template_id': 28168
                             }
                         }
                     },

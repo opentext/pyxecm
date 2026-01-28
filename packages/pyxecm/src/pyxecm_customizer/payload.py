@@ -13548,7 +13548,10 @@ class Payload:
                 )
                 continue
 
-            self.logger.info("Processing ontology -> '%s'...", ontology_name)
+            self._log_header_callback(
+                text="Process ontology '{}'".format(ontology_name),
+                char="-",
+            )
 
             entities = ontology.get("entities", [])
             if not entities:
@@ -13650,12 +13653,28 @@ class Payload:
                         target_wksp_type_id,
                     )
 
+                    # Get the relationship type. We need it capitalized:
+                    rel_type = rel.get("direction", "child").title()
+
+                    # Skip if this relationship already exists
+                    if any(
+                        r.get("target_wksp_type_id") == int(target_wksp_type_id) and r.get("rel_type") == rel_type
+                        for r in entity_relations
+                    ):
+                        self.logger.debug(
+                            "Relationship from entity type -> '%s' (%s) to -> '%s' (%s) of relationship type -> '%s' already exists. Skipping duplicate...",
+                            workspace_type_name,
+                            workspace_type_id,
+                            target_wksp_type_name,
+                            target_wksp_type_id,
+                            rel_type,
+                        )
+                        continue
+
                     entity_relations.append(
                         {
                             "target_wksp_type_id": int(target_wksp_type_id),
-                            "rel_type": rel.get(
-                                "direction", "child"
-                            ).title(),  # the REST API requires Child and Parent capitalized
+                            "rel_type": rel_type,  # the REST API requires Child and Parent capitalized
                             "predicates": [
                                 predicate if isinstance(predicate, dict) else {"en": predicate}
                                 for predicate in rel.get("predicates", [])
@@ -13667,6 +13686,9 @@ class Payload:
 
                 if not entity_relations or added == 0:
                     # We don't want to overwrite with empty or unchanged relationships
+                    self.logger.info(
+                        "No new relationships to add for entity type -> '%s'. Skipping...", workspace_type_name
+                    )
                     continue
 
                 # Update the workspace type with the relationships:

@@ -1012,20 +1012,20 @@ class OTCS:
         if not response:
             # If the file with the ontology nickname is not found we
             # try to find the file in the Personal Workspace of the current user.
-            response = self._otcs.get_node_by_volume_and_path(
-                volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
+            response = self.get_node_by_volume_and_path(
+                volume_type=self.VOLUME_TYPE_PERSONAL_WORKSPACE,
             )  # write to Personal Workspace of Admin (with Volume Type ID = 142)
-            folder_id = self._otcs.get_result_value(response=response, key="id")
+            folder_id = self.get_result_value(response=response, key="id")
             if not folder_id:
                 folder_id = 2004  # use Personal Workspace of Admin as fallback
 
             # Check if the ontology file is in the Personal Workspace of the admin user.
-            response = self._otcs.get_node_by_parent_and_name(
+            response = self.get_node_by_parent_and_name(
                 parent_id=int(folder_id),
                 name=self.ONTOLOGY_FILE_NAME,
                 show_error=False,
             )
-        document_id = self._otcs.get_result_value(response=response, key="id")
+        document_id = self.get_result_value(response=response, key="id")
         if not document_id:
             self.logger.warning("Ontology file not found - cannot load the ontology.")
             return False

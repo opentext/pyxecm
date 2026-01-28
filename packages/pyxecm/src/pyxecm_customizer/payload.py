@@ -13548,6 +13548,8 @@ class Payload:
                 )
                 continue
 
+            self.logger.info("Processing ontology -> '%s'...", ontology_name)
+
             entities = ontology.get("entities", [])
             if not entities:
                 self.logger.warning(
@@ -13584,8 +13586,12 @@ class Payload:
                     )
                     success = False
                     continue
+
                 workspace_type_id = self._otcs.get_result_value(response=workspace_type, key="wksp_type_id")
                 workspace_type_node_id = self._otcs.get_result_value(response=workspace_type, key="config_node_id")
+
+                self.logger.info("Processing ontology entity -> '%s' (%s)...", workspace_type_name, workspace_type_id)
+
                 synonyms = entity.get("synonyms", [])
                 if synonyms:
                     # As we don't have a datastructure in OTCM for Workspace Type synonyms we just write them
@@ -13595,13 +13601,18 @@ class Payload:
                     )
                     if not response:
                         self.logger.error(
-                            "Failed to update synonyms (stored in description) for workspace type -> '%s'!",
+                            "Failed to update synonyms (stored in description) for entity type -> '%s'!",
                             workspace_type_name,
                         )
                         success = False
+                # end if synonyms
+
                 # Build the data structure required for updating the workspace type
-                # with the ontology information:
-                entity_relations = []
+                # with the ontology information. As we can have multiple ontologies
+                # and entities can occur in multiple of the ontologies we need to
+                # initialize the existing relationships first:
+                entity_relations = self._otcs.get_result_value(response=workspace_type, key="relations") or []
+                added = 0
                 for rel in relationships:
                     if rel.get("source_type") != workspace_type_name:
                         # We only want the relationships originating from the
@@ -13620,6 +13631,25 @@ class Payload:
                         success = False
                         continue
                     target_wksp_type_id = self._otcs.get_result_value(response=target_wksp_type, key="wksp_type_id")
+                    target_wksp_type_name = self._otcs.get_result_value(response=target_wksp_type, key="wksp_type_name")
+
+                    # TODO: this is a bug in the REST API - hotfix requested.
+                    if workspace_type_id == target_wksp_type_id:
+                        self.logger.warning(
+                            "The REST API does not support relationships from workspace type -> '%s' (%s) to itself! Skipping...",
+                            workspace_type_name,
+                            workspace_type_id,
+                        )
+                        continue
+
+                    self.logger.info(
+                        "Processing ontology relationship from source entity type -> '%s' (%s) to target entity type -> '%s' (%s).",
+                        workspace_type_name,
+                        workspace_type_id,
+                        target_wksp_type_name,
+                        target_wksp_type_id,
+                    )
+
                     entity_relations.append(
                         {
                             "target_wksp_type_id": int(target_wksp_type_id),
@@ -13632,7 +13662,12 @@ class Payload:
                             ],  # the REST API supports multi-lingual. If the payload has plain strings as elements we interpret this as english only
                         }
                     )
+                    added += 1
                 # end for rel in relationships
+
+                if not entity_relations or added == 0:
+                    # We don't want to overwrite with empty or unchanged relationships
+                    continue
 
                 # Update the workspace type with the relationships:
                 response = self._otcs.update_workspace_type_relations(
@@ -13640,13 +13675,13 @@ class Payload:
                 )
                 if not response:
                     self.logger.error(
-                        "Failed to update workspace type relations for workspace type -> '%s'!",
+                        "Failed to update ontology relations for workspace type -> '%s'!",
                         workspace_type_name,
                     )
                     success = False
                     continue
                 self.logger.info(
-                    "Successfully updated workspace type -> '%s' with %d relations.",
+                    "Successfully updated entity type -> '%s' with %d relations.",
                     workspace_type_name,
                     len(entity_relations),
                 )

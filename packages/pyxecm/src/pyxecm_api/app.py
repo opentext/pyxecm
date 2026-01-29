@@ -17,9 +17,13 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_fastapi_instrumentator import Instrumentator
 from pyxecm_maintenance_page import run_maintenance_page
 
@@ -50,7 +54,7 @@ elif not os.path.exists(api_settings.logfolder):
 
 @asynccontextmanager
 async def lifespan(
-    app: FastAPI,  # noqa: ARG001
+    app: FastAPI,
 ) -> AsyncGenerator:
     """Lifespan function for FASTAPI to handle the startup and shutdown process.
 
@@ -59,6 +63,15 @@ async def lifespan(
             The FastAPI application.
 
     """
+
+    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        # Set up OpenTelemetry tracing for the worker
+        resource = Resource.create({"service.name": "pyxecm-customizer-api"})
+        provider = TracerProvider(resource=resource)
+        processor = BatchSpanProcessor(OTLPSpanExporter())
+        provider.add_span_processor(processor)
+
+        trace.set_tracer_provider(provider)
 
     logger.debug("API settings -> %s", api_settings)
 
@@ -111,7 +124,7 @@ app = FastAPI(
     ],
 )
 
-FastAPIInstrumentor.instrument_app(app)
+FastAPIInstrumentor.instrument_app(app, excluded_urls="/metrics,/health")
 RequestsInstrumentor().instrument()
 ThreadingInstrumentor().instrument()
 

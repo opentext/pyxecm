@@ -20652,7 +20652,7 @@ class Payload:
 
         data: Data = data_source.get("data")
         if not data:
-            self.logger.error(
+            self.logger.warning(
                 "Data source -> '%s' does not have data! Cannot save it.",
                 data_source_name,
             )
@@ -22164,7 +22164,7 @@ class Payload:
         )
 
         # Save the data source in the Admin Personal Workspace for investigations:
-        if data_source.get("save_data_source", False):
+        if data_source.get("save_data_source", False) and data_source.get("data") is not None:
             self.write_data_source_file(data_source=data_source)
 
         return data
@@ -22287,8 +22287,8 @@ class Payload:
                 success = False
                 continue
             if data.get_data_frame() is None or data.get_data_frame().empty:  # important to use "is None" here!
-                self.logger.error(
-                    "Data source for bulk workspace type -> '%s' is empty!",
+                self.logger.info(
+                    "Data source for bulk workspace type -> '%s' is empty. Skipping...",
                     type_name,
                 )
                 continue
@@ -24676,8 +24676,8 @@ class Payload:
                 success = False
                 continue
             if data.get_data_frame() is None or data.get_data_frame().empty:  # important to use "is None" here!
-                self.logger.warning(
-                    "Data source for bulk workspace relationships from -> '%s' to -> '%s' is empty!",
+                self.logger.info(
+                    "Data source for bulk workspace relationships from -> '%s' to -> '%s' is empty. Skipping...",
                     from_sub_workspace if from_sub_workspace else from_workspace,
                     to_sub_workspace if to_sub_workspace else to_workspace,
                 )

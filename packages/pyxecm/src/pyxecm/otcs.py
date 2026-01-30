@@ -2134,6 +2134,11 @@ class OTCS:
 
         """
 
+        # Extend the OTEL tracing span with attributes for this method call
+        current_span = trace.get_current_span()
+        current_span.set_attribute("revalidate", revalidate)
+        current_span.set_attribute("wait_for_ready", wait_for_ready)
+
         # Already authenticated and session still valid?
         if self._otcs_ticket and not revalidate:
             self.logger.debug(
@@ -5309,6 +5314,13 @@ class OTCS:
             ```
 
         """
+
+        # Extend the OTEL span with custom attributes
+        current_span = trace.get_current_span()
+        current_span.set_attribute("node_id", node_id)
+        current_span.set_attribute("fields", fields)
+        current_span.set_attribute("metadata", metadata)
+        current_span.set_attribute("timeout", timeout)
 
         query = {}
         if fields:

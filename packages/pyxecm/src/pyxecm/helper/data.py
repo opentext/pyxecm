@@ -28,15 +28,51 @@ default_logger = logging.getLogger("pyxecm.helper.data")
 
 
 class Data:
-    """Used to automate data loading for the customizer."""
+    """Used to handle big data sets that have a tabular structure."""
 
     # Only class variables or class-wide constants should be defined here:
 
     logger: logging.Logger = default_logger
 
+    @classmethod
+    def read_sql(
+        cls,
+        sql: str,
+        con: any,
+        columns: list[str] | None = None,
+        dtypes: dict[str, type | str] | None = None,
+        index_columns: str | list[str] | None = None,
+        **kwargs: dict,
+    ) -> Data:
+        """Load a Data object directly from a SQL table/query.
+
+        Args:
+            sql (str):
+                SQL query string or SQLAlchemy Table.
+            con (any):
+                Database connection or engine.
+            columns (list[str] | None):
+                List of columns to load. Defaults to all.
+            dtypes (dict[str, type | str] | None):
+                Column dtype dictionary (NumPy/Pandas types or strings).
+            index_columns (str | list[str] | None, optional):
+                The name of the column that should become the index
+                of the data frame. Defaults to None.
+                Also a list of column names can be provided to create
+                a multi-index.
+            **kwargs (dict):
+                Extra kwargs passed to pd.read_sql.
+
+        """
+        df = pd.read_sql(sql, con=con, columns=columns, **kwargs)
+        return cls(init_data=df, dtypes=dtypes, index_columns=index_columns)
+
     def __init__(
         self,
         init_data: pd.DataFrame | list = None,
+        columns: list[str] | None = None,
+        dtypes: dict[str, type] | None = None,
+        index_columns: str | list[str] | None = None,
         logger: logging.Logger = default_logger,
     ) -> None:
         """Initialize the Data object.
@@ -46,6 +82,18 @@ class Data:
                 Data to initialize the data frame. Can either be
                 another data frame (that gets copied) or a list of dictionaries.
                 Defaults to None.
+            columns (list[str] | None, optional):
+                The list of column names to use if init_data is None.
+                Defaults to None.
+            dtypes (dict[str, type] | None, optional):
+                A dictionary defining the data types for specific columns.
+                The keys are the column names and the values are the desired data types.
+                Defaults to None. In this case pandas will infer the data types automatically.
+            index_columns (str | list[str] | None, optional):
+                The name of the column that should become the index
+                of the data frame. Defaults to None.
+                Also a list of column names can be provided to create
+                a multi-index.
             logger (logging.Logger, optional):
                 Pass a special logging object. This is optional. If not provided,
                 the default logger is used.
@@ -59,8 +107,10 @@ class Data:
 
         self._lock: threading.Lock = threading.Lock()
 
+        self._schema = dtypes
+
         if init_data is None:
-            self._df = pd.DataFrame()
+            self._df = pd.DataFrame(columns=columns)
         elif isinstance(init_data, pd.DataFrame):
             self._df = init_data.copy()
         elif isinstance(init_data, Data):
@@ -72,6 +122,32 @@ class Data:
         else:
             error_message = "Illegal initialization data for 'Data' class!"
             raise TypeError(error_message)
+
+        # Apply dtypes if given
+        self._schema = dtypes
+        if self._schema:
+            for col, dtype in self._schema.items():
+                if col in self._df.columns:
+                    self._df[col] = self._df[col].astype(dtype)
+
+        # set index if specified
+        if index_columns:
+            # convert single string to list for uniformity
+            if isinstance(index_columns, str):
+                self._index_columns = [index_columns]
+            else:
+                self._index_columns = index_columns
+
+            # check that all index columns exist in the DataFrame
+            missing_cols = [col for col in self._index_columns if col not in self._df.columns]
+            if missing_cols:
+                msg = f"Cannot set index. Missing columns in DataFrame: {missing_cols}"
+                raise ValueError(msg)
+
+            # set the index
+            self._df.set_index(self._index_columns, inplace=True, drop=False)
+        else:
+            self._index_columns = None
 
     # end method definition
 
@@ -312,6 +388,12 @@ class Data:
     def append(self, add_data: pd.DataFrame | list | dict | Data) -> bool:
         """Append additional data to the data frame.
 
+        Behavior:
+        - If self._schema is None:
+            -> pandas-native dynamic behavior (no dtype guarantees)
+        - If self._schema is not None:
+            -> strict schema mode (dtype preserved + enforced)
+
         Args:
             add_data (pd.DataFrame | list | dict | Data):
                 Additional data. Can be pd.DataFrame or list of dicts (or Data).
@@ -370,6 +452,54 @@ class Data:
         else:
             self.logger.error("Illegal data type -> '%s'", type(add_data))
             return False
+
+    # end method definition
+
+    def append_with_schema(self, add_data: pd.DataFrame | list | dict | Data) -> bool:
+        """Append data to the Data object, enforcing schema and preserving index.
+
+        Args:
+            add_data: pd.DataFrame, list of dicts, dict, or another Data object.
+
+        Returns:
+            True if append succeeded, False if an error occurred.
+
+        """
+        try:
+            # 1️⃣ Normalize input to DataFrame
+            if isinstance(add_data, Data):
+                new_df = add_data.get_data_frame()
+            elif isinstance(add_data, pd.DataFrame):
+                new_df = add_data
+            elif isinstance(add_data, list):
+                if not add_data:
+                    return True
+                new_df = pd.DataFrame(add_data)
+            elif isinstance(add_data, dict):
+                new_df = pd.DataFrame([add_data])
+            else:
+                self.logger.error("Illegal data type -> '%s'", type(add_data))
+                return False
+
+            # 2️⃣ Align columns to schema and enforce dtypes
+            if self._schema is not None:
+                new_df = new_df.reindex(columns=self._schema.keys()).astype(self._schema)
+
+            # 3️⃣ Set index on the new data
+            if self._index_columns is not None:
+                new_df.set_index(self._index_columns, inplace=True, drop=False)
+
+            # 4️⃣ Initialize or append
+            if self._df is None or self._df.empty:
+                self._df = new_df
+            else:
+                self._df = pd.concat([self._df, new_df], ignore_index=False)
+
+        except Exception as e:
+            self.logger.error("Append with schema failed; error -> %s", e)
+            return False
+        else:
+            return True
 
     # end method definition
 
@@ -3443,6 +3573,21 @@ class Data:
         self._df[new_column] = self._df.apply(create_table, axis=1)
 
         return True
+
+    # end method definition
+
+    def drop_row(self, index: int | str) -> None:
+        """Drop a single row from the DataFrame by its index.
+
+        Args:
+            index (int | str):
+                The index value of the row to remove. Can be an integer or string
+                depending on the DataFrame index type.
+
+        """
+
+        if index in self._df.index:
+            self._df.drop(index=index, inplace=True)
 
     # end method definition
 

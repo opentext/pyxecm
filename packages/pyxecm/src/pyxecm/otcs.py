@@ -12627,6 +12627,25 @@ class OTCS:
     ) -> dict | None:
         """Create a relationship between two workspaces.
 
+        A workspace relationship always works two ways: if the relationship
+        is created such that workspace A is a child of workspace B, then workspace
+        B is automatically a parent of workspace A. I.e. retrieving the relationships
+        of workspace A will show a relationship to parent B and retrieving the relationships
+        of workspace B will show a relationship to child A.
+
+        Thus creating a relationship only needs to be done in one direction.
+        Creating a relationship with workspace_id as A and related_workspace_id as B
+        with type 'parent' is equivalent to creating a relationship with workspace_id as B
+        and related_workspace_id as A with type 'child'.
+
+        There can still be 2 relationships between A and B if one is of type 'parent'
+        and the other of type 'child', but this is a less common use case.
+
+        Adding a relationship R1: A --> Child --> B makes A to the parent of B _AND_ also
+        B to the child of A. Requesting the childs of A will include edge R1. Requesting the
+        parents of B will include R1 as well. But it is still possible to add a relationship
+        R2: A --> Parent --> B. This will be a separate relationship.
+
         Args:
             workspace_id (int):
                 The ID of the workspace.
@@ -12653,9 +12672,10 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Create workspace relationship between workspace ID -> %d and related workspace ID -> %d; calling -> %s",
+            "Create workspace relationship between workspace ID -> %d and related workspace ID -> %d of type -> %s; calling -> %s",
             workspace_id,
             related_workspace_id,
+            relationship_type,
             request_url,
         )
 
@@ -12665,13 +12685,15 @@ class OTCS:
             headers=request_header,
             data=create_workspace_relationship_post_data,
             timeout=None,
-            warning_message="Cannot create workspace relationship between -> {} and -> {}. It may already exist.".format(
+            warning_message="Cannot create workspace relationship between -> {} and -> {} of type -> {}. It may already exist.".format(
                 workspace_id,
                 related_workspace_id,
+                relationship_type,
             ),
-            failure_message="Failed to create workspace relationship between -> {} and -> {}".format(
+            failure_message="Failed to create workspace relationship between -> {} and -> {} or type -> '{}'".format(
                 workspace_id,
                 related_workspace_id,
+                relationship_type,
             ),
             show_error=show_error,
         )
@@ -12703,6 +12725,9 @@ class OTCS:
                 Either "parent" or "child" ("child" is the default).
                 If both ("child" and "parent") are requested then use a
                 list like ["child", "parent"].
+                If workspaces relationship has been created from a leading application
+                such as SAP, special types such as "BO_Child" and "BO_Parent"
+                may be returned.
             related_workspace_name (str | None, optional):
                 Filter for a certain workspace name in the related items.
             related_workspace_type_id (int | list | None, optional):
@@ -20151,7 +20176,7 @@ class OTCS:
 
         processed_workspaces = {}
 
-        # Establish the default for relationship types which is just "child":
+        # Establish the default for relationship types which is just "parent" and "child"":
         if relationship_types is None:
             relationship_types = ["child", "parent"]
 

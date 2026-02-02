@@ -64,7 +64,7 @@ class Data:
                 Extra kwargs passed to pd.read_sql.
 
         """
-        df = pd.read_sql(sql, con=con, columns=columns, **kwargs)
+        df = pd.read_sql(sql, con=con, columns=columns, dtype=dtypes, **kwargs)
         return cls(init_data=df, dtypes=dtypes, index_columns=index_columns)
 
     def __init__(
@@ -115,16 +115,13 @@ class Data:
             self._df = init_data.copy()
         elif isinstance(init_data, Data):
             self._df = init_data.get_data_frame().copy()
-        elif isinstance(init_data, list):
-            self._df = pd.DataFrame(init_data)
-        elif isinstance(init_data, dict):
-            self._df = pd.DataFrame([init_data])
+        elif isinstance(init_data, (list, dict)):
+            self._df = pd.DataFrame(data=init_data, columns=columns)
         else:
             error_message = "Illegal initialization data for 'Data' class!"
             raise TypeError(error_message)
 
         # Apply dtypes if given
-        self._schema = dtypes
         if self._schema:
             for col, dtype in self._schema.items():
                 if col in self._df.columns:
@@ -169,7 +166,7 @@ class Data:
     # end method definition
 
     def __str__(self) -> str:
-        """Print the Pandas data frame object.
+        """Return the string representation of the Pandas data frame object.
 
         Returns:
             str:
@@ -180,19 +177,31 @@ class Data:
         # if data frame is initialized we return
         # the string representation of pd.DataFrame
         if self._df is not None:
+            # We use the pandas string representation directly
             return str(self._df)
 
-        return str(self)
+        return "<Data object>: internal data frame is not initialized!"
 
     # end method definition
 
-    def __getitem__(self, column: str) -> pd.Series:
+    def __repr__(self) -> str:
+        """Return a technical representation of the Data object."""
+
+        if self._df is not None:
+            return f"Data(shape={self._df.shape}, columns={list(self._df.columns)})"
+
+        return "Data(Uninitialized)"
+
+    # end method definition
+
+    def __getitem__(self, column: any) -> pd.Series:
         """Return the column corresponding to the key from the data frame.
 
         Args:
-            column (str):
-                The name of the data frame column. This can also be used
-                to filter by a mask, e.g. data['column_name'] == 'value'
+            column (any):
+                Can be the name of the data frame column. This can also be used
+                to filter by a boolean mask, e.g. data['column_name'] == 'value'.
+                Can also be a slice or callable. So we basically delegate to Pandas DataFrame.
 
         Returns:
             pd.Series:
@@ -226,15 +235,19 @@ class Data:
 
         """
 
+        error_message = "Object -> '{}' has no attribute -> '{}'".format(type(self).__name__, attr)
+
         if self._df is None:
-            error_message = "'Data' object has no attribute -> '{}' (internal DataFrame is None)".format(attr)
-            raise AttributeError(error_message)
+            raise AttributeError(error_message + " (internal data frame is None)")
 
         try:
             return getattr(self._df, attr)
         except AttributeError:
-            self.logger.error("'Data' object has no attribute -> '%s'", attr)
-            raise
+            # We only log if it's not a 'private' or 'dunder' attribute
+            # to avoid flooding logs with IDE/Internal lookups.
+            if not attr.startswith("_"):
+                self.logger.error("Attribute -> '%s' not found in Data or internal pandas data frame", attr)
+            raise AttributeError(error_message) from None
 
     # end method definition
 
@@ -385,121 +398,109 @@ class Data:
 
     # end method definition
 
-    def append(self, add_data: pd.DataFrame | list | dict | Data) -> bool:
+    def append(self, add_data: pd.DataFrame | list | dict | Data, enforce_schema: bool = False) -> bool:
         """Append additional data to the data frame.
 
-        Behavior:
-        - If self._schema is None:
-            -> pandas-native dynamic behavior (no dtype guarantees)
-        - If self._schema is not None:
-            -> strict schema mode (dtype preserved + enforced)
+        Note: This method is not thread-safe; locking must be handled by the caller.
 
         Args:
-            add_data (pd.DataFrame | list | dict | Data):
-                Additional data. Can be pd.DataFrame or list of dicts (or Data).
+            add_data:
+                Data to append (DataFrame, list of dicts, dict, or Data object).
+            enforce_schema (bool):
+                If True, aligns columns to self._schema and enforces dtypes.
+                Defaults to False to maintain backwards compatibility.
 
         Returns:
             bool:
-                True = Success, False = Error
-
-        """
-
-        # Does the data frame has already content?
-        # Then we need to concat / append. Otherwise
-        # we just initialize self._df
-        if self._df is not None:
-            if isinstance(add_data, pd.DataFrame):
-                self._df = pd.concat([self._df, add_data], ignore_index=True)
-                return True
-            elif isinstance(add_data, Data):
-                df = add_data.get_data_frame()
-                if df is not None and not df.empty:
-                    self._df = pd.concat([self._df, df], ignore_index=True)
-                return True
-            elif isinstance(add_data, list):
-                if add_data:
-                    df = Data(add_data, logger=self.logger)
-                    self._df = pd.concat(
-                        [self._df, df.get_data_frame()],
-                        ignore_index=True,
-                    )
-                return True
-            elif isinstance(add_data, dict):
-                if add_data:
-                    # it is important to wrap the dict in a list to avoid that more than 1 row is created
-                    df = Data([add_data], logger=self.logger)
-                    self._df = pd.concat(
-                        [self._df, df.get_data_frame()],
-                        ignore_index=True,
-                    )
-                return True
-            else:
-                self.logger.error("Illegal data type -> '%s'", type(add_data))
-                return False
-        elif isinstance(add_data, pd.DataFrame):
-            self._df = add_data
-            return True
-        elif isinstance(add_data, Data):
-            self._df = add_data.get_data_frame()
-            return True
-        elif isinstance(add_data, list):
-            self._df = pd.DataFrame(add_data)
-            return True
-        elif isinstance(add_data, dict):
-            # it is important to wrap the dict in a list to avoid that more than 1 row is created
-            self._df = pd.DataFrame([add_data])
-            return True
-        else:
-            self.logger.error("Illegal data type -> '%s'", type(add_data))
-            return False
-
-    # end method definition
-
-    def append_with_schema(self, add_data: pd.DataFrame | list | dict | Data) -> bool:
-        """Append data to the Data object, enforcing schema and preserving index.
-
-        Args:
-            add_data: pd.DataFrame, list of dicts, dict, or another Data object.
-
-        Returns:
-            True if append succeeded, False if an error occurred.
+                True if successful, False otherwise.
 
         """
         try:
-            # 1️⃣ Normalize input to DataFrame
+            # Prepare construction parameters if schema is requested
+            target_cols: list[str] | None = list(self._schema.keys()) if (enforce_schema and self._schema) else None
+
+            # 1. Normalize input to a pandas DataFrame
             if isinstance(add_data, Data):
                 new_df = add_data.get_data_frame()
             elif isinstance(add_data, pd.DataFrame):
                 new_df = add_data
-            elif isinstance(add_data, list):
+            elif isinstance(add_data, (list, dict)):
                 if not add_data:
                     return True
-                new_df = pd.DataFrame(add_data)
-            elif isinstance(add_data, dict):
-                new_df = pd.DataFrame([add_data])
+
+                # Wrap single dict in list to ensure it is treated as one row
+                add_data = [add_data] if isinstance(add_data, dict) else add_data
+
+                # Early Enforcement: Pass columns to the constructor
+                new_df = pd.DataFrame(data=add_data, columns=target_cols)
             else:
-                self.logger.error("Illegal data type -> '%s'", type(add_data))
+                self.logger.error("Illegal data type -> '%s' for append!", type(add_data))
                 return False
 
-            # 2️⃣ Align columns to schema and enforce dtypes
-            if self._schema is not None:
+            # 2. Apply Schema & Index Logic
+            if enforce_schema and self._schema is not None:
+                # Always reindex/astype if enforcing schema to ensure 100% alignment
                 new_df = new_df.reindex(columns=self._schema.keys()).astype(self._schema)
 
-            # 3️⃣ Set index on the new data
-            if self._index_columns is not None:
-                new_df.set_index(self._index_columns, inplace=True, drop=False)
+                if self._index_columns is not None:
+                    new_df.set_index(self._index_columns, inplace=True, drop=False)
 
-            # 4️⃣ Initialize or append
+            # 3. Combine Data
             if self._df is None or self._df.empty:
-                self._df = new_df
+                # If enforcing schema, we take the processed new_df
+                # If not, we just take the data as-is
+                self._df = new_df.copy()
             else:
-                self._df = pd.concat([self._df, new_df], ignore_index=False)
+                # enforce_schema=False uses ignore_index=True (standard append behavior)
+                # enforce_schema=True uses ignore_index=False (preserves the index we just set)
+                ignore_idx = not enforce_schema
+                self._df = pd.concat([self._df, new_df], ignore_index=ignore_idx)
 
         except Exception as e:
-            self.logger.error("Append with schema failed; error -> %s", e)
+            self.logger.error("Append failed; error -> %s", str(e))
             return False
         else:
             return True
+
+    def apply_schema(self, apply_dtypes: bool = True, apply_index: bool = True) -> None:
+        """Force the internal DataFrame to match the defined schema and index settings.
+
+        Args:
+            apply_dtypes (bool):
+                If True, reindexes columns and casts them to the dtypes
+                defined in self._schema.
+            apply_index (bool):
+                If True, re-establishes the index based on self._index_columns.
+
+        """
+
+        if self._df is None:
+            self.logger.warning("Cannot apply schema on uninitialized data object.")
+            return
+
+        try:
+            # 1. Handle Dtypes and Column Alignment
+            if apply_dtypes and self._schema:
+                # reindex ensures order and presence; astype enforces the domain/types
+                self._df = self._df.reindex(columns=self._schema.keys()).astype(self._schema)
+                self.logger.debug("Applied dtypes and column alignment.")
+
+            # 2. Handle Index Alignment
+            if apply_index and self._index_columns:
+                # We check if the index is already correctly named to avoid
+                # unnecessary re-indexing overhead.
+                current_index_names = self._df.index.names
+                target_index_names = (
+                    [self._index_columns] if isinstance(self._index_columns, str) else self._index_columns
+                )
+
+                if current_index_names != target_index_names:
+                    self._df.set_index(self._index_columns, inplace=True, drop=False)
+                    self.logger.debug("Applied index settings -> %s", self._index_columns)
+
+        except Exception as e:
+            self.logger.error("Failed to apply schema: %s", str(e))
+            raise
 
     # end method definition
 

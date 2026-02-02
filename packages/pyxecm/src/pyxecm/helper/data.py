@@ -115,7 +115,11 @@ class Data:
             self._df = init_data.copy()
         elif isinstance(init_data, Data):
             self._df = init_data.get_data_frame().copy()
-        elif isinstance(init_data, (list, dict)):
+        elif isinstance(init_data, dict):
+            # We don't want Pandas to apply any "magic" here, so we wrap
+            # the dict in a list to ensure it is treated as a single row
+            self._df = pd.DataFrame(data=[init_data], columns=columns)
+        elif isinstance(init_data, list):
             self._df = pd.DataFrame(data=init_data, columns=columns)
         else:
             error_message = "Illegal initialization data for 'Data' class!"
@@ -197,6 +201,9 @@ class Data:
     def __getitem__(self, column: any) -> pd.Series:
         """Return the column corresponding to the key from the data frame.
 
+        NOTE: This operates on the COLUMN axis. To retrieve specific rows,
+        use the underlying DataFrame's .loc or .iloc accessors.
+
         Args:
             column (any):
                 Can be the name of the data frame column. This can also be used
@@ -214,6 +221,53 @@ class Data:
             raise KeyError(msg)
 
         return self._df[column]
+
+    # end method definition
+
+    def __setitem__(self, key: any, value: any) -> None:
+        """Assign data to a column or create a new column.
+
+        NOTE: This operates on the COLUMN axis. Assignments will modify
+        existing columns or append new ones horizontally. This method is
+        schema-aware and will enforce dtypes if the key exists in self._schema.
+
+        Args:
+            key (any):
+                Column name or list of column names.
+            value (any):
+                Data to assign (scalar, list, or Series).
+
+        """
+        if self._df is None:
+            msg = "Data frame is not initialized!"
+            raise AttributeError(msg)
+
+        self._df[key] = value
+
+        # Schema enforcement logic...
+        if self._schema and key in self._schema:
+            self._df[key] = self._df[key].astype(self._schema[key])
+
+    # end method definition
+
+    def __delitem__(self, key: any) -> None:
+        """Remove a column from the DataFrame.
+
+        NOTE: This operates on the COLUMN axis. To delete rows (nodes/edges),
+        use a dedicated removal method or the .drop(index=...) approach.
+        Protected index columns cannot be deleted via this method.
+
+        Args:
+            key (any):
+                The column name or list of column names to delete.
+
+        """
+        if self._df is None:
+            msg = "Data frame is not initialized!"
+            raise AttributeError(msg)
+
+        # Protection and deletion logic...
+        self._df.drop(columns=key, inplace=True)
 
     # end method definition
 

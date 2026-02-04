@@ -354,7 +354,7 @@ class OTCS:
         download_dir: str | None = None,
         feme_uri: str | None = None,
         use_numeric_category_identifier: bool = True,
-        workspace_ontology: dict[tuple[str, str, str], list[str]] | None = None,
+        workspace_ontology: dict[str] | None = None,
         logger: logging.Logger = default_logger,
     ) -> None:
         """Initialize the OTCS object.
@@ -403,11 +403,18 @@ class OTCS:
                 Parameter for load_items. Determines if the category ID is used
                 in the column name of the data frame (True) or a normalized
                 category name (False).
-            workspace_ontology (dict[tuple[str, str, str], list[str]]):
-                A dictionary mapping (source_type, target_type, rel_type) tuples
-                to a list of semantic relationship names. source_type and target_type
-                are workspace type names from OTCS. rel_type is either "parent" or "child".
-                It abstracts the graph structure at the type level.
+            workspace_ontology (dict[str]):
+                A dictionary with keys "entities", "relationships".
+                The values of "entities" and "relationships" are lists.
+                The items in the entities list are dictionaries with keys:
+                - name (str): name of the workspace type
+                - description (str)
+                - synonyms (list[str]): synonyms for the workspace type name
+                The items in the relationships list are dictionaries with keys:
+                - source_type (str): name of the source workspace type
+                - target_type (str): name of the target workspace type
+                - direction (str): "child" or "parent"
+                - predicate (list[str]): list of verbs/predicates describing the relationship
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
 
@@ -892,17 +899,44 @@ class OTCS:
 
     # end method definition
 
-    def get_workspace_ontology(self, force_reload: bool = False) -> dict[tuple[str, str, str], list[str]] | None:
+    def get_workspace_ontology(self, force_reload: bool = False) -> dict[str] | None:
         """Get the relationship model for workspace types (ontology).
 
         TODO: currently we cannot derive it from the workspace type definitions
         as this information is not managed in OTCS - this will change with 26.2.
 
         Returns:
-            dict[tuple[str, str, str], list[str]] | None:
+            dict[str] | None:
                 Workspace ontology or None in case it is not provided via
                 the class __init__ method or not found as a JSON file in admin
                 Personal Workspace.
+
+        Example ontology structure:
+        {
+          "entities": [
+              {
+                  "name": "Customer",
+                  "description": "",
+                  "synonyms": [
+                    "Account",
+                    "Client"
+                  ]
+              },
+              ...
+          ],
+          "relationships": [
+              {
+                  "source_type": "Project",
+                  "target_type": "Customer",
+                  "direction": "parent",
+                  "predicate": [
+                      "is for",
+                      "belongs to"
+                  ]
+              },
+              ...
+          ]
+        }
 
         """
 

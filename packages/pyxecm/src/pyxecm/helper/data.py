@@ -2876,8 +2876,9 @@ class Data:
             if not isinstance(value, list):
                 value = [value]
 
-            # If all values in the condition are strings then we
-            # want the column also to be of type string:
+            # If all value items in the value list of the condition are strings
+            # then we want the column to filter on also to be of type string
+            # and we cast the column to string type:
             if all(isinstance(v, str) for v in value):
                 # Change type of column to string:
                 #                filtered_df[field] = filtered_df[field].astype(str)
@@ -2941,14 +2942,7 @@ class Data:
                     filtered_df = filtered_df[~filtered_df[field].isin(value)]
                 else:
                     filtered_df = filtered_df[filtered_df[field].isin(value)]
-            elif not regex:
-                if pd.api.types.is_string_dtype(filtered_df[field]):
-                    filtered_df[field] = filtered_df[field].str.strip()
-                if not test_for_equal:
-                    filtered_df = filtered_df[~filtered_df[field].isin(value)]
-                else:
-                    filtered_df = filtered_df[filtered_df[field].isin(value)]
-            else:
+            elif regex:
                 # Create a pure boolean pd.Series as a filter criterium:
                 regex_condition = filtered_df[field].str.contains(
                     "|".join(value),
@@ -2958,6 +2952,14 @@ class Data:
                 # Apply the boolean pd.Series named 'regex_condition' as
                 # a filter - either non-negated or negated (using ~):
                 filtered_df = filtered_df[~regex_condition] if not test_for_equal else filtered_df[regex_condition]
+            else:
+                # If it is a column with string values we strip leading/trailing spaces
+                if pd.api.types.is_string_dtype(filtered_df[field]):
+                    filtered_df[field] = filtered_df[field].str.strip()
+                if not test_for_equal:
+                    filtered_df = filtered_df[~filtered_df[field].isin(value)]
+                else:
+                    filtered_df = filtered_df[filtered_df[field].isin(value)]
 
             self.logger.info(
                 "Data frame has %s row(s) and %s column(s) after filter -> %s has been applied.",

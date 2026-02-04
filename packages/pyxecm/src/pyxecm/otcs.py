@@ -1030,16 +1030,14 @@ class OTCS:
             self.logger.warning("Ontology file not found - cannot load the ontology.")
             return False
 
-        json_content = self.get_json_document(node_id=int(document_id))
-        if not json_content:
-            self.logger.error(
-                "Cannot load ontology from JSON document -> %s (%s)", self.ONTOLOGY_FILE_NAME, document_id
-            )
-            return False
-
         try:
-            self._workspace_ontology = json.loads(json_content)
-        except json.JSONDecodeError as json_error:
+            self._workspace_ontology = self.get_json_document(node_id=int(document_id))
+            if not self._workspace_ontology:
+                self.logger.error(
+                    "Cannot load ontology from JSON document -> %s (%s)", self.ONTOLOGY_FILE_NAME, document_id
+                )
+                return False
+        except Exception as json_error:
             self.logger.error(
                 "Invalid JSON input in document -> %s (%s); error -> %s",
                 self.ONTOLOGY_FILE_NAME,

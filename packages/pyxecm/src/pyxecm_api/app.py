@@ -54,7 +54,7 @@ elif not os.path.exists(api_settings.logfolder):
 
 @asynccontextmanager
 async def lifespan(
-    app: FastAPI,
+    app: FastAPI,  # noqa: ARG001
 ) -> AsyncGenerator:
     """Lifespan function for FASTAPI to handle the startup and shutdown process.
 

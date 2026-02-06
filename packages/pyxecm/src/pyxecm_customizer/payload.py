@@ -13570,6 +13570,7 @@ class Payload:
 
             for entity in entities:
                 workspace_type_name = entity.get("name")
+                workspace_type_description = entity.get("description", "")
                 if not workspace_type_name:
                     self.logger.error(
                         "Ontology -> '%s' has an entity -> %s without a name! Skipping to next entity...",
@@ -13598,9 +13599,11 @@ class Payload:
                 synonyms = entity.get("synonyms", [])
                 if synonyms:
                     # As we don't have a datastructure in OTCM for Workspace Type synonyms we just write them
-                    # into the description field:
+                    # into the description field (appended to the regular description):
+                    item_description = workspace_type_description + "\n"
                     response = self._otcs.update_item(
-                        node_id=workspace_type_node_id, item_description="Synonyms: " + ", ".join(synonyms)
+                        node_id=workspace_type_node_id,
+                        item_description=item_description + "Synonyms: " + ", ".join(synonyms),
                     )
                     if not response:
                         self.logger.error(

@@ -929,7 +929,7 @@ class OTCS:
                   "source_type": "Project",
                   "target_type": "Customer",
                   "direction": "parent",
-                  "predicate": [
+                  "predicates": [
                       "is for",
                       "belongs to"
                   ]
@@ -17888,6 +17888,227 @@ class OTCS:
             )
 
         return bool(response and response.ok)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_records_details")
+    def get_node_records_details(
+        self,
+        node_id: int,
+    ) -> dict | None:
+        """Get the Records Details for the node with the given ID.
+
+        Args:
+            node_id (int):
+                The node ID of the Content Server item to get the records details for.
+
+        Returns:
+            dict | None:
+                REST response or None if the REST call fails.
+
+        """
+
+        request_url = self.config()["nodesUrl"] + "/{}/rmclassifications".format(node_id)
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get records details of the node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get records details of the node with ID -> {}".format(node_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="set_node_records_details")
+    def set_node_records_details(
+        self,
+        node_id: int,
+        metadata_token: str | None = None,
+        rsi: str | None = None,
+        status: str | None = None,
+        essential: str | None = None,
+        storage: str | None = None,
+        official: bool | None = None,
+    ) -> dict | None:
+        """Set records details for the node with the given ID.
+
+        Args:
+            node_id (int):
+                The node ID of the Content Server item to set the records details for.
+            metadata_token (str | None):
+                The metadata token to be used for setting the records management details.
+            rsi (str | None):
+                The security clearance level to be set for the node.
+            status (str | None):
+                The record status to be set for the node.
+            essential (str | None):
+                The essential to be set for the node.
+            storage (str | None):
+                The storage to be set for the node.
+            official (bool | None):
+                The official flag to be set for the node.
+
+        Returns:
+            dict | None:
+                REST response or None if the REST call fails.
+
+        """
+
+        request_url = self.config()["nodesUrl"] + "/{}/securityclearances".format(node_id)
+        request_header = self.request_form_header()
+
+        put_records_detail_data = {
+            "metadata_token": metadata_token,
+        }
+        if rsi is not None:
+            put_records_detail_data["rsi"] = rsi
+        if status is not None:
+            put_records_detail_data["status"] = status
+        if essential is not None:
+            put_records_detail_data["essential"] = essential
+        if storage is not None:
+            put_records_detail_data["storage"] = storage
+        if official is not None:
+            put_records_detail_data["official"] = official
+
+        self.logger.debug(
+            "Set records details of the node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            data={"body": json.dumps(put_records_detail_data)},
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to set records details of the node with ID -> {}".format(node_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_security_clearance")
+    def get_node_security_clearance(
+        self,
+        node_id: int,
+    ) -> dict | None:
+        """Get the Security Clearance Level and Supplemental Markings for the node with the given ID.
+
+        Args:
+            node_id (int):
+                The node ID of the Content Server item to get the security clearance and supplemental markings for.
+
+        Returns:
+            dict | None:
+                REST response or None if the REST call fails.
+
+        """
+
+        request_url = self.config()["nodesUrl"] + "/{}/securityclearances".format(node_id)
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get security clearances of the node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get security clearances of the node with ID -> {}".format(node_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="set_node_security_clearance")
+    def set_node_security_clearance(
+        self,
+        node_id: int,
+        clearance_level: int,
+        supplemental_markings: list[str],
+    ) -> dict | None:
+        """Set Security Clearance Level and Supplemental Markings for the node with the given ID.
+
+        Args:
+            node_id (int):
+                The node ID of the Content Server item to set the security clearance for.
+            clearance_level (int):
+                The security clearance level to be set for the node.
+            supplemental_markings (list of strings):
+                A list of supplemental markings to be set for the node.
+
+        Returns:
+            dict | None:
+                REST response or None if the REST call fails.
+
+        """
+
+        request_url = self.config()["nodesUrl"] + "/{}/securityclearances".format(node_id)
+        request_header = self.request_form_header()
+
+        put_security_clearance_data = {
+            "clearance_level": clearance_level,
+            "supplemental_markings": supplemental_markings,
+        }
+
+        self.logger.debug(
+            "Set security clearances and supplemental markings of the node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            data={"body": json.dumps(put_security_clearance_data)},
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to set security clearances and supplemental markings of the node with ID -> {}".format(
+                node_id
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_security_clearance")
+    def get_user_security_clearance(
+        self,
+    ) -> dict | None:
+        """Get the Security Clearance level of the current (authenticated) Content Server user.
+
+        Returns:
+            dict | None:
+                REST response or None if the REST call fails.
+
+        """
+
+        request_url = self.config()["securityClearancesUrl"]
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get security clearances of the current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get security clearances of the current user",
+        )
 
     # end method definition
 

@@ -124,20 +124,22 @@ class OTPD:
         else:
             otpd_config["password"] = ""
 
+        # Base URL Settings
         otpd_base_url = protocol + "://" + otpd_config["hostname"]
         if str(port) not in ["80", "443"]:
             otpd_base_url += ":{}".format(port)
         otpd_config["baseUrl"] = otpd_base_url
 
-        otpd_servermanager_url = otpd_base_url + "/ServerManager"
-        otpd_config["serverManagerUrl"] = otpd_servermanager_url
+        # Server Manager URL Settings:
+        otpd_config["serverManagerUrl"] = otpd_base_url + "/ServerManager"
+        otpd_config["restUrl"] = otpd_config["serverManagerUrl"] + "/api"
+        otpd_config["settingsUrl"] = otpd_config["restUrl"] + "/v1/settings"
+        otpd_config["importDatabaseUrl"] = otpd_config["serverManagerUrl"] + "/servlet/import"
 
-        otpd_rest_url = otpd_servermanager_url + "/api"
-        otpd_config["restUrl"] = otpd_rest_url
-
-        otpd_config["settingsUrl"] = otpd_rest_url + "/v1/settings"
-
-        otpd_config["importDatabaseUrl"] = otpd_servermanager_url + "/servlet/import"
+        # Content Manager URL Settings:
+        otpd_config["contentManagerUrl"] = otpd_base_url + "/c4ApplicationServer"
+        otpd_config["contentManagerRestUrl"] = otpd_config["contentManagerUrl"] + "/rest"
+        otpd_config["documentGenerationUrl"] = otpd_config["contentManagerRestUrl"] + "/document"
 
         self._config = otpd_config
         self._jsessionid = None
@@ -472,7 +474,7 @@ class OTPD:
                     self.config()["username"],
                     self.config()["password"],
                 ),
-                verify=False,  # for localhost deployments this will fail otherwis e# noqa: S501
+                verify=False,  # for localhost deployments this will fail otherwise # noqa: S501
                 timeout=None,
             )
             if response.ok:
@@ -657,7 +659,7 @@ class OTPD:
                         return None
             # end try
             self.logger.info(
-                "Retrying REST API %s call -> %s... (retry = %s",
+                "Retrying REST API %s call -> %s... (retry = %s)",
                 method,
                 url,
                 str(retries),
@@ -683,7 +685,7 @@ class OTPD:
             self.logger.error("Cannot generate PowerDocs document from empty payload!")
             return None
 
-        url = self.config()["baseUrl"] + "/c4ApplicationServer/rest/document"
+        url = self.config()["documentGenerationUrl"]
 
         body = {"documentgeneration": payload}
 

@@ -165,6 +165,7 @@ def load_payload(
             ImportError,
             ValueError,
             SyntaxError,
+            RuntimeError,
         ) as exc:
             exception = f"Error while reading Terraform payload file -> '{payload_source}'! --> {traceback.format_exception_only(exc)}"
             raise PayloadImportError(exception) from exc
@@ -3590,14 +3591,7 @@ class Payload:
                         self.process_workspace_templates()
                     case "ontologies":
                         self._log_header_callback("Process Ontologies")
-                        otcs_version = float(self._otcs.get_server_version())
-                        if otcs_version >= 26.2:
-                            self.process_ontologies()
-                        else:
-                            self.logger.warning(
-                                "Ontologies are only supported in OTCS version 26.2 and higher! Current version is %s. Skipping...",
-                                str(otcs_version),
-                            )
+                        self.process_ontologies()
                     case "workspaces":
                         # If a payload file (e.g. additional ones) does not have
                         # transportPackages then it can happen that the self._business_object_types and
@@ -13529,6 +13523,11 @@ class Payload:
 
         success: bool = True
 
+        merged_entities = {}
+        merged_relationships = {}
+
+        otcs_version = float(self._otcs.get_server_version())
+
         for ontology in self._ontologies:
             ontology_name = ontology.get("name")
             if not ontology_name:
@@ -13596,7 +13595,7 @@ class Payload:
 
                 self.logger.info("Processing ontology entity -> '%s' (%s)...", workspace_type_name, workspace_type_id)
 
-                synonyms = entity.get("synonyms", [])
+                synonyms = set(entity.get("synonyms", []))
                 if synonyms:
                     # As we don't have a datastructure in OTCM for Workspace Type synonyms we just write them
                     # into the description field (appended to the regular description):
@@ -13612,6 +13611,21 @@ class Payload:
                         )
                         success = False
                 # end if synonyms
+
+                # Build the merged entity structure:
+                if workspace_type_name not in merged_entities:
+                    merged_entities[workspace_type_name] = {
+                        "name": workspace_type_name,
+                        "description": workspace_type_description,
+                        "synonyms": synonyms,
+                        "ontologies": {ontology_name},
+                    }
+                else:
+                    # as the same entity type can be defined in multiple ontologies we need to:
+                    # 1. merge the synonyms and
+                    # 2. keep track in which ontologies this entity type is defined:
+                    merged_entities[workspace_type_name]["synonyms"].update(synonyms)
+                    merged_entities[workspace_type_name]["ontologies"].add(ontology_name)
 
                 # Build the data structure required for updating the workspace type
                 # with the ontology information. As we can have multiple ontologies
@@ -13685,6 +13699,23 @@ class Payload:
                         }
                     )
                     added += 1
+
+                    # Build the merged relationships structure:
+                    rel_key = (workspace_type_name, target_wksp_type_name, rel_type)
+                    if rel_key not in merged_relationships:
+                        merged_relationships[rel_key] = {
+                            "source_type": workspace_type_name,
+                            "target_type": target_wksp_type_name,
+                            "rel_type": rel_type,
+                            "predicates": set(rel.get("predicates", [])),
+                            "ontologies": {ontology_name},
+                        }
+                    else:
+                        # as the same relationship can be defined in multiple ontologies we need to:
+                        # 1. merge the predicates and
+                        # 2. keep track in which ontologies this relationship is defined:
+                        merged_relationships[rel_key]["predicates"].update(rel.get("predicates", []))
+                        merged_relationships[rel_key]["ontologies"].add(ontology_name)
                 # end for rel in relationships
 
                 if not entity_relations or added == 0:
@@ -13694,24 +13725,90 @@ class Payload:
                     )
                     continue
 
-                # Update the workspace type with the relationships:
-                response = self._otcs.update_workspace_type_relations(
-                    type_id=workspace_type_id, relations=entity_relations
-                )
-                if not response:
-                    self.logger.error(
-                        "Failed to update ontology relations for workspace type -> '%s'!",
-                        workspace_type_name,
+                # We can only use the follow REST API call to update the workspace type relationships
+                # for OTCM 26.2 and above. For older versions of OTCS we just write out the JSON file
+                # with the ontology information to a folder in Content Server and the Knowledge Graph
+                # class will read it from there (via the method load_workspace_ontology() in the OTCS class):
+                if otcs_version >= 26.2:
+                    # Update the workspace type with the relationships:
+                    response = self._otcs.update_workspace_type_relations(
+                        type_id=workspace_type_id, relations=entity_relations
                     )
-                    success = False
-                    continue
-                self.logger.info(
-                    "Successfully updated entity type -> '%s' with %d relations.",
-                    workspace_type_name,
-                    len(entity_relations),
-                )
+                    if not response:
+                        self.logger.error(
+                            "Failed to update ontology relations for workspace type -> '%s'!",
+                            workspace_type_name,
+                        )
+                        success = False
+                        continue
+                    self.logger.info(
+                        "Successfully updated entity type -> '%s' with %d relations.",
+                        workspace_type_name,
+                        len(entity_relations),
+                    )
+                # end if otcs_version >= 26.2
+                else:
+                    self.logger.warning(
+                        "OTCM version < 26.2 detected. Skipping update of workspace type relationships via REST API."
+                    )
+
             # end for entity in entities
         # end for ontology in self._ontologies
+
+        # Convert sets back to sorted lists for JSON serializability
+        final_entities = []
+        for e in merged_entities.values():
+            e["synonyms"] = sorted(e["synonyms"])
+            e["ontologies"] = sorted(e["ontologies"])
+            final_entities.append(e)
+
+        final_relationships = []
+        for r in merged_relationships.values():
+            r["predicates"] = sorted(r["predicates"])
+            r["ontologies"] = sorted(r["ontologies"])
+            final_relationships.append(r)
+
+        # Combine it into one data structure:
+        combined_data = {
+            "entities": final_entities,
+            "relationships": final_relationships,
+        }
+
+        target_folder = self._otcs.get_node_by_volume_and_path(
+            volume_type=self._otcs.VOLUME_TYPE_ENTERPRISE_WORKSPACE, path=["Administration"]
+        )
+        if not target_folder:
+            target_folder = self._otcs.get_node_by_volume_and_path(
+                volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE, path=[]
+            )
+        target_folder_id = self._otcs.get_result_value(response=target_folder, key="id")
+        response = self._otcs.upload_file_to_parent(
+            parent_id=target_folder_id,
+            file_name=self._otcs.ONTOLOGY_FILE_NAME,
+            file_content=json.dumps(combined_data, indent=2),
+            description=(
+                "This file contains the merged ontology information from the payload for all processed ontologies. "
+                "It is written here for usage of the Knowledge Graph AI tool for OTCM versions <= 26.2"
+            ),
+            replace_existing=True,
+            mime_type="application/json",
+        )
+        if not response:
+            self.logger.error("Failed to upload the merged ontology information file to Content Server!")
+        else:
+            document_id = self._otcs.get_result_value(response=response, key="id")
+            response = self._otcs.set_node_nickname(
+                node_id=document_id, nickname=self._otcs.ONTOLOGY_NICK_NAME, show_error=True
+            )
+            if not response:
+                self.logger.error("Failed to set nickname for the merged ontology information file in Content Server!")
+            else:
+                self.logger.info(
+                    "Successfully saved ontology file -> '%s' (%s) to folder with ID -> %s",
+                    self._otcs.ONTOLOGY_FILE_NAME,
+                    document_id,
+                    target_folder_id,
+                )
 
         self.write_status_file(
             success=success,

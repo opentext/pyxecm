@@ -11099,10 +11099,10 @@ class OTCS:
     ) -> dict | None:
         """Update workspace type configured in OTCS.
 
-        Currently its main purpose is to update the onotology relations
+        Currently its main purpose is to update the ontology relations
         for a given workspace type.
 
-        This method can only be used with OTCM 26.2 or newer!
+        NOTE: This method can only be used with OTCM 26.2 or newer!
 
         Args:
             type_id (int):
@@ -11133,7 +11133,6 @@ class OTCS:
             url=request_url,
             method="PUT",
             headers=request_header,
-            #            data=workspace_type_put_body,
             data={"body": json.dumps(workspace_type_put_body)},
             timeout=None,
             failure_message="Failed to update workspace type with ID -> {}".format(type_id),
@@ -17896,7 +17895,7 @@ class OTCS:
         self,
         node_id: int,
     ) -> dict | None:
-        """Get the Records Details for the node with the given ID.
+        """Get the records details for the node with the given ID.
 
         Args:
             node_id (int):

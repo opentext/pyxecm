@@ -865,7 +865,7 @@ class OTMM:
                 self._asset_download_locks[asset_id] = threading.Lock()
             asset_lock = self._asset_download_locks[asset_id]
 
-        request_url = download_url if download_url else self.config()["assetsUrl"] + "/" + asset_id + "/contents"
+        request_url = download_url or self.config()["assetsUrl"] + "/" + asset_id + "/contents"
 
         # We use the Asset ID as the filename to avoid name collisions:
         file_name = os.path.join(self._download_dir, asset_id)

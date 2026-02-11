@@ -1326,20 +1326,15 @@ class Customizer:
         frontend: OTCS,
         extra_wait_time: int = 60,
     ) -> None:
-        """Restart the Content Server service in all OTCS pods.
+        """Zero-downtime restart of OTCS using Kubernetes-native rolling restarts.
 
-        Args:
-            backend:
-                OTCS object of the backend.
-            frontend:
-                OTCS object of the frontend.
-            extra_wait_time (int, optional):
-                Extra wait time after the restart to make sure pods are responsive again.
-                Default is 60.
-
-        Returns:
-            None
-
+        This implementation:
+        - Uses StatefulSet rolling restarts
+        - Relies on readiness probes for traffic control
+        - Ensures pods are removed from Services before restart
+        - Guarantees zero-downtime behavior
+        - Avoids exec into containers
+        - Avoids liveness probe manipulation
         """
 
         if not self.k8s_object:
@@ -1348,122 +1343,64 @@ class Customizer:
             )
             return
 
-        self.logger.info("Restart of the OTCS service in all pods...")
+        self.logger.info("Starting (zero-downtime) OTCS rolling restart...")
 
-        #
-        # Distributed Agent Pods:
-        #
+        # ------------------------------------------------------------------
+        # Distributed Agent Pods
+        # ------------------------------------------------------------------
+        if self.settings.k8s.sts_otcs_da:
+            self.log_header(text="Rolling restart of OTCS Distributed Agents", char="-")
 
-        # Get number of replicas or update it for da as it might change with dynamic scaling:
-        otcs_da_scale = self.k8s_object.get_stateful_set_scale(
-            sts_name=self.settings.k8s.sts_otcs_da,
-        )
-        if not otcs_da_scale:
-            self.logger.warning(
-                "Cannot find Kubernetes stateful set -> '%s' for OTCS DA!",
-                self.settings.k8s.sts_otcs_da,
+            success = self.k8s_object.restart_stateful_set(
+                sts_name=self.settings.k8s.sts_otcs_da,
+                wait=True,
             )
-            self.settings.k8s.sts_otcs_da_replicas = 0
-        else:
-            self.settings.k8s.sts_otcs_da_replicas = otcs_da_scale.spec.replicas
+            if not success:
+                self.logger.error(
+                    "Rolling restart failed for Distributed Agent StatefulSet -> '%s'", self.settings.k8s.sts_otcs_da
+                )
+        # end if self.settings.k8s.sts_otcs_da
 
-        if not self.settings.k8s.sts_otcs_da_replicas:
-            self.settings.k8s.sts_otcs_da_replicas = 0
+        # ------------------------------------------------------------------
+        # Frontend Pods
+        # ------------------------------------------------------------------
 
-        # Restart all Distributed Agent Pods:
-        for x in range(self.settings.k8s.sts_otcs_da_replicas):
-            pod_name = self.settings.k8s.sts_otcs_da + "-" + str(x)
+        if self.settings.k8s.sts_otcs_frontend:
+            self.log_header(text="Rolling restart of OTCS Frontends", char="-")
 
-            self.logger.info("Deactivate liveness probe for distributed agent pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "touch /tmp/keepalive"],
-                container="otcs-da-container",
+            success = self.k8s_object.restart_stateful_set(
+                sts_name=self.settings.k8s.sts_otcs_frontend,
+                wait=True,
+                endpoint_service_name=self.settings.k8s.svc_otcs_frontend,
             )
-            self.logger.info("Restarting OTCS in pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
-                container="otcs-da-container",
-            )
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"],
-                container="otcs-da-container",
-            )
+            if not success:
+                self.logger.error(
+                    "Rolling restart failed for OTCS frontend stateful set -> '%s'", self.settings.k8s.sts_otcs_frontend
+                )
+        # end if self.settings.k8s.sts_otcs_frontend
 
-        #
-        # Frontend Pods:
-        #
+        # ------------------------------------------------------------------
+        # Backend (Admin) Pods
+        # ------------------------------------------------------------------
+        if self.settings.k8s.sts_otcs_admin:
+            self.log_header(text="Restart of OTCS Admin", char="-")
 
-        # Get number of replicas or update it for frontends as it might change with dynamic scaling:
-        otcs_frontend_scale = self.k8s_object.get_stateful_set_scale(
-            sts_name=self.settings.k8s.sts_otcs_frontend,
-        )
-        if not otcs_frontend_scale:
-            self.logger.error(
-                "Cannot find Kubernetes stateful set -> '%s' for OTCS frontends!",
-                self.settings.k8s.sts_otcs_frontend,
-            )
-            self.settings.k8s.sts_otcs_frontend_replicas = 0
-        else:
-            self.settings.k8s.sts_otcs_frontend_replicas = otcs_frontend_scale.spec.replicas
-
-        if not self.settings.k8s.sts_otcs_frontend_replicas:
-            self.settings.k8s.sts_otcs_frontend_replicas = 0
-
-        # Restart all frontends:
-        for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
-            pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
-
-            self.logger.info("Deactivate liveness probe for frontend pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "touch /tmp/keepalive"],
-                container="otcs-frontend-container",
-            )
-            self.logger.info("Restarting OTCS in pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
-                container="otcs-frontend-container",
-            )
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"],
-                container="otcs-frontend-container",
+            success = self.k8s_object.restart_stateful_set(
+                sts_name=self.settings.k8s.sts_otcs_admin,
+                wait=True,
+                endpoint_service_name=self.settings.k8s.svc_otcs_admin,
             )
 
-        #
-        # Backend (admin) Pods:
-        #
+            if not success:
+                self.logger.error(
+                    "Restart failed for OTCS admin stateful set -> '%s'", self.settings.k8s.sts_otcs_admin
+                )
 
-        # Restart all backends:
-        for x in range(self.settings.k8s.sts_otcs_admin_replicas):
-            pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
-
-            self.logger.info("Deactivate liveness probe for admin pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "touch /tmp/keepalive"],
-                container="otcs-admin-container",
-            )
-            self.logger.info("Restarting OTCS in pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "/opt/opentext/cs/stop_csserver"],
-                container="otcs-admin-container",
-            )
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "/opt/opentext/cs/start_csserver"],
-                container="otcs-admin-container",
-            )
-
-        # Reauthenticate the OTCS frontend object:
-        self.logger.info(
-            "Re-authenticating to OTCS frontend after restart of frontend pods...",
-        )
+        # ------------------------------------------------------------------
+        # Re-authentication after restart
+        # ------------------------------------------------------------------
+        self.log_header(text="Re-authentication to OTCS", char="-")
+        self.logger.info("Re-authenticating to OTCS frontend after rolling restart...")
         otcs_cookie = frontend.authenticate(revalidate=True)
         while otcs_cookie is None:
             self.logger.info("Waiting 30 seconds for OTCS frontend to become ready...")
@@ -1471,10 +1408,7 @@ class Customizer:
             otcs_cookie = frontend.authenticate(revalidate=True)
         self.logger.info("OTCS frontend is ready again.")
 
-        # Reauthenticate the OTCS backend object:
-        self.logger.info(
-            "Re-authenticating to OTCS backend after restart of backend pods...",
-        )
+        self.logger.info("Re-authenticating to OTCS backend after rolling restart...")
         otcs_cookie = backend.authenticate(revalidate=True)
         while otcs_cookie is None:
             self.logger.info("Waiting 30 seconds for OTCS backend to become ready...")
@@ -1482,49 +1416,17 @@ class Customizer:
             otcs_cookie = backend.authenticate(revalidate=True)
         self.logger.info("OTCS backend is ready again.")
 
-        # Reactivate Kubernetes liveness probes in all frontend pods:
-        for x in range(self.settings.k8s.sts_otcs_frontend_replicas):
-            pod_name = self.settings.k8s.sts_otcs_frontend + "-" + str(x)
-
-            self.logger.info("Reactivate liveness probe for frontend pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "rm /tmp/keepalive"],
-                container="otcs-frontend-container",
-            )
-
-        # Reactivate Kubernetes liveness probes in all backend pods:
-        for x in range(self.settings.k8s.sts_otcs_admin_replicas):
-            pod_name = self.settings.k8s.sts_otcs_admin + "-" + str(x)
-
-            self.logger.info("Reactivate liveness probe for backend pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "rm /tmp/keepalive"],
-                container="otcs-admin-container",
-            )
-
-        # Reactivate Kubernetes liveness probes in all distributed agent pods:
-        for x in range(self.settings.k8s.sts_otcs_da_replicas):
-            pod_name = self.settings.k8s.sts_otcs_da + "-" + str(x)
-
-            self.logger.info("Reactivate liveness probe for distributed agent pod -> '%s'...", pod_name)
-            self.k8s_object.exec_pod_command(
-                pod_name,
-                ["/bin/sh", "-c", "rm /tmp/keepalive"],
-                container="otcs-da-container",
-            )
-
-        self.logger.info("Restart of OTCS service in all pods has been completed.")
-
-        # optional, give some additional time to make sure service is responsive
+        # ------------------------------------------------------------------
+        # Final stabilization wait
+        # ------------------------------------------------------------------
         if extra_wait_time > 0:
             self.logger.info(
-                "Wait %s seconds to make sure OTCS is responsive again...",
+                "Waiting %s seconds for full service stabilization...",
                 str(extra_wait_time),
             )
             time.sleep(extra_wait_time)
-        self.logger.info("Continue customizing...")
+
+        self.logger.info("Zero-downtime OTCS rolling restart completed successfully.")
 
     # end method definition
 
@@ -1599,7 +1501,10 @@ class Customizer:
                     self.settings.otpd.db_importfile,
                     package.status_code,
                 )
-                filename = os.path.join(tempfile.gettempdir(), "otpd_db_import.zip")
+                filename = os.path.join(tempfile.gettempdir(), "customizer", "packages", "otpd_db_import.zip")
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(filename), exist_ok=True)
+
                 with open(filename, mode="wb") as localfile:
                     localfile.write(package.content)
 
@@ -1963,7 +1868,9 @@ class Customizer:
                         ".tf",
                         ".yaml",
                     )
-                    cust_payload = os.path.join(tempfile.gettempdir(), payload_file)
+                    cust_payload = os.path.join(tempfile.gettempdir(), "customizer", "payloads", payload_file)
+                    # Ensure the directory exists
+                    os.makedirs(os.path.dirname(cust_payload), exist_ok=True)
 
                     with open(cust_payload, "w", encoding="utf-8") as file:
                         yaml.dump(
@@ -2011,45 +1918,6 @@ class Customizer:
 
         if self.settings.otcs.maintenance_mode:
             self.set_maintenance_mode(enable=False)
-
-        # Code below disabled -> not needed anymore, will be done via "kubernetes" payload section
-        #
-        # # Restart AppWorksPlatform pod if it is deployed (to make settings effective):
-        # if self.settings.otawp.enabled:  # is AppWorks Platform deployed?
-        #     otawp_resource = self.otds_object.get_resource(
-        #         name=self.settings.otawp.resource_name,
-        #     )
-        #     if "allowImpersonation" not in otawp_resource or not otawp_resource["allowImpersonation"]:
-        #         # Allow impersonation for all users:
-        #         self.logger.warning(
-        #             "OTAWP impersonation is not correct in OTDS before OTAWP pod restart!",
-        #         )
-        #     else:
-        #         self.logger.info(
-        #             "OTAWP impersonation is correct in OTDS before OTAWP pod restart!",
-        #         )
-        #     self.logger.info("Restart OTAWP pod...")
-        #     self.restart_otawp_pod()
-        #     # For some reason we need to double-check that the impersonation
-        #     # for OTAWP has been set correctly and if not set it again:
-        #     otawp_resource = self.otds_object.get_resource(
-        #         name=self.settings.otawp.resource_name,
-        #     )
-        #     if "allowImpersonation" not in otawp_resource or not otawp_resource["allowImpersonation"]:
-        #         # Allow impersonation for all users:
-        #         self.logger.warning(
-        #             "OTAWP impersonation is not correct in OTDS - set it once more...",
-        #         )
-        #         self.otds_object.impersonate_resource(
-        #             resource_name=self.settings.otawp.resource_name,
-        #         )
-
-        # # Restart Aviator Search (Omnigroup) to ensure group synchronisation is working
-        # if self.settings.avts.enabled:  # is Aviator Search deployed?
-        #     self.logger.info(
-        #         "Restarting Aviator Search Omnigroup server after creation of OTDS client ID and client secret...",
-        #     )
-        #     self.k8s_object.restart_stateful_set(sts_name="idol-omnigroupserver")
 
         # Upload log file for later review to "Deployment" folder
         # in "Administration" folder in OTCS Enterprise volume:

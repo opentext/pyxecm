@@ -8,6 +8,7 @@ from threading import Lock, Thread
 from typing import Annotated
 
 import anyio
+from anyio import Path
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pyxecm_customizer.k8s import K8s
@@ -85,10 +86,12 @@ async def post_otcs_log_file(
     if key != settings.upload_key:
         raise HTTPException(status_code=403, detail="Invalid Uploadkey")
 
-    os.makedirs(settings.upload_folder, exist_ok=True)
+    upload_dir = Path(settings.upload_folder)
+    await upload_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        async with await anyio.open_file(os.path.join(settings.upload_folder, file.filename), "wb") as f:
+        file_path = str(upload_dir / file.filename)
+        async with await anyio.open_file(file_path, "wb") as f:
             # Process the file in chunks instead of loading the entire file into memory
             while True:
                 chunk = await file.read(65536)  # Read 64KB at a time
@@ -112,13 +115,17 @@ async def get_otcs_log_files(
 ) -> JSONResponse:
     """List all otcs logs that can be downloaded."""
 
-    os.makedirs(settings.upload_folder, exist_ok=True)
+    upload_dir = Path(settings.upload_folder)
+    await upload_dir.mkdir(parents=True, exist_ok=True)
 
     files = []
-    for filename in sorted(os.listdir(settings.upload_folder)):
-        file_path = os.path.join(settings.upload_folder, filename)
-        if os.path.isfile(file_path):
-            file_size = os.path.getsize(file_path)
+    entries = [entry.name async for entry in upload_dir.iterdir()]
+
+    for filename in sorted(entries):
+        file_path = upload_dir / filename
+        if await file_path.is_file():
+            stat = await file_path.stat()
+            file_size = stat.st_size
             files.append({"filename": filename, "size": file_size})
 
     response = {"status": {host: bool(otcs_logs_lock[host].locked()) for host in otcs_logs_lock}, "files": files}
@@ -152,7 +159,8 @@ async def delete_otcs_log_files(
     settings: Annotated[CustomizerAPISettings, Depends(get_settings)],
 ) -> JSONResponse:
     """Delete all otcs log files."""
-    shutil.rmtree(settings.upload_folder)
+    # Use a thread to run the blocking rmtree to avoid blocking the event loop
+    await anyio.to_thread.run_sync(shutil.rmtree, settings.upload_folder)
     return JSONResponse({"message": "Successfully deleted all files"}, status_code=HTTPStatus.OK)
 
 
@@ -163,13 +171,14 @@ async def delete_otcs_log_file(
     file_name: str,
 ) -> FileResponse:
     """Delete single OTCS log archive."""
-    file_path = os.path.join(settings.upload_folder, file_name)
+    upload_dir = Path(settings.upload_folder)
+    file_path = upload_dir / file_name
 
-    if not os.path.exists(file_path):
+    if not await file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
-        os.remove(file_path)
+        await anyio.to_thread.run_sync(os.remove, str(file_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{e}") from e
 
@@ -183,8 +192,9 @@ async def get_otcs_log_file(
     file_name: str,
 ) -> FileResponse:
     """Download OTCS log archive."""
-    file_path = os.path.join(settings.upload_folder, file_name)
-    if not os.path.exists(file_path):
+    upload_dir = Path(settings.upload_folder)
+    file_path = upload_dir / file_name
+    if not await file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(file_path, media_type="application/octet-stream", filename=file_name)
+    return FileResponse(str(file_path), media_type="application/octet-stream", filename=file_name)

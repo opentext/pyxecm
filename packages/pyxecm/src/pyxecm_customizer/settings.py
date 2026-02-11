@@ -263,6 +263,8 @@ class CustomizerSettingsK8S(BaseModel):
     cm_otawp: str = Field(default="appworks-config-ymls", description="Name of the OTAWP configmap")
     pod_otpd: str = Field(default="otpd-0", description="Name of the OTPD pod")
     pod_otac: str = Field(default="otac-0", description="Name of the OTAC pod")
+    svc_otcs_frontend: str = Field(default="otcs-frontend", description="Name of the OTCS-FRONTEND service")
+    svc_otcs_admin: str = Field(default="otcs-admin-0", description="Name of the OTCS-ADMIN service")
     sts_otcs_frontend: str = Field(default="otcs-frontend", description="Name of the OTCS-FRONTEND statefulset")
     sts_otcs_frontend_replicas: int = Field(None)
     sts_otcs_admin: str = Field(default="otcs-admin", description="Name of the OTCS-ADMIN statefulset")

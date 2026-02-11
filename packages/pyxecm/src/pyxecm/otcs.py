@@ -88,7 +88,7 @@ REQUEST_MAX_RETRIES = 4
 default_logger = logging.getLogger(MODULE_NAME)
 
 try:
-    import magic
+    import magic  # pyright: ignore[reportMissingImports]
 
     magic_installed = True
 except ModuleNotFoundError:
@@ -1320,7 +1320,7 @@ class OTCS:
                     elif show_warning:
                         self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
-                            warning_message if warning_message else failure_message,
+                            warning_message or failure_message,
                             response.status_code,
                             HTTPStatus(response.status_code).phrase,
                             response_text,
@@ -4527,8 +4527,8 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get group -> '{}'".format(name if name else group_id),
-            warning_message="Group -> '{}' does not yet exist".format(name if name else group_id),
+            failure_message="Failed to get group -> '{}'".format(name or group_id),
+            warning_message="Group -> '{}' does not yet exist".format(name or group_id),
             show_error=show_error,
         )
 
@@ -9955,7 +9955,7 @@ class OTCS:
             )
 
         # Step 2: Create Transport Workbench (if not yet exist)
-        workbench_name = package_name.split(".")[0]
+        workbench_name = package_name.split(".", maxsplit=1)[0]
         self.logger.debug(
             "Check if workbench -> '%s' is already deployed...",
             workbench_name,
@@ -13909,6 +13909,54 @@ class OTCS:
             warning_message="Cannot create item -> '{}'".format(item_name),
             failure_message="Failed to create item -> '{}'".format(item_name),
             show_error=show_error,
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="copy_node")
+    def copy_node(
+        self, node_id: int, parent_id: int, new_name: str, parse_error_response: bool | None = False
+    ) -> dict | None:
+        """Create a copy of a node based on an existing, specified node to a specified destination, optionally with as a new name.
+
+        Args:
+            parent_id (int):
+                The node ID of the target location (parent).
+            node_id (int):
+                The node ID of the document to copy.
+            new_name (str):
+                The name of the item to create.
+            parse_error_response (bool, optional):
+                Whether the error response text should be interpreted as JSON and loaded. Defaults to False.
+
+        Returns:
+            dict | None:
+                Response of the REST call (converted to a Python dictionary) or
+                None if the calls fails.
+
+        """
+
+        request_header = self.request_form_header()
+        request_url = self.config()["nodesUrlv2"]
+
+        self.logger.debug(
+            "Copying the item with ID -> %s under parent with ID -> %d; calling -> %s", node_id, parent_id, request_url
+        )
+
+        create_document_post_data = {
+            "parent_id": parent_id,
+            "name": new_name,
+            "original_id": node_id,
+        }
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data={"body": json.dumps(create_document_post_data)},
+            timeout=None,
+            parse_error_response=parse_error_response,
+            failure_message="Failed to create item -> '{}' ({})".format(new_name, node_id),
         )
 
     # end method definition
@@ -17961,11 +18009,11 @@ class OTCS:
 
         """
 
-        request_url = self.config()["nodesUrl"] + "/{}/securityclearances".format(node_id)
+        request_url = f"{self.config()['nodesUrl']}/{node_id}/rmclassifications"
         request_header = self.request_form_header()
 
         put_records_detail_data = {
-            "metadata_token": metadata_token,
+            "rm_metadataToken": metadata_token,
         }
         if rsi is not None:
             put_records_detail_data["rsi"] = rsi
@@ -18057,10 +18105,13 @@ class OTCS:
         request_url = self.config()["nodesUrl"] + "/{}/securityclearances".format(node_id)
         request_header = self.request_form_header()
 
-        put_security_clearance_data = {
-            "clearance_level": clearance_level,
-            "supplemental_markings": supplemental_markings,
-        }
+        put_security_clearance_data = {}
+
+        if clearance_level is not None:
+            put_security_clearance_data["clearance_level"] = clearance_level
+
+        if supplemental_markings is not None:
+            put_security_clearance_data["supplemental_markings"] = supplemental_markings
 
         self.logger.debug(
             "Set security clearances and supplemental markings of the node with ID -> %d; calling -> %s",
@@ -19694,7 +19745,7 @@ class OTCS:
             node_id = node
             node = self.get_node(node_id=node_id)
         else:
-            self.logger.error("Illegal type of node object. Expect 'int' or 'dict'!")
+            self.logger.error("Illegal type of node object. Expect 'int' or 'dict'! Cannot traverse node.")
             return None
 
         # Run executables:
@@ -21801,9 +21852,7 @@ class OTCS:
                     "binaries": False,  # enable processing of document content (TXT, PDF, ...). CSAI does this automatically. Should be False.
                     "upload": not remove_existing,  # add or replace embedding. Should be True except for removal of embeddings.
                     "remove": remove_existing,  # If True remove embedding for the given node. Either "upload" or "remove" must be True (only).
-                    "imagePrompt": image_prompt  # Custom image prompt.
-                    if image_prompt
-                    else "Extract all information from the picture, please.",
+                    "imagePrompt": image_prompt or "Extract all information from the picture, please.",
                     "maxRelations": 0,  # Crawl related workspaces. 0 = turned off. Otherwise number of related workspaces to process.
                 }
                 if message_override:

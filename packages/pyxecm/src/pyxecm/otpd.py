@@ -604,7 +604,7 @@ class OTPD:
                     elif show_warning:
                         self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
-                            warning_message if warning_message else failure_message,
+                            warning_message or failure_message,
                             response.status_code,
                             HTTPStatus(response.status_code).phrase,
                             response_text,

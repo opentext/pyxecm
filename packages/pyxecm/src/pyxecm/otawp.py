@@ -357,18 +357,16 @@ class OTAWP:
 
         otawp_config = {}
 
-        otawp_config["hostname"] = hostname if hostname else "appworks"
-        otawp_config["protocol"] = protocol if protocol else "http"
-        otawp_config["port"] = port if port else 8080
-        otawp_config["username"] = username if username else "sysadmin"
-        otawp_config["password"] = password if password else ""
-        otawp_config["organization"] = organization if organization else "system"
-        otawp_config["configMapName"] = config_map_name if config_map_name else ""
-        otawp_config["licenseFile"] = license_file if license_file else ""
-        otawp_config["productName"] = product_name if product_name else "APPWORKS_PLATFORM"
-        otawp_config["productDescription"] = (
-            product_description if product_description else "OpenText Appworks Platform"
-        )
+        otawp_config["hostname"] = hostname or "appworks"
+        otawp_config["protocol"] = protocol or "http"
+        otawp_config["port"] = port or 8080
+        otawp_config["username"] = username or "sysadmin"
+        otawp_config["password"] = password or ""
+        otawp_config["organization"] = organization or "system"
+        otawp_config["configMapName"] = config_map_name or ""
+        otawp_config["licenseFile"] = license_file or ""
+        otawp_config["productName"] = product_name or "APPWORKS_PLATFORM"
+        otawp_config["productDescription"] = product_description or "OpenText Appworks Platform"
 
         if otawp_ticket:
             self._otawp_ticket = otawp_ticket
@@ -938,7 +936,7 @@ class OTAWP:
             except requests.RequestException as req_exception:
                 self.logger.error(
                     "%s; error -> %s",
-                    failure_message if failure_message else "Request to -> %s failed",
+                    failure_message or "Request to -> %s failed",
                     str(req_exception),
                 )
                 return None
@@ -967,7 +965,7 @@ class OTAWP:
             elif show_warning:
                 self.logger.warning(
                     "%s; status -> %s/%s; warning -> %s",
-                    warning_message if warning_message else failure_message,
+                    warning_message or failure_message,
                     response.status_code,
                     HTTPStatus(response.status_code).phrase,
                     response.text,

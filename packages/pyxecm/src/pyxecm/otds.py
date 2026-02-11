@@ -715,7 +715,7 @@ class OTDS:
                     elif show_warning:
                         self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
-                            warning_message if warning_message else failure_message,
+                            warning_message or failure_message,
                             response.status_code,
                             HTTPStatus(response.status_code).phrase,
                             response_text,
@@ -1085,8 +1085,8 @@ class OTDS:
             "name": name,
             "description": description,
             "userPartitionID": partition_id,
-            "values": values if values else [],
-            "customAttributes": custom_attributes if custom_attributes else [],
+            "values": values or [],
+            "customAttributes": custom_attributes or [],
         }
 
         request_url = self.config()["rolesUrl"]
@@ -1778,7 +1778,7 @@ class OTDS:
 
         """
 
-        if attribute_name in ["description"]:
+        if attribute_name == "description":
             user_patch_body_json = {
                 "userPartitionID": partition,
                 attribute_name: attribute_value,

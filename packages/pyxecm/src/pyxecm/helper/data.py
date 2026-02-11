@@ -1896,7 +1896,7 @@ class Data:
             # (if it exists, otherwise None). So x is self._df[parent_field], i.e.
             # what the lambda function gets 'applied' on.
             self._df[flat_field] = self._df[parent_field].apply(
-                lambda x, sub_field=flatten_field: (x.get(sub_field, None) if isinstance(x, dict) else None),
+                lambda x, sub_field=flatten_field: x.get(sub_field, None) if isinstance(x, dict) else None,
             )
 
     # end method definition
@@ -2354,22 +2354,17 @@ class Data:
                     dict_key,
                 )
                 self._df[column] = self._df[column].apply(
-                    lambda x,
-                    dict_key=dict_key,
-                    replacements=replacements,
-                    upper=upper,
-                    lower=lower,
-                    capitalize=capitalize,
-                    title=title,
-                    length=length: self._cleanse_subfield(
-                        data=x,
-                        dict_key=dict_key,
-                        replacements=replacements,
-                        upper=upper,
-                        lower=lower,
-                        capitalize=capitalize,
-                        title=title,
-                        length=length,
+                    lambda x, dict_key=dict_key, replacements=replacements, upper=upper, lower=lower, capitalize=capitalize, title=title, length=length: (
+                        self._cleanse_subfield(
+                            data=x,
+                            dict_key=dict_key,
+                            replacements=replacements,
+                            upper=upper,
+                            lower=lower,
+                            capitalize=capitalize,
+                            title=title,
+                            length=length,
+                        )
                     ),
                 )
             # end if "." in column
@@ -2390,13 +2385,7 @@ class Data:
                         column,
                     )
                     self._df[column] = self._df[column].apply(
-                        lambda x,
-                        replacements=replacements,
-                        upper=upper,
-                        lower=lower,
-                        capitalize=capitalize,
-                        title=title,
-                        length=length: (
+                        lambda x, replacements=replacements, upper=upper, lower=lower, capitalize=capitalize, title=title, length=length: (
                             self._apply_string_cleansing(
                                 value=x,
                                 replacements=replacements,
@@ -2420,13 +2409,7 @@ class Data:
                         column,
                     )
                     self._df[column] = self._df[column].apply(
-                        lambda x,
-                        replacements=replacements,
-                        upper=upper,
-                        lower=lower,
-                        capitalize=capitalize,
-                        title=title,
-                        length=length: (
+                        lambda x, replacements=replacements, upper=upper, lower=lower, capitalize=capitalize, title=title, length=length: (
                             [
                                 (
                                     self._apply_string_cleansing(
@@ -3311,7 +3294,7 @@ class Data:
 
         for col in columns:
             self._df[col] = self._df[col].apply(
-                lambda x: (split_string_ignoring_quotes(x, delimiter) if isinstance(x, str) and delimiter in x else x),
+                lambda x: split_string_ignoring_quotes(x, delimiter) if isinstance(x, str) and delimiter in x else x,
             )
 
     # end method definition

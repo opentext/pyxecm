@@ -1349,7 +1349,7 @@ class Payload:
         self._k8s = k8s_object
         self._otds = otds_object
         self._otac = otac_object
-        self._otcs = otcs_backend_object
+        self._otcs = otcs_frontend_object  # we now want the frontend to be the default because it supports zero downtime restarts
         self._otcs_backend = otcs_backend_object
         self._otcs_frontend = otcs_frontend_object
         self._otiv = otiv_object
@@ -1933,7 +1933,7 @@ class Payload:
 
             self.logger.info("Restart AppWorks Kubernetes stateful set -> '%s'...", self._otawp.hostname())
 
-            self._k8s.restart_stateful_set(sts_name=self._otawp.hostname(), force=True, wait=True)
+            self._k8s.restart_stateful_set(sts_name=self._otawp.hostname(), wait=True)
 
             self._otawp.set_organization(organization)
             otawp_cookie = self._otawp.authenticate(revalidate=True)
@@ -2564,7 +2564,9 @@ class Payload:
             prefix=prefix,
         )
 
-        full_path = os.path.join(tempfile.gettempdir(), file_name)
+        full_path = os.path.join(tempfile.gettempdir(), "customizer", "status_files", file_name)
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
         with open(full_path, mode="w", encoding="utf-8") as localfile:
             localfile.write(json.dumps(payload_section, indent=2))
@@ -3480,7 +3482,7 @@ class Payload:
                         )
                         if restart_required:
                             self.logger.info(
-                                "Admin settings (Post) require a restart of OTCS services...",
+                                "Admin settings (post) require a restart of OTCS services...",
                             )
                             # Restart OTCS frontend and backend pods:
                             self._otcs_restart_callback(
@@ -3689,7 +3691,7 @@ class Payload:
                         )
                         if restart_required:
                             self.logger.info(
-                                "WebReports (Post) require a restart of OTCS services...",
+                                "WebReports (post) require a restart of OTCS services...",
                             )
                             # Restart OTCS frontend and backend pods:
                             self._otcs_restart_callback(
@@ -3816,13 +3818,6 @@ class Payload:
                     self._otcs_restart_callback(
                         backend=self._otcs_backend,
                         frontend=self._otcs_frontend,
-                    )
-                # Avoid out of cycle message for bulkDatasources if it is
-                # passed in the payload:
-                elif payload_section["name"] != "bulkDatasources":
-                    self.logger.info(
-                        "Payload section -> '%s' does not require a restart of OTCS services.",
-                        payload_section["name"],
                     )
 
         with tracer.start_as_current_span("process_payload_users"):
@@ -5129,7 +5124,7 @@ class Payload:
             if isinstance(trusted_site, dict) and "enabled" in trusted_site and not trusted_site["enabled"]:
                 self.logger.info(
                     "Payload for OTDS Trusted Site -> '%s' is disabled. Skipping...",
-                    url if url else "<undefined>",
+                    url or "<undefined>",
                 )
                 continue
 
@@ -7339,7 +7334,7 @@ class Payload:
                     update_data["email"] = user_email
                     # If email is changed this needs to be confirmed by passing
                     # the current (old) password:
-                    update_data["password"] = old_password if old_password else user_password
+                    update_data["password"] = old_password or user_password
                     # As email has changed - we need the email verification below...
                     need_email_verification = True
                     url_search_pattern = "verify-email"
@@ -8874,11 +8869,7 @@ class Payload:
                 # we try to extract the site URL from the site ID
                 # which typically has a format like this:
                 # ideateqa.sharepoint.com,2c59000d-f3e7-44d1-9a8e-e5df82b8ab01,34b48533-af41-4743-8b41-185a21f0b80f
-                site_url = (
-                    self._m365.config()["sharepointAppRootSite"]
-                    if self._m365.config()["sharepointAppRootSite"]
-                    else "https://" + site_id.split(",", 1)[0]
-                )
+                site_url = self._m365.config()["sharepointAppRootSite"] or "https://" + site_id.split(",", 1)[0]
                 # Build the web part create data:
                 create_data = {
                     "@odata.type": "microsoft.graph.webPartData",
@@ -9156,7 +9147,7 @@ class Payload:
         # Write this information back into the data structure:
         external_system["external_system_hostname"] = external_system_hostname
         # Extract the port:
-        external_system_port = urlparse(as_url).port if urlparse(as_url).port else 80
+        external_system_port = urlparse(as_url).port or 80
         # Write this information back into the data structure:
         external_system["external_system_port"] = external_system_port
 
@@ -9646,7 +9637,7 @@ class Payload:
         """
 
         if not download_dir:
-            download_dir = os.path.join(tempfile.gettempdir(), "transports/")
+            download_dir = os.path.join(tempfile.gettempdir(), "customizer", "transports")
 
         if not self._http_object:
             self._http_object = HTTP(logger=self.logger)
@@ -10043,7 +10034,10 @@ class Payload:
             photo_id = self._otcs.get_result_value(response=response, key="id")
             photo_name = self._otcs.get_result_value(response=response, key="name")
 
-            photo_path = os.path.join(tempfile.gettempdir(), photo_name)
+            photo_path = os.path.join(tempfile.gettempdir(), "customizer", "user_photos", photo_name)
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(photo_path), exist_ok=True)
+
             result = self._otcs.download_document(
                 node_id=photo_id,
                 file_path=photo_path,
@@ -10063,7 +10057,7 @@ class Payload:
             )
 
             # Upload photo to M365:
-            response = self._m365.update_user_photo(user_m365_id, photo_path)
+            response = self._m365.update_user_photo(user_id=user_m365_id, photo_path=photo_path)
             if response is None:
                 self.logger.error(
                     "Failed to upload photo for user -> '%s' to Microsoft 365!",
@@ -10087,7 +10081,9 @@ class Payload:
         else:
             photo_id = self._otcs.get_result_value(response=response, key="id")
             photo_name = self._otcs.get_result_value(response=response, key="name")
-            photo_path = os.path.join(tempfile.gettempdir(), photo_name)
+            photo_path = os.path.join(tempfile.gettempdir(), "customizer", "user_photos", photo_name)
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(photo_path), exist_ok=True)
             result = self._otcs.download_document(
                 node_id=photo_id,
                 file_path=photo_path,
@@ -10227,7 +10223,9 @@ class Payload:
                 continue
             photo_id = self._otcs.get_result_value(response=response, key="id")
             photo_name = self._otcs.get_result_value(response=response, key="name")
-            photo_path = os.path.join(tempfile.gettempdir(), photo_name)
+            photo_path = os.path.join(tempfile.gettempdir(), "customizer", "user_photos", photo_name)
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(photo_path), exist_ok=True)
 
             # Check if it is not yet downloaded:
             if not os.path.isfile(photo_path):
@@ -10382,7 +10380,9 @@ class Payload:
                 continue
             photo_id = self._otcs.get_result_value(response=response, key="id")
             photo_name = self._otcs.get_result_value(response=response, key="name")
-            photo_path = os.path.join(tempfile.gettempdir(), photo_name)
+            photo_path = os.path.join(tempfile.gettempdir(), "customizer", "user_photos", photo_name)
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(photo_path), exist_ok=True)
 
             # Check if it is not yet downloaded:
             if not os.path.isfile(photo_path):
@@ -13317,7 +13317,9 @@ class Payload:
                         "Missing mime type information - assuming 'image/png'...",
                     )
                     mime_type = "image/png"
-                file_path = os.path.join(tempfile.gettempdir(), image_nickname)
+                file_path = os.path.join(tempfile.gettempdir(), "customizer", "workspace_images", image_nickname)
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 result = self._otcs.download_document(node_id=node_id, file_path=file_path)
                 if not result:
                     self.logger.error(
@@ -13654,13 +13656,13 @@ class Payload:
                     target_wksp_type_name = self._otcs.get_result_value(response=target_wksp_type, key="wksp_type_name")
 
                     # TODO: this is a bug in the REST API - hotfix requested.
-                    if workspace_type_id == target_wksp_type_id:
-                        self.logger.warning(
-                            "The REST API does not support relationships from workspace type -> '%s' (%s) to itself! Skipping...",
-                            workspace_type_name,
-                            workspace_type_id,
-                        )
-                        continue
+                    # if workspace_type_id == target_wksp_type_id:
+                    #     self.logger.warning(
+                    #         "The REST API does not support relationships from workspace type -> '%s' (%s) to itself! Skipping...",
+                    #         workspace_type_name,
+                    #         workspace_type_id,
+                    #     )
+                    #     continue
 
                     self.logger.info(
                         "Processing ontology relationship from source entity type -> '%s' (%s) to target entity type -> '%s' (%s).",
@@ -18655,7 +18657,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_kubernetes")
     def process_kubernetes(self, section_name: str = "kubernetes") -> bool:
-        """Process actions that should be executed in the Kubernetess.
+        """Process actions to be executed in Kubernetes.
 
         Args:
             section_name (str, optional):
@@ -18799,7 +18801,7 @@ class Payload:
                         self.logger.info("%s", message)
 
                     if k8s_type.lower() == "statefulset":
-                        self.logger.info("Restarting statefulset -> %s...", name)
+                        self.logger.info("Restarting stateful set -> %s...", name)
                         restart_result = self._k8s.restart_stateful_set(sts_name=name)
 
                     elif k8s_type.lower() == "deployment":
@@ -20779,7 +20781,9 @@ class Payload:
         file_name = "data_source_" + payload_file_name + data_source_name + ".json"
         if compression:
             file_name += ".zip"
-        full_path = os.path.join(tempfile.gettempdir(), file_name)
+        full_path = os.path.join(tempfile.gettempdir(), "customizer", "data_sources", file_name)
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
         # We also want to keep the row numbers (index):
         if not data.save_json_data(
@@ -20885,7 +20889,9 @@ class Payload:
         file_name = "data_source_" + payload_file_name + data_source_name + ".json"
         if compression:
             file_name += ".zip"
-        full_path = os.path.join(tempfile.gettempdir(), file_name)
+        full_path = os.path.join(tempfile.gettempdir(), "customizer", "data_sources", file_name)
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
         # Check if the data source file has been uploaded before.
         # This can happen if we re-run the python container.
@@ -24037,7 +24043,7 @@ class Payload:
 
                     self.logger.info(
                         "Update existing workspace -> '%s' (%s) with operations -> %s...",
-                        workspace_old_name if workspace_old_name else workspace_name,
+                        workspace_old_name or workspace_name,
                         str(workspace_id),
                         str(update_operations),
                     )
@@ -24054,7 +24060,7 @@ class Payload:
                     if not response:
                         self.logger.error(
                             "Failed to update existing workspace -> '%s' (%s) with type ID -> %s!",
-                            (workspace_old_name if workspace_old_name else workspace_name),
+                            (workspace_old_name or workspace_name),
                             workspace_id,
                             workspace_type_id,
                         )
@@ -24123,7 +24129,7 @@ class Payload:
                     if not response:
                         self.logger.error(
                             "Failed to delete existing workspace -> '%s' (%s) with type ID -> %s!",
-                            (workspace_old_name if workspace_old_name else workspace_name),
+                            (workspace_old_name or workspace_name),
                             workspace_id,
                             workspace_type_id,
                         )
@@ -24132,7 +24138,7 @@ class Payload:
                         continue
                     self.logger.info(
                         "Successfully deleted existing workspace -> '%s' (%s).",
-                        workspace_old_name if workspace_old_name else workspace_name,
+                        workspace_old_name or workspace_name,
                         workspace_id,
                     )
                     result["delete_counter"] += 1
@@ -24144,7 +24150,7 @@ class Payload:
                     result["skipped_counter"] += 1
                     self.logger.info(
                         "Skipped existing workspace -> '%s' (%s)",
-                        workspace_old_name if workspace_old_name else workspace_name,
+                        workspace_old_name or workspace_name,
                         workspace_id,
                     )
                 # this is the case where we just want to operate on existing workspaces (update or delete)
@@ -24153,7 +24159,7 @@ class Payload:
                     result["skipped_counter"] += 1
                     self.logger.info(
                         "Skipped update/delete of non-existing workspace -> '%s'.",
-                        workspace_old_name if workspace_old_name else workspace_name,
+                        workspace_old_name or workspace_name,
                     )
 
                 # The following code is executed for all operations
@@ -24722,8 +24728,8 @@ class Payload:
 
             self._log_header_callback(
                 text="Process bulk workspace relationships from -> '{}' to -> '{}'".format(
-                    from_sub_workspace if from_sub_workspace else from_workspace,
-                    to_sub_workspace if to_sub_workspace else to_workspace,
+                    from_sub_workspace or from_workspace,
+                    to_sub_workspace or to_workspace,
                 ),
                 char="-",
             )
@@ -24770,16 +24776,16 @@ class Payload:
                 self.logger.error(
                     "Failed to load data source -> '%s' for bulk workspace relationships from -> '%s' to -> '%s'",
                     data_source_name,
-                    from_sub_workspace if from_sub_workspace else from_workspace,
-                    to_sub_workspace if to_sub_workspace else to_workspace,
+                    from_sub_workspace or from_workspace,
+                    to_sub_workspace or to_workspace,
                 )
                 success = False
                 continue
             if data.get_data_frame() is None or data.get_data_frame().empty:  # important to use "is None" here!
                 self.logger.info(
                     "Data source for bulk workspace relationships from -> '%s' to -> '%s' is empty. Skipping...",
-                    from_sub_workspace if from_sub_workspace else from_workspace,
-                    to_sub_workspace if to_sub_workspace else to_workspace,
+                    from_sub_workspace or from_workspace,
+                    to_sub_workspace or to_workspace,
                 )
                 continue
 
@@ -24870,8 +24876,8 @@ class Payload:
 
             self.logger.info(
                 "Bulk create workspace relationships (from workspace -> '%s' to workspace -> '%s'). Operations -> %s.",
-                from_sub_workspace if from_sub_workspace else from_workspace,
-                to_sub_workspace if to_sub_workspace else to_workspace,
+                from_sub_workspace or from_workspace,
+                to_sub_workspace or to_workspace,
                 str(operations),
             )
 
@@ -24951,8 +24957,8 @@ class Payload:
                 )
             self._log_header_callback(
                 text="Completed processing of bulk workspace relationships from -> '{}' to -> '{}'".format(
-                    from_sub_workspace if from_sub_workspace else from_workspace,
-                    to_sub_workspace if to_sub_workspace else to_workspace,
+                    from_sub_workspace or from_workspace,
+                    to_sub_workspace or to_workspace,
                 ),
                 char="-",
             )
@@ -25007,10 +25013,7 @@ class Payload:
             return (None, None)
 
         # Determine the workspace nickname field:
-        workspace_nickname_field = bulk_workspace_relationship.get(
-            "{}_workspace".format(endpoint),
-            None,
-        )
+        workspace_nickname_field = bulk_workspace_relationship.get("{}_workspace".format(endpoint))
         workspace_nickname = self.replace_bulk_placeholders(
             input_string=workspace_nickname_field,
             row=row,
@@ -25027,16 +25030,10 @@ class Payload:
             return (None, None)
 
         # Get the workspace type if specified:
-        workspace_type = bulk_workspace_relationship.get(
-            "{}_workspace_type".format(endpoint),
-            None,
-        )
+        workspace_type = bulk_workspace_relationship.get("{}_workspace_type".format(endpoint))
 
         # Get the workspace name if specified:
-        workspace_name_field = bulk_workspace_relationship.get(
-            "{}_workspace_name".format(endpoint),
-            None,
-        )
+        workspace_name_field = bulk_workspace_relationship.get("{}_workspace_name".format(endpoint))
         if workspace_name_field:
             workspace_name = self.replace_bulk_placeholders(
                 input_string=workspace_name_field,
@@ -25055,10 +25052,7 @@ class Payload:
             workspace_name = None
 
         # Get the workspace data source if specified:
-        workspace_data_source = bulk_workspace_relationship.get(
-            "{}_workspace_data_source".format(endpoint),
-            None,
-        )
+        workspace_data_source = bulk_workspace_relationship.get("{}_workspace_data_source".format(endpoint))
 
         # Based on the given information, we now try to determine
         # the name and the ID of the workspace that is the endpoint
@@ -25083,10 +25077,7 @@ class Payload:
             return (None, None)
 
         # See if a sub-workspace is configured:
-        sub_workspace_name_field = bulk_workspace_relationship.get(
-            "{}_sub_workspace_name".format(endpoint),
-            None,
-        )
+        sub_workspace_name_field = bulk_workspace_relationship.get("{}_sub_workspace_name".format(endpoint))
         # If no sub-workspace is configured we can already
         # return the resulting workspace ID and name here:
         if not sub_workspace_name_field:
@@ -25109,10 +25100,7 @@ class Payload:
             return (None, None)
 
         # See if a sub-workspace is in a sub-path of the main workspace:
-        sub_workspace_path = bulk_workspace_relationship.get(
-            "{}_sub_workspace_path".format(endpoint),
-            None,
-        )
+        sub_workspace_path = bulk_workspace_relationship.get("{}_sub_workspace_path".format(endpoint))
         if sub_workspace_path:
             # sub_workspace_path is a mutable that is changed in place!
             result = self.replace_bulk_placeholders_list(
@@ -26716,6 +26704,7 @@ class Payload:
         row: pd.Series,
         index: int,
         replacements: dict,
+        nickname: str | None = None,
     ) -> tuple[int | None, bool]:
         """Determine the workspace location to store a document in bulk processing.
 
@@ -26730,6 +26719,10 @@ class Payload:
                 The index of current row in the data frame.
             replacements (dict):
                 The replacement configuration for placeholders.
+            nickname (str | None, optional):
+                The nickname of the current bulk document. We use
+                as a fallback if the workspace name cannot be resolved
+                from the data row. Defaults to None.
 
         Returns:
             int | None:
@@ -26772,15 +26765,35 @@ class Payload:
                 replacements=replacements,
             )
 
+        # This is for handling a special case where the data source does not
+        # have the workspace name but the document nickname:
+        if not workspace_name and nickname:
+            self.logger.debug(
+                "Row -> %s does not have the data to resolve workspace name but we have a document nickname -> '%s'. Trying to find the workspace via the volume ID...",
+                str(index),
+                nickname,
+            )
+            response = self._otcs_frontend.get_node_from_nickname(nickname=nickname, show_error=False)
+            volume_id = self._otcs_frontend.get_result_value(
+                response=response,
+                key="volume_id",
+            )
+            # Check if we have a volume ID and if it is likely a workspace:
+            if volume_id is not None and volume_id > 0:
+                workspace = self._otcs_frontend.get_node(node_id=volume_id, fields=["properties{name,id}"])
+                workspace_name = self._otcs_frontend.get_result_value(
+                    response=workspace,
+                    key="name",
+                )
+
         # it could be that the current data row does not have the
         # required fields to resolve the workspace name placeholders
         # then we skip uploading the document to this workspace
         # but still keep status as successful (don't set success = False)
         if not workspace_name:
             self.logger.warning(
-                "Row -> %s does not have the required data to resolve workspace name field -> '%s' specified for document upload! Skipping document upload to this workspace...",
+                "Row -> %s does not have the required data (workspace name nor document nickname) to resolve workspace location document upload! Skipping document upload to this workspace...",
                 str(index),
-                workspace_name_field,
             )
             # We keep success = True as this is a data problem and not a config problem!
             return None, success
@@ -27686,17 +27699,14 @@ class Payload:
                 mime_type = None
 
             # Now we traverse a list of (multiple) workspaces
-            # the document should be uploaded to:
+            # the document should be uploaded to or updated in:
             success = True
             workspaces = bulk_document.get("workspaces", [])
             for workspace in workspaces:
                 # success will only be false if a config problem (failure)
                 # and not just a data problem (skipped) has occured:
                 parent_id, success = self.get_bulk_document_location(
-                    workspace=workspace,
-                    row=row,
-                    index=index,
-                    replacements=replacements,
+                    workspace=workspace, row=row, index=index, replacements=replacements, nickname=nickname
                 )
 
                 if parent_id is None:
@@ -28078,7 +28088,7 @@ class Payload:
 
                     self.logger.info(
                         "Update existing document -> '%s' (%s) with operations -> %s...",
-                        document_old_name if document_old_name else document_name,
+                        document_old_name or document_name,
                         document_id,
                         str(update_operations),
                     )
@@ -28094,7 +28104,7 @@ class Payload:
                         if not response:
                             self.logger.error(
                                 "Failed to add new version to existing document -> '%s' (%s)!",
-                                (document_old_name if document_old_name else document_name),
+                                (document_old_name or document_name),
                                 document_id,
                             )
                             success = False
@@ -28107,7 +28117,7 @@ class Payload:
                         if not response:
                             self.logger.error(
                                 "Failed to purge versions of document -> '%s' (%s) to %d version%s!",
-                                (document_old_name if document_old_name else document_name),
+                                (document_old_name or document_name),
                                 document_id,
                                 max_versions,
                                 "s" if max_versions > 1 else "",
@@ -28126,7 +28136,7 @@ class Payload:
                     if not response:
                         self.logger.error(
                             "Failed to update metadata of existing document -> '%s' (%s) with metadata -> %s!",
-                            (document_old_name if document_old_name else document_name),
+                            (document_old_name or document_name),
                             document_id,
                             str(document_category_data),
                         )
@@ -28179,14 +28189,14 @@ class Payload:
                     if not response:
                         self.logger.error(
                             "Failed to bulk delete existing document -> '%s' (%s)!",
-                            (document_old_name if document_old_name else document_name),
+                            (document_old_name or document_name),
                             document_id,
                         )
                         success = False
                         continue
                     self.logger.info(
                         "Successfully deleted existing document -> '%s' (%s).",
-                        document_old_name if document_old_name else document_name,
+                        document_old_name or document_name,
                         document_id,
                     )
                     result["delete_counter"] += 1
@@ -28197,7 +28207,7 @@ class Payload:
                 elif document_id:
                     self.logger.info(
                         "Skipped existing document -> '%s' (%s).",
-                        document_old_name if document_old_name else document_name,
+                        document_old_name or document_name,
                         document_id,
                     )
                 # this is the case where we just want to operate on existing documents (update or delete)
@@ -28206,7 +28216,7 @@ class Payload:
                     result["skipped_counter"] += 1
                     self.logger.info(
                         "Skipped update/delete of non-existing document -> '%s'.",
-                        document_old_name if document_old_name else document_name,
+                        document_old_name or document_name,
                     )
 
                 # The following code is executed for all operations
@@ -29318,7 +29328,7 @@ class Payload:
 
                     self.logger.info(
                         "Update existing item -> '%s' (%s) with operations -> %s...",
-                        item_old_name if item_old_name else item_name,
+                        item_old_name or item_name,
                         item_id,
                         str(update_operations),
                     )
@@ -29335,7 +29345,7 @@ class Payload:
                     if not response:
                         self.logger.error(
                             "Failed to update metadata of existing item -> '%s' (%s) with metadata -> %s!",
-                            (item_old_name if item_old_name else item_name),
+                            (item_old_name or item_name),
                             item_id,
                             str(item_category_data),
                         )
@@ -29359,14 +29369,14 @@ class Payload:
                     if not response:
                         self.logger.error(
                             "Failed to bulk delete existing item -> '%s' (%s)!",
-                            (item_old_name if item_old_name else item_name),
+                            (item_old_name or item_name),
                             item_id,
                         )
                         success = False
                         continue
                     self.logger.info(
                         "Successfully deleted existing item -> '%s' (%s).",
-                        item_old_name if item_old_name else item_name,
+                        item_old_name or item_name,
                         item_id,
                     )
                     result["delete_counter"] += 1
@@ -29377,7 +29387,7 @@ class Payload:
                 elif item_id:
                     self.logger.info(
                         "Skipped existing item -> '%s' (%s).",
-                        item_old_name if item_old_name else item_name,
+                        item_old_name or item_name,
                         item_id,
                     )
                 # this is the case where we just want to operate on existing items (update or delete)
@@ -29386,7 +29396,7 @@ class Payload:
                     result["skipped_counter"] += 1
                     self.logger.info(
                         "Skipped update/delete of non-existing item -> '%s'.",
-                        item_old_name if item_old_name else item_name,
+                        item_old_name or item_name,
                     )
 
                 # The following code is executed for all operations
@@ -31265,7 +31275,7 @@ class Payload:
 
                 self.logger.info(
                     "Update existing classification -> '%s' (%s) with operations -> %s...",
-                    classification_old_name if classification_old_name else classification_name,
+                    classification_old_name or classification_name,
                     str(classification_id),
                     str(update_operations),
                 )
@@ -31282,7 +31292,7 @@ class Payload:
                 if not response:
                     self.logger.error(
                         "Failed to update existing classification -> '%s' (%s)!",
-                        (classification_old_name if classification_old_name else classification_name),
+                        (classification_old_name or classification_name),
                         classification_id,
                     )
                     result["success"] = False
@@ -31308,7 +31318,7 @@ class Payload:
                 if not response:
                     self.logger.error(
                         "Failed to delete existing classification -> '%s' (%s)!",
-                        (classification_old_name if classification_old_name else classification_name),
+                        (classification_old_name or classification_name),
                         classification_id,
                     )
                     result["success"] = False
@@ -31316,7 +31326,7 @@ class Payload:
                     continue
                 self.logger.info(
                     "Successfully deleted existing classification -> '%s' (%s).",
-                    classification_old_name if classification_old_name else classification_name,
+                    classification_old_name or classification_name,
                     classification_id,
                 )
                 result["delete_counter"] += 1
@@ -31328,7 +31338,7 @@ class Payload:
                 result["skipped_counter"] += 1
                 self.logger.info(
                     "Skipped existing classification -> '%s' (%s).",
-                    classification_old_name if classification_old_name else classification_name,
+                    classification_old_name or classification_name,
                     classification_id,
                 )
             # this is the case where we just want to operate on existing classifications (update or delete)
@@ -31337,7 +31347,7 @@ class Payload:
                 result["skipped_counter"] += 1
                 self.logger.info(
                     "Skipped update/delete of non-existing classification -> '%s'.",
-                    classification_old_name if classification_old_name else classification_name,
+                    classification_old_name or classification_name,
                 )
 
             # The following code is executed for all operations

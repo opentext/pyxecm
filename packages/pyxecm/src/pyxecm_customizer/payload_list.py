@@ -242,9 +242,9 @@ class PayloadList:
         """
 
         new_item = {
-            "name": name if name else filename,
+            "name": name or filename,
             "filename": filename,
-            "dependencies": dependencies if dependencies else [],
+            "dependencies": dependencies or [],
             "logfile": logfile,
             "status": status,
             "enabled": enabled,
@@ -255,7 +255,7 @@ class PayloadList:
             "log_warning": 0,
             "log_error": 0,
             "log_critical": 0,
-            "customizer_settings": customizer_settings if customizer_settings else {},
+            "customizer_settings": customizer_settings or {},
         }
         self.payload_items = pd.concat(
             [self.payload_items, pd.DataFrame([new_item])],
@@ -602,7 +602,7 @@ class PayloadList:
         for _, row in runnable_df.iterrows():
             self.logger.debug(
                 "Added payload file -> '%s' with index -> %s to runnable queue.",
-                row["name"] if row["name"] else row["filename"],
+                row["name"] or row["filename"],
                 row["index"],
             )
 
@@ -815,7 +815,7 @@ class PayloadList:
 
                     self.logger.info(
                         "Added payload file -> '%s' with index -> %s to runnable queue.",
-                        item["name"] if item["name"] else item["filename"],
+                        item["name"] or item["filename"],
                         item["index"],
                     )
 

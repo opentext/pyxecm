@@ -5,11 +5,11 @@ import gzip
 import json
 import logging
 import os
-import shutil
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Annotated, Literal
 
+import anyio
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pyxecm_customizer.payload import load_payload
@@ -28,7 +28,7 @@ logger = logging.getLogger("pyxecm_api.v1_payload")
 
 
 @router.post(path="")
-def create_payload_item(
+async def create_payload_item(
     user: Annotated[User, Depends(get_authorized_user)],  # noqa: ARG001
     settings: Annotated[CustomizerAPISettings, Depends(get_settings)],
     upload_file: Annotated[UploadFile, File(...)],
@@ -77,8 +77,10 @@ def create_payload_item(
     file_extension = os.path.splitext(upload_file.filename)[1]
     file_name = os.path.join(settings.temp_dir, f"{name}{file_extension}")
 
-    with open(file_name, "wb") as buffer:
-        shutil.copyfileobj(upload_file.file, buffer)
+    # Read upload file asynchronously and write to disk using anyio
+    content = await upload_file.read()
+    async with anyio.open_file(file_name, "wb") as buffer:
+        await buffer.write(content)
 
     if dependencies == [-1]:
         dependencies = []
@@ -249,7 +251,7 @@ async def update_payload_item(
         update_data["duration"] = None
 
         data = PAYLOAD_LIST.get_payload_item(index=payload_id)
-        if os.path.isfile(data.logfile):
+        if await anyio.to_thread.run_sync(os.path.isfile, data.logfile):
             logger.info(
                 "Deleting log file (for payload) -> %s (%s)",
                 data.logfile,
@@ -264,7 +266,7 @@ async def update_payload_item(
                 + now.strftime("_%Y-%m-%d_%H-%M-%S.log")
             )
 
-            os.rename(data.logfile, old_log_name)
+            await anyio.to_thread.run_sync(os.rename, data.logfile, old_log_name)
 
     # Save the updated payload back to the list (or database)
     result = PAYLOAD_LIST.update_payload_item(
@@ -414,7 +416,7 @@ async def get_payload_content(
 
 
 @router.get(path="/{payload_id}/download")
-def download_payload_content(
+async def download_payload_content(
     user: Annotated[User, Depends(get_authorized_user)],  # noqa: ARG001
     payload_id: int,
 ) -> FileResponse:
@@ -428,30 +430,36 @@ def download_payload_content(
             detail="Payload with ID -> {} not found!".format(payload_id),
         )
 
-    if not os.path.isfile(payload.filename):
+    if not await anyio.to_thread.run_sync(os.path.isfile, payload.filename):
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail="Payload file -> '{}' not found".format(payload.filename),
         )
 
-    with open(payload.filename, encoding="UTF-8") as file:
-        content = file.read()
+    async with anyio.open_file(payload.filename, "rb") as file:
+        content = await file.read()
 
-        if payload.filename.endswith(".gz.b64"):
-            content = base64.b64decode(content)
-            content = gzip.decompress(content)
+    if payload.filename.endswith(".gz.b64"):
+        content = base64.b64decode(content)
+        content = gzip.decompress(content)
+
+    download_name = (
+        os.path.basename(payload.filename.removesuffix(".gz.b64"))
+        if payload.filename.endswith(".gz.b64")
+        else os.path.basename(payload.filename)
+    )
 
     return Response(
         content,
         media_type="application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{os.path.basename(payload.filename.removesuffix(".gz.b64"))}"',
+            "Content-Disposition": f'attachment; filename="{download_name}"',
         },
     )
 
 
 @router.get(path="/{payload_id}/log")
-def download_payload_logfile(
+async def download_payload_logfile(
     user: Annotated[User, Depends(get_authorized_user)],  # noqa: ARG001
     payload_id: int,
 ) -> FileResponse:
@@ -464,13 +472,15 @@ def download_payload_logfile(
 
     filename = payload.logfile
 
-    if not os.path.isfile(filename):
+    if not await anyio.to_thread.run_sync(os.path.isfile, filename):
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail="Log file -> '{}' not found".format(filename),
         )
-    with open(filename, encoding="UTF-8") as file:
-        content = file.read()
+
+    async with anyio.open_file(filename, "rb") as file:
+        content = await file.read()
+
     return Response(
         content,
         media_type="application/octet-stream",
@@ -493,8 +503,7 @@ async def stream_logfile(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Payload not found")
 
     filename = payload.logfile
-
-    if os.path.isfile(filename):
+    if await anyio.to_thread.run_sync(os.path.isfile, filename):
         return StreamingResponse(tail_log(filename), media_type="text/plain")
 
     raise HTTPException(status_code=HTTPStatus.NOT_FOUND)

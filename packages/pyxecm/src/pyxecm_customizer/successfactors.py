@@ -92,7 +92,9 @@ class SuccessFactors:
         successfactors_config["asUrl"] = as_url
         successfactors_config["clientId"] = client_id
         successfactors_config["clientSecret"] = client_secret
-        successfactors_config["username"] = username.split("@")[0]  # we don't want the company ID in the user name
+        successfactors_config["username"] = username.split("@", maxsplit=1)[
+            0
+        ]  # we don't want the company ID in the user name
         successfactors_config["password"] = password
         if company_id:
             successfactors_config["companyId"] = company_id

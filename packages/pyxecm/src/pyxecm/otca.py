@@ -144,12 +144,12 @@ class OTCA:
         otca_config["studioTenantsUrl"] = otca_config["studioModelsUrl"] + "/tenants"
         otca_config["scratchPadUrl"] = otca_config["studioUrl"] + "/v1/scratchpad"
 
-        otca_config["contentSystem"] = content_system if content_system else {"chat": "xecm", "embed": "xecm"}
+        otca_config["contentSystem"] = content_system or {"chat": "xecm", "embed": "xecm"}
         otca_config["clientId"] = client_id
         otca_config["clientSecret"] = client_secret
         otca_config["otdsUrl"] = otds_url.rstrip("/")
 
-        otca_config["synonyms"] = synonyms if synonyms else []
+        otca_config["synonyms"] = synonyms or []
         otca_config["inlineCitation"] = inline_citation
 
         self._config = otca_config

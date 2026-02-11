@@ -121,7 +121,7 @@ class XML:
                 else:
                     return {tag: text}
 
-            return {tag: node_dict if node_dict else text}
+            return {tag: node_dict or text}
 
         if encode:
             xml_string = xml_string.encode("utf-8")
@@ -180,7 +180,7 @@ class XML:
 
             # Convert the selected elements to dictionaries
             results = []
-            tag = xpath.split("/")[-1]
+            tag = xpath.rsplit("/", maxsplit=1)[-1]
             for element in elements:
                 element_dict = xmltodict.parse(etree.tostring(element))
                 if tag in element_dict:

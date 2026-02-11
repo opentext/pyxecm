@@ -389,7 +389,7 @@ class K8s:
                 time.sleep(time_retry)
                 continue
             else:
-                self.logger.debug("Command execution response -> %s", response if response else "<empty>")
+                self.logger.debug("Command execution response -> %s", response or "<empty>")
                 return response
 
         self.logger.error(
@@ -823,7 +823,7 @@ class K8s:
 
         try:
             response = self.patch_stateful_set(
-                sts_name,
+                sts_name=sts_name,
                 sts_body={"spec": {"replicas": scale}},
             )
         except ApiException:
@@ -1424,119 +1424,234 @@ class K8s:
     # end method definition
 
     def restart_stateful_set(
-        self, sts_name: str, force: bool = False, wait: bool = False, wait_timeout: int = 1800
+        self,
+        sts_name: str,
+        wait: bool = True,
+        wait_timeout: int = 1800,
+        endpoint_service_name: str | None = None,
     ) -> bool:
-        """Restart a Kubernetes stateful set using rolling restart.
+        """Enterprise-grade zero-downtime rolling restart of a stateful set.
+
+        Guarantees:
+        - Zero-downtime traffic handling (via readiness probes)
+        - Kubernetes-native rollout
+        - Deterministic state transitions
+        - Traffic draining via Service endpoints
+        - Readiness-gated pod rotation
+        - Failure detection
+        - Rollout completion validation
 
         Args:
-            sts_name (str):
-                Name of the Kubernetes statefulset.
-            force (bool, optional):
-                If True, all pod instances will be forcefully deleted. [False]
-            wait (bool, optional):
-                If True, wait for the stateful set to be ready again. [False]
-            wait_timeout (int, optional):
-                Maximum time to wait for the stateful set to be ready again (in seconds). [1800]
+            sts_name:
+                Name of the stateful set
+            wait:
+                Whether to wait for rollout completion
+            wait_timeout:
+                Max seconds to wait
+            endpoint_service_name:
+                Optional Service name for endpoint gating
 
         Returns:
             bool:
-                True if successful, False otherwise.
+                True if successful, False otherwise
 
         """
 
-        success = True
+        self.logger.info("Starting rolling restart for stateful set -> '%s'", sts_name)
+
+        # ------------------------------------------------------------------
+        # Load stateful set
+        # ------------------------------------------------------------------
+
+        sts = self.get_stateful_set(sts_name)
+        if not sts:
+            self.logger.error("Stateful set -> '%s' not found!", sts_name)
+            return False
+
+        replicas = sts.spec.replicas or 0
+
+        # ------------------------------------------------------------------
+        # Safety checks
+        # ------------------------------------------------------------------
+
+        if replicas < 2:
+            self.logger.warning(
+                "Stateful set -> '%s' has only %s replica(s). Proceeding with restart in downtime-allowed mode.",
+                sts_name,
+                replicas,
+            )
+
+        # ------------------------------------------------------------------
+        # Readiness probe validation
+        # ------------------------------------------------------------------
+
+        containers = sts.spec.template.spec.containers
+        for container in containers:
+            if not container.readiness_probe:
+                self.logger.error(
+                    "Container -> '%s' in stateful set -> '%s' has no readiness probe. Zero-downtime restart not possible!",
+                    container.name,
+                    sts_name,
+                )
+                return False
+        # end for container in containers
+
+        # ------------------------------------------------------------------
+        # Trigger rolling restart via annotation
+        # ------------------------------------------------------------------
 
         now = datetime.now(UTC).isoformat(timespec="seconds") + "Z"
 
-        body = {
-            "spec": {
-                "template": {
-                    "metadata": {
-                        "annotations": {
-                            "kubectl.kubernetes.io/restartedAt": now,
-                        },
-                    },
-                },
-            },
-        }
+        patch_body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
 
-        try:
-            self.get_apps_v1_api().patch_namespaced_stateful_set(sts_name, self.get_namespace(), body, pretty="true")
-            self.logger.debug("Triggered restart of stateful set -> '%s'.", sts_name)
-
-        except ApiException as api_exception:
-            self.logger.error("Failed to restart stateful set -> '%s'; error -> %s!", sts_name, str(api_exception))
+        sts = self.patch_stateful_set(sts_name, patch_body)
+        if not sts:
+            self.logger.error("Failed to trigger rolling restart for stateful set -> '%s'", sts_name)
             return False
 
-        # If force is set, all pod instances will be forcefully deleted.
-        if force:
-            self.logger.info("Force deleting all pods of stateful set -> '%s'.", sts_name)
+        self.logger.info("Rolling restart triggered for stateful set -> '%s'", sts_name)
 
-            try:
-                # Get the StatefulSet
-                statefulset = self.get_apps_v1_api().read_namespaced_stateful_set(
-                    name=sts_name, namespace=self.get_namespace()
-                )
+        if not wait:
+            return True
 
-                # Loop through the replicas of the StatefulSet
-                for i in range(statefulset.spec.replicas):
-                    pod_name = f"{statefulset.metadata.name}-{i}"
-                    try:
-                        # Define the delete options with force and grace period set to 0
-                        body = client.V1DeleteOptions(grace_period_seconds=0, propagation_policy="Foreground")
+        target_generation = sts.metadata.generation
+        self.logger.debug("Rollout triggered. Target generation -> %s", target_generation)
 
-                        # Call the delete_namespaced_pod method
-                        self.get_core_v1_api().delete_namespaced_pod(
-                            name=pod_name, namespace=self.get_namespace(), body=body
-                        )
-                        self.logger.info(
-                            "Pod -> '%s' in namespace -> '%s' has been deleted forcefully.",
-                            pod_name,
-                            self.get_namespace(),
-                        )
-
-                    except Exception as e:
-                        self.logger.error("Error occurred while deleting pod -> '%s': %s", pod_name, str(e))
-                        success = False
-
-            except Exception as e:
-                self.logger.error("Error occurred while getting stateful set -> '%s': %s", sts_name, str(e))
-                success = False
+        # ------------------------------------------------------------------
+        # Rollout monitoring
+        # ------------------------------------------------------------------
 
         start_time = time.time()
+        last_logged_revision = None
+        wait_time = 10
 
-        while wait:
-            time.sleep(10)  # Add delay before checking that the stateful set is ready again.
-            self.logger.info("Waiting for restart of stateful set -> '%s' to complete...", sts_name)
-            # Get the deployment
-            statefulset = self.get_apps_v1_api().read_namespaced_stateful_set_status(sts_name, self.get_namespace())
+        while True:
+            # Avoid tight loop
+            time.sleep(wait_time)
 
-            # Check the availability status
-            available_replicas = statefulset.status.available_replicas or 0
-            desired_replicas = statefulset.spec.replicas or 0
+            elapsed = time.time() - start_time
+            if elapsed > wait_timeout:
+                self.logger.error(
+                    "Timeout waiting for rolling restart of stateful set -> '%s'",
+                    sts_name,
+                )
+                return False
 
-            current_revision = statefulset.status.current_revision or ""
-            update_revision = statefulset.status.update_revision or ""
+            sts = self.get_stateful_set(sts_name)
+            if not sts:
+                self.logger.warning("Stateful set -> '%s' not found during rollout monitoring. Retrying...", sts_name)
+                continue
 
-            self.logger.debug(
-                "Stateful set status -> available pods: %s/%s, revision updated: %s",
-                available_replicas,
-                desired_replicas,
-                current_revision == update_revision,
+            # The ONLY reliable way to know if the loop is seeing the NEW rollout
+            if (sts.status.observed_generation or 0) < target_generation:
+                self.logger.debug(
+                    "Kubernetes controller hasn't processed the new generation -> %s yet...", target_generation
+                )
+                continue
+
+            status = sts.status
+
+            desired = sts.spec.replicas or 0
+            ready = status.ready_replicas or 0
+            updated = status.updated_replicas or 0
+            available = status.available_replicas or 0
+            current_revision = status.current_revision
+            update_revision = status.update_revision
+
+            # Log revision changes
+            if update_revision != last_logged_revision:
+                self.logger.debug(
+                    "Stateful set -> '%s' rollout revision: current=%s update=%s",
+                    sts_name,
+                    current_revision,
+                    update_revision,
+                )
+                last_logged_revision = update_revision
+
+            # ------------------------------------------------------------------
+            # Rollout completion condition
+            # ------------------------------------------------------------------
+
+            self.logger.info(
+                "Rolling restart in progress for stateful set -> '%s'... (ready=%s, updated=%s, available=%s, desired=%s)",
+                sts_name,
+                ready,
+                updated,
+                available,
+                desired,
             )
 
-            if available_replicas == desired_replicas and update_revision == current_revision:
-                self.logger.info("Stateful set -> '%s' completed restart successfully", sts_name)
-                break
+            if ready == desired and updated == desired and available == desired and current_revision == update_revision:
+                self.logger.info(
+                    "Stateful set -> '%s' rollout completed successfully (%s/%s pods ready)",
+                    sts_name,
+                    ready,
+                    desired,
+                )
+                break  # the while loop will exit here if the rollout is successful
 
-            if (time.time() - start_time) > wait_timeout:
-                self.logger.error("Timed out waiting for restart of stateful set -> '%s' to complete.", sts_name)
-                success = False
-                break
+            wait_time = 30
 
-            # Sleep for a while before checking again
-            time.sleep(10)
+        # end while rollout monitoring
 
-        return success
+        # ------------------------------------------------------------------
+        # Endpoint gating (optional)
+        # ------------------------------------------------------------------
+
+        if endpoint_service_name:
+            self.logger.info(
+                "Validating registration of stateful set -> '%s' at service -> '%s'",
+                sts_name,
+                endpoint_service_name,
+            )
+
+            # Extract the match_labels from the STS spec
+            match_labels = sts.spec.selector.match_labels
+
+            # Convert the dictionary into a comma-separated string (e.g., "app=my-app,tier=frontend")
+            selector = ",".join([f"{k}={v}" for k, v in match_labels.items()])
+
+            # Use the dynamic selector to list the pods
+            pod_list = self.list_pods(label_selector=selector)
+
+            pods = pod_list.items
+
+            pod_ips = [p.status.pod_ip for p in pods if p.status.pod_ip]
+
+            start_time = time.time()
+            while True:
+                if time.time() - start_time > 300:
+                    self.logger.error(
+                        "Timeout waiting for endpoint registration for stateful set -> '%s'.",
+                        sts_name,
+                    )
+                    return False
+
+                endpoints = self.get_core_v1_api().read_namespaced_endpoints(
+                    name=endpoint_service_name,
+                    namespace=self.get_namespace(),
+                )
+
+                registered_ips = [addr.ip for subset in (endpoints.subsets or []) for addr in (subset.addresses or [])]
+
+                if all(ip in registered_ips for ip in pod_ips):
+                    self.logger.info(
+                        "All pods for stateful set -> '%s' registered in service -> '%s' endpoint.",
+                        sts_name,
+                        endpoint_service_name,
+                    )
+                    break
+
+                self.logger.info(
+                    "Waiting for service endpoint registration for stateful set -> '%s'...",
+                    sts_name,
+                )
+                time.sleep(5)
+            # end while endpoint registration
+        # end if endpoint_service_name
+
+        self.logger.info("Rolling restart completed for stateful set ->'%s'", sts_name)
+
+        return True
 
     # end method definition

@@ -394,7 +394,7 @@ class M365:
                     elif show_warning:
                         self.logger.warning(
                             "%s; status -> %s/%s; warning -> %s",
-                            warning_message if warning_message else failure_message,
+                            warning_message or failure_message,
                             response.status_code,
                             HTTPStatus(response.status_code).phrase,
                             response_text,
@@ -846,7 +846,7 @@ class M365:
 
         """
 
-        request_url = next_page_url if next_page_url else self.config()["usersUrl"]
+        request_url = next_page_url or self.config()["usersUrl"]
         request_header = self.request_header()
 
         self.logger.debug(
@@ -978,12 +978,12 @@ class M365:
                 user_email,
             )
 
-        request_url = self.config()["usersUrl"] + "/" + str(user_email if user_email else user_id)
+        request_url = self.config()["usersUrl"] + "/" + str(user_email or user_id)
         request_header = self.request_header()
 
         self.logger.debug(
             "Get M365 user -> '%s'; calling -> %s",
-            str(user_email if user_email else user_id),
+            str(user_email or user_id),
             request_url,
         )
 
@@ -992,7 +992,7 @@ class M365:
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to get M365 user -> '{}'".format(user_email if user_email else user_id),
+            failure_message="Failed to get M365 user -> '{}'".format(user_email or user_id),
             show_error=show_error,
         )
 
@@ -1038,7 +1038,7 @@ class M365:
             "displayName": first_name + " " + last_name,
             "givenName": first_name,
             "surname": last_name,
-            "mailNickname": email.split("@")[0],
+            "mailNickname": email.split("@", maxsplit=1)[0],
             "userPrincipalName": email,
             "passwordProfile": {
                 "forceChangePasswordNextSignIn": False,
@@ -1462,7 +1462,7 @@ class M365:
 
         """
 
-        request_url = next_page_url if next_page_url else self.config()["groupsUrl"]
+        request_url = next_page_url or self.config()["groupsUrl"]
         request_header = self.request_header()
 
         self.logger.debug(
@@ -5832,7 +5832,7 @@ class M365:
             timeout=REQUEST_TIMEOUT,
             warning_message="Failed to follow SharePoint site -> '{}' as user -> '{}'".format(
                 site_id,
-                username if username else user_id,
+                username or user_id,
             ),
             show_error=False,
             show_warning=True,

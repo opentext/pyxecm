@@ -180,7 +180,7 @@ class BrowserAutomation:
         self.screenshot_counter = 1
         self.screenshot_full_page = True
 
-        self.wait_until = wait_until if wait_until else DEFAULT_WAIT_UNTIL_STRATEGY
+        self.wait_until = wait_until or DEFAULT_WAIT_UNTIL_STRATEGY
 
         self.screenshot_directory = os.path.join(
             tempfile.gettempdir(),

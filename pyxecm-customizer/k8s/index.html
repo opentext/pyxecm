@@ -3446,7 +3446,122 @@ and various API objects like CoreV1, AppsV1, and NetworkingV1.</p>
 <span class="normal"><a href="#__codelineno-0-1537">1537</a></span>
 <span class="normal"><a href="#__codelineno-0-1538">1538</a></span>
 <span class="normal"><a href="#__codelineno-0-1539">1539</a></span>
-<span class="normal"><a href="#__codelineno-0-1540">1540</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42"></a><span class="k">class</span><span class="w"> </span><span class="nc">K8s</span><span class="p">:</span>
+<span class="normal"><a href="#__codelineno-0-1540">1540</a></span>
+<span class="normal"><a href="#__codelineno-0-1541">1541</a></span>
+<span class="normal"><a href="#__codelineno-0-1542">1542</a></span>
+<span class="normal"><a href="#__codelineno-0-1543">1543</a></span>
+<span class="normal"><a href="#__codelineno-0-1544">1544</a></span>
+<span class="normal"><a href="#__codelineno-0-1545">1545</a></span>
+<span class="normal"><a href="#__codelineno-0-1546">1546</a></span>
+<span class="normal"><a href="#__codelineno-0-1547">1547</a></span>
+<span class="normal"><a href="#__codelineno-0-1548">1548</a></span>
+<span class="normal"><a href="#__codelineno-0-1549">1549</a></span>
+<span class="normal"><a href="#__codelineno-0-1550">1550</a></span>
+<span class="normal"><a href="#__codelineno-0-1551">1551</a></span>
+<span class="normal"><a href="#__codelineno-0-1552">1552</a></span>
+<span class="normal"><a href="#__codelineno-0-1553">1553</a></span>
+<span class="normal"><a href="#__codelineno-0-1554">1554</a></span>
+<span class="normal"><a href="#__codelineno-0-1555">1555</a></span>
+<span class="normal"><a href="#__codelineno-0-1556">1556</a></span>
+<span class="normal"><a href="#__codelineno-0-1557">1557</a></span>
+<span class="normal"><a href="#__codelineno-0-1558">1558</a></span>
+<span class="normal"><a href="#__codelineno-0-1559">1559</a></span>
+<span class="normal"><a href="#__codelineno-0-1560">1560</a></span>
+<span class="normal"><a href="#__codelineno-0-1561">1561</a></span>
+<span class="normal"><a href="#__codelineno-0-1562">1562</a></span>
+<span class="normal"><a href="#__codelineno-0-1563">1563</a></span>
+<span class="normal"><a href="#__codelineno-0-1564">1564</a></span>
+<span class="normal"><a href="#__codelineno-0-1565">1565</a></span>
+<span class="normal"><a href="#__codelineno-0-1566">1566</a></span>
+<span class="normal"><a href="#__codelineno-0-1567">1567</a></span>
+<span class="normal"><a href="#__codelineno-0-1568">1568</a></span>
+<span class="normal"><a href="#__codelineno-0-1569">1569</a></span>
+<span class="normal"><a href="#__codelineno-0-1570">1570</a></span>
+<span class="normal"><a href="#__codelineno-0-1571">1571</a></span>
+<span class="normal"><a href="#__codelineno-0-1572">1572</a></span>
+<span class="normal"><a href="#__codelineno-0-1573">1573</a></span>
+<span class="normal"><a href="#__codelineno-0-1574">1574</a></span>
+<span class="normal"><a href="#__codelineno-0-1575">1575</a></span>
+<span class="normal"><a href="#__codelineno-0-1576">1576</a></span>
+<span class="normal"><a href="#__codelineno-0-1577">1577</a></span>
+<span class="normal"><a href="#__codelineno-0-1578">1578</a></span>
+<span class="normal"><a href="#__codelineno-0-1579">1579</a></span>
+<span class="normal"><a href="#__codelineno-0-1580">1580</a></span>
+<span class="normal"><a href="#__codelineno-0-1581">1581</a></span>
+<span class="normal"><a href="#__codelineno-0-1582">1582</a></span>
+<span class="normal"><a href="#__codelineno-0-1583">1583</a></span>
+<span class="normal"><a href="#__codelineno-0-1584">1584</a></span>
+<span class="normal"><a href="#__codelineno-0-1585">1585</a></span>
+<span class="normal"><a href="#__codelineno-0-1586">1586</a></span>
+<span class="normal"><a href="#__codelineno-0-1587">1587</a></span>
+<span class="normal"><a href="#__codelineno-0-1588">1588</a></span>
+<span class="normal"><a href="#__codelineno-0-1589">1589</a></span>
+<span class="normal"><a href="#__codelineno-0-1590">1590</a></span>
+<span class="normal"><a href="#__codelineno-0-1591">1591</a></span>
+<span class="normal"><a href="#__codelineno-0-1592">1592</a></span>
+<span class="normal"><a href="#__codelineno-0-1593">1593</a></span>
+<span class="normal"><a href="#__codelineno-0-1594">1594</a></span>
+<span class="normal"><a href="#__codelineno-0-1595">1595</a></span>
+<span class="normal"><a href="#__codelineno-0-1596">1596</a></span>
+<span class="normal"><a href="#__codelineno-0-1597">1597</a></span>
+<span class="normal"><a href="#__codelineno-0-1598">1598</a></span>
+<span class="normal"><a href="#__codelineno-0-1599">1599</a></span>
+<span class="normal"><a href="#__codelineno-0-1600">1600</a></span>
+<span class="normal"><a href="#__codelineno-0-1601">1601</a></span>
+<span class="normal"><a href="#__codelineno-0-1602">1602</a></span>
+<span class="normal"><a href="#__codelineno-0-1603">1603</a></span>
+<span class="normal"><a href="#__codelineno-0-1604">1604</a></span>
+<span class="normal"><a href="#__codelineno-0-1605">1605</a></span>
+<span class="normal"><a href="#__codelineno-0-1606">1606</a></span>
+<span class="normal"><a href="#__codelineno-0-1607">1607</a></span>
+<span class="normal"><a href="#__codelineno-0-1608">1608</a></span>
+<span class="normal"><a href="#__codelineno-0-1609">1609</a></span>
+<span class="normal"><a href="#__codelineno-0-1610">1610</a></span>
+<span class="normal"><a href="#__codelineno-0-1611">1611</a></span>
+<span class="normal"><a href="#__codelineno-0-1612">1612</a></span>
+<span class="normal"><a href="#__codelineno-0-1613">1613</a></span>
+<span class="normal"><a href="#__codelineno-0-1614">1614</a></span>
+<span class="normal"><a href="#__codelineno-0-1615">1615</a></span>
+<span class="normal"><a href="#__codelineno-0-1616">1616</a></span>
+<span class="normal"><a href="#__codelineno-0-1617">1617</a></span>
+<span class="normal"><a href="#__codelineno-0-1618">1618</a></span>
+<span class="normal"><a href="#__codelineno-0-1619">1619</a></span>
+<span class="normal"><a href="#__codelineno-0-1620">1620</a></span>
+<span class="normal"><a href="#__codelineno-0-1621">1621</a></span>
+<span class="normal"><a href="#__codelineno-0-1622">1622</a></span>
+<span class="normal"><a href="#__codelineno-0-1623">1623</a></span>
+<span class="normal"><a href="#__codelineno-0-1624">1624</a></span>
+<span class="normal"><a href="#__codelineno-0-1625">1625</a></span>
+<span class="normal"><a href="#__codelineno-0-1626">1626</a></span>
+<span class="normal"><a href="#__codelineno-0-1627">1627</a></span>
+<span class="normal"><a href="#__codelineno-0-1628">1628</a></span>
+<span class="normal"><a href="#__codelineno-0-1629">1629</a></span>
+<span class="normal"><a href="#__codelineno-0-1630">1630</a></span>
+<span class="normal"><a href="#__codelineno-0-1631">1631</a></span>
+<span class="normal"><a href="#__codelineno-0-1632">1632</a></span>
+<span class="normal"><a href="#__codelineno-0-1633">1633</a></span>
+<span class="normal"><a href="#__codelineno-0-1634">1634</a></span>
+<span class="normal"><a href="#__codelineno-0-1635">1635</a></span>
+<span class="normal"><a href="#__codelineno-0-1636">1636</a></span>
+<span class="normal"><a href="#__codelineno-0-1637">1637</a></span>
+<span class="normal"><a href="#__codelineno-0-1638">1638</a></span>
+<span class="normal"><a href="#__codelineno-0-1639">1639</a></span>
+<span class="normal"><a href="#__codelineno-0-1640">1640</a></span>
+<span class="normal"><a href="#__codelineno-0-1641">1641</a></span>
+<span class="normal"><a href="#__codelineno-0-1642">1642</a></span>
+<span class="normal"><a href="#__codelineno-0-1643">1643</a></span>
+<span class="normal"><a href="#__codelineno-0-1644">1644</a></span>
+<span class="normal"><a href="#__codelineno-0-1645">1645</a></span>
+<span class="normal"><a href="#__codelineno-0-1646">1646</a></span>
+<span class="normal"><a href="#__codelineno-0-1647">1647</a></span>
+<span class="normal"><a href="#__codelineno-0-1648">1648</a></span>
+<span class="normal"><a href="#__codelineno-0-1649">1649</a></span>
+<span class="normal"><a href="#__codelineno-0-1650">1650</a></span>
+<span class="normal"><a href="#__codelineno-0-1651">1651</a></span>
+<span class="normal"><a href="#__codelineno-0-1652">1652</a></span>
+<span class="normal"><a href="#__codelineno-0-1653">1653</a></span>
+<span class="normal"><a href="#__codelineno-0-1654">1654</a></span>
+<span class="normal"><a href="#__codelineno-0-1655">1655</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42"></a><span class="k">class</span><span class="w"> </span><span class="nc">K8s</span><span class="p">:</span>
 </span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Provides an interface to interact with the Kubernetes API.</span>
 </span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44"></a>
 </span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">    This class can run both in-cluster and locally using kubeconfig.</span>
@@ -3796,7 +3911,7 @@ and various API objects like CoreV1, AppsV1, and NetworkingV1.</p>
 </span><span id="__span-0-389"><a id="__codelineno-0-389" name="__codelineno-0-389"></a>                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">time_retry</span><span class="p">)</span>
 </span><span id="__span-0-390"><a id="__codelineno-0-390" name="__codelineno-0-390"></a>                <span class="k">continue</span>
 </span><span id="__span-0-391"><a id="__codelineno-0-391" name="__codelineno-0-391"></a>            <span class="k">else</span><span class="p">:</span>
-</span><span id="__span-0-392"><a id="__codelineno-0-392" name="__codelineno-0-392"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Command execution response -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">response</span> <span class="k">if</span> <span class="n">response</span> <span class="k">else</span> <span class="s2">&quot;&lt;empty&gt;&quot;</span><span class="p">)</span>
+</span><span id="__span-0-392"><a id="__codelineno-0-392" name="__codelineno-0-392"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Command execution response -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">response</span> <span class="ow">or</span> <span class="s2">&quot;&lt;empty&gt;&quot;</span><span class="p">)</span>
 </span><span id="__span-0-393"><a id="__codelineno-0-393" name="__codelineno-0-393"></a>                <span class="k">return</span> <span class="n">response</span>
 </span><span id="__span-0-394"><a id="__codelineno-0-394" name="__codelineno-0-394"></a>
 </span><span id="__span-0-395"><a id="__codelineno-0-395" name="__codelineno-0-395"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
@@ -4230,7 +4345,7 @@ and various API objects like CoreV1, AppsV1, and NetworkingV1.</p>
 </span><span id="__span-0-823"><a id="__codelineno-0-823" name="__codelineno-0-823"></a>
 </span><span id="__span-0-824"><a id="__codelineno-0-824" name="__codelineno-0-824"></a>        <span class="k">try</span><span class="p">:</span>
 </span><span id="__span-0-825"><a id="__codelineno-0-825" name="__codelineno-0-825"></a>            <span class="n">response</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">patch_stateful_set</span><span class="p">(</span>
-</span><span id="__span-0-826"><a id="__codelineno-0-826" name="__codelineno-0-826"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-826"><a id="__codelineno-0-826" name="__codelineno-0-826"></a>                <span class="n">sts_name</span><span class="o">=</span><span class="n">sts_name</span><span class="p">,</span>
 </span><span id="__span-0-827"><a id="__codelineno-0-827" name="__codelineno-0-827"></a>                <span class="n">sts_body</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;spec&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;replicas&quot;</span><span class="p">:</span> <span class="n">scale</span><span class="p">}},</span>
 </span><span id="__span-0-828"><a id="__codelineno-0-828" name="__codelineno-0-828"></a>            <span class="p">)</span>
 </span><span id="__span-0-829"><a id="__codelineno-0-829" name="__codelineno-0-829"></a>        <span class="k">except</span> <span class="n">ApiException</span><span class="p">:</span>
@@ -4831,120 +4946,235 @@ and various API objects like CoreV1, AppsV1, and NetworkingV1.</p>
 </span><span id="__span-0-1424"><a id="__codelineno-0-1424" name="__codelineno-0-1424"></a>    <span class="c1"># end method definition</span>
 </span><span id="__span-0-1425"><a id="__codelineno-0-1425" name="__codelineno-0-1425"></a>
 </span><span id="__span-0-1426"><a id="__codelineno-0-1426" name="__codelineno-0-1426"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">restart_stateful_set</span><span class="p">(</span>
-</span><span id="__span-0-1427"><a id="__codelineno-0-1427" name="__codelineno-0-1427"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">wait</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1800</span>
-</span><span id="__span-0-1428"><a id="__codelineno-0-1428" name="__codelineno-0-1428"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="__span-0-1429"><a id="__codelineno-0-1429" name="__codelineno-0-1429"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Restart a Kubernetes stateful set using rolling restart.</span>
-</span><span id="__span-0-1430"><a id="__codelineno-0-1430" name="__codelineno-0-1430"></a>
-</span><span id="__span-0-1431"><a id="__codelineno-0-1431" name="__codelineno-0-1431"></a><span class="sd">        Args:</span>
-</span><span id="__span-0-1432"><a id="__codelineno-0-1432" name="__codelineno-0-1432"></a><span class="sd">            sts_name (str):</span>
-</span><span id="__span-0-1433"><a id="__codelineno-0-1433" name="__codelineno-0-1433"></a><span class="sd">                Name of the Kubernetes statefulset.</span>
-</span><span id="__span-0-1434"><a id="__codelineno-0-1434" name="__codelineno-0-1434"></a><span class="sd">            force (bool, optional):</span>
-</span><span id="__span-0-1435"><a id="__codelineno-0-1435" name="__codelineno-0-1435"></a><span class="sd">                If True, all pod instances will be forcefully deleted. [False]</span>
-</span><span id="__span-0-1436"><a id="__codelineno-0-1436" name="__codelineno-0-1436"></a><span class="sd">            wait (bool, optional):</span>
-</span><span id="__span-0-1437"><a id="__codelineno-0-1437" name="__codelineno-0-1437"></a><span class="sd">                If True, wait for the stateful set to be ready again. [False]</span>
-</span><span id="__span-0-1438"><a id="__codelineno-0-1438" name="__codelineno-0-1438"></a><span class="sd">            wait_timeout (int, optional):</span>
-</span><span id="__span-0-1439"><a id="__codelineno-0-1439" name="__codelineno-0-1439"></a><span class="sd">                Maximum time to wait for the stateful set to be ready again (in seconds). [1800]</span>
-</span><span id="__span-0-1440"><a id="__codelineno-0-1440" name="__codelineno-0-1440"></a>
-</span><span id="__span-0-1441"><a id="__codelineno-0-1441" name="__codelineno-0-1441"></a><span class="sd">        Returns:</span>
-</span><span id="__span-0-1442"><a id="__codelineno-0-1442" name="__codelineno-0-1442"></a><span class="sd">            bool:</span>
-</span><span id="__span-0-1443"><a id="__codelineno-0-1443" name="__codelineno-0-1443"></a><span class="sd">                True if successful, False otherwise.</span>
-</span><span id="__span-0-1444"><a id="__codelineno-0-1444" name="__codelineno-0-1444"></a>
-</span><span id="__span-0-1445"><a id="__codelineno-0-1445" name="__codelineno-0-1445"></a><span class="sd">        &quot;&quot;&quot;</span>
-</span><span id="__span-0-1446"><a id="__codelineno-0-1446" name="__codelineno-0-1446"></a>
-</span><span id="__span-0-1447"><a id="__codelineno-0-1447" name="__codelineno-0-1447"></a>        <span class="n">success</span> <span class="o">=</span> <span class="kc">True</span>
-</span><span id="__span-0-1448"><a id="__codelineno-0-1448" name="__codelineno-0-1448"></a>
-</span><span id="__span-0-1449"><a id="__codelineno-0-1449" name="__codelineno-0-1449"></a>        <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(</span><span class="n">timespec</span><span class="o">=</span><span class="s2">&quot;seconds&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;Z&quot;</span>
-</span><span id="__span-0-1450"><a id="__codelineno-0-1450" name="__codelineno-0-1450"></a>
-</span><span id="__span-0-1451"><a id="__codelineno-0-1451" name="__codelineno-0-1451"></a>        <span class="n">body</span> <span class="o">=</span> <span class="p">{</span>
-</span><span id="__span-0-1452"><a id="__codelineno-0-1452" name="__codelineno-0-1452"></a>            <span class="s2">&quot;spec&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1453"><a id="__codelineno-0-1453" name="__codelineno-0-1453"></a>                <span class="s2">&quot;template&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1454"><a id="__codelineno-0-1454" name="__codelineno-0-1454"></a>                    <span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1455"><a id="__codelineno-0-1455" name="__codelineno-0-1455"></a>                        <span class="s2">&quot;annotations&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1456"><a id="__codelineno-0-1456" name="__codelineno-0-1456"></a>                            <span class="s2">&quot;kubectl.kubernetes.io/restartedAt&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
-</span><span id="__span-0-1457"><a id="__codelineno-0-1457" name="__codelineno-0-1457"></a>                        <span class="p">},</span>
-</span><span id="__span-0-1458"><a id="__codelineno-0-1458" name="__codelineno-0-1458"></a>                    <span class="p">},</span>
-</span><span id="__span-0-1459"><a id="__codelineno-0-1459" name="__codelineno-0-1459"></a>                <span class="p">},</span>
-</span><span id="__span-0-1460"><a id="__codelineno-0-1460" name="__codelineno-0-1460"></a>            <span class="p">},</span>
-</span><span id="__span-0-1461"><a id="__codelineno-0-1461" name="__codelineno-0-1461"></a>        <span class="p">}</span>
-</span><span id="__span-0-1462"><a id="__codelineno-0-1462" name="__codelineno-0-1462"></a>
-</span><span id="__span-0-1463"><a id="__codelineno-0-1463" name="__codelineno-0-1463"></a>        <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-0-1464"><a id="__codelineno-0-1464" name="__codelineno-0-1464"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">get_apps_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">patch_namespaced_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span> <span class="n">body</span><span class="p">,</span> <span class="n">pretty</span><span class="o">=</span><span class="s2">&quot;true&quot;</span><span class="p">)</span>
-</span><span id="__span-0-1465"><a id="__codelineno-0-1465" name="__codelineno-0-1465"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Triggered restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;.&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1466"><a id="__codelineno-0-1466" name="__codelineno-0-1466"></a>
-</span><span id="__span-0-1467"><a id="__codelineno-0-1467" name="__codelineno-0-1467"></a>        <span class="k">except</span> <span class="n">ApiException</span> <span class="k">as</span> <span class="n">api_exception</span><span class="p">:</span>
-</span><span id="__span-0-1468"><a id="__codelineno-0-1468" name="__codelineno-0-1468"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Failed to restart stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;; error -&gt; </span><span class="si">%s</span><span class="s2">!&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">api_exception</span><span class="p">))</span>
+</span><span id="__span-0-1427"><a id="__codelineno-0-1427" name="__codelineno-0-1427"></a>        <span class="bp">self</span><span class="p">,</span>
+</span><span id="__span-0-1428"><a id="__codelineno-0-1428" name="__codelineno-0-1428"></a>        <span class="n">sts_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+</span><span id="__span-0-1429"><a id="__codelineno-0-1429" name="__codelineno-0-1429"></a>        <span class="n">wait</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-1430"><a id="__codelineno-0-1430" name="__codelineno-0-1430"></a>        <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1800</span><span class="p">,</span>
+</span><span id="__span-0-1431"><a id="__codelineno-0-1431" name="__codelineno-0-1431"></a>        <span class="n">endpoint_service_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1432"><a id="__codelineno-0-1432" name="__codelineno-0-1432"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="__span-0-1433"><a id="__codelineno-0-1433" name="__codelineno-0-1433"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Enterprise-grade zero-downtime rolling restart of a stateful set.</span>
+</span><span id="__span-0-1434"><a id="__codelineno-0-1434" name="__codelineno-0-1434"></a>
+</span><span id="__span-0-1435"><a id="__codelineno-0-1435" name="__codelineno-0-1435"></a><span class="sd">        Guarantees:</span>
+</span><span id="__span-0-1436"><a id="__codelineno-0-1436" name="__codelineno-0-1436"></a><span class="sd">        - Zero-downtime traffic handling (via readiness probes)</span>
+</span><span id="__span-0-1437"><a id="__codelineno-0-1437" name="__codelineno-0-1437"></a><span class="sd">        - Kubernetes-native rollout</span>
+</span><span id="__span-0-1438"><a id="__codelineno-0-1438" name="__codelineno-0-1438"></a><span class="sd">        - Deterministic state transitions</span>
+</span><span id="__span-0-1439"><a id="__codelineno-0-1439" name="__codelineno-0-1439"></a><span class="sd">        - Traffic draining via Service endpoints</span>
+</span><span id="__span-0-1440"><a id="__codelineno-0-1440" name="__codelineno-0-1440"></a><span class="sd">        - Readiness-gated pod rotation</span>
+</span><span id="__span-0-1441"><a id="__codelineno-0-1441" name="__codelineno-0-1441"></a><span class="sd">        - Failure detection</span>
+</span><span id="__span-0-1442"><a id="__codelineno-0-1442" name="__codelineno-0-1442"></a><span class="sd">        - Rollout completion validation</span>
+</span><span id="__span-0-1443"><a id="__codelineno-0-1443" name="__codelineno-0-1443"></a>
+</span><span id="__span-0-1444"><a id="__codelineno-0-1444" name="__codelineno-0-1444"></a><span class="sd">        Args:</span>
+</span><span id="__span-0-1445"><a id="__codelineno-0-1445" name="__codelineno-0-1445"></a><span class="sd">            sts_name:</span>
+</span><span id="__span-0-1446"><a id="__codelineno-0-1446" name="__codelineno-0-1446"></a><span class="sd">                Name of the stateful set</span>
+</span><span id="__span-0-1447"><a id="__codelineno-0-1447" name="__codelineno-0-1447"></a><span class="sd">            wait:</span>
+</span><span id="__span-0-1448"><a id="__codelineno-0-1448" name="__codelineno-0-1448"></a><span class="sd">                Whether to wait for rollout completion</span>
+</span><span id="__span-0-1449"><a id="__codelineno-0-1449" name="__codelineno-0-1449"></a><span class="sd">            wait_timeout:</span>
+</span><span id="__span-0-1450"><a id="__codelineno-0-1450" name="__codelineno-0-1450"></a><span class="sd">                Max seconds to wait</span>
+</span><span id="__span-0-1451"><a id="__codelineno-0-1451" name="__codelineno-0-1451"></a><span class="sd">            endpoint_service_name:</span>
+</span><span id="__span-0-1452"><a id="__codelineno-0-1452" name="__codelineno-0-1452"></a><span class="sd">                Optional Service name for endpoint gating</span>
+</span><span id="__span-0-1453"><a id="__codelineno-0-1453" name="__codelineno-0-1453"></a>
+</span><span id="__span-0-1454"><a id="__codelineno-0-1454" name="__codelineno-0-1454"></a><span class="sd">        Returns:</span>
+</span><span id="__span-0-1455"><a id="__codelineno-0-1455" name="__codelineno-0-1455"></a><span class="sd">            bool:</span>
+</span><span id="__span-0-1456"><a id="__codelineno-0-1456" name="__codelineno-0-1456"></a><span class="sd">                True if successful, False otherwise</span>
+</span><span id="__span-0-1457"><a id="__codelineno-0-1457" name="__codelineno-0-1457"></a>
+</span><span id="__span-0-1458"><a id="__codelineno-0-1458" name="__codelineno-0-1458"></a><span class="sd">        &quot;&quot;&quot;</span>
+</span><span id="__span-0-1459"><a id="__codelineno-0-1459" name="__codelineno-0-1459"></a>
+</span><span id="__span-0-1460"><a id="__codelineno-0-1460" name="__codelineno-0-1460"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Starting rolling restart for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1461"><a id="__codelineno-0-1461" name="__codelineno-0-1461"></a>
+</span><span id="__span-0-1462"><a id="__codelineno-0-1462" name="__codelineno-0-1462"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1463"><a id="__codelineno-0-1463" name="__codelineno-0-1463"></a>        <span class="c1"># Load stateful set</span>
+</span><span id="__span-0-1464"><a id="__codelineno-0-1464" name="__codelineno-0-1464"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1465"><a id="__codelineno-0-1465" name="__codelineno-0-1465"></a>
+</span><span id="__span-0-1466"><a id="__codelineno-0-1466" name="__codelineno-0-1466"></a>        <span class="n">sts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1467"><a id="__codelineno-0-1467" name="__codelineno-0-1467"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">sts</span><span class="p">:</span>
+</span><span id="__span-0-1468"><a id="__codelineno-0-1468" name="__codelineno-0-1468"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; not found!&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
 </span><span id="__span-0-1469"><a id="__codelineno-0-1469" name="__codelineno-0-1469"></a>            <span class="k">return</span> <span class="kc">False</span>
 </span><span id="__span-0-1470"><a id="__codelineno-0-1470" name="__codelineno-0-1470"></a>
-</span><span id="__span-0-1471"><a id="__codelineno-0-1471" name="__codelineno-0-1471"></a>        <span class="c1"># If force is set, all pod instances will be forcefully deleted.</span>
-</span><span id="__span-0-1472"><a id="__codelineno-0-1472" name="__codelineno-0-1472"></a>        <span class="k">if</span> <span class="n">force</span><span class="p">:</span>
-</span><span id="__span-0-1473"><a id="__codelineno-0-1473" name="__codelineno-0-1473"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Force deleting all pods of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;.&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1474"><a id="__codelineno-0-1474" name="__codelineno-0-1474"></a>
-</span><span id="__span-0-1475"><a id="__codelineno-0-1475" name="__codelineno-0-1475"></a>            <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-0-1476"><a id="__codelineno-0-1476" name="__codelineno-0-1476"></a>                <span class="c1"># Get the StatefulSet</span>
-</span><span id="__span-0-1477"><a id="__codelineno-0-1477" name="__codelineno-0-1477"></a>                <span class="n">statefulset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_apps_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">read_namespaced_stateful_set</span><span class="p">(</span>
-</span><span id="__span-0-1478"><a id="__codelineno-0-1478" name="__codelineno-0-1478"></a>                    <span class="n">name</span><span class="o">=</span><span class="n">sts_name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">()</span>
-</span><span id="__span-0-1479"><a id="__codelineno-0-1479" name="__codelineno-0-1479"></a>                <span class="p">)</span>
-</span><span id="__span-0-1480"><a id="__codelineno-0-1480" name="__codelineno-0-1480"></a>
-</span><span id="__span-0-1481"><a id="__codelineno-0-1481" name="__codelineno-0-1481"></a>                <span class="c1"># Loop through the replicas of the StatefulSet</span>
-</span><span id="__span-0-1482"><a id="__codelineno-0-1482" name="__codelineno-0-1482"></a>                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">statefulset</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span><span class="p">):</span>
-</span><span id="__span-0-1483"><a id="__codelineno-0-1483" name="__codelineno-0-1483"></a>                    <span class="n">pod_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">statefulset</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span>
-</span><span id="__span-0-1484"><a id="__codelineno-0-1484" name="__codelineno-0-1484"></a>                    <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-0-1485"><a id="__codelineno-0-1485" name="__codelineno-0-1485"></a>                        <span class="c1"># Define the delete options with force and grace period set to 0</span>
-</span><span id="__span-0-1486"><a id="__codelineno-0-1486" name="__codelineno-0-1486"></a>                        <span class="n">body</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">V1DeleteOptions</span><span class="p">(</span><span class="n">grace_period_seconds</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">propagation_policy</span><span class="o">=</span><span class="s2">&quot;Foreground&quot;</span><span class="p">)</span>
+</span><span id="__span-0-1471"><a id="__codelineno-0-1471" name="__codelineno-0-1471"></a>        <span class="n">replicas</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1472"><a id="__codelineno-0-1472" name="__codelineno-0-1472"></a>
+</span><span id="__span-0-1473"><a id="__codelineno-0-1473" name="__codelineno-0-1473"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1474"><a id="__codelineno-0-1474" name="__codelineno-0-1474"></a>        <span class="c1"># Safety checks</span>
+</span><span id="__span-0-1475"><a id="__codelineno-0-1475" name="__codelineno-0-1475"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1476"><a id="__codelineno-0-1476" name="__codelineno-0-1476"></a>
+</span><span id="__span-0-1477"><a id="__codelineno-0-1477" name="__codelineno-0-1477"></a>        <span class="k">if</span> <span class="n">replicas</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+</span><span id="__span-0-1478"><a id="__codelineno-0-1478" name="__codelineno-0-1478"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+</span><span id="__span-0-1479"><a id="__codelineno-0-1479" name="__codelineno-0-1479"></a>                <span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; has only </span><span class="si">%s</span><span class="s2"> replica(s). Proceeding with restart in downtime-allowed mode.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1480"><a id="__codelineno-0-1480" name="__codelineno-0-1480"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1481"><a id="__codelineno-0-1481" name="__codelineno-0-1481"></a>                <span class="n">replicas</span><span class="p">,</span>
+</span><span id="__span-0-1482"><a id="__codelineno-0-1482" name="__codelineno-0-1482"></a>            <span class="p">)</span>
+</span><span id="__span-0-1483"><a id="__codelineno-0-1483" name="__codelineno-0-1483"></a>
+</span><span id="__span-0-1484"><a id="__codelineno-0-1484" name="__codelineno-0-1484"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1485"><a id="__codelineno-0-1485" name="__codelineno-0-1485"></a>        <span class="c1"># Readiness probe validation</span>
+</span><span id="__span-0-1486"><a id="__codelineno-0-1486" name="__codelineno-0-1486"></a>        <span class="c1"># ------------------------------------------------------------------</span>
 </span><span id="__span-0-1487"><a id="__codelineno-0-1487" name="__codelineno-0-1487"></a>
-</span><span id="__span-0-1488"><a id="__codelineno-0-1488" name="__codelineno-0-1488"></a>                        <span class="c1"># Call the delete_namespaced_pod method</span>
-</span><span id="__span-0-1489"><a id="__codelineno-0-1489" name="__codelineno-0-1489"></a>                        <span class="bp">self</span><span class="o">.</span><span class="n">get_core_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">delete_namespaced_pod</span><span class="p">(</span>
-</span><span id="__span-0-1490"><a id="__codelineno-0-1490" name="__codelineno-0-1490"></a>                            <span class="n">name</span><span class="o">=</span><span class="n">pod_name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span> <span class="n">body</span><span class="o">=</span><span class="n">body</span>
-</span><span id="__span-0-1491"><a id="__codelineno-0-1491" name="__codelineno-0-1491"></a>                        <span class="p">)</span>
-</span><span id="__span-0-1492"><a id="__codelineno-0-1492" name="__codelineno-0-1492"></a>                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-</span><span id="__span-0-1493"><a id="__codelineno-0-1493" name="__codelineno-0-1493"></a>                            <span class="s2">&quot;Pod -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; in namespace -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; has been deleted forcefully.&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1494"><a id="__codelineno-0-1494" name="__codelineno-0-1494"></a>                            <span class="n">pod_name</span><span class="p">,</span>
-</span><span id="__span-0-1495"><a id="__codelineno-0-1495" name="__codelineno-0-1495"></a>                            <span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span>
-</span><span id="__span-0-1496"><a id="__codelineno-0-1496" name="__codelineno-0-1496"></a>                        <span class="p">)</span>
-</span><span id="__span-0-1497"><a id="__codelineno-0-1497" name="__codelineno-0-1497"></a>
-</span><span id="__span-0-1498"><a id="__codelineno-0-1498" name="__codelineno-0-1498"></a>                    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-0-1499"><a id="__codelineno-0-1499" name="__codelineno-0-1499"></a>                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Error occurred while deleting pod -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">pod_name</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-</span><span id="__span-0-1500"><a id="__codelineno-0-1500" name="__codelineno-0-1500"></a>                        <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-1501"><a id="__codelineno-0-1501" name="__codelineno-0-1501"></a>
-</span><span id="__span-0-1502"><a id="__codelineno-0-1502" name="__codelineno-0-1502"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-0-1503"><a id="__codelineno-0-1503" name="__codelineno-0-1503"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Error occurred while getting stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-</span><span id="__span-0-1504"><a id="__codelineno-0-1504" name="__codelineno-0-1504"></a>                <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-1505"><a id="__codelineno-0-1505" name="__codelineno-0-1505"></a>
-</span><span id="__span-0-1506"><a id="__codelineno-0-1506" name="__codelineno-0-1506"></a>        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-</span><span id="__span-0-1507"><a id="__codelineno-0-1507" name="__codelineno-0-1507"></a>
-</span><span id="__span-0-1508"><a id="__codelineno-0-1508" name="__codelineno-0-1508"></a>        <span class="k">while</span> <span class="n">wait</span><span class="p">:</span>
-</span><span id="__span-0-1509"><a id="__codelineno-0-1509" name="__codelineno-0-1509"></a>            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>  <span class="c1"># Add delay before checking that the stateful set is ready again.</span>
-</span><span id="__span-0-1510"><a id="__codelineno-0-1510" name="__codelineno-0-1510"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Waiting for restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; to complete...&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1511"><a id="__codelineno-0-1511" name="__codelineno-0-1511"></a>            <span class="c1"># Get the deployment</span>
-</span><span id="__span-0-1512"><a id="__codelineno-0-1512" name="__codelineno-0-1512"></a>            <span class="n">statefulset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_apps_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">read_namespaced_stateful_set_status</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">())</span>
+</span><span id="__span-0-1488"><a id="__codelineno-0-1488" name="__codelineno-0-1488"></a>        <span class="n">containers</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">template</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">containers</span>
+</span><span id="__span-0-1489"><a id="__codelineno-0-1489" name="__codelineno-0-1489"></a>        <span class="k">for</span> <span class="n">container</span> <span class="ow">in</span> <span class="n">containers</span><span class="p">:</span>
+</span><span id="__span-0-1490"><a id="__codelineno-0-1490" name="__codelineno-0-1490"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">container</span><span class="o">.</span><span class="n">readiness_probe</span><span class="p">:</span>
+</span><span id="__span-0-1491"><a id="__codelineno-0-1491" name="__codelineno-0-1491"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+</span><span id="__span-0-1492"><a id="__codelineno-0-1492" name="__codelineno-0-1492"></a>                    <span class="s2">&quot;Container -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; in stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; has no readiness probe. Zero-downtime restart not possible!&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1493"><a id="__codelineno-0-1493" name="__codelineno-0-1493"></a>                    <span class="n">container</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+</span><span id="__span-0-1494"><a id="__codelineno-0-1494" name="__codelineno-0-1494"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1495"><a id="__codelineno-0-1495" name="__codelineno-0-1495"></a>                <span class="p">)</span>
+</span><span id="__span-0-1496"><a id="__codelineno-0-1496" name="__codelineno-0-1496"></a>                <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-0-1497"><a id="__codelineno-0-1497" name="__codelineno-0-1497"></a>        <span class="c1"># end for container in containers</span>
+</span><span id="__span-0-1498"><a id="__codelineno-0-1498" name="__codelineno-0-1498"></a>
+</span><span id="__span-0-1499"><a id="__codelineno-0-1499" name="__codelineno-0-1499"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1500"><a id="__codelineno-0-1500" name="__codelineno-0-1500"></a>        <span class="c1"># Trigger rolling restart via annotation</span>
+</span><span id="__span-0-1501"><a id="__codelineno-0-1501" name="__codelineno-0-1501"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1502"><a id="__codelineno-0-1502" name="__codelineno-0-1502"></a>
+</span><span id="__span-0-1503"><a id="__codelineno-0-1503" name="__codelineno-0-1503"></a>        <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(</span><span class="n">timespec</span><span class="o">=</span><span class="s2">&quot;seconds&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;Z&quot;</span>
+</span><span id="__span-0-1504"><a id="__codelineno-0-1504" name="__codelineno-0-1504"></a>
+</span><span id="__span-0-1505"><a id="__codelineno-0-1505" name="__codelineno-0-1505"></a>        <span class="n">patch_body</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;spec&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;template&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;annotations&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;kubectl.kubernetes.io/restartedAt&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">}}}}}</span>
+</span><span id="__span-0-1506"><a id="__codelineno-0-1506" name="__codelineno-0-1506"></a>
+</span><span id="__span-0-1507"><a id="__codelineno-0-1507" name="__codelineno-0-1507"></a>        <span class="n">sts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">patch_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="n">patch_body</span><span class="p">)</span>
+</span><span id="__span-0-1508"><a id="__codelineno-0-1508" name="__codelineno-0-1508"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">sts</span><span class="p">:</span>
+</span><span id="__span-0-1509"><a id="__codelineno-0-1509" name="__codelineno-0-1509"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Failed to trigger rolling restart for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1510"><a id="__codelineno-0-1510" name="__codelineno-0-1510"></a>            <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-0-1511"><a id="__codelineno-0-1511" name="__codelineno-0-1511"></a>
+</span><span id="__span-0-1512"><a id="__codelineno-0-1512" name="__codelineno-0-1512"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rolling restart triggered for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
 </span><span id="__span-0-1513"><a id="__codelineno-0-1513" name="__codelineno-0-1513"></a>
-</span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a>            <span class="c1"># Check the availability status</span>
-</span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a>            <span class="n">available_replicas</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">available_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
-</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a>            <span class="n">desired_replicas</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span> <span class="ow">or</span> <span class="mi">0</span>
-</span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a>
-</span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a>            <span class="n">current_revision</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">current_revision</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span>
-</span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a>            <span class="n">update_revision</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">update_revision</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span>
-</span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a>
-</span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
-</span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a>                <span class="s2">&quot;Stateful set status -&gt; available pods: </span><span class="si">%s</span><span class="s2">/</span><span class="si">%s</span><span class="s2">, revision updated: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a>                <span class="n">available_replicas</span><span class="p">,</span>
-</span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a>                <span class="n">desired_replicas</span><span class="p">,</span>
-</span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a>                <span class="n">current_revision</span> <span class="o">==</span> <span class="n">update_revision</span><span class="p">,</span>
-</span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a>            <span class="p">)</span>
+</span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">wait</span><span class="p">:</span>
+</span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a>            <span class="k">return</span> <span class="kc">True</span>
+</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a>
+</span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a>        <span class="n">target_generation</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">generation</span>
+</span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Rollout triggered. Target generation -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">target_generation</span><span class="p">)</span>
+</span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a>
+</span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a>        <span class="c1"># Rollout monitoring</span>
+</span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a>
+</span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a>        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+</span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a>        <span class="n">last_logged_revision</span> <span class="o">=</span> <span class="kc">None</span>
+</span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a>        <span class="n">wait_time</span> <span class="o">=</span> <span class="mi">10</span>
 </span><span id="__span-0-1527"><a id="__codelineno-0-1527" name="__codelineno-0-1527"></a>
-</span><span id="__span-0-1528"><a id="__codelineno-0-1528" name="__codelineno-0-1528"></a>            <span class="k">if</span> <span class="n">available_replicas</span> <span class="o">==</span> <span class="n">desired_replicas</span> <span class="ow">and</span> <span class="n">update_revision</span> <span class="o">==</span> <span class="n">current_revision</span><span class="p">:</span>
-</span><span id="__span-0-1529"><a id="__codelineno-0-1529" name="__codelineno-0-1529"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; completed restart successfully&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1530"><a id="__codelineno-0-1530" name="__codelineno-0-1530"></a>                <span class="k">break</span>
+</span><span id="__span-0-1528"><a id="__codelineno-0-1528" name="__codelineno-0-1528"></a>        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+</span><span id="__span-0-1529"><a id="__codelineno-0-1529" name="__codelineno-0-1529"></a>            <span class="c1"># Avoid tight loop</span>
+</span><span id="__span-0-1530"><a id="__codelineno-0-1530" name="__codelineno-0-1530"></a>            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">wait_time</span><span class="p">)</span>
 </span><span id="__span-0-1531"><a id="__codelineno-0-1531" name="__codelineno-0-1531"></a>
-</span><span id="__span-0-1532"><a id="__codelineno-0-1532" name="__codelineno-0-1532"></a>            <span class="k">if</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">wait_timeout</span><span class="p">:</span>
-</span><span id="__span-0-1533"><a id="__codelineno-0-1533" name="__codelineno-0-1533"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Timed out waiting for restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; to complete.&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1534"><a id="__codelineno-0-1534" name="__codelineno-0-1534"></a>                <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-1535"><a id="__codelineno-0-1535" name="__codelineno-0-1535"></a>                <span class="k">break</span>
-</span><span id="__span-0-1536"><a id="__codelineno-0-1536" name="__codelineno-0-1536"></a>
-</span><span id="__span-0-1537"><a id="__codelineno-0-1537" name="__codelineno-0-1537"></a>            <span class="c1"># Sleep for a while before checking again</span>
-</span><span id="__span-0-1538"><a id="__codelineno-0-1538" name="__codelineno-0-1538"></a>            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</span><span id="__span-0-1532"><a id="__codelineno-0-1532" name="__codelineno-0-1532"></a>            <span class="n">elapsed</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+</span><span id="__span-0-1533"><a id="__codelineno-0-1533" name="__codelineno-0-1533"></a>            <span class="k">if</span> <span class="n">elapsed</span> <span class="o">&gt;</span> <span class="n">wait_timeout</span><span class="p">:</span>
+</span><span id="__span-0-1534"><a id="__codelineno-0-1534" name="__codelineno-0-1534"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+</span><span id="__span-0-1535"><a id="__codelineno-0-1535" name="__codelineno-0-1535"></a>                    <span class="s2">&quot;Timeout waiting for rolling restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1536"><a id="__codelineno-0-1536" name="__codelineno-0-1536"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1537"><a id="__codelineno-0-1537" name="__codelineno-0-1537"></a>                <span class="p">)</span>
+</span><span id="__span-0-1538"><a id="__codelineno-0-1538" name="__codelineno-0-1538"></a>                <span class="k">return</span> <span class="kc">False</span>
 </span><span id="__span-0-1539"><a id="__codelineno-0-1539" name="__codelineno-0-1539"></a>
-</span><span id="__span-0-1540"><a id="__codelineno-0-1540" name="__codelineno-0-1540"></a>        <span class="k">return</span> <span class="n">success</span>
+</span><span id="__span-0-1540"><a id="__codelineno-0-1540" name="__codelineno-0-1540"></a>            <span class="n">sts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1541"><a id="__codelineno-0-1541" name="__codelineno-0-1541"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">sts</span><span class="p">:</span>
+</span><span id="__span-0-1542"><a id="__codelineno-0-1542" name="__codelineno-0-1542"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; not found during rollout monitoring. Retrying...&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1543"><a id="__codelineno-0-1543" name="__codelineno-0-1543"></a>                <span class="k">continue</span>
+</span><span id="__span-0-1544"><a id="__codelineno-0-1544" name="__codelineno-0-1544"></a>
+</span><span id="__span-0-1545"><a id="__codelineno-0-1545" name="__codelineno-0-1545"></a>            <span class="c1"># The ONLY reliable way to know if the loop is seeing the NEW rollout</span>
+</span><span id="__span-0-1546"><a id="__codelineno-0-1546" name="__codelineno-0-1546"></a>            <span class="k">if</span> <span class="p">(</span><span class="n">sts</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">observed_generation</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">target_generation</span><span class="p">:</span>
+</span><span id="__span-0-1547"><a id="__codelineno-0-1547" name="__codelineno-0-1547"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+</span><span id="__span-0-1548"><a id="__codelineno-0-1548" name="__codelineno-0-1548"></a>                    <span class="s2">&quot;Kubernetes controller hasn&#39;t processed the new generation -&gt; </span><span class="si">%s</span><span class="s2"> yet...&quot;</span><span class="p">,</span> <span class="n">target_generation</span>
+</span><span id="__span-0-1549"><a id="__codelineno-0-1549" name="__codelineno-0-1549"></a>                <span class="p">)</span>
+</span><span id="__span-0-1550"><a id="__codelineno-0-1550" name="__codelineno-0-1550"></a>                <span class="k">continue</span>
+</span><span id="__span-0-1551"><a id="__codelineno-0-1551" name="__codelineno-0-1551"></a>
+</span><span id="__span-0-1552"><a id="__codelineno-0-1552" name="__codelineno-0-1552"></a>            <span class="n">status</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">status</span>
+</span><span id="__span-0-1553"><a id="__codelineno-0-1553" name="__codelineno-0-1553"></a>
+</span><span id="__span-0-1554"><a id="__codelineno-0-1554" name="__codelineno-0-1554"></a>            <span class="n">desired</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1555"><a id="__codelineno-0-1555" name="__codelineno-0-1555"></a>            <span class="n">ready</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">ready_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1556"><a id="__codelineno-0-1556" name="__codelineno-0-1556"></a>            <span class="n">updated</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">updated_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1557"><a id="__codelineno-0-1557" name="__codelineno-0-1557"></a>            <span class="n">available</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">available_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1558"><a id="__codelineno-0-1558" name="__codelineno-0-1558"></a>            <span class="n">current_revision</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">current_revision</span>
+</span><span id="__span-0-1559"><a id="__codelineno-0-1559" name="__codelineno-0-1559"></a>            <span class="n">update_revision</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">update_revision</span>
+</span><span id="__span-0-1560"><a id="__codelineno-0-1560" name="__codelineno-0-1560"></a>
+</span><span id="__span-0-1561"><a id="__codelineno-0-1561" name="__codelineno-0-1561"></a>            <span class="c1"># Log revision changes</span>
+</span><span id="__span-0-1562"><a id="__codelineno-0-1562" name="__codelineno-0-1562"></a>            <span class="k">if</span> <span class="n">update_revision</span> <span class="o">!=</span> <span class="n">last_logged_revision</span><span class="p">:</span>
+</span><span id="__span-0-1563"><a id="__codelineno-0-1563" name="__codelineno-0-1563"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+</span><span id="__span-0-1564"><a id="__codelineno-0-1564" name="__codelineno-0-1564"></a>                    <span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; rollout revision: current=</span><span class="si">%s</span><span class="s2"> update=</span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1565"><a id="__codelineno-0-1565" name="__codelineno-0-1565"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1566"><a id="__codelineno-0-1566" name="__codelineno-0-1566"></a>                    <span class="n">current_revision</span><span class="p">,</span>
+</span><span id="__span-0-1567"><a id="__codelineno-0-1567" name="__codelineno-0-1567"></a>                    <span class="n">update_revision</span><span class="p">,</span>
+</span><span id="__span-0-1568"><a id="__codelineno-0-1568" name="__codelineno-0-1568"></a>                <span class="p">)</span>
+</span><span id="__span-0-1569"><a id="__codelineno-0-1569" name="__codelineno-0-1569"></a>                <span class="n">last_logged_revision</span> <span class="o">=</span> <span class="n">update_revision</span>
+</span><span id="__span-0-1570"><a id="__codelineno-0-1570" name="__codelineno-0-1570"></a>
+</span><span id="__span-0-1571"><a id="__codelineno-0-1571" name="__codelineno-0-1571"></a>            <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1572"><a id="__codelineno-0-1572" name="__codelineno-0-1572"></a>            <span class="c1"># Rollout completion condition</span>
+</span><span id="__span-0-1573"><a id="__codelineno-0-1573" name="__codelineno-0-1573"></a>            <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1574"><a id="__codelineno-0-1574" name="__codelineno-0-1574"></a>
+</span><span id="__span-0-1575"><a id="__codelineno-0-1575" name="__codelineno-0-1575"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1576"><a id="__codelineno-0-1576" name="__codelineno-0-1576"></a>                <span class="s2">&quot;Rolling restart in progress for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;... (ready=</span><span class="si">%s</span><span class="s2">, updated=</span><span class="si">%s</span><span class="s2">, available=</span><span class="si">%s</span><span class="s2">, desired=</span><span class="si">%s</span><span class="s2">)&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1577"><a id="__codelineno-0-1577" name="__codelineno-0-1577"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1578"><a id="__codelineno-0-1578" name="__codelineno-0-1578"></a>                <span class="n">ready</span><span class="p">,</span>
+</span><span id="__span-0-1579"><a id="__codelineno-0-1579" name="__codelineno-0-1579"></a>                <span class="n">updated</span><span class="p">,</span>
+</span><span id="__span-0-1580"><a id="__codelineno-0-1580" name="__codelineno-0-1580"></a>                <span class="n">available</span><span class="p">,</span>
+</span><span id="__span-0-1581"><a id="__codelineno-0-1581" name="__codelineno-0-1581"></a>                <span class="n">desired</span><span class="p">,</span>
+</span><span id="__span-0-1582"><a id="__codelineno-0-1582" name="__codelineno-0-1582"></a>            <span class="p">)</span>
+</span><span id="__span-0-1583"><a id="__codelineno-0-1583" name="__codelineno-0-1583"></a>
+</span><span id="__span-0-1584"><a id="__codelineno-0-1584" name="__codelineno-0-1584"></a>            <span class="k">if</span> <span class="n">ready</span> <span class="o">==</span> <span class="n">desired</span> <span class="ow">and</span> <span class="n">updated</span> <span class="o">==</span> <span class="n">desired</span> <span class="ow">and</span> <span class="n">available</span> <span class="o">==</span> <span class="n">desired</span> <span class="ow">and</span> <span class="n">current_revision</span> <span class="o">==</span> <span class="n">update_revision</span><span class="p">:</span>
+</span><span id="__span-0-1585"><a id="__codelineno-0-1585" name="__codelineno-0-1585"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1586"><a id="__codelineno-0-1586" name="__codelineno-0-1586"></a>                    <span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; rollout completed successfully (</span><span class="si">%s</span><span class="s2">/</span><span class="si">%s</span><span class="s2"> pods ready)&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1587"><a id="__codelineno-0-1587" name="__codelineno-0-1587"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1588"><a id="__codelineno-0-1588" name="__codelineno-0-1588"></a>                    <span class="n">ready</span><span class="p">,</span>
+</span><span id="__span-0-1589"><a id="__codelineno-0-1589" name="__codelineno-0-1589"></a>                    <span class="n">desired</span><span class="p">,</span>
+</span><span id="__span-0-1590"><a id="__codelineno-0-1590" name="__codelineno-0-1590"></a>                <span class="p">)</span>
+</span><span id="__span-0-1591"><a id="__codelineno-0-1591" name="__codelineno-0-1591"></a>                <span class="k">break</span>  <span class="c1"># the while loop will exit here if the rollout is successful</span>
+</span><span id="__span-0-1592"><a id="__codelineno-0-1592" name="__codelineno-0-1592"></a>
+</span><span id="__span-0-1593"><a id="__codelineno-0-1593" name="__codelineno-0-1593"></a>            <span class="n">wait_time</span> <span class="o">=</span> <span class="mi">30</span>
+</span><span id="__span-0-1594"><a id="__codelineno-0-1594" name="__codelineno-0-1594"></a>
+</span><span id="__span-0-1595"><a id="__codelineno-0-1595" name="__codelineno-0-1595"></a>        <span class="c1"># end while rollout monitoring</span>
+</span><span id="__span-0-1596"><a id="__codelineno-0-1596" name="__codelineno-0-1596"></a>
+</span><span id="__span-0-1597"><a id="__codelineno-0-1597" name="__codelineno-0-1597"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1598"><a id="__codelineno-0-1598" name="__codelineno-0-1598"></a>        <span class="c1"># Endpoint gating (optional)</span>
+</span><span id="__span-0-1599"><a id="__codelineno-0-1599" name="__codelineno-0-1599"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1600"><a id="__codelineno-0-1600" name="__codelineno-0-1600"></a>
+</span><span id="__span-0-1601"><a id="__codelineno-0-1601" name="__codelineno-0-1601"></a>        <span class="k">if</span> <span class="n">endpoint_service_name</span><span class="p">:</span>
+</span><span id="__span-0-1602"><a id="__codelineno-0-1602" name="__codelineno-0-1602"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1603"><a id="__codelineno-0-1603" name="__codelineno-0-1603"></a>                <span class="s2">&quot;Validating registration of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; at service -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1604"><a id="__codelineno-0-1604" name="__codelineno-0-1604"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1605"><a id="__codelineno-0-1605" name="__codelineno-0-1605"></a>                <span class="n">endpoint_service_name</span><span class="p">,</span>
+</span><span id="__span-0-1606"><a id="__codelineno-0-1606" name="__codelineno-0-1606"></a>            <span class="p">)</span>
+</span><span id="__span-0-1607"><a id="__codelineno-0-1607" name="__codelineno-0-1607"></a>
+</span><span id="__span-0-1608"><a id="__codelineno-0-1608" name="__codelineno-0-1608"></a>            <span class="c1"># Extract the match_labels from the STS spec</span>
+</span><span id="__span-0-1609"><a id="__codelineno-0-1609" name="__codelineno-0-1609"></a>            <span class="n">match_labels</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">selector</span><span class="o">.</span><span class="n">match_labels</span>
+</span><span id="__span-0-1610"><a id="__codelineno-0-1610" name="__codelineno-0-1610"></a>
+</span><span id="__span-0-1611"><a id="__codelineno-0-1611" name="__codelineno-0-1611"></a>            <span class="c1"># Convert the dictionary into a comma-separated string (e.g., &quot;app=my-app,tier=frontend&quot;)</span>
+</span><span id="__span-0-1612"><a id="__codelineno-0-1612" name="__codelineno-0-1612"></a>            <span class="n">selector</span> <span class="o">=</span> <span class="s2">&quot;,&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">match_labels</span><span class="o">.</span><span class="n">items</span><span class="p">()])</span>
+</span><span id="__span-0-1613"><a id="__codelineno-0-1613" name="__codelineno-0-1613"></a>
+</span><span id="__span-0-1614"><a id="__codelineno-0-1614" name="__codelineno-0-1614"></a>            <span class="c1"># Use the dynamic selector to list the pods</span>
+</span><span id="__span-0-1615"><a id="__codelineno-0-1615" name="__codelineno-0-1615"></a>            <span class="n">pod_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">list_pods</span><span class="p">(</span><span class="n">label_selector</span><span class="o">=</span><span class="n">selector</span><span class="p">)</span>
+</span><span id="__span-0-1616"><a id="__codelineno-0-1616" name="__codelineno-0-1616"></a>
+</span><span id="__span-0-1617"><a id="__codelineno-0-1617" name="__codelineno-0-1617"></a>            <span class="n">pods</span> <span class="o">=</span> <span class="n">pod_list</span><span class="o">.</span><span class="n">items</span>
+</span><span id="__span-0-1618"><a id="__codelineno-0-1618" name="__codelineno-0-1618"></a>
+</span><span id="__span-0-1619"><a id="__codelineno-0-1619" name="__codelineno-0-1619"></a>            <span class="n">pod_ips</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pod_ip</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pods</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pod_ip</span><span class="p">]</span>
+</span><span id="__span-0-1620"><a id="__codelineno-0-1620" name="__codelineno-0-1620"></a>
+</span><span id="__span-0-1621"><a id="__codelineno-0-1621" name="__codelineno-0-1621"></a>            <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+</span><span id="__span-0-1622"><a id="__codelineno-0-1622" name="__codelineno-0-1622"></a>            <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+</span><span id="__span-0-1623"><a id="__codelineno-0-1623" name="__codelineno-0-1623"></a>                <span class="k">if</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span> <span class="o">&gt;</span> <span class="mi">300</span><span class="p">:</span>
+</span><span id="__span-0-1624"><a id="__codelineno-0-1624" name="__codelineno-0-1624"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+</span><span id="__span-0-1625"><a id="__codelineno-0-1625" name="__codelineno-0-1625"></a>                        <span class="s2">&quot;Timeout waiting for endpoint registration for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1626"><a id="__codelineno-0-1626" name="__codelineno-0-1626"></a>                        <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1627"><a id="__codelineno-0-1627" name="__codelineno-0-1627"></a>                    <span class="p">)</span>
+</span><span id="__span-0-1628"><a id="__codelineno-0-1628" name="__codelineno-0-1628"></a>                    <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-0-1629"><a id="__codelineno-0-1629" name="__codelineno-0-1629"></a>
+</span><span id="__span-0-1630"><a id="__codelineno-0-1630" name="__codelineno-0-1630"></a>                <span class="n">endpoints</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_core_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">read_namespaced_endpoints</span><span class="p">(</span>
+</span><span id="__span-0-1631"><a id="__codelineno-0-1631" name="__codelineno-0-1631"></a>                    <span class="n">name</span><span class="o">=</span><span class="n">endpoint_service_name</span><span class="p">,</span>
+</span><span id="__span-0-1632"><a id="__codelineno-0-1632" name="__codelineno-0-1632"></a>                    <span class="n">namespace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span>
+</span><span id="__span-0-1633"><a id="__codelineno-0-1633" name="__codelineno-0-1633"></a>                <span class="p">)</span>
+</span><span id="__span-0-1634"><a id="__codelineno-0-1634" name="__codelineno-0-1634"></a>
+</span><span id="__span-0-1635"><a id="__codelineno-0-1635" name="__codelineno-0-1635"></a>                <span class="n">registered_ips</span> <span class="o">=</span> <span class="p">[</span><span class="n">addr</span><span class="o">.</span><span class="n">ip</span> <span class="k">for</span> <span class="n">subset</span> <span class="ow">in</span> <span class="p">(</span><span class="n">endpoints</span><span class="o">.</span><span class="n">subsets</span> <span class="ow">or</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">addr</span> <span class="ow">in</span> <span class="p">(</span><span class="n">subset</span><span class="o">.</span><span class="n">addresses</span> <span class="ow">or</span> <span class="p">[])]</span>
+</span><span id="__span-0-1636"><a id="__codelineno-0-1636" name="__codelineno-0-1636"></a>
+</span><span id="__span-0-1637"><a id="__codelineno-0-1637" name="__codelineno-0-1637"></a>                <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="n">ip</span> <span class="ow">in</span> <span class="n">registered_ips</span> <span class="k">for</span> <span class="n">ip</span> <span class="ow">in</span> <span class="n">pod_ips</span><span class="p">):</span>
+</span><span id="__span-0-1638"><a id="__codelineno-0-1638" name="__codelineno-0-1638"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1639"><a id="__codelineno-0-1639" name="__codelineno-0-1639"></a>                        <span class="s2">&quot;All pods for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; registered in service -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; endpoint.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1640"><a id="__codelineno-0-1640" name="__codelineno-0-1640"></a>                        <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1641"><a id="__codelineno-0-1641" name="__codelineno-0-1641"></a>                        <span class="n">endpoint_service_name</span><span class="p">,</span>
+</span><span id="__span-0-1642"><a id="__codelineno-0-1642" name="__codelineno-0-1642"></a>                    <span class="p">)</span>
+</span><span id="__span-0-1643"><a id="__codelineno-0-1643" name="__codelineno-0-1643"></a>                    <span class="k">break</span>
+</span><span id="__span-0-1644"><a id="__codelineno-0-1644" name="__codelineno-0-1644"></a>
+</span><span id="__span-0-1645"><a id="__codelineno-0-1645" name="__codelineno-0-1645"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1646"><a id="__codelineno-0-1646" name="__codelineno-0-1646"></a>                    <span class="s2">&quot;Waiting for service endpoint registration for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;...&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1647"><a id="__codelineno-0-1647" name="__codelineno-0-1647"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1648"><a id="__codelineno-0-1648" name="__codelineno-0-1648"></a>                <span class="p">)</span>
+</span><span id="__span-0-1649"><a id="__codelineno-0-1649" name="__codelineno-0-1649"></a>                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+</span><span id="__span-0-1650"><a id="__codelineno-0-1650" name="__codelineno-0-1650"></a>            <span class="c1"># end while endpoint registration</span>
+</span><span id="__span-0-1651"><a id="__codelineno-0-1651" name="__codelineno-0-1651"></a>        <span class="c1"># end if endpoint_service_name</span>
+</span><span id="__span-0-1652"><a id="__codelineno-0-1652" name="__codelineno-0-1652"></a>
+</span><span id="__span-0-1653"><a id="__codelineno-0-1653" name="__codelineno-0-1653"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rolling restart completed for stateful set -&gt;&#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1654"><a id="__codelineno-0-1654" name="__codelineno-0-1654"></a>
+</span><span id="__span-0-1655"><a id="__codelineno-0-1655" name="__codelineno-0-1655"></a>        <span class="k">return</span> <span class="kc">True</span>
 </span></code></pre></div></td></tr></table></div>
               </details>
 
@@ -5628,7 +5858,7 @@ Response of the command or None if the call fails.</p>
 </span><span id="__span-0-389"><a id="__codelineno-0-389" name="__codelineno-0-389"></a>            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">time_retry</span><span class="p">)</span>
 </span><span id="__span-0-390"><a id="__codelineno-0-390" name="__codelineno-0-390"></a>            <span class="k">continue</span>
 </span><span id="__span-0-391"><a id="__codelineno-0-391" name="__codelineno-0-391"></a>        <span class="k">else</span><span class="p">:</span>
-</span><span id="__span-0-392"><a id="__codelineno-0-392" name="__codelineno-0-392"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Command execution response -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">response</span> <span class="k">if</span> <span class="n">response</span> <span class="k">else</span> <span class="s2">&quot;&lt;empty&gt;&quot;</span><span class="p">)</span>
+</span><span id="__span-0-392"><a id="__codelineno-0-392" name="__codelineno-0-392"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Command execution response -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">response</span> <span class="ow">or</span> <span class="s2">&quot;&lt;empty&gt;&quot;</span><span class="p">)</span>
 </span><span id="__span-0-393"><a id="__codelineno-0-393" name="__codelineno-0-393"></a>            <span class="k">return</span> <span class="n">response</span>
 </span><span id="__span-0-394"><a id="__codelineno-0-394" name="__codelineno-0-394"></a>
 </span><span id="__span-0-395"><a id="__codelineno-0-395" name="__codelineno-0-395"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
@@ -8996,14 +9226,22 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1C
 
 
 <h3 id="pyxecm_customizer.k8s.K8s.restart_stateful_set" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">restart_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="o">=</span><span class="mi">1800</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">restart_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="o">=</span><span class="mi">1800</span><span class="p">,</span> <span class="n">endpoint_service_name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Restart a Kubernetes stateful set using rolling restart.</p>
+        <p>Enterprise-grade zero-downtime rolling restart of a stateful set.</p>
+<p>Guarantees:
+- Zero-downtime traffic handling (via readiness probes)
+- Kubernetes-native rollout
+- Deterministic state transitions
+- Traffic draining via Service endpoints
+- Readiness-gated pod rotation
+- Failure detection
+- Rollout completion validation</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9026,27 +9264,11 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1C
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Name of the Kubernetes statefulset.</p>
+                <p>Name of the stateful set</p>
               </div>
             </td>
             <td>
                 <em>required</em>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>force</code>
-            </td>
-            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>If True, all pod instances will be forcefully deleted. [False]</p>
-              </div>
-            </td>
-            <td>
-                  <code>False</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -9058,11 +9280,11 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1C
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If True, wait for the stateful set to be ready again. [False]</p>
+                <p>Whether to wait for rollout completion</p>
               </div>
             </td>
             <td>
-                  <code>False</code>
+                  <code>True</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -9074,11 +9296,27 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1C
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Maximum time to wait for the stateful set to be ready again (in seconds). [1800]</p>
+                <p>Max seconds to wait</p>
               </div>
             </td>
             <td>
                   <code>1800</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>endpoint_service_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional Service name for endpoint gating</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -9100,7 +9338,7 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1C
             </td>
             <td>
               <div class="doc-md-description">
-                <p>True if successful, False otherwise.</p>
+                <p>True if successful, False otherwise</p>
               </div>
             </td>
           </tr>
@@ -9224,121 +9462,351 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1C
 <span class="normal"><a href="#__codelineno-0-1537">1537</a></span>
 <span class="normal"><a href="#__codelineno-0-1538">1538</a></span>
 <span class="normal"><a href="#__codelineno-0-1539">1539</a></span>
-<span class="normal"><a href="#__codelineno-0-1540">1540</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-1426"><a id="__codelineno-0-1426" name="__codelineno-0-1426"></a><span class="k">def</span><span class="w"> </span><span class="nf">restart_stateful_set</span><span class="p">(</span>
-</span><span id="__span-0-1427"><a id="__codelineno-0-1427" name="__codelineno-0-1427"></a>    <span class="bp">self</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">wait</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1800</span>
-</span><span id="__span-0-1428"><a id="__codelineno-0-1428" name="__codelineno-0-1428"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="__span-0-1429"><a id="__codelineno-0-1429" name="__codelineno-0-1429"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Restart a Kubernetes stateful set using rolling restart.</span>
-</span><span id="__span-0-1430"><a id="__codelineno-0-1430" name="__codelineno-0-1430"></a>
-</span><span id="__span-0-1431"><a id="__codelineno-0-1431" name="__codelineno-0-1431"></a><span class="sd">    Args:</span>
-</span><span id="__span-0-1432"><a id="__codelineno-0-1432" name="__codelineno-0-1432"></a><span class="sd">        sts_name (str):</span>
-</span><span id="__span-0-1433"><a id="__codelineno-0-1433" name="__codelineno-0-1433"></a><span class="sd">            Name of the Kubernetes statefulset.</span>
-</span><span id="__span-0-1434"><a id="__codelineno-0-1434" name="__codelineno-0-1434"></a><span class="sd">        force (bool, optional):</span>
-</span><span id="__span-0-1435"><a id="__codelineno-0-1435" name="__codelineno-0-1435"></a><span class="sd">            If True, all pod instances will be forcefully deleted. [False]</span>
-</span><span id="__span-0-1436"><a id="__codelineno-0-1436" name="__codelineno-0-1436"></a><span class="sd">        wait (bool, optional):</span>
-</span><span id="__span-0-1437"><a id="__codelineno-0-1437" name="__codelineno-0-1437"></a><span class="sd">            If True, wait for the stateful set to be ready again. [False]</span>
-</span><span id="__span-0-1438"><a id="__codelineno-0-1438" name="__codelineno-0-1438"></a><span class="sd">        wait_timeout (int, optional):</span>
-</span><span id="__span-0-1439"><a id="__codelineno-0-1439" name="__codelineno-0-1439"></a><span class="sd">            Maximum time to wait for the stateful set to be ready again (in seconds). [1800]</span>
-</span><span id="__span-0-1440"><a id="__codelineno-0-1440" name="__codelineno-0-1440"></a>
-</span><span id="__span-0-1441"><a id="__codelineno-0-1441" name="__codelineno-0-1441"></a><span class="sd">    Returns:</span>
-</span><span id="__span-0-1442"><a id="__codelineno-0-1442" name="__codelineno-0-1442"></a><span class="sd">        bool:</span>
-</span><span id="__span-0-1443"><a id="__codelineno-0-1443" name="__codelineno-0-1443"></a><span class="sd">            True if successful, False otherwise.</span>
-</span><span id="__span-0-1444"><a id="__codelineno-0-1444" name="__codelineno-0-1444"></a>
-</span><span id="__span-0-1445"><a id="__codelineno-0-1445" name="__codelineno-0-1445"></a><span class="sd">    &quot;&quot;&quot;</span>
-</span><span id="__span-0-1446"><a id="__codelineno-0-1446" name="__codelineno-0-1446"></a>
-</span><span id="__span-0-1447"><a id="__codelineno-0-1447" name="__codelineno-0-1447"></a>    <span class="n">success</span> <span class="o">=</span> <span class="kc">True</span>
-</span><span id="__span-0-1448"><a id="__codelineno-0-1448" name="__codelineno-0-1448"></a>
-</span><span id="__span-0-1449"><a id="__codelineno-0-1449" name="__codelineno-0-1449"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(</span><span class="n">timespec</span><span class="o">=</span><span class="s2">&quot;seconds&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;Z&quot;</span>
-</span><span id="__span-0-1450"><a id="__codelineno-0-1450" name="__codelineno-0-1450"></a>
-</span><span id="__span-0-1451"><a id="__codelineno-0-1451" name="__codelineno-0-1451"></a>    <span class="n">body</span> <span class="o">=</span> <span class="p">{</span>
-</span><span id="__span-0-1452"><a id="__codelineno-0-1452" name="__codelineno-0-1452"></a>        <span class="s2">&quot;spec&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1453"><a id="__codelineno-0-1453" name="__codelineno-0-1453"></a>            <span class="s2">&quot;template&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1454"><a id="__codelineno-0-1454" name="__codelineno-0-1454"></a>                <span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1455"><a id="__codelineno-0-1455" name="__codelineno-0-1455"></a>                    <span class="s2">&quot;annotations&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-0-1456"><a id="__codelineno-0-1456" name="__codelineno-0-1456"></a>                        <span class="s2">&quot;kubectl.kubernetes.io/restartedAt&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
-</span><span id="__span-0-1457"><a id="__codelineno-0-1457" name="__codelineno-0-1457"></a>                    <span class="p">},</span>
-</span><span id="__span-0-1458"><a id="__codelineno-0-1458" name="__codelineno-0-1458"></a>                <span class="p">},</span>
-</span><span id="__span-0-1459"><a id="__codelineno-0-1459" name="__codelineno-0-1459"></a>            <span class="p">},</span>
-</span><span id="__span-0-1460"><a id="__codelineno-0-1460" name="__codelineno-0-1460"></a>        <span class="p">},</span>
-</span><span id="__span-0-1461"><a id="__codelineno-0-1461" name="__codelineno-0-1461"></a>    <span class="p">}</span>
-</span><span id="__span-0-1462"><a id="__codelineno-0-1462" name="__codelineno-0-1462"></a>
-</span><span id="__span-0-1463"><a id="__codelineno-0-1463" name="__codelineno-0-1463"></a>    <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-0-1464"><a id="__codelineno-0-1464" name="__codelineno-0-1464"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">get_apps_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">patch_namespaced_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span> <span class="n">body</span><span class="p">,</span> <span class="n">pretty</span><span class="o">=</span><span class="s2">&quot;true&quot;</span><span class="p">)</span>
-</span><span id="__span-0-1465"><a id="__codelineno-0-1465" name="__codelineno-0-1465"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Triggered restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;.&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1466"><a id="__codelineno-0-1466" name="__codelineno-0-1466"></a>
-</span><span id="__span-0-1467"><a id="__codelineno-0-1467" name="__codelineno-0-1467"></a>    <span class="k">except</span> <span class="n">ApiException</span> <span class="k">as</span> <span class="n">api_exception</span><span class="p">:</span>
-</span><span id="__span-0-1468"><a id="__codelineno-0-1468" name="__codelineno-0-1468"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Failed to restart stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;; error -&gt; </span><span class="si">%s</span><span class="s2">!&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">api_exception</span><span class="p">))</span>
+<span class="normal"><a href="#__codelineno-0-1540">1540</a></span>
+<span class="normal"><a href="#__codelineno-0-1541">1541</a></span>
+<span class="normal"><a href="#__codelineno-0-1542">1542</a></span>
+<span class="normal"><a href="#__codelineno-0-1543">1543</a></span>
+<span class="normal"><a href="#__codelineno-0-1544">1544</a></span>
+<span class="normal"><a href="#__codelineno-0-1545">1545</a></span>
+<span class="normal"><a href="#__codelineno-0-1546">1546</a></span>
+<span class="normal"><a href="#__codelineno-0-1547">1547</a></span>
+<span class="normal"><a href="#__codelineno-0-1548">1548</a></span>
+<span class="normal"><a href="#__codelineno-0-1549">1549</a></span>
+<span class="normal"><a href="#__codelineno-0-1550">1550</a></span>
+<span class="normal"><a href="#__codelineno-0-1551">1551</a></span>
+<span class="normal"><a href="#__codelineno-0-1552">1552</a></span>
+<span class="normal"><a href="#__codelineno-0-1553">1553</a></span>
+<span class="normal"><a href="#__codelineno-0-1554">1554</a></span>
+<span class="normal"><a href="#__codelineno-0-1555">1555</a></span>
+<span class="normal"><a href="#__codelineno-0-1556">1556</a></span>
+<span class="normal"><a href="#__codelineno-0-1557">1557</a></span>
+<span class="normal"><a href="#__codelineno-0-1558">1558</a></span>
+<span class="normal"><a href="#__codelineno-0-1559">1559</a></span>
+<span class="normal"><a href="#__codelineno-0-1560">1560</a></span>
+<span class="normal"><a href="#__codelineno-0-1561">1561</a></span>
+<span class="normal"><a href="#__codelineno-0-1562">1562</a></span>
+<span class="normal"><a href="#__codelineno-0-1563">1563</a></span>
+<span class="normal"><a href="#__codelineno-0-1564">1564</a></span>
+<span class="normal"><a href="#__codelineno-0-1565">1565</a></span>
+<span class="normal"><a href="#__codelineno-0-1566">1566</a></span>
+<span class="normal"><a href="#__codelineno-0-1567">1567</a></span>
+<span class="normal"><a href="#__codelineno-0-1568">1568</a></span>
+<span class="normal"><a href="#__codelineno-0-1569">1569</a></span>
+<span class="normal"><a href="#__codelineno-0-1570">1570</a></span>
+<span class="normal"><a href="#__codelineno-0-1571">1571</a></span>
+<span class="normal"><a href="#__codelineno-0-1572">1572</a></span>
+<span class="normal"><a href="#__codelineno-0-1573">1573</a></span>
+<span class="normal"><a href="#__codelineno-0-1574">1574</a></span>
+<span class="normal"><a href="#__codelineno-0-1575">1575</a></span>
+<span class="normal"><a href="#__codelineno-0-1576">1576</a></span>
+<span class="normal"><a href="#__codelineno-0-1577">1577</a></span>
+<span class="normal"><a href="#__codelineno-0-1578">1578</a></span>
+<span class="normal"><a href="#__codelineno-0-1579">1579</a></span>
+<span class="normal"><a href="#__codelineno-0-1580">1580</a></span>
+<span class="normal"><a href="#__codelineno-0-1581">1581</a></span>
+<span class="normal"><a href="#__codelineno-0-1582">1582</a></span>
+<span class="normal"><a href="#__codelineno-0-1583">1583</a></span>
+<span class="normal"><a href="#__codelineno-0-1584">1584</a></span>
+<span class="normal"><a href="#__codelineno-0-1585">1585</a></span>
+<span class="normal"><a href="#__codelineno-0-1586">1586</a></span>
+<span class="normal"><a href="#__codelineno-0-1587">1587</a></span>
+<span class="normal"><a href="#__codelineno-0-1588">1588</a></span>
+<span class="normal"><a href="#__codelineno-0-1589">1589</a></span>
+<span class="normal"><a href="#__codelineno-0-1590">1590</a></span>
+<span class="normal"><a href="#__codelineno-0-1591">1591</a></span>
+<span class="normal"><a href="#__codelineno-0-1592">1592</a></span>
+<span class="normal"><a href="#__codelineno-0-1593">1593</a></span>
+<span class="normal"><a href="#__codelineno-0-1594">1594</a></span>
+<span class="normal"><a href="#__codelineno-0-1595">1595</a></span>
+<span class="normal"><a href="#__codelineno-0-1596">1596</a></span>
+<span class="normal"><a href="#__codelineno-0-1597">1597</a></span>
+<span class="normal"><a href="#__codelineno-0-1598">1598</a></span>
+<span class="normal"><a href="#__codelineno-0-1599">1599</a></span>
+<span class="normal"><a href="#__codelineno-0-1600">1600</a></span>
+<span class="normal"><a href="#__codelineno-0-1601">1601</a></span>
+<span class="normal"><a href="#__codelineno-0-1602">1602</a></span>
+<span class="normal"><a href="#__codelineno-0-1603">1603</a></span>
+<span class="normal"><a href="#__codelineno-0-1604">1604</a></span>
+<span class="normal"><a href="#__codelineno-0-1605">1605</a></span>
+<span class="normal"><a href="#__codelineno-0-1606">1606</a></span>
+<span class="normal"><a href="#__codelineno-0-1607">1607</a></span>
+<span class="normal"><a href="#__codelineno-0-1608">1608</a></span>
+<span class="normal"><a href="#__codelineno-0-1609">1609</a></span>
+<span class="normal"><a href="#__codelineno-0-1610">1610</a></span>
+<span class="normal"><a href="#__codelineno-0-1611">1611</a></span>
+<span class="normal"><a href="#__codelineno-0-1612">1612</a></span>
+<span class="normal"><a href="#__codelineno-0-1613">1613</a></span>
+<span class="normal"><a href="#__codelineno-0-1614">1614</a></span>
+<span class="normal"><a href="#__codelineno-0-1615">1615</a></span>
+<span class="normal"><a href="#__codelineno-0-1616">1616</a></span>
+<span class="normal"><a href="#__codelineno-0-1617">1617</a></span>
+<span class="normal"><a href="#__codelineno-0-1618">1618</a></span>
+<span class="normal"><a href="#__codelineno-0-1619">1619</a></span>
+<span class="normal"><a href="#__codelineno-0-1620">1620</a></span>
+<span class="normal"><a href="#__codelineno-0-1621">1621</a></span>
+<span class="normal"><a href="#__codelineno-0-1622">1622</a></span>
+<span class="normal"><a href="#__codelineno-0-1623">1623</a></span>
+<span class="normal"><a href="#__codelineno-0-1624">1624</a></span>
+<span class="normal"><a href="#__codelineno-0-1625">1625</a></span>
+<span class="normal"><a href="#__codelineno-0-1626">1626</a></span>
+<span class="normal"><a href="#__codelineno-0-1627">1627</a></span>
+<span class="normal"><a href="#__codelineno-0-1628">1628</a></span>
+<span class="normal"><a href="#__codelineno-0-1629">1629</a></span>
+<span class="normal"><a href="#__codelineno-0-1630">1630</a></span>
+<span class="normal"><a href="#__codelineno-0-1631">1631</a></span>
+<span class="normal"><a href="#__codelineno-0-1632">1632</a></span>
+<span class="normal"><a href="#__codelineno-0-1633">1633</a></span>
+<span class="normal"><a href="#__codelineno-0-1634">1634</a></span>
+<span class="normal"><a href="#__codelineno-0-1635">1635</a></span>
+<span class="normal"><a href="#__codelineno-0-1636">1636</a></span>
+<span class="normal"><a href="#__codelineno-0-1637">1637</a></span>
+<span class="normal"><a href="#__codelineno-0-1638">1638</a></span>
+<span class="normal"><a href="#__codelineno-0-1639">1639</a></span>
+<span class="normal"><a href="#__codelineno-0-1640">1640</a></span>
+<span class="normal"><a href="#__codelineno-0-1641">1641</a></span>
+<span class="normal"><a href="#__codelineno-0-1642">1642</a></span>
+<span class="normal"><a href="#__codelineno-0-1643">1643</a></span>
+<span class="normal"><a href="#__codelineno-0-1644">1644</a></span>
+<span class="normal"><a href="#__codelineno-0-1645">1645</a></span>
+<span class="normal"><a href="#__codelineno-0-1646">1646</a></span>
+<span class="normal"><a href="#__codelineno-0-1647">1647</a></span>
+<span class="normal"><a href="#__codelineno-0-1648">1648</a></span>
+<span class="normal"><a href="#__codelineno-0-1649">1649</a></span>
+<span class="normal"><a href="#__codelineno-0-1650">1650</a></span>
+<span class="normal"><a href="#__codelineno-0-1651">1651</a></span>
+<span class="normal"><a href="#__codelineno-0-1652">1652</a></span>
+<span class="normal"><a href="#__codelineno-0-1653">1653</a></span>
+<span class="normal"><a href="#__codelineno-0-1654">1654</a></span>
+<span class="normal"><a href="#__codelineno-0-1655">1655</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-1426"><a id="__codelineno-0-1426" name="__codelineno-0-1426"></a><span class="k">def</span><span class="w"> </span><span class="nf">restart_stateful_set</span><span class="p">(</span>
+</span><span id="__span-0-1427"><a id="__codelineno-0-1427" name="__codelineno-0-1427"></a>    <span class="bp">self</span><span class="p">,</span>
+</span><span id="__span-0-1428"><a id="__codelineno-0-1428" name="__codelineno-0-1428"></a>    <span class="n">sts_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+</span><span id="__span-0-1429"><a id="__codelineno-0-1429" name="__codelineno-0-1429"></a>    <span class="n">wait</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-1430"><a id="__codelineno-0-1430" name="__codelineno-0-1430"></a>    <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1800</span><span class="p">,</span>
+</span><span id="__span-0-1431"><a id="__codelineno-0-1431" name="__codelineno-0-1431"></a>    <span class="n">endpoint_service_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1432"><a id="__codelineno-0-1432" name="__codelineno-0-1432"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="__span-0-1433"><a id="__codelineno-0-1433" name="__codelineno-0-1433"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Enterprise-grade zero-downtime rolling restart of a stateful set.</span>
+</span><span id="__span-0-1434"><a id="__codelineno-0-1434" name="__codelineno-0-1434"></a>
+</span><span id="__span-0-1435"><a id="__codelineno-0-1435" name="__codelineno-0-1435"></a><span class="sd">    Guarantees:</span>
+</span><span id="__span-0-1436"><a id="__codelineno-0-1436" name="__codelineno-0-1436"></a><span class="sd">    - Zero-downtime traffic handling (via readiness probes)</span>
+</span><span id="__span-0-1437"><a id="__codelineno-0-1437" name="__codelineno-0-1437"></a><span class="sd">    - Kubernetes-native rollout</span>
+</span><span id="__span-0-1438"><a id="__codelineno-0-1438" name="__codelineno-0-1438"></a><span class="sd">    - Deterministic state transitions</span>
+</span><span id="__span-0-1439"><a id="__codelineno-0-1439" name="__codelineno-0-1439"></a><span class="sd">    - Traffic draining via Service endpoints</span>
+</span><span id="__span-0-1440"><a id="__codelineno-0-1440" name="__codelineno-0-1440"></a><span class="sd">    - Readiness-gated pod rotation</span>
+</span><span id="__span-0-1441"><a id="__codelineno-0-1441" name="__codelineno-0-1441"></a><span class="sd">    - Failure detection</span>
+</span><span id="__span-0-1442"><a id="__codelineno-0-1442" name="__codelineno-0-1442"></a><span class="sd">    - Rollout completion validation</span>
+</span><span id="__span-0-1443"><a id="__codelineno-0-1443" name="__codelineno-0-1443"></a>
+</span><span id="__span-0-1444"><a id="__codelineno-0-1444" name="__codelineno-0-1444"></a><span class="sd">    Args:</span>
+</span><span id="__span-0-1445"><a id="__codelineno-0-1445" name="__codelineno-0-1445"></a><span class="sd">        sts_name:</span>
+</span><span id="__span-0-1446"><a id="__codelineno-0-1446" name="__codelineno-0-1446"></a><span class="sd">            Name of the stateful set</span>
+</span><span id="__span-0-1447"><a id="__codelineno-0-1447" name="__codelineno-0-1447"></a><span class="sd">        wait:</span>
+</span><span id="__span-0-1448"><a id="__codelineno-0-1448" name="__codelineno-0-1448"></a><span class="sd">            Whether to wait for rollout completion</span>
+</span><span id="__span-0-1449"><a id="__codelineno-0-1449" name="__codelineno-0-1449"></a><span class="sd">        wait_timeout:</span>
+</span><span id="__span-0-1450"><a id="__codelineno-0-1450" name="__codelineno-0-1450"></a><span class="sd">            Max seconds to wait</span>
+</span><span id="__span-0-1451"><a id="__codelineno-0-1451" name="__codelineno-0-1451"></a><span class="sd">        endpoint_service_name:</span>
+</span><span id="__span-0-1452"><a id="__codelineno-0-1452" name="__codelineno-0-1452"></a><span class="sd">            Optional Service name for endpoint gating</span>
+</span><span id="__span-0-1453"><a id="__codelineno-0-1453" name="__codelineno-0-1453"></a>
+</span><span id="__span-0-1454"><a id="__codelineno-0-1454" name="__codelineno-0-1454"></a><span class="sd">    Returns:</span>
+</span><span id="__span-0-1455"><a id="__codelineno-0-1455" name="__codelineno-0-1455"></a><span class="sd">        bool:</span>
+</span><span id="__span-0-1456"><a id="__codelineno-0-1456" name="__codelineno-0-1456"></a><span class="sd">            True if successful, False otherwise</span>
+</span><span id="__span-0-1457"><a id="__codelineno-0-1457" name="__codelineno-0-1457"></a>
+</span><span id="__span-0-1458"><a id="__codelineno-0-1458" name="__codelineno-0-1458"></a><span class="sd">    &quot;&quot;&quot;</span>
+</span><span id="__span-0-1459"><a id="__codelineno-0-1459" name="__codelineno-0-1459"></a>
+</span><span id="__span-0-1460"><a id="__codelineno-0-1460" name="__codelineno-0-1460"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Starting rolling restart for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1461"><a id="__codelineno-0-1461" name="__codelineno-0-1461"></a>
+</span><span id="__span-0-1462"><a id="__codelineno-0-1462" name="__codelineno-0-1462"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1463"><a id="__codelineno-0-1463" name="__codelineno-0-1463"></a>    <span class="c1"># Load stateful set</span>
+</span><span id="__span-0-1464"><a id="__codelineno-0-1464" name="__codelineno-0-1464"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1465"><a id="__codelineno-0-1465" name="__codelineno-0-1465"></a>
+</span><span id="__span-0-1466"><a id="__codelineno-0-1466" name="__codelineno-0-1466"></a>    <span class="n">sts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1467"><a id="__codelineno-0-1467" name="__codelineno-0-1467"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">sts</span><span class="p">:</span>
+</span><span id="__span-0-1468"><a id="__codelineno-0-1468" name="__codelineno-0-1468"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; not found!&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
 </span><span id="__span-0-1469"><a id="__codelineno-0-1469" name="__codelineno-0-1469"></a>        <span class="k">return</span> <span class="kc">False</span>
 </span><span id="__span-0-1470"><a id="__codelineno-0-1470" name="__codelineno-0-1470"></a>
-</span><span id="__span-0-1471"><a id="__codelineno-0-1471" name="__codelineno-0-1471"></a>    <span class="c1"># If force is set, all pod instances will be forcefully deleted.</span>
-</span><span id="__span-0-1472"><a id="__codelineno-0-1472" name="__codelineno-0-1472"></a>    <span class="k">if</span> <span class="n">force</span><span class="p">:</span>
-</span><span id="__span-0-1473"><a id="__codelineno-0-1473" name="__codelineno-0-1473"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Force deleting all pods of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;.&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1474"><a id="__codelineno-0-1474" name="__codelineno-0-1474"></a>
-</span><span id="__span-0-1475"><a id="__codelineno-0-1475" name="__codelineno-0-1475"></a>        <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-0-1476"><a id="__codelineno-0-1476" name="__codelineno-0-1476"></a>            <span class="c1"># Get the StatefulSet</span>
-</span><span id="__span-0-1477"><a id="__codelineno-0-1477" name="__codelineno-0-1477"></a>            <span class="n">statefulset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_apps_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">read_namespaced_stateful_set</span><span class="p">(</span>
-</span><span id="__span-0-1478"><a id="__codelineno-0-1478" name="__codelineno-0-1478"></a>                <span class="n">name</span><span class="o">=</span><span class="n">sts_name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">()</span>
-</span><span id="__span-0-1479"><a id="__codelineno-0-1479" name="__codelineno-0-1479"></a>            <span class="p">)</span>
-</span><span id="__span-0-1480"><a id="__codelineno-0-1480" name="__codelineno-0-1480"></a>
-</span><span id="__span-0-1481"><a id="__codelineno-0-1481" name="__codelineno-0-1481"></a>            <span class="c1"># Loop through the replicas of the StatefulSet</span>
-</span><span id="__span-0-1482"><a id="__codelineno-0-1482" name="__codelineno-0-1482"></a>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">statefulset</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span><span class="p">):</span>
-</span><span id="__span-0-1483"><a id="__codelineno-0-1483" name="__codelineno-0-1483"></a>                <span class="n">pod_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">statefulset</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span>
-</span><span id="__span-0-1484"><a id="__codelineno-0-1484" name="__codelineno-0-1484"></a>                <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-0-1485"><a id="__codelineno-0-1485" name="__codelineno-0-1485"></a>                    <span class="c1"># Define the delete options with force and grace period set to 0</span>
-</span><span id="__span-0-1486"><a id="__codelineno-0-1486" name="__codelineno-0-1486"></a>                    <span class="n">body</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">V1DeleteOptions</span><span class="p">(</span><span class="n">grace_period_seconds</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">propagation_policy</span><span class="o">=</span><span class="s2">&quot;Foreground&quot;</span><span class="p">)</span>
+</span><span id="__span-0-1471"><a id="__codelineno-0-1471" name="__codelineno-0-1471"></a>    <span class="n">replicas</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1472"><a id="__codelineno-0-1472" name="__codelineno-0-1472"></a>
+</span><span id="__span-0-1473"><a id="__codelineno-0-1473" name="__codelineno-0-1473"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1474"><a id="__codelineno-0-1474" name="__codelineno-0-1474"></a>    <span class="c1"># Safety checks</span>
+</span><span id="__span-0-1475"><a id="__codelineno-0-1475" name="__codelineno-0-1475"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1476"><a id="__codelineno-0-1476" name="__codelineno-0-1476"></a>
+</span><span id="__span-0-1477"><a id="__codelineno-0-1477" name="__codelineno-0-1477"></a>    <span class="k">if</span> <span class="n">replicas</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+</span><span id="__span-0-1478"><a id="__codelineno-0-1478" name="__codelineno-0-1478"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+</span><span id="__span-0-1479"><a id="__codelineno-0-1479" name="__codelineno-0-1479"></a>            <span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; has only </span><span class="si">%s</span><span class="s2"> replica(s). Proceeding with restart in downtime-allowed mode.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1480"><a id="__codelineno-0-1480" name="__codelineno-0-1480"></a>            <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1481"><a id="__codelineno-0-1481" name="__codelineno-0-1481"></a>            <span class="n">replicas</span><span class="p">,</span>
+</span><span id="__span-0-1482"><a id="__codelineno-0-1482" name="__codelineno-0-1482"></a>        <span class="p">)</span>
+</span><span id="__span-0-1483"><a id="__codelineno-0-1483" name="__codelineno-0-1483"></a>
+</span><span id="__span-0-1484"><a id="__codelineno-0-1484" name="__codelineno-0-1484"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1485"><a id="__codelineno-0-1485" name="__codelineno-0-1485"></a>    <span class="c1"># Readiness probe validation</span>
+</span><span id="__span-0-1486"><a id="__codelineno-0-1486" name="__codelineno-0-1486"></a>    <span class="c1"># ------------------------------------------------------------------</span>
 </span><span id="__span-0-1487"><a id="__codelineno-0-1487" name="__codelineno-0-1487"></a>
-</span><span id="__span-0-1488"><a id="__codelineno-0-1488" name="__codelineno-0-1488"></a>                    <span class="c1"># Call the delete_namespaced_pod method</span>
-</span><span id="__span-0-1489"><a id="__codelineno-0-1489" name="__codelineno-0-1489"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">get_core_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">delete_namespaced_pod</span><span class="p">(</span>
-</span><span id="__span-0-1490"><a id="__codelineno-0-1490" name="__codelineno-0-1490"></a>                        <span class="n">name</span><span class="o">=</span><span class="n">pod_name</span><span class="p">,</span> <span class="n">namespace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span> <span class="n">body</span><span class="o">=</span><span class="n">body</span>
-</span><span id="__span-0-1491"><a id="__codelineno-0-1491" name="__codelineno-0-1491"></a>                    <span class="p">)</span>
-</span><span id="__span-0-1492"><a id="__codelineno-0-1492" name="__codelineno-0-1492"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-</span><span id="__span-0-1493"><a id="__codelineno-0-1493" name="__codelineno-0-1493"></a>                        <span class="s2">&quot;Pod -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; in namespace -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; has been deleted forcefully.&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1494"><a id="__codelineno-0-1494" name="__codelineno-0-1494"></a>                        <span class="n">pod_name</span><span class="p">,</span>
-</span><span id="__span-0-1495"><a id="__codelineno-0-1495" name="__codelineno-0-1495"></a>                        <span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span>
-</span><span id="__span-0-1496"><a id="__codelineno-0-1496" name="__codelineno-0-1496"></a>                    <span class="p">)</span>
-</span><span id="__span-0-1497"><a id="__codelineno-0-1497" name="__codelineno-0-1497"></a>
-</span><span id="__span-0-1498"><a id="__codelineno-0-1498" name="__codelineno-0-1498"></a>                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-0-1499"><a id="__codelineno-0-1499" name="__codelineno-0-1499"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Error occurred while deleting pod -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">pod_name</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-</span><span id="__span-0-1500"><a id="__codelineno-0-1500" name="__codelineno-0-1500"></a>                    <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-1501"><a id="__codelineno-0-1501" name="__codelineno-0-1501"></a>
-</span><span id="__span-0-1502"><a id="__codelineno-0-1502" name="__codelineno-0-1502"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-0-1503"><a id="__codelineno-0-1503" name="__codelineno-0-1503"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Error occurred while getting stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-</span><span id="__span-0-1504"><a id="__codelineno-0-1504" name="__codelineno-0-1504"></a>            <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-1505"><a id="__codelineno-0-1505" name="__codelineno-0-1505"></a>
-</span><span id="__span-0-1506"><a id="__codelineno-0-1506" name="__codelineno-0-1506"></a>    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-</span><span id="__span-0-1507"><a id="__codelineno-0-1507" name="__codelineno-0-1507"></a>
-</span><span id="__span-0-1508"><a id="__codelineno-0-1508" name="__codelineno-0-1508"></a>    <span class="k">while</span> <span class="n">wait</span><span class="p">:</span>
-</span><span id="__span-0-1509"><a id="__codelineno-0-1509" name="__codelineno-0-1509"></a>        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>  <span class="c1"># Add delay before checking that the stateful set is ready again.</span>
-</span><span id="__span-0-1510"><a id="__codelineno-0-1510" name="__codelineno-0-1510"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Waiting for restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; to complete...&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1511"><a id="__codelineno-0-1511" name="__codelineno-0-1511"></a>        <span class="c1"># Get the deployment</span>
-</span><span id="__span-0-1512"><a id="__codelineno-0-1512" name="__codelineno-0-1512"></a>        <span class="n">statefulset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_apps_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">read_namespaced_stateful_set_status</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">())</span>
+</span><span id="__span-0-1488"><a id="__codelineno-0-1488" name="__codelineno-0-1488"></a>    <span class="n">containers</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">template</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">containers</span>
+</span><span id="__span-0-1489"><a id="__codelineno-0-1489" name="__codelineno-0-1489"></a>    <span class="k">for</span> <span class="n">container</span> <span class="ow">in</span> <span class="n">containers</span><span class="p">:</span>
+</span><span id="__span-0-1490"><a id="__codelineno-0-1490" name="__codelineno-0-1490"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">container</span><span class="o">.</span><span class="n">readiness_probe</span><span class="p">:</span>
+</span><span id="__span-0-1491"><a id="__codelineno-0-1491" name="__codelineno-0-1491"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+</span><span id="__span-0-1492"><a id="__codelineno-0-1492" name="__codelineno-0-1492"></a>                <span class="s2">&quot;Container -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; in stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; has no readiness probe. Zero-downtime restart not possible!&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1493"><a id="__codelineno-0-1493" name="__codelineno-0-1493"></a>                <span class="n">container</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+</span><span id="__span-0-1494"><a id="__codelineno-0-1494" name="__codelineno-0-1494"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1495"><a id="__codelineno-0-1495" name="__codelineno-0-1495"></a>            <span class="p">)</span>
+</span><span id="__span-0-1496"><a id="__codelineno-0-1496" name="__codelineno-0-1496"></a>            <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-0-1497"><a id="__codelineno-0-1497" name="__codelineno-0-1497"></a>    <span class="c1"># end for container in containers</span>
+</span><span id="__span-0-1498"><a id="__codelineno-0-1498" name="__codelineno-0-1498"></a>
+</span><span id="__span-0-1499"><a id="__codelineno-0-1499" name="__codelineno-0-1499"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1500"><a id="__codelineno-0-1500" name="__codelineno-0-1500"></a>    <span class="c1"># Trigger rolling restart via annotation</span>
+</span><span id="__span-0-1501"><a id="__codelineno-0-1501" name="__codelineno-0-1501"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1502"><a id="__codelineno-0-1502" name="__codelineno-0-1502"></a>
+</span><span id="__span-0-1503"><a id="__codelineno-0-1503" name="__codelineno-0-1503"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(</span><span class="n">timespec</span><span class="o">=</span><span class="s2">&quot;seconds&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;Z&quot;</span>
+</span><span id="__span-0-1504"><a id="__codelineno-0-1504" name="__codelineno-0-1504"></a>
+</span><span id="__span-0-1505"><a id="__codelineno-0-1505" name="__codelineno-0-1505"></a>    <span class="n">patch_body</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;spec&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;template&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;annotations&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;kubectl.kubernetes.io/restartedAt&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">}}}}}</span>
+</span><span id="__span-0-1506"><a id="__codelineno-0-1506" name="__codelineno-0-1506"></a>
+</span><span id="__span-0-1507"><a id="__codelineno-0-1507" name="__codelineno-0-1507"></a>    <span class="n">sts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">patch_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">,</span> <span class="n">patch_body</span><span class="p">)</span>
+</span><span id="__span-0-1508"><a id="__codelineno-0-1508" name="__codelineno-0-1508"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">sts</span><span class="p">:</span>
+</span><span id="__span-0-1509"><a id="__codelineno-0-1509" name="__codelineno-0-1509"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Failed to trigger rolling restart for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1510"><a id="__codelineno-0-1510" name="__codelineno-0-1510"></a>        <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-0-1511"><a id="__codelineno-0-1511" name="__codelineno-0-1511"></a>
+</span><span id="__span-0-1512"><a id="__codelineno-0-1512" name="__codelineno-0-1512"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rolling restart triggered for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
 </span><span id="__span-0-1513"><a id="__codelineno-0-1513" name="__codelineno-0-1513"></a>
-</span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a>        <span class="c1"># Check the availability status</span>
-</span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a>        <span class="n">available_replicas</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">available_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
-</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a>        <span class="n">desired_replicas</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span> <span class="ow">or</span> <span class="mi">0</span>
-</span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a>
-</span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a>        <span class="n">current_revision</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">current_revision</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span>
-</span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a>        <span class="n">update_revision</span> <span class="o">=</span> <span class="n">statefulset</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">update_revision</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span>
-</span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a>
-</span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
-</span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a>            <span class="s2">&quot;Stateful set status -&gt; available pods: </span><span class="si">%s</span><span class="s2">/</span><span class="si">%s</span><span class="s2">, revision updated: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a>            <span class="n">available_replicas</span><span class="p">,</span>
-</span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a>            <span class="n">desired_replicas</span><span class="p">,</span>
-</span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a>            <span class="n">current_revision</span> <span class="o">==</span> <span class="n">update_revision</span><span class="p">,</span>
-</span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a>        <span class="p">)</span>
+</span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">wait</span><span class="p">:</span>
+</span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a>        <span class="k">return</span> <span class="kc">True</span>
+</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a>
+</span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a>    <span class="n">target_generation</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">generation</span>
+</span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Rollout triggered. Target generation -&gt; </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">target_generation</span><span class="p">)</span>
+</span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a>
+</span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a>    <span class="c1"># Rollout monitoring</span>
+</span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a>
+</span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a>    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+</span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a>    <span class="n">last_logged_revision</span> <span class="o">=</span> <span class="kc">None</span>
+</span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a>    <span class="n">wait_time</span> <span class="o">=</span> <span class="mi">10</span>
 </span><span id="__span-0-1527"><a id="__codelineno-0-1527" name="__codelineno-0-1527"></a>
-</span><span id="__span-0-1528"><a id="__codelineno-0-1528" name="__codelineno-0-1528"></a>        <span class="k">if</span> <span class="n">available_replicas</span> <span class="o">==</span> <span class="n">desired_replicas</span> <span class="ow">and</span> <span class="n">update_revision</span> <span class="o">==</span> <span class="n">current_revision</span><span class="p">:</span>
-</span><span id="__span-0-1529"><a id="__codelineno-0-1529" name="__codelineno-0-1529"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; completed restart successfully&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1530"><a id="__codelineno-0-1530" name="__codelineno-0-1530"></a>            <span class="k">break</span>
+</span><span id="__span-0-1528"><a id="__codelineno-0-1528" name="__codelineno-0-1528"></a>    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+</span><span id="__span-0-1529"><a id="__codelineno-0-1529" name="__codelineno-0-1529"></a>        <span class="c1"># Avoid tight loop</span>
+</span><span id="__span-0-1530"><a id="__codelineno-0-1530" name="__codelineno-0-1530"></a>        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">wait_time</span><span class="p">)</span>
 </span><span id="__span-0-1531"><a id="__codelineno-0-1531" name="__codelineno-0-1531"></a>
-</span><span id="__span-0-1532"><a id="__codelineno-0-1532" name="__codelineno-0-1532"></a>        <span class="k">if</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">wait_timeout</span><span class="p">:</span>
-</span><span id="__span-0-1533"><a id="__codelineno-0-1533" name="__codelineno-0-1533"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;Timed out waiting for restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; to complete.&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
-</span><span id="__span-0-1534"><a id="__codelineno-0-1534" name="__codelineno-0-1534"></a>            <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-1535"><a id="__codelineno-0-1535" name="__codelineno-0-1535"></a>            <span class="k">break</span>
-</span><span id="__span-0-1536"><a id="__codelineno-0-1536" name="__codelineno-0-1536"></a>
-</span><span id="__span-0-1537"><a id="__codelineno-0-1537" name="__codelineno-0-1537"></a>        <span class="c1"># Sleep for a while before checking again</span>
-</span><span id="__span-0-1538"><a id="__codelineno-0-1538" name="__codelineno-0-1538"></a>        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</span><span id="__span-0-1532"><a id="__codelineno-0-1532" name="__codelineno-0-1532"></a>        <span class="n">elapsed</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+</span><span id="__span-0-1533"><a id="__codelineno-0-1533" name="__codelineno-0-1533"></a>        <span class="k">if</span> <span class="n">elapsed</span> <span class="o">&gt;</span> <span class="n">wait_timeout</span><span class="p">:</span>
+</span><span id="__span-0-1534"><a id="__codelineno-0-1534" name="__codelineno-0-1534"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+</span><span id="__span-0-1535"><a id="__codelineno-0-1535" name="__codelineno-0-1535"></a>                <span class="s2">&quot;Timeout waiting for rolling restart of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1536"><a id="__codelineno-0-1536" name="__codelineno-0-1536"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1537"><a id="__codelineno-0-1537" name="__codelineno-0-1537"></a>            <span class="p">)</span>
+</span><span id="__span-0-1538"><a id="__codelineno-0-1538" name="__codelineno-0-1538"></a>            <span class="k">return</span> <span class="kc">False</span>
 </span><span id="__span-0-1539"><a id="__codelineno-0-1539" name="__codelineno-0-1539"></a>
-</span><span id="__span-0-1540"><a id="__codelineno-0-1540" name="__codelineno-0-1540"></a>    <span class="k">return</span> <span class="n">success</span>
+</span><span id="__span-0-1540"><a id="__codelineno-0-1540" name="__codelineno-0-1540"></a>        <span class="n">sts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_stateful_set</span><span class="p">(</span><span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1541"><a id="__codelineno-0-1541" name="__codelineno-0-1541"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">sts</span><span class="p">:</span>
+</span><span id="__span-0-1542"><a id="__codelineno-0-1542" name="__codelineno-0-1542"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; not found during rollout monitoring. Retrying...&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1543"><a id="__codelineno-0-1543" name="__codelineno-0-1543"></a>            <span class="k">continue</span>
+</span><span id="__span-0-1544"><a id="__codelineno-0-1544" name="__codelineno-0-1544"></a>
+</span><span id="__span-0-1545"><a id="__codelineno-0-1545" name="__codelineno-0-1545"></a>        <span class="c1"># The ONLY reliable way to know if the loop is seeing the NEW rollout</span>
+</span><span id="__span-0-1546"><a id="__codelineno-0-1546" name="__codelineno-0-1546"></a>        <span class="k">if</span> <span class="p">(</span><span class="n">sts</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">observed_generation</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">target_generation</span><span class="p">:</span>
+</span><span id="__span-0-1547"><a id="__codelineno-0-1547" name="__codelineno-0-1547"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+</span><span id="__span-0-1548"><a id="__codelineno-0-1548" name="__codelineno-0-1548"></a>                <span class="s2">&quot;Kubernetes controller hasn&#39;t processed the new generation -&gt; </span><span class="si">%s</span><span class="s2"> yet...&quot;</span><span class="p">,</span> <span class="n">target_generation</span>
+</span><span id="__span-0-1549"><a id="__codelineno-0-1549" name="__codelineno-0-1549"></a>            <span class="p">)</span>
+</span><span id="__span-0-1550"><a id="__codelineno-0-1550" name="__codelineno-0-1550"></a>            <span class="k">continue</span>
+</span><span id="__span-0-1551"><a id="__codelineno-0-1551" name="__codelineno-0-1551"></a>
+</span><span id="__span-0-1552"><a id="__codelineno-0-1552" name="__codelineno-0-1552"></a>        <span class="n">status</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">status</span>
+</span><span id="__span-0-1553"><a id="__codelineno-0-1553" name="__codelineno-0-1553"></a>
+</span><span id="__span-0-1554"><a id="__codelineno-0-1554" name="__codelineno-0-1554"></a>        <span class="n">desired</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1555"><a id="__codelineno-0-1555" name="__codelineno-0-1555"></a>        <span class="n">ready</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">ready_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1556"><a id="__codelineno-0-1556" name="__codelineno-0-1556"></a>        <span class="n">updated</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">updated_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1557"><a id="__codelineno-0-1557" name="__codelineno-0-1557"></a>        <span class="n">available</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">available_replicas</span> <span class="ow">or</span> <span class="mi">0</span>
+</span><span id="__span-0-1558"><a id="__codelineno-0-1558" name="__codelineno-0-1558"></a>        <span class="n">current_revision</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">current_revision</span>
+</span><span id="__span-0-1559"><a id="__codelineno-0-1559" name="__codelineno-0-1559"></a>        <span class="n">update_revision</span> <span class="o">=</span> <span class="n">status</span><span class="o">.</span><span class="n">update_revision</span>
+</span><span id="__span-0-1560"><a id="__codelineno-0-1560" name="__codelineno-0-1560"></a>
+</span><span id="__span-0-1561"><a id="__codelineno-0-1561" name="__codelineno-0-1561"></a>        <span class="c1"># Log revision changes</span>
+</span><span id="__span-0-1562"><a id="__codelineno-0-1562" name="__codelineno-0-1562"></a>        <span class="k">if</span> <span class="n">update_revision</span> <span class="o">!=</span> <span class="n">last_logged_revision</span><span class="p">:</span>
+</span><span id="__span-0-1563"><a id="__codelineno-0-1563" name="__codelineno-0-1563"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+</span><span id="__span-0-1564"><a id="__codelineno-0-1564" name="__codelineno-0-1564"></a>                <span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; rollout revision: current=</span><span class="si">%s</span><span class="s2"> update=</span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1565"><a id="__codelineno-0-1565" name="__codelineno-0-1565"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1566"><a id="__codelineno-0-1566" name="__codelineno-0-1566"></a>                <span class="n">current_revision</span><span class="p">,</span>
+</span><span id="__span-0-1567"><a id="__codelineno-0-1567" name="__codelineno-0-1567"></a>                <span class="n">update_revision</span><span class="p">,</span>
+</span><span id="__span-0-1568"><a id="__codelineno-0-1568" name="__codelineno-0-1568"></a>            <span class="p">)</span>
+</span><span id="__span-0-1569"><a id="__codelineno-0-1569" name="__codelineno-0-1569"></a>            <span class="n">last_logged_revision</span> <span class="o">=</span> <span class="n">update_revision</span>
+</span><span id="__span-0-1570"><a id="__codelineno-0-1570" name="__codelineno-0-1570"></a>
+</span><span id="__span-0-1571"><a id="__codelineno-0-1571" name="__codelineno-0-1571"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1572"><a id="__codelineno-0-1572" name="__codelineno-0-1572"></a>        <span class="c1"># Rollout completion condition</span>
+</span><span id="__span-0-1573"><a id="__codelineno-0-1573" name="__codelineno-0-1573"></a>        <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1574"><a id="__codelineno-0-1574" name="__codelineno-0-1574"></a>
+</span><span id="__span-0-1575"><a id="__codelineno-0-1575" name="__codelineno-0-1575"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1576"><a id="__codelineno-0-1576" name="__codelineno-0-1576"></a>            <span class="s2">&quot;Rolling restart in progress for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;... (ready=</span><span class="si">%s</span><span class="s2">, updated=</span><span class="si">%s</span><span class="s2">, available=</span><span class="si">%s</span><span class="s2">, desired=</span><span class="si">%s</span><span class="s2">)&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1577"><a id="__codelineno-0-1577" name="__codelineno-0-1577"></a>            <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1578"><a id="__codelineno-0-1578" name="__codelineno-0-1578"></a>            <span class="n">ready</span><span class="p">,</span>
+</span><span id="__span-0-1579"><a id="__codelineno-0-1579" name="__codelineno-0-1579"></a>            <span class="n">updated</span><span class="p">,</span>
+</span><span id="__span-0-1580"><a id="__codelineno-0-1580" name="__codelineno-0-1580"></a>            <span class="n">available</span><span class="p">,</span>
+</span><span id="__span-0-1581"><a id="__codelineno-0-1581" name="__codelineno-0-1581"></a>            <span class="n">desired</span><span class="p">,</span>
+</span><span id="__span-0-1582"><a id="__codelineno-0-1582" name="__codelineno-0-1582"></a>        <span class="p">)</span>
+</span><span id="__span-0-1583"><a id="__codelineno-0-1583" name="__codelineno-0-1583"></a>
+</span><span id="__span-0-1584"><a id="__codelineno-0-1584" name="__codelineno-0-1584"></a>        <span class="k">if</span> <span class="n">ready</span> <span class="o">==</span> <span class="n">desired</span> <span class="ow">and</span> <span class="n">updated</span> <span class="o">==</span> <span class="n">desired</span> <span class="ow">and</span> <span class="n">available</span> <span class="o">==</span> <span class="n">desired</span> <span class="ow">and</span> <span class="n">current_revision</span> <span class="o">==</span> <span class="n">update_revision</span><span class="p">:</span>
+</span><span id="__span-0-1585"><a id="__codelineno-0-1585" name="__codelineno-0-1585"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1586"><a id="__codelineno-0-1586" name="__codelineno-0-1586"></a>                <span class="s2">&quot;Stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; rollout completed successfully (</span><span class="si">%s</span><span class="s2">/</span><span class="si">%s</span><span class="s2"> pods ready)&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1587"><a id="__codelineno-0-1587" name="__codelineno-0-1587"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1588"><a id="__codelineno-0-1588" name="__codelineno-0-1588"></a>                <span class="n">ready</span><span class="p">,</span>
+</span><span id="__span-0-1589"><a id="__codelineno-0-1589" name="__codelineno-0-1589"></a>                <span class="n">desired</span><span class="p">,</span>
+</span><span id="__span-0-1590"><a id="__codelineno-0-1590" name="__codelineno-0-1590"></a>            <span class="p">)</span>
+</span><span id="__span-0-1591"><a id="__codelineno-0-1591" name="__codelineno-0-1591"></a>            <span class="k">break</span>  <span class="c1"># the while loop will exit here if the rollout is successful</span>
+</span><span id="__span-0-1592"><a id="__codelineno-0-1592" name="__codelineno-0-1592"></a>
+</span><span id="__span-0-1593"><a id="__codelineno-0-1593" name="__codelineno-0-1593"></a>        <span class="n">wait_time</span> <span class="o">=</span> <span class="mi">30</span>
+</span><span id="__span-0-1594"><a id="__codelineno-0-1594" name="__codelineno-0-1594"></a>
+</span><span id="__span-0-1595"><a id="__codelineno-0-1595" name="__codelineno-0-1595"></a>    <span class="c1"># end while rollout monitoring</span>
+</span><span id="__span-0-1596"><a id="__codelineno-0-1596" name="__codelineno-0-1596"></a>
+</span><span id="__span-0-1597"><a id="__codelineno-0-1597" name="__codelineno-0-1597"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1598"><a id="__codelineno-0-1598" name="__codelineno-0-1598"></a>    <span class="c1"># Endpoint gating (optional)</span>
+</span><span id="__span-0-1599"><a id="__codelineno-0-1599" name="__codelineno-0-1599"></a>    <span class="c1"># ------------------------------------------------------------------</span>
+</span><span id="__span-0-1600"><a id="__codelineno-0-1600" name="__codelineno-0-1600"></a>
+</span><span id="__span-0-1601"><a id="__codelineno-0-1601" name="__codelineno-0-1601"></a>    <span class="k">if</span> <span class="n">endpoint_service_name</span><span class="p">:</span>
+</span><span id="__span-0-1602"><a id="__codelineno-0-1602" name="__codelineno-0-1602"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1603"><a id="__codelineno-0-1603" name="__codelineno-0-1603"></a>            <span class="s2">&quot;Validating registration of stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; at service -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1604"><a id="__codelineno-0-1604" name="__codelineno-0-1604"></a>            <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1605"><a id="__codelineno-0-1605" name="__codelineno-0-1605"></a>            <span class="n">endpoint_service_name</span><span class="p">,</span>
+</span><span id="__span-0-1606"><a id="__codelineno-0-1606" name="__codelineno-0-1606"></a>        <span class="p">)</span>
+</span><span id="__span-0-1607"><a id="__codelineno-0-1607" name="__codelineno-0-1607"></a>
+</span><span id="__span-0-1608"><a id="__codelineno-0-1608" name="__codelineno-0-1608"></a>        <span class="c1"># Extract the match_labels from the STS spec</span>
+</span><span id="__span-0-1609"><a id="__codelineno-0-1609" name="__codelineno-0-1609"></a>        <span class="n">match_labels</span> <span class="o">=</span> <span class="n">sts</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">selector</span><span class="o">.</span><span class="n">match_labels</span>
+</span><span id="__span-0-1610"><a id="__codelineno-0-1610" name="__codelineno-0-1610"></a>
+</span><span id="__span-0-1611"><a id="__codelineno-0-1611" name="__codelineno-0-1611"></a>        <span class="c1"># Convert the dictionary into a comma-separated string (e.g., &quot;app=my-app,tier=frontend&quot;)</span>
+</span><span id="__span-0-1612"><a id="__codelineno-0-1612" name="__codelineno-0-1612"></a>        <span class="n">selector</span> <span class="o">=</span> <span class="s2">&quot;,&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">match_labels</span><span class="o">.</span><span class="n">items</span><span class="p">()])</span>
+</span><span id="__span-0-1613"><a id="__codelineno-0-1613" name="__codelineno-0-1613"></a>
+</span><span id="__span-0-1614"><a id="__codelineno-0-1614" name="__codelineno-0-1614"></a>        <span class="c1"># Use the dynamic selector to list the pods</span>
+</span><span id="__span-0-1615"><a id="__codelineno-0-1615" name="__codelineno-0-1615"></a>        <span class="n">pod_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">list_pods</span><span class="p">(</span><span class="n">label_selector</span><span class="o">=</span><span class="n">selector</span><span class="p">)</span>
+</span><span id="__span-0-1616"><a id="__codelineno-0-1616" name="__codelineno-0-1616"></a>
+</span><span id="__span-0-1617"><a id="__codelineno-0-1617" name="__codelineno-0-1617"></a>        <span class="n">pods</span> <span class="o">=</span> <span class="n">pod_list</span><span class="o">.</span><span class="n">items</span>
+</span><span id="__span-0-1618"><a id="__codelineno-0-1618" name="__codelineno-0-1618"></a>
+</span><span id="__span-0-1619"><a id="__codelineno-0-1619" name="__codelineno-0-1619"></a>        <span class="n">pod_ips</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pod_ip</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pods</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pod_ip</span><span class="p">]</span>
+</span><span id="__span-0-1620"><a id="__codelineno-0-1620" name="__codelineno-0-1620"></a>
+</span><span id="__span-0-1621"><a id="__codelineno-0-1621" name="__codelineno-0-1621"></a>        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+</span><span id="__span-0-1622"><a id="__codelineno-0-1622" name="__codelineno-0-1622"></a>        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+</span><span id="__span-0-1623"><a id="__codelineno-0-1623" name="__codelineno-0-1623"></a>            <span class="k">if</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span> <span class="o">&gt;</span> <span class="mi">300</span><span class="p">:</span>
+</span><span id="__span-0-1624"><a id="__codelineno-0-1624" name="__codelineno-0-1624"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+</span><span id="__span-0-1625"><a id="__codelineno-0-1625" name="__codelineno-0-1625"></a>                    <span class="s2">&quot;Timeout waiting for endpoint registration for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1626"><a id="__codelineno-0-1626" name="__codelineno-0-1626"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1627"><a id="__codelineno-0-1627" name="__codelineno-0-1627"></a>                <span class="p">)</span>
+</span><span id="__span-0-1628"><a id="__codelineno-0-1628" name="__codelineno-0-1628"></a>                <span class="k">return</span> <span class="kc">False</span>
+</span><span id="__span-0-1629"><a id="__codelineno-0-1629" name="__codelineno-0-1629"></a>
+</span><span id="__span-0-1630"><a id="__codelineno-0-1630" name="__codelineno-0-1630"></a>            <span class="n">endpoints</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_core_v1_api</span><span class="p">()</span><span class="o">.</span><span class="n">read_namespaced_endpoints</span><span class="p">(</span>
+</span><span id="__span-0-1631"><a id="__codelineno-0-1631" name="__codelineno-0-1631"></a>                <span class="n">name</span><span class="o">=</span><span class="n">endpoint_service_name</span><span class="p">,</span>
+</span><span id="__span-0-1632"><a id="__codelineno-0-1632" name="__codelineno-0-1632"></a>                <span class="n">namespace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">get_namespace</span><span class="p">(),</span>
+</span><span id="__span-0-1633"><a id="__codelineno-0-1633" name="__codelineno-0-1633"></a>            <span class="p">)</span>
+</span><span id="__span-0-1634"><a id="__codelineno-0-1634" name="__codelineno-0-1634"></a>
+</span><span id="__span-0-1635"><a id="__codelineno-0-1635" name="__codelineno-0-1635"></a>            <span class="n">registered_ips</span> <span class="o">=</span> <span class="p">[</span><span class="n">addr</span><span class="o">.</span><span class="n">ip</span> <span class="k">for</span> <span class="n">subset</span> <span class="ow">in</span> <span class="p">(</span><span class="n">endpoints</span><span class="o">.</span><span class="n">subsets</span> <span class="ow">or</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">addr</span> <span class="ow">in</span> <span class="p">(</span><span class="n">subset</span><span class="o">.</span><span class="n">addresses</span> <span class="ow">or</span> <span class="p">[])]</span>
+</span><span id="__span-0-1636"><a id="__codelineno-0-1636" name="__codelineno-0-1636"></a>
+</span><span id="__span-0-1637"><a id="__codelineno-0-1637" name="__codelineno-0-1637"></a>            <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="n">ip</span> <span class="ow">in</span> <span class="n">registered_ips</span> <span class="k">for</span> <span class="n">ip</span> <span class="ow">in</span> <span class="n">pod_ips</span><span class="p">):</span>
+</span><span id="__span-0-1638"><a id="__codelineno-0-1638" name="__codelineno-0-1638"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1639"><a id="__codelineno-0-1639" name="__codelineno-0-1639"></a>                    <span class="s2">&quot;All pods for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; registered in service -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39; endpoint.&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1640"><a id="__codelineno-0-1640" name="__codelineno-0-1640"></a>                    <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1641"><a id="__codelineno-0-1641" name="__codelineno-0-1641"></a>                    <span class="n">endpoint_service_name</span><span class="p">,</span>
+</span><span id="__span-0-1642"><a id="__codelineno-0-1642" name="__codelineno-0-1642"></a>                <span class="p">)</span>
+</span><span id="__span-0-1643"><a id="__codelineno-0-1643" name="__codelineno-0-1643"></a>                <span class="k">break</span>
+</span><span id="__span-0-1644"><a id="__codelineno-0-1644" name="__codelineno-0-1644"></a>
+</span><span id="__span-0-1645"><a id="__codelineno-0-1645" name="__codelineno-0-1645"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+</span><span id="__span-0-1646"><a id="__codelineno-0-1646" name="__codelineno-0-1646"></a>                <span class="s2">&quot;Waiting for service endpoint registration for stateful set -&gt; &#39;</span><span class="si">%s</span><span class="s2">&#39;...&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1647"><a id="__codelineno-0-1647" name="__codelineno-0-1647"></a>                <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-1648"><a id="__codelineno-0-1648" name="__codelineno-0-1648"></a>            <span class="p">)</span>
+</span><span id="__span-0-1649"><a id="__codelineno-0-1649" name="__codelineno-0-1649"></a>            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+</span><span id="__span-0-1650"><a id="__codelineno-0-1650" name="__codelineno-0-1650"></a>        <span class="c1"># end while endpoint registration</span>
+</span><span id="__span-0-1651"><a id="__codelineno-0-1651" name="__codelineno-0-1651"></a>    <span class="c1"># end if endpoint_service_name</span>
+</span><span id="__span-0-1652"><a id="__codelineno-0-1652" name="__codelineno-0-1652"></a>
+</span><span id="__span-0-1653"><a id="__codelineno-0-1653" name="__codelineno-0-1653"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rolling restart completed for stateful set -&gt;&#39;</span><span class="si">%s</span><span class="s2">&#39;&quot;</span><span class="p">,</span> <span class="n">sts_name</span><span class="p">)</span>
+</span><span id="__span-0-1654"><a id="__codelineno-0-1654" name="__codelineno-0-1654"></a>
+</span><span id="__span-0-1655"><a id="__codelineno-0-1655" name="__codelineno-0-1655"></a>    <span class="k">return</span> <span class="kc">True</span>
 </span></code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -9484,7 +9952,7 @@ See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1S
 </span><span id="__span-0-823"><a id="__codelineno-0-823" name="__codelineno-0-823"></a>
 </span><span id="__span-0-824"><a id="__codelineno-0-824" name="__codelineno-0-824"></a>    <span class="k">try</span><span class="p">:</span>
 </span><span id="__span-0-825"><a id="__codelineno-0-825" name="__codelineno-0-825"></a>        <span class="n">response</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">patch_stateful_set</span><span class="p">(</span>
-</span><span id="__span-0-826"><a id="__codelineno-0-826" name="__codelineno-0-826"></a>            <span class="n">sts_name</span><span class="p">,</span>
+</span><span id="__span-0-826"><a id="__codelineno-0-826" name="__codelineno-0-826"></a>            <span class="n">sts_name</span><span class="o">=</span><span class="n">sts_name</span><span class="p">,</span>
 </span><span id="__span-0-827"><a id="__codelineno-0-827" name="__codelineno-0-827"></a>            <span class="n">sts_body</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;spec&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;replicas&quot;</span><span class="p">:</span> <span class="n">scale</span><span class="p">}},</span>
 </span><span id="__span-0-828"><a id="__codelineno-0-828" name="__codelineno-0-828"></a>        <span class="p">)</span>
 </span><span id="__span-0-829"><a id="__codelineno-0-829" name="__codelineno-0-829"></a>    <span class="k">except</span> <span class="n">ApiException</span><span class="p">:</span>

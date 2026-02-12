@@ -10910,7 +10910,9 @@ class OTCS:
 
     # end method definition
 
-    def get_workspace_types_iterator(self, expand_workspace_info: bool = True, expand_templates: bool = True) -> iter:
+    def get_workspace_types_iterator(
+        self, expand_workspace_info: bool = True, expand_templates: bool = True, show_error: bool = True
+    ) -> iter:
         """Get an iterator object to traverse all workspace types.
 
         Args:
@@ -10919,6 +10921,9 @@ class OTCS:
             expand_templates (bool, optional):
                 Controls if the list of workspace templates
                 per workspace type is returned as well
+            show_error (bool, optional):
+                Controls if errors are shown to the caller. Defaults to True.
+
         Returns:
             iter:
                 An iterator to traverse all workspace types.
@@ -10933,7 +10938,7 @@ class OTCS:
         """
 
         response = self.get_workspace_types(
-            expand_workspace_info=expand_workspace_info, expand_templates=expand_templates
+            expand_workspace_info=expand_workspace_info, expand_templates=expand_templates, show_error=show_error
         )
         if not response or "results" not in response:
             self.logger.warning("Failed to get workspace types or no results found.")

@@ -22224,3 +22224,64 @@ class OTCS:
         return payload
 
     # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_permissions")
+    def get_node_permissions(
+        self,
+        node_id: int,
+        page: int | None = None,
+        limit: int | None = None,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get all permissions on a node (Default Access and any Assigned Access).
+
+        The results can be paginated if the request specifies parameters 'page' and 'limit'.
+
+        Args:
+            node_id (int):
+                The ID of the node to retrieve permissions for.
+            page (int | None, optional):
+                Page number for pagination. Defaults to None (no pagination).
+            limit (int, optional):
+                Page size for pagination. Defaults to None (no pagination).
+            show_error (bool, optional):
+                If True, treat as error if node is not found.
+
+        Returns:
+            dict | None:
+                Permission information as a dictionary, or None if the request fails.
+
+        """
+
+        # Build query parameters
+        query_params = {}
+        if page is not None:
+            query_params["page"] = page
+        if limit is not None:
+            query_params["limit"] = limit
+
+        # Build the request URL
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/permissions"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get permissions for node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            data=query_params if query_params else None,
+            timeout=None,
+            warning_message="Permissions for node ID -> {} do not exist or cannot be retrieved".format(
+                node_id,
+            ),
+            failure_message="Failed to get permissions for node ID -> {}".format(node_id),
+            show_error=show_error,
+        )
+
+    # end method definition
+

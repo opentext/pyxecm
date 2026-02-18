@@ -4616,6 +4616,9 @@ class Payload:
             client_default_scopes = oauth_client.get("default_scopes")
             client_allow_impersonation = oauth_client.get("allow_impersonation", True)
             client_secret = oauth_client.get("secret", "")
+            client_user_type = oauth_client.get(
+                "user_type", ""
+            )  # "" -> Default: Standard user, "ServiceUser" -> Service User
 
             # Check if OAuth client does already exist
             # (in an attempt to make the code idem-potent)
@@ -4676,6 +4679,21 @@ class Payload:
             )
             # Write the secret back into the payload
             oauth_client["secret"] = client_secret
+
+            if client_user_type:
+                response = self._otds.update_user(
+                    partition="OAuthClients",
+                    user_id=client_name,
+                    attribute_name="oTType",
+                    attribute_value=client_user_type,
+                )
+                if not response:
+                    self.logger.error(
+                        "Failed to set user type -> '%s' for OAuth client -> '%s'!",
+                        client_user_type,
+                        client_name,
+                    )
+                oauth_client["user_type"] = client_user_type
 
         self.write_status_file(
             success=success,
@@ -13601,18 +13619,27 @@ class Payload:
                 if synonyms:
                     # As we don't have a datastructure in OTCM for Workspace Type synonyms we just write them
                     # into the description field (appended to the regular description):
-                    item_description = workspace_type_description + "\n"
+                    workspace_type_description += "\n" + "Synonyms: " + ", ".join(synonyms)
+                # end if synonyms
+
+                key_aspects = set(entity.get("key_aspects", []))
+                if key_aspects:
+                    # As we don't have a datastructure in OTCM for Workspace Type key aspects we just write them
+                    # into the description field (appended to the regular description):
+                    workspace_type_description += "\n" + "Key Aspects: " + ", ".join(key_aspects)
+                # end if key_aspects
+
+                if synonyms or key_aspects:
                     response = self._otcs.update_item(
                         node_id=workspace_type_node_id,
-                        item_description=item_description + "Synonyms: " + ", ".join(synonyms),
+                        item_description=workspace_type_description,
                     )
                     if not response:
                         self.logger.error(
-                            "Failed to update synonyms (stored in description) for entity type -> '%s'!",
+                            "Failed to update synonyms and key aspects (stored in description) for entity type -> '%s'!",
                             workspace_type_name,
                         )
                         success = False
-                # end if synonyms
 
                 # Build the merged entity structure:
                 if workspace_type_name not in merged_entities:
@@ -13620,6 +13647,7 @@ class Payload:
                         "name": workspace_type_name,
                         "description": workspace_type_description,
                         "synonyms": synonyms,
+                        "key_aspects": key_aspects,
                         "ontologies": {ontology_name},
                     }
                 else:
@@ -13627,6 +13655,7 @@ class Payload:
                     # 1. merge the synonyms and
                     # 2. keep track in which ontologies this entity type is defined:
                     merged_entities[workspace_type_name]["synonyms"].update(synonyms)
+                    merged_entities[workspace_type_name]["key_aspects"].update(key_aspects)
                     merged_entities[workspace_type_name]["ontologies"].add(ontology_name)
 
                 # Build the data structure required for updating the workspace type
@@ -13654,15 +13683,6 @@ class Payload:
                         continue
                     target_wksp_type_id = self._otcs.get_result_value(response=target_wksp_type, key="wksp_type_id")
                     target_wksp_type_name = self._otcs.get_result_value(response=target_wksp_type, key="wksp_type_name")
-
-                    # TODO: this is a bug in the REST API - hotfix requested.
-                    # if workspace_type_id == target_wksp_type_id:
-                    #     self.logger.warning(
-                    #         "The REST API does not support relationships from workspace type -> '%s' (%s) to itself! Skipping...",
-                    #         workspace_type_name,
-                    #         workspace_type_id,
-                    #     )
-                    #     continue
 
                     self.logger.info(
                         "Processing ontology relationship from source entity type -> '%s' (%s) to target entity type -> '%s' (%s).",

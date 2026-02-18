@@ -79,7 +79,7 @@ async def create_payload_item(
 
     # Read upload file asynchronously and write to disk using anyio
     content = await upload_file.read()
-    async with anyio.open_file(file_name, "wb") as buffer:
+    async with await anyio.open_file(file_name, "wb") as buffer:
         await buffer.write(content)
 
     if dependencies == [-1]:
@@ -436,7 +436,7 @@ async def download_payload_content(
             detail="Payload file -> '{}' not found".format(payload.filename),
         )
 
-    async with anyio.open_file(payload.filename, "rb") as file:
+    async with await anyio.open_file(payload.filename, "rb") as file:
         content = await file.read()
 
     if payload.filename.endswith(".gz.b64"):
@@ -478,7 +478,7 @@ async def download_payload_logfile(
             detail="Log file -> '{}' not found".format(filename),
         )
 
-    async with anyio.open_file(filename, "rb") as file:
+    async with await anyio.open_file(filename, "rb") as file:
         content = await file.read()
 
     return Response(

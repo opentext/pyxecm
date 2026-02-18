@@ -68,6 +68,7 @@ def import_payload(
 
         if enabled is None:
             enabled = payload_options.get("enabled", True)
+            enabled = False if isinstance(enabled, str) and enabled.lower() == "false" else bool(enabled)
 
         # read name from options section if specified, otherwise take filename
         name = payload_options.get("name", os.path.basename(filename))

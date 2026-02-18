@@ -1859,7 +1859,13 @@ class Customizer:
                         key="id",
                     )
                     if not target_folder_id:
-                        target_folder_id = 2004  # use Enterprise Workspace as fallback
+                        response = self.otcs_backend_object.get_node_by_volume_and_path(
+                            volume_type=self.otcs_backend_object.VOLUME_TYPE_PERSONAL_WORKSPACE,
+                        )  # write to Personal Workspace of Admin
+                        target_folder_id = (
+                            self.otcs_backend_object.get_result_value(response=response, key="id") or 2004
+                        )
+
                     # Write YAML file with upadated payload (including IDs, etc.).
                     # We need to write to a temporary location as initial location is read-only:
                     payload_file = os.path.basename(cust_payload)
@@ -1931,7 +1937,11 @@ class Customizer:
                 key="id",
             )
             if not target_folder_id:
-                target_folder_id = 2004  # use Enterprise Workspace as fallback
+                response = self.otcs_backend_object.get_node_by_volume_and_path(
+                    volume_type=self.otcs_backend_object.VOLUME_TYPE_PERSONAL_WORKSPACE,
+                )  # write to Personal Workspace of Admin
+                target_folder_id = self.otcs_backend_object.get_result_value(response=response, key="id") or 2004
+
             # Check if the log file has been uploaded before.
             # This can happen if we re-run the python container:
             # In this case we add a version to the existing document:

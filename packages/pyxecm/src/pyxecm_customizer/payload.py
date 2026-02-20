@@ -13781,6 +13781,7 @@ class Payload:
         final_entities = []
         for e in merged_entities.values():
             e["synonyms"] = sorted(e["synonyms"])
+            e["key_aspects"] = sorted(e["key_aspects"])
             e["ontologies"] = sorted(e["ontologies"])
             final_entities.append(e)
 

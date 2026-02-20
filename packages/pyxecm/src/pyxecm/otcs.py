@@ -6307,6 +6307,7 @@ class OTCS:
         sort: str | None = None,
         result_field: str = "contents",
         page_size: int = 100,
+        limit: int | None = None,
     ) -> iter:
         """Get an iterator object that can be used to traverse the filtered nodes.
 
@@ -6328,9 +6329,20 @@ class OTCS:
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Default is None.
             result_field (str, optional):
-                This V3 REST API delivers multiple substructures for the matching nodes:
+                This V3 REST API delivers multiple substructures for the matching nodes.
+                Defaults to "contents".
             page_size (int, optional):
-                The maximum number of results to return (page size). Defaults to 100.
+                The maximum number of results to return per page. Defaults to 100.
+                This is basically the chunk size for the iterator.
+            limit (int | None, optional):
+                The maximum number of nodes to return in total.
+                If None (default) all nodes are returned.
+                If a number is provided only up to this number of results is returned.
+
+        Returns:
+            iter:
+                A generator yielding one node per iteration.
+                If the REST API fails, returns no value.
 
         Example usage:
             ```python
@@ -6393,37 +6405,38 @@ class OTCS:
 
         """
 
-        # Get the first page of items:
-        response = self.get_nodes_by_parent_and_filters(
-            parent_id=parent_id,
-            name=name,
-            facet_values=facet_values,
-            sort=sort,
-            page=1,
-            page_size=page_size,
-        )
+        page = 1
+        remaining = limit
 
-        if not response or not response["results"]:
-            return
-
-        total_pages = response["results"]["paging"]["page_total"]
-
-        # Yield nodes one at a time
-        yield from response["results"][result_field]
-
-        for page in range(2, total_pages):
-            # Get the next page of sub node items:
+        while True:
+            effective_limit = min(page_size, remaining) if remaining is not None else page_size
+            # Get the next page of nodes:
             response = self.get_nodes_by_parent_and_filters(
                 parent_id=parent_id,
                 name=name,
                 facet_values=facet_values,
                 sort=sort,
                 page=page,
-                page_size=page_size,
+                page_size=effective_limit,
             )
 
-            # Yield nodes one at a time
-            yield from response["results"][result_field]
+            results = response.get("results", {}).get(result_field) if response else None
+            if not results:
+                return  # natural iterator termination
+
+            yield from results
+
+            if remaining is not None:
+                remaining -= len(results)
+                if remaining <= 0:
+                    return
+
+            # Fewer results than requested means this was the last page
+            if len(results) < effective_limit:
+                return
+
+            page += 1
+        # end while True
 
     # end method definition
 
@@ -13016,67 +13029,40 @@ class OTCS:
 
         """
 
-        # First we probe how many items we have:
-        response = self.get_workspace_relationships(
-            workspace_id=workspace_id,
-            relationship_type=relationship_type,
-            related_workspace_name=related_workspace_name,
-            related_workspace_type_id=related_workspace_type_id,
-            limit=1,
-            page=1,
-            fields=fields,
-            metadata=metadata,
-        )
-        if not response or "results" not in response:
-            # Don't return None! Plain return is what we need for iterators.
-            # Natural Termination: If the generator does not yield, it behaves
-            # like an empty iterable when used in a loop or converted to a list:
-            return
+        page = 1
+        remaining = limit
 
-        number_of_related_workspaces = response["paging"]["total_count"]
-        if limit and number_of_related_workspaces > limit:
-            number_of_related_workspaces = limit
-
-        if not number_of_related_workspaces:
-            self.logger.debug(
-                "Workspace with node ID -> %d does not have related workspaces! Cannot iterate over related workspaces.",
-                workspace_id,
-            )
-            # Don't return None! Plain return is what we need for iterators.
-            # Natural Termination: If the generator does not yield, it behaves
-            # like an empty iterable when used in a loop or converted to a list:
-            return
-
-        # If the container has many items we need to go through all pages
-        # Adding page_size - 1 ensures that any remainder from the division is
-        # accounted for, effectively rounding up. Integer division (//) performs floor division,
-        # giving the desired number of pages:
-        total_pages = (number_of_related_workspaces + page_size - 1) // page_size
-
-        for page in range(1, total_pages + 1):
+        while True:
+            effective_limit = min(page_size, remaining) if remaining is not None else page_size
             # Get the next page of sub node items:
             response = self.get_workspace_relationships(
                 workspace_id=workspace_id,
                 relationship_type=relationship_type,
                 related_workspace_name=related_workspace_name,
                 related_workspace_type_id=related_workspace_type_id,
-                limit=page_size if limit is None else limit,
+                limit=effective_limit,
                 page=page,
                 fields=fields,
                 metadata=metadata,
             )
-            if not response or not response.get("results", None):
-                self.logger.warning(
-                    "Failed to retrieve related workspaces for workspace with node ID -> %d (page -> %d)",
-                    workspace_id,
-                    page,
-                )
+
+            results = response.get("results") if response else None
+            if not results:
+                return  # natural iterator termination
+
+            yield from results
+
+            if remaining is not None:
+                remaining -= len(results)
+                if remaining <= 0:
+                    return
+
+            # Fewer results than requested means this was the last page
+            if len(results) < effective_limit:
                 return
 
-            # Yield nodes one at a time
-            yield from response["results"]
-
-        # end for page in range(1, total_pages + 1)
+            page += 1
+        # end while True
 
     # end method definition
 

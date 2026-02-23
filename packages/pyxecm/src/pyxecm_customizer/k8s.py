@@ -1523,7 +1523,7 @@ class K8s:
 
         start_time = time.time()
         last_logged_revision = None
-        wait_time = 10
+        wait_time = 3
 
         while True:
             # Avoid tight loop

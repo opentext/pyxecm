@@ -6420,6 +6420,8 @@ class OTCS:
                 page_size=effective_limit,
             )
 
+            total_pages = response.get("paging", {}).get("page_total") if response else None
+
             results = response.get("results", {}).get(result_field) if response else None
             if not results:
                 return  # natural iterator termination
@@ -6435,6 +6437,10 @@ class OTCS:
             if len(results) < effective_limit:
                 return
 
+            # This is required as the REST API has a bug to deliver results
+            # for pages out of range instead an empty result. In this case we just stop the iteration.
+            if total_pages and page >= total_pages:
+                return
             page += 1
         # end while True
 
@@ -9485,6 +9491,8 @@ class OTCS:
                 page=page,
             )
 
+            total_pages = response.get("paging", {}).get("page_total") if response else None
+
             results = response.get("results") if response else None
             if not results:
                 return  # natural iterator termination
@@ -9500,6 +9508,10 @@ class OTCS:
             if len(results) < effective_limit:
                 return
 
+            # This is required as the REST API has a bug to deliver results
+            # for pages out of range instead an empty result. In this case we just stop the iteration.
+            if total_pages and page >= total_pages:
+                return
             page += 1
         # end while True
 
@@ -11667,6 +11679,8 @@ class OTCS:
                 metadata=metadata,
             )
 
+            total_pages = response.get("paging", {}).get("page_total") if response else None
+
             results = response.get("results") if response else None
             if not results:
                 return  # natural iterator termination
@@ -11682,6 +11696,10 @@ class OTCS:
             if len(results) < effective_limit:
                 return
 
+            # This is required as the REST API has a bug to deliver results
+            # for pages out of range instead an empty result. In this case we just stop the iteration.
+            if total_pages and page >= total_pages:
+                return
             page += 1
         # end while True
 
@@ -13046,6 +13064,8 @@ class OTCS:
                 metadata=metadata,
             )
 
+            total_pages = response.get("paging", {}).get("page_total") if response else None
+
             results = response.get("results") if response else None
             if not results:
                 return  # natural iterator termination
@@ -13061,6 +13081,10 @@ class OTCS:
             if len(results) < effective_limit:
                 return
 
+            # This is required as the REST API has a bug to deliver results
+            # for pages out of range instead an empty result. In this case we just stop the iteration.
+            if total_pages and page >= total_pages:
+                return
             page += 1
         # end while True
 
@@ -13751,6 +13775,7 @@ class OTCS:
         classifications: list | None = None,
         body: bool = True,
         show_error: bool = True,
+        parse_error_response: bool | None = False,
         **kwargs: dict,
     ) -> dict | None:
         """Create a Content Server item.
@@ -13782,6 +13807,8 @@ class OTCS:
                 do require this but some not (like Scheduled Bots)
             show_error (bool, optional):
                 Log an error if item cration fails. Otherwise log a warning.
+            parse_error_response (bool | None, optional):
+                Whether to parse the request response or not. Defaults to False.
             **kwargs (dict):
                 Add additional attributes to the body of the POST request
 
@@ -13900,6 +13927,7 @@ class OTCS:
             warning_message="Cannot create item -> '{}'".format(item_name),
             failure_message="Failed to create item -> '{}'".format(item_name),
             show_error=show_error,
+            parse_error_response=parse_error_response,
         )
 
     # end method definition

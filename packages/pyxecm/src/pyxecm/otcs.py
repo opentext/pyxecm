@@ -6845,6 +6845,96 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_ancestors")
+    def get_node_ancestors(self, node_id: int) -> dict | None:
+        """Get ancestors of a node.
+
+        Args:
+            node_id (int):
+                The ID of the Node.
+
+        Returns:
+            dict | None:
+                Information of the Node ancestors or None if the request fails.
+
+        Example:
+        {
+            'ancestors': [
+                {
+                    'id': 2000,
+                    'name': 'Enterprise',
+                    'parent_id': -1,
+                    'type': 141,
+                    'volume_id': -2000,
+                    'type_name': 'Enterprise Workspace'
+                },
+                {
+                    'id': 26848,
+                    'name': 'Case Management',
+                    'parent_id': 2000,
+                    'type': 0,
+                    'volume_id': -2000,
+                    'type_name': 'Folder'
+                },
+                {
+                    'id': 37267,
+                    'name': 'eFiles',
+                    'parent_id': 26848,
+                    'type': 0,
+                    'volume_id': -2000,
+                    'type_name': 'Folder'
+                },
+                {
+                    'id': 63193,
+                    'name': 'Engineering & Construction',
+                    'parent_id': 37267,
+                    'type': 0,
+                    'volume_id': -2000,
+                    'type_name': 'Folder'
+                },
+                {
+                    'id': 66490,
+                    'name': 'eFile-M6P 1Y7-02-001',
+                    'parent_id': 63193,
+                    'type': 848,
+                    'volume_id': -2000,
+                    'type_name': 'Business Workspace'
+                },
+                {
+                    'id': 72941,
+                    'name': 'eCase-M6P 1Y7-02-001-00001 Building Extension 2822',
+                    'parent_id': -66490,
+                    'type': 848,
+                    'volume_id': 66490,
+                    'type_name': 'Business Workspace'
+                }
+            ]
+        }
+
+        """
+
+        request_url = self.config()["nodesUrl"] + "/" + str(node_id) + "/ancestors"
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get ancestors for node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get ancestors for node with ID -> {}".format(
+                node_id,
+            ),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_facets")
     def get_node_facets(
         self, node_id: int, facet_values: dict[int, str] | None = None, facet_values_limit: int | None = None

@@ -129,7 +129,7 @@ class Data:
         if self._schema:
             for col, dtype in self._schema.items():
                 if col in self._df.columns:
-                    if dtype == "datetime64[ns, UTC]":
+                    if dtype.startswith("datetime64") and "UTC" in dtype:
                         self._df[col] = pd.to_datetime(self._df[col], utc=True)
                     elif dtype.startswith("datetime64"):
                         self._df[col] = pd.to_datetime(self._df[col])

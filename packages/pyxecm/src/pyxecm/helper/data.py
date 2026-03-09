@@ -129,7 +129,12 @@ class Data:
         if self._schema:
             for col, dtype in self._schema.items():
                 if col in self._df.columns:
-                    self._df[col] = self._df[col].astype(dtype)
+                    if dtype == "datetime64[ns, UTC]":
+                        self._df[col] = pd.to_datetime(self._df[col], utc=True)
+                    elif dtype.startswith("datetime64"):
+                        self._df[col] = pd.to_datetime(self._df[col])
+                    else:
+                        self._df[col] = self._df[col].astype(dtype)
 
         # set index if specified
         if index_columns:
@@ -494,7 +499,16 @@ class Data:
             # 2. Apply Schema & Index Logic
             if enforce_schema and self._schema is not None:
                 # Always reindex/astype if enforcing schema to ensure 100% alignment
-                new_df = new_df.reindex(columns=self._schema.keys()).astype(self._schema)
+                new_df = new_df.reindex(columns=self._schema.keys())
+
+                for col, dtype in self._schema.items():
+                    if dtype.startswith("datetime64"):
+                        if "UTC" in dtype:
+                            new_df[col] = pd.to_datetime(new_df[col], utc=True)
+                        else:
+                            new_df[col] = pd.to_datetime(new_df[col])
+                    else:
+                        new_df[col] = new_df[col].astype(dtype)
 
                 if self._index_columns is not None:
                     new_df.set_index(self._index_columns, inplace=True, drop=False)

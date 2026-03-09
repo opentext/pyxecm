@@ -2554,7 +2554,7 @@ class OTCS:
 
         """
 
-        version = self._get_server_version_cached()
+        version = self.__get_server_version_cached()
         if version is None:
             # Avoid caching transient None results when the server is not ready.
             self.__get_server_version_cached.cache_clear()

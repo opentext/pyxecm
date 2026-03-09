@@ -779,6 +779,8 @@ class OTKD:
                 return None
 
         process_groups = self.get_process_groups(parent_process_group_id=parent_id)
+        if process_groups is None:
+            return None
 
         process_group = next(
             (group for group in process_groups if group["component"]["name"] == name),
@@ -842,6 +844,8 @@ class OTKD:
             return None
 
         process_groups = self.get_process_groups(parent_process_group_id=root_process_group_id)
+        if process_groups is None:
+            return None
 
         group_exists = next(
             (True for group in process_groups if group["component"]["name"] == name),
@@ -1000,6 +1004,8 @@ class OTKD:
 
         # Get a list of all parameter contexts:
         parameter_contexts = self.get_parameter_contexts()
+        if parameter_contexts is None:
+            return None
 
         parameter_context = next(
             (context for context in parameter_contexts if context["component"]["name"] == name), None

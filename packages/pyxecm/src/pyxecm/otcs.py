@@ -506,6 +506,7 @@ class OTCS:
         otcs_config["securityClearancesUrl"] = otcs_rest_url + "/v1/securityclearances"
         otcs_config["holdsUrl"] = otcs_rest_url + "/v1/holds"
         otcs_config["holdsUrlv2"] = otcs_rest_url + "/v2/holds"
+        otcs_config["holdUrlv2"] = otcs_rest_url + "/v2/hold"
         otcs_config["validationUrl"] = otcs_rest_url + "/v1/validation/nodes/names"
         otcs_config["aiUrl"] = otcs_rest_url + "/v2/ai"
         otcs_config["aiNodesUrl"] = otcs_config["aiUrl"] + "/nodes"
@@ -2541,7 +2542,6 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_server_version")
-    @cache
     def get_server_version(self) -> str | None:
         """Get Content Server version.
 
@@ -2554,6 +2554,18 @@ class OTCS:
 
         """
 
+        version = self._get_server_version_cached()
+        if version is None:
+            # Avoid caching transient None results when the server is not ready.
+            self.__get_server_version_cached.cache_clear()
+
+        current_span = trace.get_current_span()
+        current_span.set_attribute("version", version)
+
+        return version
+
+    @cache
+    def __get_server_version_cached(self) -> str | None:
         response = self.get_server_info()
         if not response:
             return None
@@ -9268,8 +9280,8 @@ class OTCS:
                 The ID of a saved search query.
             template_id (int, optional):
                 The ID of a saved search template.
-            location_id (int | None, optional):
-                The ID of a folder or workspace to start a search from here.
+            location_id (int | list[int] | None, optional):
+                The ID(s) of a folder or workspace to start a search from here.
                 None = unrestricted search (default).
             limit (int, optional):
                 The maximum number of results to return. Default is 100.
@@ -9504,7 +9516,7 @@ class OTCS:
         slice_id: int = 0,
         query_id: int = 0,
         template_id: int = 0,
-        location_id: int | None = None,
+        location_id: int | list[int] | None = None,
         page_size: int = 100,
         limit: int | None = None,
     ) -> iter:
@@ -9545,8 +9557,8 @@ class OTCS:
                 The ID of a saved search query.
             template_id (int, optional):
                 The ID of a saved search template.
-            location_id (int | None, optional):
-                The ID of a folder or workspace to start a search from here.
+            location_id (int | list[int] | None, optional):
+                The ID(s) of a folder or workspace to start a search from here.
                 None = unrestricted search (default).
             page_size (int, optional):
                 The maximum number of results to return. Default is 100.
@@ -11533,6 +11545,9 @@ class OTCS:
             ```
 
         """
+
+        current_span = trace.get_current_span()
+        current_span.set_attribute("node_id", node_id)
 
         query = {}
         if fields:
@@ -16993,6 +17008,110 @@ class OTCS:
             timeout=None,
             failure_message="Failed to assign RM classifications with ID -> {} to item with ID -> {}".format(
                 rm_classification,
+                node_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_hold_by_name")
+    def get_hold_by_name(self, holdname: str) -> dict | None:
+        """Get information about a hold by its name.
+
+        Args:
+            holdname (str):
+                The name of the hold.
+
+        Returns:
+            dict | None:
+                Response of the request or None if the request has failed.
+
+        Example:
+            ```json
+                    "results": {
+                        "data": {
+                            "hold": {
+                                "HoldID": 13,
+                                "HoldName": "HOLD_10",
+                                "ActiveHold": 1,
+                                "OBJECT": null,
+                                "ApplyPatron": "Records Management System User",
+                                "DateApplied": null,
+                                "HoldComment": "The comment",
+                                "HoldType": "FOIA",
+                                "DateToRemove": null,
+                                "DateRemoved": null,
+                                "RemovalPatron": null,
+                                "RemovalComment": null,
+                                "EditDate": null,
+                                "EditPatron": null,
+                                "AlternateHoldID": "HOLD_10",
+                                "ParentID": null
+                            }
+                        }
+                    }
+
+        """
+
+        request_url = self.config()["holdUrlv2"] + "?holdname=" + holdname
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get hold with name -> %s; calling -> %s",
+            holdname,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get hold with name -> {}".format(
+                holdname,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_hold")
+    def assign_hold(self, node_id: int, hold_id: int) -> dict | None:
+        """Assign a hold to a Content Server item.
+
+        Args:
+            node_id (int):
+                The node ID of the Content Server item.
+            hold_id (int):
+                The Hold ID.
+
+        Returns:
+            dict | None:
+                Response of the request or None if the assignment of the hold has failed.
+
+        """
+
+        assign_hold_post_data = {"hold_id": hold_id}
+
+        request_url = self.config()["nodesUrl"] + "/" + str(node_id) + "/holds"
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Assign Hold with ID -> %d to item with ID -> %d; calling -> %s",
+            hold_id,
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data={"body": json.dumps(assign_hold_post_data)},
+            timeout=None,
+            failure_message="Failed to assign hold with ID -> {} to item with ID -> {}".format(
+                hold_id,
                 node_id,
             ),
         )

@@ -3197,13 +3197,23 @@ class Payload:
             # Write nodeID back into the payload
             workspace["nodeId"] = workspace_id
             return workspace_id
-        else:
-            self.logger.info(
-                "Workspace of type -> '%s' and name -> '%s' does not yet exist. Cannot determine its ID.",
-                workspace["type_name"],
-                workspace["name"],
-            )
-            return 0
+        # We fallback to nickname lookup if type + name did not
+        # deliver a result - this can happen if a workspace got a different name
+        # based on workspace type naming definitions:
+        if "nickname" in workspace:
+            response = self._otcs.get_node_from_nickname(nickname=workspace["nickname"])
+            workspace_id = self._otcs.get_result_value(response=response, key="id")
+            if workspace_id:
+                workspace_id = int(workspace_id)
+                workspace["nodeId"] = workspace_id
+                return workspace_id
+
+        self.logger.info(
+            "Workspace of type -> '%s' and name -> '%s' does not yet exist. Cannot determine its ID.",
+            workspace["type_name"],
+            workspace["name"],
+        )
+        return 0
 
     # end method definition
 
@@ -13945,6 +13955,13 @@ class Payload:
             # e.g. in the process_workspace_relationships. Otherwise the
             # changes to "nodeId" or "name" would be lost. We need to do it
             # in 2 steps as we want to avoid to have NaN values in the resulting dicts:
+            # Merge all partition updates back into the main DataFrame first.
+            # Worker threads update their partition DataFrames; those updates are
+            # intentionally merged into the main DataFrame before serialization:
+            for partition in partitions:
+                # Write updated rows for this partition back into the main frame:
+                df.loc[partition.index, partition.columns] = partition
+
             # 1. Convert the data frame back to a list of dictionaries:
             updated_workspaces = df.get_data_frame().to_dict(orient="records")
             # 2. Remove any dictionary item that has a "NaN" scalar value
@@ -14029,8 +14046,8 @@ class Payload:
             )
             return True
 
-        # Read relationships from payload:
-        if "relationships" not in workspace:
+        # Read relationships from payload if they exist:
+        if "relationships" not in workspace or not workspace["relationships"]:
             self.logger.debug(
                 "Workspace -> '%s' has no relationships. Skipping to next workspace...",
                 name,

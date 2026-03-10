@@ -20369,6 +20369,8 @@ class OTCS:
         relationship_executables: list[callable] | None = None,
         relationship_types: list | None = None,
         max_depth: int | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
         **kwargs: dict,
     ) -> dict:
         """Traverse all workspaces of a given type and execute executables.
@@ -20400,6 +20402,10 @@ class OTCS:
                 The default that will be established if None is provided is ["child", "parent"].
             max_depth (int | None):
                 The maximum depth for the recursive traversal.
+            fields (str | list, optional):
+                The fields to retrieve for each workspace. Default is "properties".
+            metadata (bool, optional):
+                Whether to include metadata in the traversal results. Default is False.
             kwargs:
                 Additional keyword arguments for the executables.
 
@@ -20430,7 +20436,9 @@ class OTCS:
                 )
                 continue
 
-            workspace_instances = self.get_workspace_instances_iterator(type_id=wksp_type_id)
+            workspace_instances = self.get_workspace_instances_iterator(
+                type_id=wksp_type_id, fields=fields, metadata=metadata
+            )
             for workspace_instance in workspace_instances:
                 # Call the actual recursive traversal method:
                 result = self.traverse_workspace(
@@ -20443,6 +20451,8 @@ class OTCS:
                     relationship_executables=relationship_executables,
                     relationship_types=relationship_types,
                     filter_at_traversal=filter_at_traversal,
+                    fields=fields,
+                    metadata=metadata,
                     max_depth=max_depth,
                     **kwargs,
                 )
@@ -20468,6 +20478,8 @@ class OTCS:
         relationship_executables: list[callable] | None = None,
         relationship_types: list | None = None,
         max_depth: int | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
         **kwargs: dict,
     ) -> dict:
         """Recursively traverse all workspaces and relationships.
@@ -20508,6 +20520,10 @@ class OTCS:
                 The current depth of the traversal.
             max_depth (int | None):
                 The maximum depth for the recursive traversal.
+            fields (str | list, optional):
+                The fields to retrieve for each workspace. Default is "properties".
+            metadata (bool, optional):
+                Whether to include metadata in the traversal results. Default is False.
             kwargs:
                 Additional keyword arguments for the executables.
 
@@ -20540,7 +20556,7 @@ class OTCS:
             workspace_node_id = self.get_result_value(response=workspace_node, key="id")
         elif isinstance(workspace_node, int):
             workspace_node_id = workspace_node
-            workspace_node = self.get_workspace(node_id=workspace_node_id)
+            workspace_node = self.get_workspace(node_id=workspace_node_id, fields=fields, metadata=metadata)
         else:
             self.logger.error("Illegal type of workspace node parameter. Expect 'int' or 'dict'!")
             return {"processed": processed, "traversed": traversed}
@@ -20587,7 +20603,7 @@ class OTCS:
             for rel_type in relationship_types:
                 # Get children nodes of the current node:
                 workspace_relationships = self.get_workspace_relationships_iterator(
-                    workspace_id=workspace_node_id, relationship_type=rel_type
+                    workspace_id=workspace_node_id, relationship_type=rel_type, fields=fields, metadata=metadata
                 )
 
                 # Recursive call of all subnodes:
@@ -20629,6 +20645,8 @@ class OTCS:
                         node_executables=node_executables,
                         relationship_executables=relationship_executables,
                         max_depth=max_depth,
+                        fields=fields,
+                        metadata=metadata,
                         **kwargs,
                     )
                     processed += result.get("processed", 0)
@@ -20655,6 +20673,8 @@ class OTCS:
         strategy: str = "BFS",
         max_depth: int | None = None,
         timeout: float = 60.0,
+        fields: str | list = "properties",
+        metadata: bool = False,
         **kwargs: dict,
     ) -> dict:
         """Traverse nodes using a queue and thread pool (BFS-style).
@@ -20694,6 +20714,10 @@ class OTCS:
                 Wait time for the queue to have items. This is also the time it
                 takes at the end to detect the workers are done. So expect delay
                 if you raise it high!
+            fields (str | list, optional):
+                The fields to retrieve for each workspace. Default is "properties".
+            metadata (bool, optional):
+                Whether to include metadata in the traversal results. Default is False.
             kwargs (dict):
                 Additional arguments for executables.
 
@@ -20760,7 +20784,9 @@ class OTCS:
                     )
                     continue
 
-                workspace_instances = self.get_workspace_instances_iterator(type_id=wksp_type_id)
+                workspace_instances = self.get_workspace_instances_iterator(
+                    type_id=wksp_type_id, fields=fields, metadata=metadata
+                )
                 for workspace_instance in workspace_instances:
                     # Add the workspace and the current depth to the queue. Depth is 0 for the initial workspaces:
                     workspace_id = self.get_result_value(response=workspace_instance, key="id")
@@ -20822,7 +20848,7 @@ class OTCS:
 
                     # Fetch node dictionary if just an ID was passed as parameter:
                     if isinstance(workspace_node, int):
-                        workspace_node = self.get_workspace(node_id=workspace_node)
+                        workspace_node = self.get_workspace(node_id=workspace_node, fields=fields, metadata=metadata)
 
                     workspace_id = self.get_result_value(response=workspace_node, key="id")
                     workspace_name = self.get_result_value(response=workspace_node, key="name")
@@ -20880,7 +20906,7 @@ class OTCS:
                         for rel_type in relationship_types:
                             # Get related workspaces of the current workspace and the current relationship type:
                             workspace_relationships = self.get_workspace_relationships_iterator(
-                                workspace_id=workspace_id, relationship_type=rel_type
+                                workspace_id=workspace_id, relationship_type=rel_type, fields=fields, metadata=metadata
                             )
 
                             # Traverse all related workspaces:

@@ -549,8 +549,19 @@ class Data:
         try:
             # 1. Handle Dtypes and Column Alignment
             if apply_dtypes and self._schema:
-                # reindex ensures order and presence; astype enforces the domain/types
-                self._df = self._df.reindex(columns=self._schema.keys()).astype(self._schema)
+                # Reindex ensures order and presence. We cast per-column so we can
+                # treat datetime dtypes via pd.to_datetime (timezone metadata such as
+                # "datetime64[s,UTC]" is not accepted by astype()).
+                self._df = self._df.reindex(columns=self._schema.keys())
+
+                for col, dtype in self._schema.items():
+                    if dtype.startswith("datetime64") and "UTC" in dtype:
+                        self._df[col] = pd.to_datetime(self._df[col], utc=True)
+                    elif dtype.startswith("datetime64"):
+                        self._df[col] = pd.to_datetime(self._df[col])
+                    else:
+                        self._df[col] = self._df[col].astype(dtype)
+
                 self.logger.debug("Applied dtypes and column alignment.")
 
             # 2. Handle Index Alignment
@@ -1818,7 +1829,7 @@ class Data:
 
     # end method definition
 
-    def sort(self, sort_fields: list, inplace: bool = True) -> pd.DataFrame | None:
+    def sort(self, sort_fields: list, inplace: bool = True, ascending: bool = True) -> pd.DataFrame | None:
         """Sort the data frame based on one or multiple fields.
 
         Sorting can be either in place or return it as a new data frame
@@ -1830,6 +1841,8 @@ class Data:
             inplace (bool, optional):
                 If the sorting should be inplace, i.e. modifying self._df.
                 Defaults to True.
+            ascending (bool, optional):
+                If True, sort in ascending order. If False, sort in descending order. Defaults to True.
 
         Returns:
             pd.DataFrame | None:
@@ -1854,11 +1867,11 @@ class Data:
             )
 
         if inplace:
-            self._df.sort_values(by=sort_fields, inplace=True)
+            self._df.sort_values(by=sort_fields, inplace=True, ascending=ascending)
             self._df.reset_index(drop=True, inplace=True)
             return self._df
         else:
-            df = self._df.sort_values(by=sort_fields, inplace=False)
+            df = self._df.sort_values(by=sort_fields, inplace=False, ascending=ascending)
             df = df.reset_index(drop=True, inplace=False)
             return df
 

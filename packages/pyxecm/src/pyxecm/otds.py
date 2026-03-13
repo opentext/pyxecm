@@ -29,10 +29,14 @@ from http import HTTPStatus
 from importlib.metadata import version
 
 import requests
+from opentelemetry import trace
+
+tracer = trace.get_tracer(__name__)
 
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".otds"
+OTEL_TRACING_ATTRIBUTES = {"class": "otds"}
 
 PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 OS_INFO = f"{platform.system()} {platform.release()}"
@@ -832,6 +836,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="authenticate")
     def authenticate(
         self, revalidate: bool = False, grant_type: str | None = None, show_error: bool = True
     ) -> dict | None:
@@ -952,6 +957,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="impersonate_user")
     def impersonate_user(
         self,
         user_id: str,
@@ -1051,6 +1057,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_application_role")
     def add_application_role(
         self,
         name: str,
@@ -1109,6 +1116,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_application_role")
     def get_application_role(self, name: str, partition: str = "OAuthClients", show_error: bool = True) -> dict | None:
         """Get an existing application role from OTDS.
 
@@ -1153,6 +1161,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_user_to_application_role")
     def assign_user_to_application_role(
         self,
         user_id: str,
@@ -1238,6 +1247,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_group_to_application_role")
     def assign_group_to_application_role(
         self,
         group_id: str,
@@ -1320,6 +1330,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_partition")
     def add_partition(self, name: str, description: str) -> dict | None:
         """Add a new user partition to OTDS.
 
@@ -1356,6 +1367,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_partition")
     def get_partition(self, name: str, show_error: bool = True) -> dict | None:
         """Get an existing user partition from OTDS.
 
@@ -1390,6 +1402,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_user")
     def add_user(
         self,
         partition: str,
@@ -1451,7 +1464,7 @@ class OTDS:
         )
 
     # end method definition
-
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user")
     def get_user(self, partition: str, user_id: str) -> dict | None:
         """Get an existing user by its partition and user ID.
 
@@ -1485,6 +1498,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_users")
     def get_users(
         self,
         partition: str = "",
@@ -1654,6 +1668,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_users_iterator")
     def get_users_iterator(
         self,
         partition: str = "",
@@ -1728,6 +1743,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_current_user")
     def get_current_user(self) -> dict | None:
         """Get the currently logged in user.
 
@@ -1753,6 +1769,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_user")
     def update_user(
         self,
         partition: str,
@@ -1809,6 +1826,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_user")
     def delete_user(self, partition: str, user_id: str) -> bool:
         """Delete an existing user.
 
@@ -1845,6 +1863,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="reset_user_password")
     def reset_user_password(self, user_id: str, password: str) -> bool:
         """Reset a password of an existing user.
 
@@ -1883,6 +1902,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_group")
     def add_group(self, partition: str, name: str, description: str) -> dict | None:
         """Add a new user group to a user partition in OTDS.
 
@@ -1926,6 +1946,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_group")
     def get_group(self, group: str, show_error: bool = True) -> dict | None:
         """Get a OTDS group by its group name.
 
@@ -1972,6 +1993,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_groups")
     def get_groups(
         self,
         partition: str = "",
@@ -2150,6 +2172,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_groups_iterator")
     def get_groups_iterator(
         self,
         partition: str = "",
@@ -2217,6 +2240,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_user_to_group")
     def add_user_to_group(self, user: str, group: str) -> bool:
         """Add an existing user to an existing group in OTDS.
 
@@ -2260,6 +2284,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_group_to_parent_group")
     def add_group_to_parent_group(self, group: str, parent_group: str) -> bool:
         """Add an existing group to an existing parent group in OTDS.
 
@@ -2303,6 +2328,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_resource")
     def add_resource(
         self,
         name: str,
@@ -2384,6 +2410,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_resource")
     def get_resource(self, name: str, show_error: bool = False) -> dict | None:
         """Get an existing OTDS resource.
 
@@ -2443,6 +2470,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_resource")
     def update_resource(
         self,
         name: str,
@@ -2480,6 +2508,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="activate_resource")
     def activate_resource(self, resource_id: str) -> dict | None:
         """Activate an OTDS resource.
 
@@ -2513,6 +2542,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_access_roles")
     def get_access_roles(self) -> dict | None:
         """Get a list of all OTDS access roles.
 
@@ -2538,6 +2568,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_access_role")
     def get_access_role(self, access_role: str) -> dict | None:
         """Get an OTDS access role.
 
@@ -2568,6 +2599,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_partition_to_access_role")
     def add_partition_to_access_role(
         self,
         access_role: str,
@@ -2624,6 +2656,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_user_to_access_role")
     def add_user_to_access_role(
         self,
         access_role: str,
@@ -2703,6 +2736,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_group_to_access_role")
     def add_group_to_access_role(
         self,
         access_role: str,
@@ -2780,6 +2814,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_access_role_attributes")
     def update_access_role_attributes(
         self,
         name: str,
@@ -2838,6 +2873,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_license_to_resource")
     def add_license_to_resource(
         self,
         path_to_license_file: str,
@@ -2940,6 +2976,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_license_for_resource")
     def get_license_for_resource(self, resource_id: str) -> dict | None:
         """Get a product license for a resource in OTDS.
 
@@ -2990,6 +3027,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_license_from_resource")
     def delete_license_from_resource(self, resource_id: str, license_id: str) -> bool:
         """Delete a product license for a resource in OTDS.
 
@@ -3029,6 +3067,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_user_to_license")
     def assign_user_to_license(
         self,
         partition: str,
@@ -3143,6 +3182,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_partition_to_license")
     def assign_partition_to_license(
         self,
         partition_name: str,
@@ -3247,6 +3287,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_licensed_objects")
     def get_licensed_objects(
         self,
         resource_id: str,
@@ -3355,6 +3396,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="is_user_licensed")
     def is_user_licensed(
         self,
         user_name: str,
@@ -3403,6 +3445,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="is_group_licensed")
     def is_group_licensed(
         self,
         group_name: str,
@@ -3451,6 +3494,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="is_partition_licensed")
     def is_partition_licensed(
         self,
         partition_name: str,
@@ -3499,6 +3543,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="import_synchronized_partition_members")
     def import_synchronized_partition_members(self, name: str) -> bool:
         """Import users and groups to partition.
 
@@ -3536,6 +3581,7 @@ class OTDS:
 
     # end of method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_synchronized_partition")
     def add_synchronized_partition(
         self,
         name: str,
@@ -3586,6 +3632,7 @@ class OTDS:
 
     # end of method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_system_attribute")
     def add_system_attribute(
         self,
         name: str,
@@ -3645,6 +3692,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_trusted_sites")
     def get_trusted_sites(self) -> dict | None:
         """Get all configured OTDS trusted sites.
 
@@ -3670,6 +3718,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_trusted_site")
     def add_trusted_site(self, trusted_site: str) -> dict | None:
         """Add a new OTDS trusted site.
 
@@ -3718,6 +3767,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="enable_audit")
     def enable_audit(
         self,
         enable: bool = True,
@@ -3819,6 +3869,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_oauth_client")
     def add_oauth_client(
         self,
         client_id: str,
@@ -3951,6 +4002,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_oauth_client")
     def get_oauth_client(self, client_id: str, show_error: bool = True) -> dict | None:
         """Get an existing OAuth client from OTDS.
 
@@ -3984,6 +4036,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_oauth_client")
     def update_oauth_client(self, client_id: str, updates: dict) -> dict | None:
         """Update an OAuth client with new values.
 
@@ -4021,6 +4074,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_oauth_clients_to_access_role")
     def add_oauth_clients_to_access_role(self, access_role_name: str) -> dict | None:
         """Add OAuth clients (in the "OAuthClients" partition) to an OTDS access role.
 
@@ -4104,6 +4158,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_auth_handler")
     def get_auth_handler(self, name: str, show_error: bool = True) -> dict | None:
         """Get the OTDS auth handler with a given name.
 
@@ -4171,6 +4226,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_auth_handler_saml")
     def add_auth_handler_saml(
         self,
         name: str,
@@ -4523,6 +4579,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_auth_handler_sap")
     def add_auth_handler_sap(
         self,
         name: str,
@@ -4749,6 +4806,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_auth_handler_oauth")
     def add_auth_handler_oauth(
         self,
         name: str,
@@ -5166,6 +5224,7 @@ class OTDS:
 
         # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="consolidate")
     def consolidate(self, resource_name: str) -> bool:
         """Consolidate an OTDS resource.
 
@@ -5223,6 +5282,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="impersonate_resource")
     def impersonate_resource(
         self,
         resource_name: str,
@@ -5277,6 +5337,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="impersonate_oauth_client")
     def impersonate_oauth_client(
         self,
         client_id: str,
@@ -5331,6 +5392,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_password_policy")
     def get_password_policy(self) -> dict | None:
         """Get the global password policy.
 
@@ -5376,6 +5438,7 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_password_policy")
     def update_password_policy(self, update_values: dict) -> bool:
         """Update the global password policy.
 

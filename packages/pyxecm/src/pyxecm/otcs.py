@@ -44,6 +44,7 @@ import websockets
 from opentelemetry import trace
 
 from pyxecm.helper import XML, Data
+from pyxecm.otds import OTDS
 
 tracer = trace.get_tracer(__name__)
 
@@ -348,6 +349,7 @@ class OTCS:
         default_license: str = "X3",
         otds_ticket: str | None = None,
         otds_token: str | None = None,
+        otds_object: OTDS | None = None,
         base_path: str = "/cs/cs",
         support_path: str = "/cssupport",
         thread_number: int = 3,
@@ -385,6 +387,8 @@ class OTCS:
                 The authentication ticket of OTDS.
             otds_token (str, optional):
                 The authentication token of OTDS.
+            otds_object (OTDS, optional):
+                An instance of the OTDS class to use for authentication and other OTDS related operations.
             base_path (str, optional):
                 The base path segment of the Content Server URL.
                 This typically is /cs/cs on a Linux deployment or /cs/cs.exe
@@ -529,6 +533,7 @@ class OTCS:
         self._otcs_ticket = None  # will be set by authenticate()
         self._otds_ticket = otds_ticket
         self._otds_token = otds_token
+        self._otds_object = otds_object
         self._data = Data(logger=self.logger)
         self._thread_number = thread_number
         self._download_dir = download_dir
@@ -1269,20 +1274,25 @@ class OTCS:
                 elif response.status_code == 401 and retries <= max_retries:
                     # Try to reauthenticate:
                     self.logger.info(
-                        "Reauthentication at -> '%s' required.",
+                        "Reauthentication at -> '%s' required...",
                         url,
                     )
-                    self.reauthenticate(request_cookie=request_cookie, thread_safe=True)
+                    if self.reauthenticate(request_cookie=request_cookie, thread_safe=True) is not None:
+                        self.logger.info("Reauthentication complete.")
+                        self.logger.debug(
+                            "Old cookie -> %s",
+                            str(request_cookie),
+                        )
+                        self.logger.debug(
+                            "New cookie -> %s",
+                            str(self.cookie()),
+                        )
+                    else:
+                        self.logger.warning(
+                            "Reauthentication failed at -> '%s'! Cannot call the REST API.",
+                            url,
+                        )
                     retries += 1
-                    self.logger.info("Reauthentication complete.")
-                    self.logger.debug(
-                        "Old cookie -> %s",
-                        str(request_cookie),
-                    )
-                    self.logger.debug(
-                        "New cookie -> %s",
-                        str(self.cookie()),
-                    )
                 elif response.status_code == 500 and "already exists" in response.text:
                     self.logger.warning(
                         (
@@ -2198,9 +2208,10 @@ class OTCS:
             not self._otds_token
             and not self._otds_ticket
             and (not self.config()["username"] or not self.config()["password"])
+            and not self._otds_object
         ):
             self.logger.error(
-                "No OTDS token, OTDS ticket or username/password available for authentication! Cannot authenticate with OTCS.",
+                "No OTDS token, no OTDS ticket, no OTDS object, nor a username/password available for authentication! Cannot authenticate with OTCS.",
             )
             return None
 
@@ -2212,6 +2223,10 @@ class OTCS:
 
         # Initialize the ticket to not set:
         otcs_ticket = None
+
+        # If we have an OTDS object we can just generate the OTDS token with it:
+        if self._otds_object:
+            self._otds_token = self._otds_object.authenticate(grant_type="client_credentials")
 
         # Try with OTDS TOKEN first (if available):
         if self._otds_token:  #  and not revalidate:
@@ -2415,22 +2430,26 @@ class OTCS:
                         self.logger.debug(
                             "Current thread got the session lock and tries to re-authenticate to get new cookie",
                         )
-                        try:
-                            self.authenticate(revalidate=True)
+                        reauth_ok = bool(self.authenticate(revalidate=True))
+                        if reauth_ok:
                             self.logger.debug(
                                 "Session renewal successful, new cookie -> %s",
                                 str(self.cookie()),
                             )
                             time.sleep(REQUEST_RETRY_DELAY)
-                        except Exception:
+                        else:
                             self.logger.error(
                                 "Reauthentication failed!",
                             )
-                            raise
+                            self.invalidate_authentication_ticket()
+                    # end with self._session_lock
                     self.logger.debug("Lift session lock and notify waiting threads...")
                     # Notify all waiting threads that session is renewed:
                     self._authentication_condition.notify_all()
                     self.logger.debug("All waiting threads have been notified.")
+
+                    if not reauth_ok:
+                        return None
             finally:
                 # Ensure the semaphore is released even if an error occurs
                 self._authentication_semaphore.release()
@@ -16965,6 +16984,7 @@ class OTCS:
         node_id: int,
         rm_classification: int,
         apply_to_sub_items: bool = False,
+        metadata_token: str | None = None,
     ) -> dict | None:
         """Assign a RM classification to a Content Server item.
 
@@ -16977,6 +16997,8 @@ class OTCS:
                 If True, the RM classification is applied to
                 the item and all its sub-items.
                 If False the RM classification is only applied to the item itself.
+            metadata_token (str, optional):
+                Required if changing an RM Classification to another, otherwise not required.
 
         Returns:
             dict | None:
@@ -16988,6 +17010,9 @@ class OTCS:
             "class_id": rm_classification,
             "apply_to_sub_items": apply_to_sub_items,
         }
+
+        if metadata_token is not None:
+            rm_classification_post_data["rm_metadataToken"] = metadata_token
 
         request_url = self.config()["nodesUrl"] + "/" + str(node_id) + "/rmclassifications"
 
@@ -18246,7 +18271,7 @@ class OTCS:
         if rsi is not None:
             put_records_detail_data["rsi"] = rsi
         if status is not None:
-            put_records_detail_data["status"] = status
+            put_records_detail_data["file_status"] = status
         if essential is not None:
             put_records_detail_data["essential"] = essential
         if storage is not None:

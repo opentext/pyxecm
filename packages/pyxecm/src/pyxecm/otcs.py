@@ -20907,6 +20907,7 @@ class OTCS:
                         try:
                             result_success, result_traverse = executable(
                                 workspace_node=workspace_node,
+                                metadata=metadata,
                                 **kwargs,
                             )
                             if result_traverse:

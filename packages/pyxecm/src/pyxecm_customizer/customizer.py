@@ -1213,18 +1213,18 @@ class Customizer:
                 # Change values as required
                 solution["platform"]["organizations"][organization]["otds"]["resourceId"] = awp_resource_id
                 solution["platform"]["content"]["ContentServer"]["contentServerUrl"] = (
-                    f"{self.settings.otcs.url!s}{self.settings.otcs.base_path}"
+                    f"{str(self.settings.otcs.url).rstrip('/')}{self.settings.otcs.base_path}"
                 )
                 solution["platform"]["content"]["ContentServer"]["contentServerSupportDirectoryUrl"] = (
-                    f"{self.settings.otcs.url!s}/cssupport"
+                    f"{str(self.settings.otcs.url).rstrip('/')}/cssupport"
                 )
                 solution["platform"]["content"]["ContentServer"]["otdsResourceId"] = otcs_resource_id
                 solution["platform"]["authenticators"]["OTDS_auth"]["publicLoginUrl"] = (
-                    str(self.settings.otds.url) + "/otdsws/login"
+                    str(self.settings.otds.url).rstrip("/") + "/otdsws/login"
                 )
                 solution["platform"]["security"]["contentSecurityPolicy"] = "frame-ancestors 'self' " + str(
-                    self.settings.otcs.url,
-                )
+                    self.settings.otcs.url
+                ).rstrip("/")
                 config_map.data["solution.yaml"] = yaml.dump(solution)
                 result = self.k8s_object.replace_config_map(
                     config_map_name=self.settings.k8s.cm_otawp,

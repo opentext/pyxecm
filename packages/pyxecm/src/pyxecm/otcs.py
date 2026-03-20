@@ -8975,6 +8975,7 @@ class OTCS:
                     "Cannot get latest version of document with ID -> %d",
                     node_id,
                 )
+                return None
             version_number = response["data"]["version_number"]
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/versions/" + str(version_number) + "/content"
@@ -9853,12 +9854,14 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="deploy_workbench")
-    def deploy_workbench(self, workbench_id: int) -> tuple[dict | None, int]:
+    def deploy_workbench(self, workbench_id: int, max_retries: int = 1) -> tuple[dict | None, int]:
         """Deploy an existing Workbench.
 
         Args:
             workbench_id (int):
                 The ID of the workbench to be deployed.
+            max_retries (int, optional):
+                The maximum number of retries in case of deployment errors. Default is 1 retry.
 
         Returns:
             dict | None:
@@ -9902,46 +9905,69 @@ class OTCS:
             request_url,
         )
 
-        response = self.do_request(
-            url=request_url,
-            method="POST",
-            headers=request_header,
-            timeout=None,
-            failure_message="Failed to deploy workbench with ID -> {}".format(
-                workbench_id,
-            ),
-        )
+        # In case of an expired session we reauthenticate and
+        # try 1 more time. Session expiration should not happen
+        # twice in a row:
+        retries = 0
 
-        # Transport packages canalso partly fail to deploy.
-        # For such cases we determine the number of errors.
-        error_count = 0
+        while retries <= max_retries:
+            response = self.do_request(
+                url=request_url,
+                method="POST",
+                headers=request_header,
+                timeout=None,
+                failure_message="Failed to deploy workbench with ID -> {}".format(
+                    workbench_id,
+                ),
+            )
 
-        if not response or "results" not in response:
-            return (None, 0)
+            # Transport packages can also partly fail to deploy.
+            # For such cases we determine the number of errors.
+            error_count = 0
 
-        try:
-            error_count = response["results"]["data"]["status"]["error_count"]
-            if error_count > 0:
-                self.logger.error(
-                    "%d error%s occoured during workbench deployment", error_count, "s" if error_count > 1 else ""
-                )
-            else:
-                success_count = response["results"]["data"]["status"]["success_count"]
-                self.logger.info(
-                    "Transport successfully deployed %d workbench items.",
-                    success_count,
-                )
+            if not response or "results" not in response:
+                return (None, 0)
 
-            for error in response["results"]["data"]["status"]["errors"]:
-                self.logger.error(
-                    "Failed to deploy workbench item -> '%s' (%s); error -> %s",
-                    error["name"],
-                    error["id"],
-                    error["error"],
-                )
+            try:
+                error_count = response["results"]["data"]["status"]["error_count"]
+                if error_count > 0 and retries > 0:
+                    self.logger.error(
+                        "%d error%s occurred during workbench deployment and retry did not help.",
+                        error_count,
+                        "s" if error_count > 1 else "",
+                    )
+                    retries += 1
+                elif error_count > 0:
+                    self.logger.warning(
+                        "%d error%s occurred during workbench deployment. Retrying once more after %d seconds...",
+                        error_count,
+                        "s" if error_count > 1 else "",
+                        REQUEST_RETRY_DELAY * 10,
+                    )
+                    # we wait a bit before retrying as sometimes the errors are related to temporary
+                    # database overload:
+                    time.sleep(REQUEST_RETRY_DELAY * 10)
+                    retries += 1
+                else:
+                    success_count = response["results"]["data"]["status"]["success_count"]
+                    self.logger.info(
+                        "Transport successfully deployed %d workbench items.",
+                        success_count,
+                    )
+                    break
 
-        except Exception as e:
-            self.logger.debug(str(e))
+                for error in response["results"]["data"]["status"]["errors"]:
+                    self.logger.error(
+                        "Failed to deploy workbench item -> '%s' (%s); error -> %s",
+                        error["name"],
+                        error["id"],
+                        error["error"],
+                    )
+
+            except Exception as e:
+                self.logger.debug(str(e))
+                break
+        # end while retries <= 1
 
         return (response, error_count)
 
@@ -21557,6 +21583,7 @@ class OTCS:
                 Stats with processed and traversed counters.
 
         Side Effects:
+        ```markdown
             The resulting data frame is stored in self._data. It will have the following columns:
             - type which is either "item" or "workspace"
             - workspace_type
@@ -21576,6 +21603,7 @@ class OTCS:
             - item_<cat_id>_<attr_id> for each item attribute if item_metadata is True
             - item_cat_<cat_id>_<attr_id> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is True
             - item_cat_<cat_name>_<attr_name> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is False
+        ```
 
         """
 

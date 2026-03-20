@@ -8390,15 +8390,17 @@ class Payload:
                     continue
 
             # 4. Create a Tab in the "General" channel of the M365 Team:
+            enterprise_node = self._otcs.get_volume(OTCS.VOLUME_TYPE_ENTERPRISE_WORKSPACE)
+            enterprise_node_id = self._otcs.get_result_value(response=enterprise_node, key="id")
             if group_name == "Innovate":
                 # Use the Enterprise Workspace for the
                 # top-level group "Innovate":
-                node_id = 2000
+                node_id = enterprise_node_id
             else:
                 # We assume the departmental group names are identical to
                 # top-level folders in the Enterprise volume
                 node = self._otcs.get_node_by_parent_and_name(
-                    parent_id=2000,
+                    parent_id=enterprise_node_id,
                     name=group_name,
                 )
                 node_id = self._otcs.get_result_value(response=node, key="id")
@@ -8411,7 +8413,7 @@ class Payload:
 
             app_url = self._otcs_frontend.cs_support_public_url()  # it is important to use the frontend pod URL here
             app_url += "/xecmoffice/teamsapp.html?nodeId="
-            app_url += str(node_id) + "&type=container&parentId=2000&target=content&csurl="
+            app_url += str(node_id) + "&type=container&parentId=" + str(enterprise_node_id) + "&target=content&csurl="
             app_url += self._otcs_frontend.cs_public_url()
             app_url += "&appId=" + app_internal_id
 
@@ -8664,6 +8666,9 @@ class Payload:
 
         success: bool = True
 
+        enterprise_node = self._otcs.get_volume(OTCS.VOLUME_TYPE_ENTERPRISE_WORKSPACE)
+        enterprise_node_id = self._otcs.get_result_value(response=enterprise_node, key="id")
+
         for group in self._groups:
             if "name" not in group:
                 self.logger.error("Group needs a name. Cannot configure SharePoint site for it. Skipping...")
@@ -8692,7 +8697,7 @@ class Payload:
             #
 
             if group_name == "Innovate":
-                folder_id = 2000
+                folder_id = enterprise_node_id
             else:
                 folder = self._otcs.get_node_by_volume_and_path(
                     volume_type=self._otcs.VOLUME_TYPE_ENTERPRISE_WORKSPACE,
@@ -8815,7 +8820,7 @@ class Payload:
                 # Update the webpart with the new ID (which has changed after redeployment):
                 update_data = {
                     "properties": {
-                        "ContentServerFolderParentWP": "2000",
+                        "ContentServerFolderParentWP": str(enterprise_node_id),
                         "ContentServerFolderSelectedWP": str(folder_id),
                     },
                 }
@@ -8913,7 +8918,7 @@ class Payload:
                         "ShowPersonalWorkspaceWP": "",
                         "ShowNavigationBreadcrumbWP": "",
                         "PageSizeWP": "",
-                        "ContentServerFolderParentWP": "2000",
+                        "ContentServerFolderParentWP": str(enterprise_node_id),
                         "ContentServerFolderSelectedWP": str(folder_id),
                         "ContentServerFolderDisplayWP": group_name,
                         "SettingStorageURLSite": site_url,
@@ -8986,7 +8991,7 @@ class Payload:
 
             item_name = (
                 "SharePoint site for {} department".format(group_name)
-                if folder_id != 2000
+                if folder_id != enterprise_node_id
                 else "SharePoint site for Innovate"
             )
             response = self._otcs.get_node_by_parent_and_name(parent_id=folder_id, name=item_name)
@@ -12269,7 +12274,7 @@ class Payload:
                 response = guidewire_object.search_account(
                     attributes={search_field: search_value},
                 )
-                bo_id = guidewire_object.get_result_value(response=response, key="id")
+                bo_id = guidewire_object.get_result_value(response=response, key="accountNumber")
             case "Policy" | "policy" | "gw.policy":
                 response = guidewire_object.search_policy(
                     attributes={search_field: search_value},

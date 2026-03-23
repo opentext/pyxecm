@@ -162,8 +162,8 @@ class Guidewire:
                 The Authorization type. This can be "basic" or "oauth".
 
         Returns:
-            bool:
-                True if authentication is successful, False otherwise.
+            HTTPBasicAuth | str | None:
+                The authentication object if authentication is successful, None otherwise.
 
         """
 
@@ -226,7 +226,7 @@ class Guidewire:
             self.logger.error(
                 "Authentication of type -> '%s' requires either client credentials or username/password.", auth_type
             )
-            return False
+            return None
 
         if self._scope:
             auth_data["scope"] = self._scope
@@ -235,13 +235,13 @@ class Guidewire:
             response = requests.post(request_url, data=auth_data)
             if response.status_code == 200:
                 self.token = response.json().get("access_token")
-                return True
+                return self.token
             else:
                 self.logger.error("OAuth2 authentication failed: %s - %s", response.status_code, response.text)
         except requests.RequestException as e:
             self.logger.error("OAuth2 token request failed; error -> %s", str(e))
 
-        return False
+        return None
 
     # end method definition
 

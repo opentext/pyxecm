@@ -207,1050 +207,19 @@ def load_payload(
 class Payload:
     """Class Payload is used to process Terrarium payload."""
 
-    logger: logging.Logger = default_logger
+    logger = default_logger
 
     # _debug controls whether or not transport processing is
     # stopped if one transport fails:
     _debug: bool = False
-    _otcs: OTCS
-    _otcs_backend: OTCS
-    _otcs_frontend: OTCS
-    _otac: OTAC | None
-    _otds: OTDS
-    _otiv: OTIV | None
-    _otpd: OTPD | None
-    _otmm: OTMM | None
-    _pht: None
-    _nhc: None
-    _otcs_source: OTCS | None
-    _k8s: K8s | None
-    _http_object: HTTP | None
-    _m365: M365 | None
-    _core_share: CoreShare | None
-    _sap: SAP | None
-    _successfactors: SuccessFactors | None
-    _salesforce: Salesforce | None
-    _servicenow: ServiceNow | None
-    _guidewire_policy_center: Guidewire | None
-    _guidewire_claims_center: Guidewire | None
     _custom_settings_dir = ""
-    _otawp: OTAWP | None
-    _otca: OTCA | None
-    _otkd: OTKD | None
-    _avts: AVTS | None
 
     # _payload_source (string): This is either path + filename of the yaml payload
     # or an path + filename of the Terraform HCL payload
     _payload_source = ""
 
     # _payload is a dict of the complete payload file.
-    # It is initialized by the init_payload() method:
-    _payload = {}
-
-    """
-    _payload_sections is a list of dicts with these keys:
-    - name (str)
-    - enabled (bool)
-    - restart (bool)
-    See below and method init_payload() for details of existing payload sections
-    """
-    _payload_sections = []
-
-    # Declare options dict to read payloadOptions
-    _payload_options = {}
-
-    #
-    # Initialize payload section variables. They are all list of dicts:
-    #
-
-    """
-    _webhooks and webhooks_post: List of webHooks.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - description (str, optional)
-    - url (str, mandatory)
-    - method (str) - either POST, PUT, GET
-    - payload (dict, optional, default = {})
-    - headers (dict, optional, default = {})
-    """
-    _webhooks = []
-    _webhooks_post = []
-
-    """
-    _resources: List of OTDS resources.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - description (str, optional)
-    - display_name (str, optional)
-    - activate (bool, optional, default = True) - if a secret is provided the resource will automatically be activated
-    - allow_impersonation (bool, optional, default = True)
-    - resource_id (str, optional, default = None) - a predefined resource ID. If specified, also secrethas to be provided
-    - secret (string, optional, default = None) - a predefined secret. Should be 24 characters long and should end with '=='
-    - additional_payload (dict, optional)
-    """
-    _resources = []
-
-    """
-    _partitions and _synchronized_partitions: Lists of OTDS partitions (for users and groups).
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - description (str, optional)
-    - access_role (str, optional)
-    - licenses (list, optional)
-    """
-    _partitions = []
-    _synchronized_partitions = []
-
-    """
-    _licenses: Lists of OTDS Licenses to be added to a resource.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - path (str, mandatory)
-    - product_name (str, mandatory)
-    - resource (str, mandatory)
-    - description (str, optional)
-    """
-    _licenses = []
-
-    """
-    _oauth_clients: List of OTDS OAuth Clients. Each element
-    is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - description (str, optional, default = "")
-    - confidential (bool, optional, default = True)
-    - partition (str, optional, default = "Global")
-    - redirect_urls (list, optional, default = [])
-    - permission_scopes (list)
-    - default_scopes (list)
-    - allow_impersonation (bool, optional, default = True)
-    - secret (str, optional, default = "") - option to provide a predefined secret
-    """
-    _oauth_clients = []
-
-    """
-    _oauth_handlers: List of OTDS OAuth handler. Each element
-    is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - description (str, optional)
-    - scope (str, optional, default = None)
-    - type (str, mandatory) - handler type, like SAML, SAP, OAUTH
-    - priority (int, optional)
-    - active_by_default (bool, optional, default = False)
-    - provider_name (str, mandatory for type = SAML and type = SAP)
-    - auth_principal_attributes (list)
-    - nameid_format (str, optional)
-    - saml_url (str, mandatory for type = SAML)
-    - otds_sp_endpoint (str, mandatory for type = SAML)
-    - certificate_file (str, mandatory for type = SAP)
-    - certificate_password (str, mandatory for type = SAP)
-    - client_id (str, mandatory for type = OAUTH)
-    - client_secret (str, mandatory for type = OAUTH)
-    - authorization_endpoint (str, mandatory for type = OAUTH)
-    - token_endpoint (str, optional for type = OAUTH)
-    - scope_string (str, optional)
-    """
-    _auth_handlers = []
-
-    """
-    _trusted_sites: List of OTDS trasted sites.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - url (str, mandatory)
-    """
-    _trusted_sites = []
-
-    """
-    _system_attributes: List of OTDS System Attributes.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - value (str, mandatory)
-    - description (str, optional)
-    """
-    _system_attributes = []
-
-    """
-    _system_attributes: List of OTPD Settings.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - description (str, optional)
-    - name (str, mandatory)
-    - value (str, mandatory)
-    - tenant (str, optional)
-    """
-    _docgen_settings = []
-
-    """
-    _groups: List of groups.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory),
-    - parent_groups (list, optional),
-    - enable_o365 (bool, optional, default = False)
-    - enable_salesforce (bool, optional, default = False)
-    - enable_core_share (bool, optional, default = False)
-    """
-    _groups = []
-
-    """
-    _users: List of users.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory) (= login)
-    - password (str, optional, will be generated if not provided)
-    - firstname (str, optional, default = "")
-    - lastname (str, optional, default = "")
-    - title (str, optional, default = "")
-    - email (str, optional, default = "")
-    - base_group (str, optional, default = "DefaultGroup")
-    - user_type (str, optional, default = "User") - possible values are "User" and "ServiceUser"
-    - company (str, optional, default = "Innovate") - currently used for Salesforce users only
-    - privileges (list, optional, default = ["Login", "Public Access"])
-    - groups (list, optional)
-    - favorites (list of str, optional)
-    - security_clearance (int, optional)
-    - supplemental_markings (list of str)
-    - location (str, optional, default = "US") - only relevant for M365 users
-    - enable_sap (bool, optional, default = False)
-    - enable_successfactors (bool, optional, default = False)
-    - enable_salesforce (bool, optional, default = False)
-    - enable_o365 (bool, optional, default = False)
-    - enable_core_share (bool, optional, default = False)
-    - m365_skus (list of str) - only relevant for M365 users
-    - extra_attributes (list of dict)
-    """
-    _users = []
-    _user_customization = True
-
-    """
-    _admin_settings: list of admin settings (XML file to import).
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - description (str, optional)
-    - filename (str, mandatory) - without path
-    """
-    _admin_settings = []
-    _admin_settings_post = []
-
-    """
-    _exec_pod_commands: List of commands to be executed in the pods.
-    list elements need to be dicts with pod name, command, etc.
-    - enabled (bool, optional, default = True)
-    - command (str, mandatory)
-    - pod_name (str, mandatory)
-    - description (str, optional)
-    - interactive (bool, optional, default = False)
-    """
-    _exec_pod_commands = []
-
-    """
-    _exec_commands: List of commands to be executed in the customizer pod (as local process).
-    Each list element need to be a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - command (str, mandatory)
-    - description (str, optional)
-    """
-    _exec_commands = []
-
-    """
-    _exec_database_commands: list of database command sets to be executed.
-    Each list is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - db_connection (dict, mandatory) - supported dictionary keys:
-        - db_name (str, mandatory) - name of the database
-        - db_hostname (str, mandatory) - hostname of the database server
-        - db_port (int, optional) - port to communicate to the database server; default is 5432
-        - db_username (str, mandatory) - username
-        - db_password (str, mandatory) - password
-    - db_commands (list, mandatory) - each list item is a dictionary with these keys:
-        - command (str, mandatory) - needs to have %s paceholder for each parameter
-        - params (list, optional) - parameter values to be inserted into the %s postions in the command
-    """
-    _exec_database_commands = []
-
-    """
-    external_systems (list): List of external systems.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - external_system_type (str, mandatory) - possible values: SuccessFactors, SAP, Salesforce, Appworks Platform, Business Scenario Sample
-    - external_system_name (str, mandatory) - for SAP this is the System ID
-    - external_system_number (str)
-    - description (str)
-    - as_url (str, mandatory)
-    - base_url (str, optional, default = "")
-    - client (str, optional - only relevant for SAP, default = 100)
-    - destination (str, optional - only relevant for SAP, default = "")
-    - group (str, optional - only relevant for SAP, default = "PUBLIC")
-    - username (str, optional - depends on external_system_type)
-    - password (str, optional - depends on external_system_type)
-    - certificate_file (str, optional - only relevant for SAP, used for Auth Handler)
-    - certificate_password (str, optional - only relevant for SAP, used for Auth Handler)
-    - external_system_hostname (str, mandatory - only relevant for SAP)
-    - archive_logical_name (str, optional - only relevant for SAP)
-    - archive_certificate_file (str, optional - only relevant for SAP)
-    - oauth_client_id (str, optional)
-    - oauth_client_secret (str, optional)
-    - skip_connection_test (bool, optional, default = False)
-    """
-    _external_systems = []
-
-    """
-    _transport_packages (list): List of transport packages systems.
-    Each list element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - url (str, mandatory)
-    - description (str, optional, default = "")
-    - replacements (list, optional, default = None)
-    - extractions (list, optional, default = None)
-    """
-    _transport_packages = []
-    _content_transport_packages = []
-    _transport_packages_post = []
-
-    # _business_object_types (list): Business object types are not in payload
-    # but retrieved from transport package:
-    _business_object_types = []
-
-    # _workspace_types (list): Workspace types are not in payload but imported with transport package:
-    _workspace_types = []
-
-    # _workspace_types (list): Workspace types are not in payload but imported with transport package:
-    _ontologies = []
-
-    """
-    _workspace_templates (list): actually these are also imported via transport
-    but used if we want to define standard members on template basis.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - type_name (str, mandatory)
-    - template_name (str, mandatory)
-    - members (list, optional)
-      * role (str, mandatory)
-      * users (list, optional, default = [])
-      * groups (list, optional, default = [])
-    - categories (list, optional)
-      * nickname (str, optional) - the nickname of the category
-      * path (list, optional) - the path to the category object in the category volume
-      * inheritance (bool, optional) - should category inheritance be turned on on the workspace template node?
-      * apply_to_sub_items (bool, optional) - should the category be inherited to existing sub-items?
-    """
-    _workspace_templates = []
-
-    """
-    _workspaces (list): list of Content Server business workspaces.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - id (str, mandatory) - logical ID of the workspace - used for cross-referencing inside the payload. This is NOT this node ID!
-    - name (str, mandatory)
-    - description (str, optional, default = "")
-    - type_name (str, mandatory)
-    - template_name (str, optional, default = just take first template)
-    - business_objects (list, optional, default = [])
-    - parent_id (str, optional, default = None) - this is a LOGICAL ID used in the payload - not the node ID!
-    - parent_path (list, optional, default = None)
-    - categories (list, optional, default = None)
-      * name (str, mandatory)
-      * set (str, default = "")
-      * row (int, optional)
-      * attribute (str, mandatory)
-      * value (str, mandatory)
-    - nickname (str, optional, default = ignore)
-    - photo_nickname (str, optional, default = ignore)
-    - rm_classification_path (list, optional, default = [])
-    - classification_pathes (list of lists, optional, default = [])
-    - members (list, optional, default = [])
-      * role (name)
-      * users (list, optional, default = [])
-      * groups (list, optional, default = [])
-    - relationships (list, optional, default = []) - list of related workspaces.
-      The elements of the list can be:
-      * string or integer with logical workspace ID
-      * string with nickname of the related workspace
-      * dictionaries with keys "type" and "name" of the related workspace
-      * list of strings with the top-down path in the Enterprise volume
-    """
-    _workspaces = []
-
-    """
-    _sap_rfcs (list) and _sap_rfcs_post (list) include distinct lists of SAP RFC calls.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - description (str)
-    - parameters (dict)
-    - call_options (dict)
-    """
-    _sap_rfcs = []
-    _sap_rfcs_post = []
-
-    """
-    _web_reports (list) and _web_reports_post (list) include all web report payload definitions.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - nickname (str, mandatory)
-    - description (str, optional, default = "")
-    - restart (bool, optional, default = False)
-    - parameters (dict, optional, default = {}) - the dict keys are the parameter names and the dict values are the actual parameter values
-    """
-    _web_reports = []
-    _web_reports_post = []
-
-    """
-    _cs_applications (list): List of Content Server Applications to deploy.
-    Each list element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - descriptions (str, optional, default = "")
-    """
-    _cs_applications = []
-
-    """
-    _additional_group_members: List of memberships to establish.
-    Each element is a dict with these keys:
-    - parent_group (string)
-    - user_name (string)
-    - group_name (string)
-    """
-    _additional_group_members = []
-
-    """
-    _additional_access_role_members: List of memberships to establish.
-    Each element is a dict with these keys:
-    - access_role (string)
-    - user_name (string)
-    - group_name (string)
-    - partition_name (string)
-    """
-    _additional_access_role_members = []
-
-    """
-    _additional_application_role_assignments: List of assignments to establish.
-    Each element is a dict with these keys:
-    - role (string)
-    - user_name (string)
-    - group_name (string)
-    """
-    _additional_application_role_assignments = []
-
-    """
-    _renamings (list). List of items to be renamed.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - nodeid (int, mandatory if no volume is specified) - this is the technical OTCS ID - typically only known for some preinstalled items
-    - volume (int, mandatory if no nodeid is specified)
-    - path (list, optional) - can be combined with volume - to specify a top-down path in the volume to the item to be renamed
-    - nickname (str, optional) - the nickname of the node to rename - alternative to to volume/path or nodeid
-    """
-    _renamings = []
-
-    """
-    _items: List of items to create in Content Server
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - parent_nickname (str)
-    - parent_path (list)
-    - name (str)
-    - description (str, optional, default = "")
-    - type (str)
-    - url (str) - "" means not set
-    - original_nickname
-    - original_path (list)
-    """
-    _items = []
-    _items_post = []
-
-    """
-    _permissions: List of permissions changes to apply
-    Each element is a dict with these keys:
-    - path (list, optional)
-    - volume (int, optional)
-    - nickname (str, optional)
-    - owner_permissions (list, optional)
-    - owner_group_permissions (list, optional)
-    - public_permissions (list, optional)
-    - groups (list, optional)
-      + name (str)
-      + permissions (list)
-    - users (list, optional)
-      + name (str)
-      + permissions (list)
-    - apply_to (int)
-    """
-    _permissions = []
-    _permissions_post = []
-
-    """
-    _workspace_permissions: List of workspace permissions changes to apply.
-    Each element is a dict with these keys:
-    - workspace_folder (str, optional)
-    - workspace_type (str)
-    - regex (bool, optional)
-    - owner_permissions (list, optional)
-    - owner_group_permissions (list, optional)
-    - public_permissions (list, optional)
-    - groups (list, optional)
-      + name (str)
-      + permissions (list)
-    - users (list, optional)
-      + name (str)
-      + permissions (list)
-    - apply_to (int)
-    """
-    _workspace_permissions = []
-
-    """
-    _assignments: List of assignments. Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - subject (str, mandatory)
-    - instruction (str, optional)
-    - workspace (str, optional if nickname is specified)
-    - nickname (str, optional if workspace is specified)
-    - groups (list)
-    - users (list)
-    """
-    _assignments = []
-
-    """
-    _category_assignments: List of category assignments. Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - categories (list of dicts) - syntax like for categories inside workspaces payload
-    - category_item (list | str) - either a list defining the path to the category item in the Categories volume or the nickname of the category item
-    - volume (int, optional) - the volume type ID - default is Enterprise Workspace with ID 141
-    - item (list | str) - either a list defining the path to the item in the Enterprise volume or the nickname of the item
-    - apply_to_sub_items (bool, optional, default = False)
-    - inheritance (bool, optional, default = False) - whether or not category inheritance should be turned on for the item
-    """
-    _category_assignments = []
-
-    """
-    _doc_generators: List of document generators that use the Document Template capabilities of Content Server.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - workspace_type (str, mandatory)
-    - template_path (list, mandatory)
-    - classification_path (list, mandatory)
-    - category_name (str, optional, default = "")
-    - workspace_folder_path (list, optional, default = []) - default puts the document in the workspace root
-    - exec_as_user (str, optional, default = "")
-    """
-    _doc_generators = []
-
-    """
-    _workflows: List of workflow initiations inside workspace instances of a workspace type
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - worklow_nickname (str, mandatory) - the nickname of the workflow
-    - initiate_as_user (str, mandatory) - user that initiates the workflow
-    - workspace_type (str, mandatory) - for each instance of the given workspace type a workflow is started
-    - workspace_folder_path (list, optional) - the subfolder that contains the document the workflow is started with
-    - attributes (list, optional) - the list of attributes (name, value) the workflow is started with
-    - steps (list)
-      * action (Initiate, )
-      * exec_as_user
-      * attributes
-        - name
-        - value
-        - type
-    """
-    _workflows = []
-
-    """
-    _browser_automations: List of browser automation for things that can only be
-    automated via the web user interface. Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - description (str, optional)
-    - base_url (str, mandatory)
-    - user_name (str, optional)
-    - password (str, optional)
-    - wait_time (float, optional, default = 30.0) - wait time in seconds
-    - wait_until (str, optional) - the page load / navigation `wait until` strategy. Possible values: `load`, `networkidle`, `domcontentloaded`
-    - debug (bool, optional, default = False) - if True take screenshots and save to container
-    - automations (list, mandatory)
-      * dependent (bool, optional) - decide if current automation step is dependent on the previous step. Default is True. If dependent = True and previous step failed this step is skipped.
-      * type (str, optional, default = "") - possible types: `login`, `get_page`, `click_elem`, `set_elem`, `check_elem`
-      * page (str, optional, default = "") - the page-specific part of the URL. Will be concatenated with the `base_url`
-      * selector (str, optional, default = "")
-      * selector_type (str, optional, default = "id") - the find strategy - either `id`, `name`, `css`, `xpath`, `role`, `text`
-      * role_type (str, optional, default = "") - the ARIA role of an element. Only relevant for selector_type = `role`.
-      * scroll_to_element (bool, optional, default = true) - scroll to the element before clicking it - for type `click_elem` only. Should actually not be necessary as locators should scroll automatically.
-      * value (str, optional, default = "") - the new value of element. Relevant for type = `set_elem`.
-      * user_field (str, optional, default = "") - the name of the HTML field holding the user name - only for type `login`.
-      * password_field (str, optional, default = "") - the name of the HTML field holding the password - only for type `login`.
-      * iframe: name of the iframe if the elem is inside an iframe
-      * press_enter: simulate pressing the "Enter" key after setting the elem value - for type set_elem only
-      * typing (bool, optional) - deciding if to simulate keyboard input - this is required for many type-ahead fields to work - for type `set_elem` only
-      * exact_match (bool, optional) - deciding if the element should be identified with an exact match
-      * hover_only (bool, optional) - deciding if instead of clicking the element only a mouse over hovering should be simulated - for type `click_elem` only
-      * regex (bool, optional) - deciding if the selector should be treated as a regular expression - for type `set_elem`
-      * wait_until (str, optional, default = "") - an automation-step specific value for `wait_until` (see above)
-      * wait_time (int, optional) - number of seconds to explicitly wait for an element to appear - for type `click_elem` only - for edge cases only
-      * volume (int, optional, default = 141 (Enterprise Volume)) - the OTCS volume ID. Only relevant for type = `get_page`.
-      * path (list), optional, default = []) - a top-down list of folder / workspace names. Only relevant for type = `get_page`.
-      * navigation (bool, optional, default = False) - whether or not the click issues a nvigation event. Relevant only for type = `click_elem`.
-      * popup_window (bool, optional) - deciding if the click will popup a new browser window - for type `click_elem` only
-      * close_window (bool, optional) - deciding if the click will close the current window - for type `click_elem` only
-      * checkbox_state (bool, optional, default = None) - defines the required state of a checkbox element (True = checked, False = unchecked)
-      * attribute (str, optional, default = "") - the attribute name of an HTML element. Relevant only for type = `check_elem`.
-      * substring (bool, optional, default = False) - with or not a string comparison should consider substrings. Relevant only for type = `check_elem`.
-      * min_count (int, optional, default = 1) - defines how many elements should be found at a minimum by type = `check_elem`.
-      * want_exist (bool, optional, default = True) - defines for type = `check_elem` if the existence or non-existence should be checked.
-      * show_error (bool, optional) - deciding if an an error is logged
-    """
-    _browser_automations = []
-    _browser_automations_post = []
-    _test_automations = []
-
-    """
-    _security_clearances: List of Security Clearances. Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - level (str, mandatory)
-    - description (str, optional, default = "")
-    """
-    _security_clearances = []
-
-    """
-    _supplemental_markings: List of supplemental markings. Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - code (str, mandatory)
-    - description (str, optional, default = "")
-    """
-    _supplemental_markings = []
-
-    _records_management_settings = []
-
-    """
-    _holds: List of Records Management holds. Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - name (str, mandatory)
-    - type (str, mandatory)
-    - group (str, optional)
-    - comment (str, optional, default = "")
-    - alternate_id (str, optional)
-    - date_applied (str, optional, default = "")
-    - date_to_remove (str, optional, default = "")
-    """
-    _holds = []
-
-    """
-    _bulk_datasources: list of bulk datasources.
-    Each element is a dict with these keys:
-    - data (Data object), this is not in payload but automatically filled
-    - type (str, mandatory) - either excel, servicenow, otmm, otcs, pht, json, xml, nhc
-    - csv_files (list, mandatory if type = csv)
-    - csv_delimiter (str, optional) - value delimiter in the file - default is a comma
-    - csv_header_index (int, optional) - if the file has a header line this parameter specifies the index
-      (0 = first line, this is the default)
-    - csv_column_names (list, optional) - if the file has no header line the column name can be
-      specified as a list of strings
-    - csv_use_columns (list, optional) - this list can either include integers (index of columns to keep), strings
-      (names of columns to keep), or a list of boolean values (True = column is kept, False = column is dropped)
-    - json_files (list, mandatory if type = json)
-    - xml_files (list, optional, default = []) - only relevant for type = xml
-    - xml_directories (list, optional, default = []) - only relevant for type = xml
-    - xml_xpath (str, optional, default = None) - only relevant if xml_directories is set
-    - xlsx_files (list, optional, default = [])
-    - xlsx_sheets (list, optional, default = 0)
-    - xlsx_columns (list, optional, default = None)
-    - xlsx_skip_rows (int, optional, default = 0) - number of rows to skip on top of sheet
-    - xlsx_na_values (list, optional, default = [])
-    - pht_base_url (str, mandatory if type = pht)
-    - pht_username (str, mandatory if type = pht)
-    - pht_password (str, mandatory if type = pht)
-    - pht_business_unit_exclusions (list, optional, default = [])
-    - pht_business_unit_inclusions (list, optional, default = [])
-    - pht_product_exclusions (list, optional, default = [])
-    - pht_product_inclusions (list, optional, default = [])
-    - pht_product_category_exclusions (list, optional, default = [])
-    - pht_product_category_inclusions (list, optional, default = [])
-    - pht_product_status_exclusions (list, optional, default = [])
-    - pht_product_status_inclusions (list, optional, default = [])
-    - pht_product_attributes (list, optional, default = []) - a list of attribute names that should be extracted and added as columns to the data frame
-    - otmm_username (str, optional, default = "")
-    - otmm_password (str, optional, default = "")
-    - otmm_client_id (str, optional, default = None)
-    - otmm_client_secret (str, optional, default = None)
-    - otmm_thread_number (int, optional, default = BULK_THREAD_NUMBER)
-    - otmm_download_dir (str, optional, default = "/data/mediaassets")
-    - otmm_business_unit_exclusions (list, optional, default = [])
-    - otmm_business_unit_inclusions (list, optional, default = [])
-    - otmm_product_exclusions (list, optional, default = [])
-    - otmm_product_inclusions (list, optional, default = [])
-    - sn_base_url (str, mandatory if type = servicenow)
-    - sn_auth_type (str, optional, default = "basic")
-    - sn_username (str, optional, default = "")
-    - sn_password (str, optional, default = "")
-    - sn_client_id (str, optional, default = None)
-    - sn_client_secret (str, optional, default = None)
-    - sn_queries (list, mandatory if type = servicenow)
-      * sn_table_name (str, mandatory) - name of the ServiceNow database table for the query
-      * sn_query (str, mandatory) - query string
-    - sn_thread_number (int, optional, default = BULK_THREAD_NUMBER)
-    - sn_download_dir (str, optional, default = "/data/knowledgebase")
-    - sn_skip_existing_downloads (bool, optional, default = True)
-    - otcs_hostname (str, mandatory if type = otcs)
-    - otcs_protocol (str, optional, default = "https")
-    - otcs_port (str, optional, default = "443")
-    - otcs_basepath (str, optional, default = "/cs/cs")
-    - otcs_username (str, mandatory if type = otcs)
-    - otcs_password (str, mandatory if type = otcs)
-    - otcs_thread_number (int, optional, default = BULK_THREAD_NUMBER)
-    - otcs_download_dir (str, optional, default = "/data/contentserver")
-    - otcs_root_node_ids (list | int, mandatory if type = otcs)
-    - otcs_include_workspaces (bool, optional, default = True)
-    - otcs_include_items (bool, optional, default = True)
-    - otcs_include_workspace_metadata (bool, optional, default = True)
-    - otcs_include_item_metadata (bool, optional, default = True)
-    - otcs_filter_workspace_depth (int, optional, default = 0)
-    - otcs_filter_workspace_subtypes (int, optional, default = 0)
-    - otcs_filter_workspace_category (str, optional, default = None) - name of the category the workspace needs to have
-    - otcs_filter_workspace_attributes (dict | list, optional, default = None)
-      * set (str, optional, default = None) - name of the attribute set
-      * row (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
-      * attribute (str, mandatory) - name of the attribute
-      * value (str, mandatory) - value the attribute should have to pass the filter
-    - otcs_filter_item_depth (int, optional, default = None)
-    - otcs_filter_item_subtypes (int, optional, default = 0)
-    - otcs_filter_item_category (str, optional, default = None) - name of the category the workspace needs to have
-    - otcs_filter_item_attributes (dict | list, optional, default = None)
-      * set (str, optional, default = None) - name of the attribute set
-      * row (int, optional, default = None) - row number (starting with 1) - only required for multi-value sets
-      * attribute (str, mandatory) - name of the attribute
-      * value (str, mandatory) - value the attribute should have to pass the filter
-    - cleansings (dict, optional, default = {}) - the keys of this dict are the field names! The values of the dict
-      are sub-dicts with these keys:
-      * upper (bool, optional, default = False)
-      * lower (bool, optional, default = False)
-      * capitalize (bool, optional, default = false) - first character upper case, rest lower-case
-      * title (bool, optional, default = false) - first character of each word upper case
-      * length (int, optional, default = None)
-      * replacements (dict, optional, default = {}) - the keys are regular expressions and the values are
-        replacement values
-    - columns_to_drop (list, optional, default = [])
-    - columns_to_keep (list, optional, default = [])
-    - columns_to_add (list, optional, default = []) - elements are dicts with these keys:
-      * source_column (str, mandatory)
-      * name (str, mandatory)
-      * reg_exp (str, optional, default = None)
-      * prefix (str, optional, default = "")
-      * suffix (str, optional, default = "")
-      * length (int, optional, default = None)
-      * group_chars (str, optional, default = None)
-      * group_separator (str, optional, default =".")
-    - columns_to_add_list (list, optional, default = []): add a new column with list values.
-      Each payload item is a dictionary with these keys:
-      * source_columns (str, mandatory) - names of the columns from which row values are taken from to create
-        the list of string values
-      * name (str, mandatory) - name of the new column
-    - columns_to_add_concat (list, optional, default = []): add a new column with concatenated values.
-      Each payload item is a dictionary with these keys:
-      * source_columns (str, mandatory) - names of the columns from which row values are taken from to create
-        the list of string values
-      * name (str, mandatory) - name of the new column
-      * concat_char (str, optional) - concatenation char e.g. "-", ".". Default is None = empty.
-      * columns_to_add_concat_lower (bool,optional) - convert result to lower case
-      * columns_to_add_concat_upper (bool,optional) - convert result to upper case
-      * columns_to_add_concat_capitalize (bool,optional) - capitalize result
-      * columns_to_add_concat_title (bool,optional) - convert result to title case
-    - columns_to_add_table (list, optional, default = []): add a new column with table values.
-      Each payload item is a dictionary with these keys:
-      * source_columns (str, mandatory) - names of the columns from which row values are taken from to create a list
-        of dictionary values. It is expected that the source columns already have list items or are strings with
-        delimiter-separated values.
-      * name (str, mandatory) - name of the new column
-      * list_splitter (str, optional, default = ",")
-    - conditions (list, optional, default = []) - each list item is a dict with these keys:
-      * field (str, mandatory)
-      * value (str | bool | list, optional, default = None)
-      * equal (bool, optional): if True test for equality, if False test for non-equality
-    - explosions (list, optional, default = []) - each list item is a dict with these keys:
-      * explode_fields (str | list, mandatory)
-      * flatten_fields (list, optional, default = [])
-      * split_string_to_list (bool, optional, default = False)
-      * list_splitter (str, optional, default = ",;") - string with characters that are used to split
-        a string into list items.
-    - name_column (str, optional, default = None)
-    - synonyms_column (str, optional, default = None)
-    """
-    _bulk_datasources = []
-
-    """
-    _bulk_workspaces: List of bulk workspace definitions.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - type_name (str, mandatory) - type of the workspace
-    - data_source (str, mandatory)
-    - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source
-      has been modified before by column operations or explosions
-    - copy_data_source (bool, optional, default = False) - to avoid side-effects for repeative usage of the data source
-    - operations (list, optional, default = ["create"]) - possible values: "create", "update", "delete", "recreate"
-      (delete existing + create new)
-    - update_operations (list, optional, default = ["name", "description", "categories", "nickname"]) - possible values:
-      "name", "description", "categories", "nickname"
-    - unique (list, optional, default = []) - list of fields (columns) that should be unique -> deduplication
-    - sort (list, optional, default = []) - list of fields to sort the data frame by
-    - name (str, mandatory) - name of the workspace - can include placeholder surrounded by {...}
-    - name_alt (str, optional, default = None) - alternative name - can include placeholder surrounded by {...}
-    - description (str, optional, default = "")
-    - description_alt (str, optional, default = "") - alternative description (using different placeholders)
-    - template_name (str, optional, default = take first template)
-    - categories (list, optional, default = []) - each list item is a dict that may have these keys:
-      * name (str, mandatory)
-      * set (str, default = "")
-      * row (int, optional)
-      * attribute (str, mandatory)
-      * value (str, optional if value_field is specified, default = None)
-      * value_field (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-      * value_type (str, optional, default = "string") - possible values: "string", "date", "list" and "table".
-        If list then string with comma-separated values will be converted to a list.
-      * attribute_mapping (dict, optional, default = None) - only relevant for value_type = "table" -
-        defines a mapping from the data frame column names to the category attribute names
-      * value_mapping (dict, optional, default = None) - dictionary keys are the original values and dictionary values
-        are the mapped values. This makes most sense for values with a limited / fixed domain of possible values
-      * list_splitter (str, optional, default = ";,")
-      * lookup_data_source (str, optional, default = None)
-      * lookup_data_failure_drop (bool, optional, default = False) -
-        should we clear / drop values that cannot be looked up?
-      * is_key (bool,optional, default = False) - find document with old name. For this we expect a "key" value to be
-        defined in the bulk workspace and one of the category / attribute item to be marked with "is_key" = True
-    - workspaces (dict, dynamically bult up, default = {}) - list of already generated workspaces
-    - external_create_date (str, optional, default = "")
-    - external_modify_date (str, optional, default = "")
-    - key (str, optional, default = None) - lookup key for workspaces other then the name
-    - replacements (dict, optional, default = {}) - Each dictionary item has the field name as the dictionary key and a
-      list of regular expressions as dictionary value
-    - nickname (str, optional, default = None)
-    - nickname_alt (str, optional, default = None) - alternative nickname
-    - conditions (list, optional, default = [])
-      * field (str, mandatory)
-      * value (str | bool | list, optional, default = None)
-    """
-    _bulk_workspaces = []
-
-    """
-    _bulk_workspace_relationships: List of bulk workspace relationships.
-    Each element is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - from_workspace (str, mandatory)
-    - from_workspace_type (str, optional, default = None)
-    - from_workspace_name (str, optional, default = None)
-    - from_workspace_data_source (str, optional, default = None)
-    - from_sub_workspace_name (str, optional, default = None) - if the related workspace is a sub-workspace
-    - from_sub_workspace_path (list, optional, default = None) - the folder path under the main workspace where
-      the sub-workspaces are located
-    - to_workspace (str, mandatory)
-    - to_workspace_type (str, optional, default = None)
-    - to_workspace_name (str, optional, default = None)
-    - to_workspace_data_source (str, optional, default = None)
-    - to_sub_workspace_name (str, optional, default = None) - if the related workspace is a sub-workspace
-    - to_sub_workspace_path (list, optional, default = None) - the folder path under the main workspace
-      where the sub-workspaces are located
-    - type (str, optional, default = "child") - type of the relationship (defines if the _from_ workspace
-      is the parent or the child)
-    - data_source (str, mandatory)
-    - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source
-      has been modified before by column operations or explosions
-    - copy_data_source (bool, optional, default = False) - to avoid side-effects for repeative usage of the data source
-    - explosions (list, optional, default = []) - each list item is a dict with these keys:
-      * explode_fields (str | list, mandatory)
-      * flatten_fields (list, optional, default = [])
-      * split_string_to_list (bool, optional, default = False)
-      * list_splitter (str, optional, default = ",;") - string with characters that are used to split
-        a string into list items.
-    - unique (list, optional, default = [])
-    - sort (list, optional, default = [])
-    - thread_number (int, optional, default = BULK_THREAD_NUMBER)
-    - replacements (list, optional, default = None)
-    - conditions (list, optional, default = None)
-      * field (str, mandatory)
-      * value (str | bool | list, optional, default = None)
-    - from_workspace_lookup_error (bool, optional, default = True) - whether or not an error should be logged
-      if a relationship endpoint cannot be looked up
-    - to_workspace_lookup_error (bool, optional, default = True) - whether or not an error should be logged
-      if a relationship endpoint cannot be looked up
-    """
-    _bulk_workspace_relationships = []
-
-    """
-    _bulk_documents (list): List of bulk document payload. Each element
-    is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - data_source (str, mandatory)
-    - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source
-      has been modified before by column operations or explosions
-    - copy_data_source (bool, optional, default = False) - to avoid side-effects for repeative usage of the data source
-    - explosions (list of dicts, optional, default = [])
-      * explode_fields (str | list, mandatory)
-      * flatten_fields (list, optional, default = [])
-      * split_string_to_list (bool, optional, default = False)
-      * list_splitter (str, optional, default = ",;") - string with characters that are used to split a
-        string into list items.
-    - unique (list, optional, default = []) - list of column names which values should be unique -> deduplication
-    - sort (list, optional, default = []) - list of fields to sort the data frame by
-    - operations (list, optional, default = ["create"])
-    - update_operations (list, optional, default = ["name", "description", "categories", "nickname", "version"]) - possible values:
-      "name", "description", "categories", "nickname", "version", "purge"
-    - name (str, mandatory) - can include placeholder surrounded by {...}
-    - name_alt (str, optional, default = None) - can include placeholder surrounded by {...}
-    - name_regex (str, optional, default = r"") - regex replacement for document names. The pattern and replacement are separated by pipe character |
-    - description (str, optional, default = None) - can include placeholder surrounded by {...}
-    - download_name (str, optional, default = name) - can include placeholder surrounded by {...}
-    - download_name_wildcards (bool, optional, default = False) - defines if the download name includes wildcards,
-      e.g. "*.pdf"
-    - nickname (str, optional, default = None) - can include placeholder surrounded by {...}
-    - download_url (str, optional, default = None)
-    - download_url_alt (str, optional, default = None)
-    - download_dir (str, optional, default = BULK_DOCUMENT_PATH)
-    - delete_download (bool, optional, default = True)
-    - file_extension (str, optional, default = "")
-    - file_extension_alt (str, optional, default = "html")
-    - mime_type (str, optional, default = "application/pdf")
-    - mime_type_alt (str, optional, default = "text/html")
-    - nickname (str, optional, default = None)
-    - categories (list, optional, default = [])
-      * name (str, mandatory)
-      * set (str, default = "")
-      * row (int, optional)
-      * attribute (str, mandatory)
-      * value (str, optional if value_field is specified, default = None)
-      * value_field (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-      * value_type (str, optional, default = "string") - possible values: "string", "date", "list" and "table".
-        If list then string with comma-separated values will be converted to a list.
-      * attribute_mapping (dict, optional, default = None) - only relevant for value_type = "table" - defines a mapping
-        from the data frame column names to the category attribute names
-      * list_splitter (str, optional, default = ";,")
-      * lookup_data_source (str, optional, default = None)
-      * lookup_data_failure_drop (bool, optional, default = False) -
-        should we clear / drop values that cannot be looked up?
-      * is_key (bool, optional, default = False) - find document is old name. For this we expect a "key" value
-        to be defined for the bulk document and one of the category / attribute item to be marked with "is_key" = True
-    - thread_number (int, optional, default = BULK_THREAD_NUMBER)
-    - external_create_date (str, optional, default = "")
-    - external_modify_date (str, optional, default = "")
-    - key (str, optional, default = None) - lookup key for documents other then the name
-    - download_wait_time (int, optional, default = 30)
-    - download_retries (int, optional, default = 2)
-    - replacements (list, optional, default = [])
-    - conditions (list, optional, default = []) - all conditions must evaluate to true
-      * field (str, mandatory)
-      * value (str | bool | list, optional, default = None)
-    - workspaces (list, optional, default = [])
-      * workspace_name (str, mandatory)
-      * conditions (list, optional, default = [])
-        + field (str, mandatory)
-        + value (str | bool | list, optional, default = None)
-      * workspace_type (str, mandatory)
-      * data_source (str, optional, default = None)
-      * workspace_folder (str, optional, default = "")
-      * workspace_path (list, optional, default = [])
-      * sub_workspace_type (str, optional, default = "")
-      * sub_workspace_name (str, optional, default = "")
-      * sub_workspace_template (str, optional, default = "")
-      * sub_workspace_folder (str, optional, default = "")
-      * sub_workspace_path (list, optional, default = [])
-    """
-    _bulk_documents = []
-
-    """
-    _bulk_items (list): List of bulk items payload. Each element
-    is a dict with these keys:
-    - enabled (bool, optional, default = True)
-    - data_source (str, mandatory)
-    - force_reload (bool, optional, default = True) - enforce a reload of the data source, e.g. useful if data source
-      has been modified before by column operations or explosions
-    - copy_data_source (bool, optional, default = False) - to avoid side-effects for repeative usage of the data source
-    - explosions (list of dicts, optional, default = [])
-      * explode_fields (str | list, mandatory)
-      * flatten_fields (list, optional, default = [])
-      * split_string_to_list (bool, optional, default = False)
-      * list_splitter (str, optional, default = ",;") - string with characters that are used to split a
-        string into list items.
-    - unique (list, optional, default = []) - list of column names which values should be unique -> deduplication
-    - sort (list, optional, default = []) - list of fields to sort the data frame by
-    - operations (list, optional, default = ["create"])
-    - update_operations (list, optional, default = ["name", "description", "categories", "nickname"]) - possible values:
-      "name", "description", "categories", "nickname", "url"
-    - name (str, mandatory) - can include placeholder surrounded by {...}
-    - name_alt (str, optional, default = None) - can include placeholder surrounded by {...}
-    - name_regex (str, optional, default = r"") - regex replacement for document names. The pattern and replacement are separated by pipe character |
-    - description (str, optional, default = None) - can include placeholder surrounded by {...}
-    - nickname (str, optional, default = None) - can include placeholder surrounded by {...}
-    - nickname (str, optional, default = None)
-    - categories (list, optional, default = [])
-      * name (str, mandatory)
-      * set (str, default = "")
-      * row (int, optional)
-      * attribute (str, mandatory)
-      * value (str, optional if value_field is specified, default = None)
-      * value_field (str, optional if value is specified, default = None) - can include placeholder surrounded by {...}
-      * value_type (str, optional, default = "string") - possible values: "string", "date", "list" and "table".
-        If list then string with comma-separated values will be converted to a list.
-      * attribute_mapping (dict, optional, default = None) - only relevant for value_type = "table" - defines a mapping
-        from the data frame column names to the category attribute names
-      * list_splitter (str, optional, default = ";,")
-      * lookup_data_source (str, optional, default = None)
-      * lookup_data_failure_drop (bool, optional, default = False) -
-        should we clear / drop values that cannot be looked up?
-      * is_key (bool, optional, default = False) - find document is old name. For this we expect a "key" value
-        to be defined for the bulk document and one of the category / attribute item to be marked with "is_key" = True
-    - thread_number (int, optional, default = BULK_THREAD_NUMBER)
-    - external_create_date (str, optional, default = "")
-    - external_modify_date (str, optional, default = "")
-    - key (str, optional, default = None) - lookup key for documents other then the name
-    - replacements (list, optional, default = [])
-    - conditions (list, optional, default = []) - all conditions must evaluate to true
-      * field (str, mandatory)
-      * value (str | bool | list, optional, default = None)
-    - workspaces (list, optional, default = [])
-      * workspace_name (str, mandatory)
-      * conditions (list, optional, default = [])
-        + field (str, mandatory)
-        + value (str | bool | list, optional, default = None)
-      * workspace_type (str, mandatory)
-      * data_source (str, optional, default = None)
-      * workspace_folder (str, optional, default = "")
-      * workspace_path (list, optional, default = [])
-      * sub_workspace_type (str, optional, default = "")
-      * sub_workspace_name (str, optional, default = "")
-      * sub_workspace_template (str, optional, default = "")
-      * sub_workspace_folder (str, optional, default = "")
-      * sub_workspace_path (list, optional, default = [])
-    """
-    _bulk_items = []
-
-    _bulk_classifications = []
-
-    _nifi_flows = []
-
-    _placeholder_values = {}
-
-    # Link to the method in customizer.py to restart the Content Server pods.
-    _otcs_restart_callback: Callable
-
-    # Link to the method in customizer.py to print a log header (separator line)
-    _log_header_callback: Callable
-
-    _aviator_enabled = False
-
-    _transport_extractions: list = []
-    _transport_replacements: list = []
-    _appworks_configurations = []
-
-    _avts_repositories: list = []
-
-    _embeddings: list = []
-
-    # Disable Status files
-    upload_status_files: bool = True
-
-    # Enable / Disable the check of existing status files
-    status_file_check: bool = True
+    # It is initialized by the init_payload() method.
 
     def __init__(
         self,
@@ -1357,14 +326,14 @@ class Payload:
         self._m365 = m365_object
         self._core_share = core_share_object
         # The SAP, SuccessFactors and Salesforce objects only exists after external systems have been processed
-        self._sap = None
-        self._successfactors = None
-        self._salesforce = None
-        self._servicenow = None
-        self._guidewire_policy_center = None
-        self._guidewire_claims_center = None
-        self._otmm = None
-        self._otcs_source = None
+        self._sap: SAP | None = None
+        self._successfactors: SuccessFactors | None = None
+        self._salesforce: Salesforce | None = None
+        self._servicenow: ServiceNow | None = None
+        self._guidewire_policy_center: Guidewire | None = None
+        self._guidewire_claims_center: Guidewire | None = None
+        self._otmm: OTMM | None = None
+        self._otcs_source: OTCS | None = None
         self._pht = None  # the OpenText prodcut hierarchy
         self._nhc = None  # National Hurricane Center
         self._otca = otca_object  # Content Aviator
@@ -1372,14 +341,84 @@ class Payload:
         self._avts = avts_object  # Aviator Search
         self._browser_headless = browser_headless
         self._custom_settings_dir = custom_settings_dir
-        self._placeholder_values = placeholder_values
-        self._otcs_restart_callback = otcs_restart_callback
-        self._log_header_callback = log_header_callback
+        self._placeholder_values: dict = placeholder_values
+        self._otcs_restart_callback: Callable = otcs_restart_callback
+        self._log_header_callback: Callable = log_header_callback
         self._aviator_enabled = aviator_enabled
         self._http_object = HTTP(logger=self.logger)
-        self.upload_status_files = upload_status_files
-        self.status_file_check = status_file_check
+        self.upload_status_files: bool = upload_status_files
+        self.status_file_check: bool = status_file_check
         self._otawp = otawp_object
+
+        self._payload: dict = {}
+        self._payload_options: dict = {}
+        self._payload_sections: list = []
+
+        self._additional_access_role_members: list = []
+        self._additional_application_role_assignments: list = []
+        self._additional_group_members: list = []
+        self._admin_settings: list = []
+        self._admin_settings_post: list = []
+        self._appworks_configurations: list = []
+        self._assignments: list = []
+        self._auth_handlers: list = []
+        self._avts_repositories: list = []
+        self._browser_automations: list = []
+        self._browser_automations_post: list = []
+        self._bulk_classifications: list = []
+        self._bulk_datasources: list = []
+        self._bulk_documents: list = []
+        self._bulk_items: list = []
+        self._bulk_workspace_relationships: list = []
+        self._bulk_workspaces: list = []
+        self._business_object_types: list = []
+        self._category_assignments: list = []
+        self._content_transport_packages: list = []
+        self._cs_applications: list = []
+        self._doc_generators: list = []
+        self._docgen_settings: list = []
+        self._embeddings: list = []
+        self._exec_commands: list = []
+        self._exec_database_commands: list = []
+        self._exec_pod_commands: list = []
+        self._external_systems: list = []
+        self._groups: list = []
+        self._holds: list = []
+        self._items: list = []
+        self._items_post: list = []
+        self._licenses: list = []
+        self._nifi_flows: list = []
+        self._oauth_clients: list = []
+        self._ontologies: list = []
+        self._partitions: list = []
+        self._permissions: list = []
+        self._permissions_post: list = []
+        self._records_management_settings: list = []
+        self._renamings: list = []
+        self._resources: list = []
+        self._sap_rfcs: list = []
+        self._sap_rfcs_post: list = []
+        self._security_clearances: list = []
+        self._supplemental_markings: list = []
+        self._synchronized_partitions: list = []
+        self._system_attributes: list = []
+        self._test_automations: list = []
+        self._transport_extractions: list = []
+        self._transport_packages: list = []
+        self._transport_packages_post: list = []
+        self._transport_replacements: list = []
+        self._trusted_sites: list = []
+        self._user_customization: bool = True
+        self._users: list = []
+        self._web_reports: list = []
+        self._web_reports_post: list = []
+        self._webhooks: list = []
+        self._webhooks_post: list = []
+        self._workflows: list = []
+        self._workspace_permissions: list = []
+        self._workspace_templates: list = []
+        self._workspace_types: list = []
+        self._workspaces: list = []
 
     # end method definition
 
@@ -1663,6 +702,13 @@ class Payload:
             - add an OTAWP license
         * Solution configuration
             - create the AppWorks artifacts
+
+        Payload item keys:
+            * organization (str, mandatory) - AppWorks organization name
+            * enabled (bool, optional, default = True)
+            * resource_config (bool, optional, default = False) - whether to configure OTDS resources
+            * workspaces (list, optional) - list of workspace configurations for the organization
+            * entities (list, optional) - list of entity definitions (categories, priorities, case types, etc.)
 
         Args:
             section_name (str, optional):
@@ -3168,6 +2214,12 @@ class Payload:
     def determine_workspace_id(self, workspace: dict) -> int:
         """Determine the node ID of a workspace - either from payload or from OTCS.
 
+        For OTCS determination we try different approaches:
+         1. Lookup the workspace via type and name
+         2. Lookup via nickname
+         3. Lookup via business object information (in case the workspace got renamed and does not match
+            the name in the payload anymore but the business object information is still correct)
+
         Args:
             workspace (dict):
                 The workspace payload element.
@@ -3178,13 +2230,18 @@ class Payload:
 
         Side Effects:
             The workspace items are modified by adding an "nodeId" dict element that
-            includes the node ID of the workspace in Content Server.
+            includes the node ID of the workspace in Content Server. If the workspace
+            name got updated based on the lookup via business object information the
+            "name" dict element is updated as well. This is because the actual name of
+            the workspace might differ from the name specified in the payload.
 
         """
 
         if "nodeId" in workspace:
             return workspace["nodeId"]
 
+        # 1. First we try to lookup the workspace via type and name - this is the most reliable way
+        # as the workspace name is defined in the payload in most cases match the actual workspace name in OTCS:
         response = self._otcs.get_workspace_by_type_and_name(
             type_name=workspace["type_name"],
             name=workspace["name"],
@@ -3197,7 +2254,8 @@ class Payload:
             # Write nodeID back into the payload
             workspace["nodeId"] = workspace_id
             return workspace_id
-        # We fallback to nickname lookup if type + name did not
+
+        # 2. We fallback to nickname lookup if type + name did not
         # deliver a result - this can happen if a workspace got a different name
         # based on workspace type naming definitions:
         if "nickname" in workspace:
@@ -3208,10 +2266,43 @@ class Payload:
                 workspace["nodeId"] = workspace_id
                 return workspace_id
 
+        # 3. If we have not found the workspace yet but there are business objects specified we try to
+        # find the workspace with a lookup via external system, business object type and business object ID:
+        if workspace.get("business_objects"):
+            for business_object in workspace["business_objects"]:
+                if not all(key in business_object for key in ("external_system", "bo_type", "bo_id")):
+                    continue
+                response = self._otcs.get_workspace_by_business_object(
+                    external_system_name=business_object["external_system"],
+                    business_object_type=business_object["bo_type"],
+                    business_object_id=business_object["bo_id"],
+                )
+                workspace_id = self._otcs.get_result_value(response=response, key="id")
+                workspace_name = self._otcs.get_result_value(response=response, key="name")
+                if workspace_id:
+                    workspace_id = int(workspace_id)
+                    workspace["nodeId"] = workspace_id
+                    # If the lookup via business object is successful we also write back the workspace name
+                    # into the payload as the actual name of the workspace might differ from the name specified
+                    # in the payload based on the workspace type naming definition:
+                    workspace["name"] = workspace_name
+                    self.logger.info(
+                        "Found workspace -> %s (%s) via business object -> %s.",
+                        workspace_name,
+                        workspace_id,
+                        str(business_object),
+                    )
+                    return workspace_id
+            # end for loop
+
         self.logger.info(
-            "Workspace of type -> '%s' and name -> '%s' does not yet exist. Cannot determine its ID.",
+            "Workspace of type -> '%s' and name -> '%s'%s%s does not yet exist. Cannot determine its ID.",
             workspace["type_name"],
             workspace["name"],
+            " with nickname -> '{}'".format(workspace["nickname"]) if "nickname" in workspace else "",
+            " with business objects -> {}".format(workspace["business_objects"])
+            if workspace.get("business_objects")
+            else "",
         )
         return 0
 
@@ -3854,6 +2945,16 @@ class Payload:
     def process_web_hooks(self, webhooks: list, section_name: str = "webHooks") -> bool:
         """Process Web Hooks in payload and do HTTP requests.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - description (str, optional)
+            - url (str, required)
+            - method (str, optional, default="POST")
+            - payload (dict, optional, default={})
+            - headers (dict, optional, default={})
+            - retries (int, optional, default=0)
+            - wait_time (int, optional, default=0)
+
         Args:
             webhooks (list):
                 The list of web hook payload settings.
@@ -3945,6 +3046,17 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_resources")
     def process_resources(self, section_name: str = "resources") -> bool:
         """Process OTDS resources in payload and create them in OTDS.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - display_name (str, optional)
+            - activate (bool, optional, default=True)
+            - allow_impersonation (bool, optional, default=True)
+            - resource_id (str, optional)
+            - secret (str, optional)
+            - additional_payload (dict, optional)
 
         Args:
             section_name (str, optional):
@@ -4061,6 +3173,12 @@ class Payload:
         section_name: str = "synchronizedPartitions",
     ) -> bool:
         """Process OTDS synchronized partitions in payload and create them in OTDS.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - spec (dict, required) with at least profileName
+            - access_role (str, optional)
+            - licenses (list, optional)
 
         Args:
             section_name (str, optional):
@@ -4281,6 +3399,13 @@ class Payload:
     def process_partitions(self, section_name: str = "partitions") -> bool:
         """Process OTDS partitions in payload and create them in OTDS.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - access_role (str, optional)
+            - licenses (list, optional)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -4484,6 +3609,14 @@ class Payload:
     def process_licenses(self, section_name: str = "licenses") -> bool:
         """Process OTDS licenses in payload and create them in OTDS.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - path (str, required)
+            - product_name (str, required)
+            - resource (str, required)
+            - description (str, optional)
+            - update (bool, optional, default=True)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -4574,6 +3707,19 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_oauth_clients")
     def process_oauth_clients(self, section_name: str = "oauthClients") -> bool:
         """Process OTDS OAuth clients in payload and create them in OTDS.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - confidential (bool, optional, default=True)
+            - partition (str, optional, default="Global")
+            - redirect_urls (list, optional)
+            - permission_scopes (list, optional)
+            - default_scopes (list, optional)
+            - allow_impersonation (bool, optional, default=True)
+            - secret (str, optional)
+            - user_type (str, optional)
 
         Args:
             section_name (str, optional):
@@ -4817,6 +3963,27 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_auth_handlers")
     def process_auth_handlers(self, section_name: str = "authHandlers") -> bool:
         """Process OTDS authorization handlers in payload and create them in OTDS.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - scope (str, optional)
+            - type (str, required): SAML, SAP, OAUTH
+            - priority (int, optional)
+            - active_by_default (bool, optional, default=False)
+            - provider_name (str, required for SAML/OAUTH)
+            - auth_principal_attributes (list, optional)
+            - nameid_format (str, optional)
+            - saml_url (str, required for SAML)
+            - otds_sp_endpoint (str, required for SAML)
+            - certificate_file (str, required for SAP)
+            - certificate_password (str, optional for SAP)
+            - client_id (str, required for OAUTH)
+            - client_secret (str, required for OAUTH)
+            - authorization_endpoint (str, required for OAUTH)
+            - token_endpoint (str, optional for OAUTH)
+            - scope_string (str, optional for OAUTH)
 
         An authorization handler defined the connection to an Identity Provider (IdP).
 
@@ -5109,6 +4276,12 @@ class Payload:
     def process_trusted_sites(self, section_name: str = "trustedSites") -> bool:
         """Process OTDS trusted sites in payload and create them in OTDS.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - url (str, required)
+
+        Legacy payloads may still provide plain string URLs and are supported.
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -5181,6 +4354,12 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_system_attributes")
     def process_system_attributes(self, section_name: str = "systemAttributes") -> bool:
         """Process OTDS system attributes in payload and create them in OTDS.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - value (str, required)
+            - description (str, optional)
 
         Args:
             section_name (str, optional):
@@ -5269,6 +4448,13 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_docgen_settings")
     def process_docgen_settings(self, section_name: str = "docgenSettings") -> bool:
         """Process OTPD settings in payload and configure them in OTPD.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - value (str, required)
+            - description (str, optional)
+            - tenant (str, optional)
 
         Args:
             section_name (str, optional):
@@ -5368,6 +4554,10 @@ class Payload:
 
         For this we prepare a lookup dict. The dict self._placeholder_values already includes
         lookups for the OTCS and OTAWP OTDS resource IDs (see main.py)
+
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
         """
 
         for group in self._groups:
@@ -5415,6 +4605,10 @@ class Payload:
 
         For this we prepare a lookup dict. The dict self._placeholder_values already includes
         lookups for the OTCS and OTAWP OTDS resource IDs (see customizer.py).
+
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
         """
 
         for user in self._users:
@@ -5459,6 +4653,15 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_groups")
     def process_groups(self, section_name: str = "groups") -> bool:
         """Process groups in payload and create them in Content Server.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - parent_groups (list, optional)
+            - usage_privileges (list, optional)
+            - enable_o365 (bool, optional, default=False)
+            - enable_salesforce (bool, optional, default=False)
+            - enable_core_share (bool, optional, default=False)
 
         Args:
             section_name (str, optional):
@@ -5719,6 +4922,12 @@ class Payload:
     def process_groups_m365(self, section_name: str = "groupsM365") -> bool:
         """Process groups in payload and create them in Microsoft 365.
 
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
+            * enable_o365 (bool, optional, default = False) - enable Microsoft 365 team for this group
+            * m365_id (str, optional, output field set by method) - Microsoft 365 group ID
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -5839,6 +5048,12 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_groups_salesforce")
     def process_groups_salesforce(self, section_name: str = "groupsSalesforce") -> bool:
         """Process groups in payload and create them in Salesforce.
+
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
+            * enable_salesforce (bool, optional, default = False) - enable Salesforce creation for this group
+            * salesforce_id (str, optional, output field set by method) - Salesforce group ID
 
         Args:
             section_name (str, optional):
@@ -6017,6 +5232,12 @@ class Payload:
     def process_groups_core_share(self, section_name: str = "groupsCoreShare") -> bool:
         """Process groups in payload and create them in Core Share.
 
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
+            * enable_core_share (bool, optional, default = False) - enable Core Share creation for this group
+            * core_share_id (str, optional, output field set by method) - Core Share group ID
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -6149,6 +5370,20 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_users")
     def process_users(self, section_name: str = "users") -> bool:
         """Process users in payload and create them in Content Server.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - password (str, optional)
+            - firstname (str, optional)
+            - lastname (str, optional)
+            - title (str, optional)
+            - email (str, optional)
+            - base_group (str, optional, default="DefaultGroup")
+            - type (str, optional, default="User")
+            - groups (list, optional)
+            - extra_attributes (list[dict], optional)
+            - privileges (list, optional)
 
         Args:
             section_name (str, optional):
@@ -6484,6 +5719,13 @@ class Payload:
     def process_users_sap(self, section_name: str = "usersSAP") -> bool:
         """Process users in payload and sync them with SAP (passwords only for now).
 
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * enable_sap (bool, optional, default = False) - enable SAP sync for this user
+            * password (str, mandatory) - user password for SAP sync
+            * sap_sync_result (dict, optional, output field set by method) - SAP sync result details
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -6618,6 +5860,14 @@ class Payload:
         section_name: str = "usersSuccessFactors",
     ) -> bool:
         """Process users in payload and sync them with SuccessFactors (passwords and email).
+
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * enable_successfactors (bool, optional, default = False) - enable SuccessFactors sync for this user
+            * password (str, optional, default = "") - user password for SuccessFactors
+            * email (str, optional, default = "") - user email address
+            * successfactors_user_id (str, optional, output field set by method) - SuccessFactors user ID
 
         Args:
             section_name (str, optional):
@@ -6780,6 +6030,20 @@ class Payload:
         section_name: str = "usersSalesforce",
     ) -> bool:
         """Process users in payload and sync them with Salesforce (passwords and email).
+
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * enable_salesforce (bool, optional, default = False) - enable Salesforce sync for this user
+            * extra_attributes (dict, mandatory if enabled) - Salesforce-specific attributes
+            * email (str, optional, default = "") - user email address
+            * firstname (str, optional, default = "") - user first name
+            * lastname (str, optional, default = "") - user last name
+            * base_group (str, optional, default = "") - base Salesforce group
+            * title (str, optional, default = "") - user title
+            * company (str, optional, default = None) - user company
+            * salesforce_user_id (str, optional, output field set by method) - Salesforce user ID
+            * salesforce_user_login (str, optional, output field set by method) - Salesforce user login
 
         Args:
             section_name (str, optional):
@@ -7128,6 +6392,17 @@ class Payload:
         section_name: str = "usersCoreShare",
     ) -> bool:
         """Process users in payload and sync them with Core Share (passwords and email).
+
+        Payload item keys (from _users):
+            * lastname (str, optional, default = "") - user last name
+            * firstname (str, optional, default = "") - user first name
+            * enabled (bool, optional, default = True)
+            * enable_core_share (bool, optional, default = False) - enable Core Share sync for this user
+            * email (str, optional, default = "") - user email address
+            * password (str, optional, default = "") - user password for Core Share
+            * title (str, optional, default = None) - user title
+            * company (str, optional, default = "Innovate") - user company
+            * core_share_user_id (str, optional, output field set by method) - Core Share user ID
 
         Args:
             section_name (str, optional):
@@ -7624,6 +6899,19 @@ class Payload:
     def process_users_m365(self, section_name: str = "usersM365") -> bool:
         """Process users in payload and create them in Microsoft 365 via MS Graph API.
 
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * enable_o365 (bool, optional, default = False) - enable Microsoft 365 creation for this user
+            * password (str, mandatory if enabled) - user password for Microsoft 365
+            * base_group (str, optional, default = "") - base Microsoft 365 group
+            * firstname (str, optional, default = "") - user first name
+            * lastname (str, optional, default = "") - user last name
+            * location (str, optional, default = "US") - user location
+            * email (str, optional, default = name) - user email address
+            * m365_skus (list, optional) - Microsoft 365 SKU list for licensing
+            * m365_id (str, optional, output field set by method) - Microsoft 365 user ID
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -8109,6 +7397,11 @@ class Payload:
         Group Owners to create teams. These are NOT the teams for OTCS
         workspaces! Those are created by Scheduled Bots (Jobs) from OTCS!
 
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
+            * enable_o365 (bool, mandatory check) - must verify O365 is enabled for teams
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -8219,6 +7512,11 @@ class Payload:
 
         We need to do this after the transports as we need top level folders
         we can point the Extended ECM teams app to.
+
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
+            * enable_o365 (bool, mandatory check) - must verify O365 is enabled for teams
 
         Args:
             section_name (str, optional):
@@ -8631,6 +7929,16 @@ class Payload:
         5. Determine or create the SharePoint webpart for the OTCS browser
         6. Create URL object pointing to SharePoint site inside top level department folder
 
+        Payload item keys (from _groups):
+            * name (str, mandatory) - group name
+            * enabled (bool, optional, default = True)
+            * enable_o365 (bool, mandatory check) - must verify O365 is enabled
+            * o365_site_page_name (str, optional, default = "OpenText Content Management") - SharePoint page name
+            * m365_id (str, optional, output field set by method) - Microsoft 365 group ID
+            * m365_site_id (str, optional, output field set by method) - SharePoint site ID
+            * m365_site_name (str, optional, output field set by method) - SharePoint site name
+            * m365_folder_id (str, optional, output field set by method) - SharePoint folder ID
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -9034,6 +8342,12 @@ class Payload:
     ) -> bool:
         """Process admin settings in payload and import them to Content Server.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - filename (str, required)
+            - description (str, optional)
+            - restart (bool, optional, default=False)
+
             The payload section is a list of dicts with these items:
             {
                 enabled: True or False to enable or disable the payload item
@@ -9203,6 +8517,28 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_external_systems")
     def process_external_systems(self, section_name: str = "externalSystems") -> bool:
         """Process external systems in payload and create them in Content Server.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - external_system_type (str, required)
+            - external_system_name (str, required)
+            - external_system_number (str, optional)
+            - description (str, optional)
+            - as_url (str, required)
+            - base_url (str, optional)
+            - client (str, optional)
+            - destination (str, optional)
+            - group (str, optional)
+            - username (str, optional)
+            - password (str, optional)
+            - certificate_file (str, optional)
+            - certificate_password (str, optional)
+            - external_system_hostname (str, optional)
+            - archive_logical_name (str, optional)
+            - archive_certificate_file (str, optional)
+            - oauth_client_id (str, optional)
+            - oauth_client_secret (str, optional)
+            - skip_connection_test (bool, optional, default=False)
 
             The payload section is a list of dicts (each representing one external
             system) with these items:
@@ -9713,6 +9049,14 @@ class Payload:
     ) -> bool:
         """Process transport packages in payload and import them to Content Server.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - url (str, required)
+            - description (str, optional)
+            - replacements (list | dict, optional)
+            - extractions (list | dict, optional)
+
         Args:
             transport_packages (list):
                 A list of transport packages. As we have three different lists (transport,
@@ -9859,6 +9203,11 @@ class Payload:
     def process_user_photos(self, section_name: str = "userPhotos") -> bool:
         """Process user photos in payload and assign them to Content Server users.
 
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * type (str, optional, default = "User") - photo type
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -9961,6 +9310,13 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_photos_m365")
     def process_user_photos_m365(self, section_name: str = "userPhotosM365") -> bool:
         """Process user photos in payload and assign them to Microsoft 365 users.
+
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * id (str, mandatory if enable_o365) - required field for M365 lookup
+            * enable_o365 (bool, optional, default = False) - enable photo update for Microsoft 365 user
+            * m365_id (str, optional, output field set/updated by method) - Microsoft 365 user ID
 
         Args:
             section_name (str, optional):
@@ -10162,6 +9518,12 @@ class Payload:
     ) -> bool:
         """Process user photos in payload and assign them to Salesforce users.
 
+        Payload item keys (from _users):
+            * name (str, mandatory) - user login name
+            * enabled (bool, optional, default = True)
+            * enable_salesforce (bool, optional, default = False) - enable photo update for Salesforce user
+            * extra_attributes (dict, mandatory if enable_salesforce=True) - Salesforce-specific attributes
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -10324,6 +9686,13 @@ class Payload:
         section_name: str = "userPhotosCoreShare",
     ) -> bool:
         """Process user photos in payload and assign them to Core Share users.
+
+        Payload item keys (from _users):
+            * name (str, mandatory via 'name' check) - user login name or identifier
+            * lastname (str, optional, default = "") - user last name
+            * firstname (str, optional, default = "") - user first name
+            * enabled (bool, optional, default = True)
+            * enable_core_share (bool, optional, default = False) - enable photo update for Core Share user
 
         Args:
             section_name (str, optional):
@@ -10773,6 +10142,9 @@ class Payload:
     ) -> list:
         """Create a data structure for all business object types in the Extended ECM system.
 
+        Payload item keys:
+            * None - Retrieves all BOs from OTCS API; no individual payload item iteration
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -11023,6 +10395,9 @@ class Payload:
     def process_workspace_types(self, section_name: str = "workspaceTypes") -> list:
         """Create a data structure for all workspace types in the OTCS.
 
+        Payload item keys:
+            * None - Retrieves all workspace types from OTCS API; no individual payload item iteration
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -11178,6 +10553,13 @@ class Payload:
         section_name: str = "workspaceTemplates",
     ) -> bool:
         """Process workspace template playload.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - type_name (str, required)
+            - template_name (str, required)
+            - members (list[dict], optional) with role/users/groups
+            - categories (list[dict], optional)
 
         This allows to define role members on template basis.
         This avoids having to "pollute" workspace templates
@@ -12279,7 +11661,12 @@ class Payload:
                 response = guidewire_object.search_policy(
                     attributes={search_field: search_value},
                 )
-                bo_id = guidewire_object.get_result_value(response=response, key="policyId")
+                bo_id = guidewire_object.get_result_value(response=response, key="policyNumber")
+            case "Claim" | "claim" | "gw.claim":
+                response = guidewire_object.search_claim(
+                    attributes={search_field: search_value},
+                )
+                bo_id = guidewire_object.get_result_value(response=response, key="claimNumber")
             case _:
                 self.logger.warning("Currently we only support lookup of 'Account' and 'Policy' objects in Guidewire!")
                 return None
@@ -12730,7 +12117,6 @@ class Payload:
     def prepare_workspace_business_objects(
         self,
         workspace: dict,
-        business_objects: list,
     ) -> list | None:
         """Prepare the business object data for the workspace creation.
 
@@ -12741,17 +12127,21 @@ class Payload:
         Args:
             workspace (dict):
                 The payload data for the workspace.
-            business_objects (list):
-                The payload data for the business object connections.
 
         Returns:
             list | None:
                 A list of business object data connections
                 (list elements are dictionaries).
 
+        Side Effects:
+            Mutates each dictionary in workspace["business_objects"] by adding
+            or updating the "bo_id" key when a business object ID can be
+            resolved (for example via Salesforce or Guidewire lookup).
+
         """
 
         business_object_list = []
+        business_objects = workspace.get("business_objects", [])
 
         for business_object_data in business_objects:
             business_object = {}
@@ -12897,6 +12287,9 @@ class Payload:
                 bo_type,
                 bo_id,
             )
+            # Update the payload structure to have the bo_id
+            # for downstream dtermine_workspace_id():
+            business_object_data["bo_id"] = bo_id
 
             business_object["ext_system_id"] = ext_system_id
             business_object["bo_type"] = bo_type
@@ -12955,11 +12348,8 @@ class Payload:
         # We need to do this early to find out if we have a cross-application workspace
         # and need to continue even if the workspace does exist...
         if workspace.get("business_objects"):
-            business_objects = workspace["business_objects"]
-
             business_object_list = self.prepare_workspace_business_objects(
                 workspace=workspace,
-                business_objects=business_objects,
             )
             # Check if any of the external systems are avaiable:
             if business_object_list:
@@ -12987,9 +12377,19 @@ class Payload:
         )
         # Check if workspace does already exist
         # In case the workspace exists, determine_workspace_id()
-        # also stores the node ID into workspace["nodeId"]
+        # also stores the node ID into workspace["nodeId"] and
+        # and the real workspace name into workspace["real_name"]
+        # in case the name in payload is different from the real name
+        # in the system (e.g. with nickname or business object lookup):
         workspace_id = self.determine_workspace_id(workspace=workspace)
         if workspace_id:
+            if name != workspace["name"]:
+                self.logger.info(
+                    "Real workspace name -> '%s' is different from payload workspace name -> '%s'. Payload name has been updated.",
+                    workspace["name"],
+                    name,
+                )
+                name = workspace["name"]
             self.logger.info(
                 "Workspace -> '%s' of type -> '%s' does already exist and has ID -> %d.",
                 name,
@@ -13006,10 +12406,12 @@ class Payload:
                 )
             elif not business_object_list:
                 self.logger.info(
-                    "Workspace -> '%s' does already exist and has no business object references to update - skipping the creation...",
+                    "Workspace -> '%s' does already exist and has no business object references to update - skipping creation and only applying workspace post-processing...",
                     name,
                 )
-                return True
+                return self.process_workspace_post(
+                    workspace=workspace,
+                )
 
         # Parent ID is optional and only required if workspace type does not specify a create location.
         # This is typically the case if it is a nested workspace or workspaces of the same type can be created
@@ -13312,17 +12714,52 @@ class Payload:
             )
             return False
 
+        return self.process_workspace_post(
+            workspace=workspace,
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_workspace_post")
+    def process_workspace_post(
+        self,
+        workspace: dict,
+    ) -> bool:
+        """Apply post-processing steps to a workspace creation.
+
+        This handles payload settings that should run for both newly created
+        and already existing workspaces.
+
+        Args:
+            workspace (dict):
+                Dictionary with payload of a single workspace.
+
+        Returns:
+            bool:
+                True if post-processing completed, False for blocking errors.
+
+        """
+
+        workspace_id = workspace.get("nodeId")
+        workspace_name = workspace.get("name")
+        if not workspace_id:
+            self.logger.error(
+                "Missing workspace node ID for workspace -> '%s'. Cannot apply post-processing!",
+                workspace_name,
+            )
+            return False
+
         # Check if there's an workspace nickname configured:
         if "nickname" in workspace:
             nickname = workspace["nickname"]
             self.logger.info(
                 "Assign nickname -> '%s' to workspace -> '%s' (%s)...",
                 nickname,
-                name,
-                workspace["nodeId"],
+                workspace_name,
+                workspace_id,
             )
             response = self._otcs.set_node_nickname(
-                node_id=workspace["nodeId"],
+                node_id=workspace_id,
                 nickname=nickname,
                 show_error=True,
             )
@@ -13330,9 +12767,10 @@ class Payload:
                 self.logger.error(
                     "Failed to assign nickname -> '%s' to workspace -> '%s' (%s)!",
                     nickname,
-                    name,
-                    workspace["nodeId"],
+                    workspace_name,
+                    workspace_id,
                 )
+        # end if "nickname" in workspace
 
         # Check if there's an workspace icon/image configured:
         if "image_nickname" in workspace:
@@ -13362,7 +12800,7 @@ class Payload:
                     )
                 else:
                     response = self._otcs.update_workspace_icon(
-                        workspace_id=workspace["nodeId"],
+                        workspace_id=workspace_id,
                         file_path=file_path,
                         file_mimetype=mime_type,
                     )
@@ -13370,15 +12808,16 @@ class Payload:
                         self.logger.error(
                             "Failed to assign icon -> '%s' to workspace -> '%s' from file -> '%s'!",
                             image_nickname,
-                            name,
+                            workspace_name,
                             file_path,
                         )
             else:
                 self.logger.error(
                     "Cannot find workspace image with nickname -> '%s' for workspace -> '%s'!",
                     image_nickname,
-                    name,
+                    workspace_name,
                 )
+        # end if "image_nickname" in workspace
 
         # Check if an RM classification is specified for the workspace:
         # RM Classification is specified as list of path elements (top-down)
@@ -13393,7 +12832,7 @@ class Payload:
             )
             if rm_class_node_id:
                 response = self._otcs.assign_rm_classification(
-                    node_id=workspace["nodeId"],
+                    node_id=workspace_id,
                     rm_classification=rm_class_node_id,
                     apply_to_sub_items=False,
                 )
@@ -13402,14 +12841,17 @@ class Payload:
                         "Failed to assign RM classification -> '%s' (%s) to workspace -> '%s'!",
                         workspace["rm_classification_path"][-1],
                         rm_class_node_id,
-                        name,
+                        workspace_name,
                     )
                 else:
                     self.logger.info(
                         "Assigned RM Classification -> '%s' to workspace -> '%s'.",
                         workspace["rm_classification_path"][-1],
-                        name,
+                        workspace_name,
                     )
+            # end if rm_class_node_id
+        # end if "rm_classification_path" in workspace and workspace["rm_classification_path"] != []
+
         # Check if one or multiple classifications are specified for the workspace
         # Classifications are specified as list of path elements (top-down)
         if "classification_pathes" in workspace and workspace["classification_pathes"] != []:
@@ -13424,7 +12866,7 @@ class Payload:
                 )
                 if class_node_id:
                     response = self._otcs.assign_classifications(
-                        node_id=workspace["nodeId"],
+                        node_id=workspace_id,
                         classifications=[class_node_id],
                         apply_to_sub_items=False,
                     )
@@ -13432,14 +12874,17 @@ class Payload:
                         self.logger.error(
                             "Failed to assign classification -> '%s' to workspace -> '%s'!",
                             class_node_id,
-                            name,
+                            workspace_name,
                         )
                     else:
                         self.logger.info(
                             "Successfully assigned Classification -> '%s' to workspace -> '%s'.",
                             classification_path[-1],
-                            name,
+                            workspace_name,
                         )
+                # end if class_node_id
+            # end for classification_path in workspace["classification_pathes"]
+        # end if "classification_pathes" in workspace and workspace["classification_pathes"] != []
 
         return True
 
@@ -13862,6 +13307,24 @@ class Payload:
     def process_workspaces(self, section_name: str = "workspaces") -> bool:
         """Process workspaces in payload and create them in Content Server.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - id (str, required)
+            - name (str, required)
+            - description (str, optional)
+            - type_name (str, required)
+            - template_name (str, optional)
+            - business_objects (list, optional)
+            - parent_id (str, optional)
+            - parent_path (list, optional)
+            - categories (list, optional)
+            - nickname (str, optional)
+            - photo_nickname (str, optional)
+            - rm_classification_path (list, optional)
+            - classification_pathes (list, optional)
+            - members (list, optional)
+            - relationships (list, optional)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -14096,6 +13559,7 @@ class Payload:
             # Initialize variable to determine if we found a related workspace:
             related_workspace_node_id = None
             found_by = ""
+            relationship_type = "child"
 
             if isinstance(related_workspace, (str, int)):
                 #
@@ -14127,7 +13591,7 @@ class Payload:
                 # end if related_workspace_payload:
 
                 #
-                # 2. Option: Find the related workspace with nickname:
+                # 2. Option: Find the related workspace with plain nickname:
                 #
                 else:
                     # See if a nickname exists the the provided related_workspace:
@@ -14141,11 +13605,13 @@ class Payload:
             # end if isinstance(related_workspace_id, (str, int)):
 
             #
-            # 3. Option: Find the related workspace type and name:
+            # 3. Option: Find the related workspace type and name or by nickname with relationship type:
             #
             elif isinstance(related_workspace, dict):
                 related_workspace_type = related_workspace.get("type", None)
                 related_workspace_name = related_workspace.get("name", None)
+                related_workspace_nickname = related_workspace.get("nickname", None)
+                relationship_type = related_workspace.get("relationship_type", "child").lower()
                 if related_workspace_type and related_workspace_name:
                     response = self._otcs.get_workspace_by_type_and_name(
                         type_name=related_workspace_type, name=related_workspace_name
@@ -14158,6 +13624,14 @@ class Payload:
                         found_by = "type -> '{}' and name -> '{}'".format(
                             related_workspace_type, related_workspace_name
                         )
+                elif related_workspace_nickname:
+                    response = self._otcs.get_node_from_nickname(nickname=related_workspace_nickname)
+                    related_workspace_node_id = self._otcs.get_result_value(
+                        response=response,
+                        key="id",
+                    )
+                    if related_workspace_node_id:
+                        found_by = "nickname -> '{}'".format(related_workspace)
             #
             # 4. Option: Find the related workspace volume and path:
             #
@@ -14188,7 +13662,7 @@ class Payload:
 
             # Check if relationship does already exists:
             response = self._otcs.get_workspace_relationships(
-                workspace_id=workspace_node_id,
+                workspace_id=workspace_node_id, relationship_type=relationship_type
             )
 
             existing_workspace_relationship = self._otcs.exist_result_item(
@@ -14198,14 +13672,16 @@ class Payload:
             )
             if existing_workspace_relationship:
                 self.logger.info(
-                    "Workspace relationship between workspace ID -> %s and related workspace ID -> %s does already exist. Skipping...",
+                    "Workspace relationship (type -> %s) between workspace ID -> %s and related workspace ID -> %s does already exist. Skipping...",
+                    relationship_type,
                     str(workspace_node_id),
                     related_workspace_node_id,
                 )
                 continue
 
             self.logger.info(
-                "Create workspace relationship between workspace node ID -> %s and workspace node ID -> %s...",
+                "Create workspace relationship (type -> %s) between workspace node ID -> %s and workspace node ID -> %s...",
+                relationship_type,
                 str(workspace_node_id),
                 related_workspace_node_id,
             )
@@ -14213,6 +13689,7 @@ class Payload:
             response = self._otcs.create_workspace_relationship(
                 workspace_id=workspace_node_id,
                 related_workspace_id=related_workspace_node_id,
+                relationship_type=relationship_type,
             )
             if not response:
                 self.logger.error("Failed to create workspace relationship!")
@@ -14295,6 +13772,10 @@ class Payload:
         to the payload["workspaces"] data structure (see process_workspaces())
         Relationships are created between the node IDs of two business workspaces
         (and not the logical IDs in the inital payload specification)
+
+        Payload item keys (from _workspaces):
+            * name (str, optional, for logging) - workspace name
+            * enabled (bool, optional, default = True) - no specific item-level key access
 
         Args:
             section_name (str, optional):
@@ -14403,6 +13884,12 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_workspace_members")
     def process_workspace_members(self, section_name: str = "workspaceMembers") -> bool:
         """Process workspaces members in payload and create them in Content Server.
+
+        Payload item keys (from _workspaces):
+            * name (str, mandatory) - workspace name
+            * enabled (bool, optional, default = True)
+            * members (dict/list, mandatory if workspace valid) - workspace members configuration
+            * id (str, mandatory for workspace reference) - workspace node ID
 
         Args:
             section_name (str, optional):
@@ -15047,6 +14534,13 @@ class Payload:
     ) -> bool:
         """Process web reports in payload and run them in Content Server.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - nickname (str, required)
+            - description (str, optional)
+            - restart (bool, optional, default=False)
+            - parameters (dict, optional, default={})
+
         Args:
             web_reports (list):
                 The payload list of web reports. As we have two different list (pre and post)
@@ -15222,6 +14716,11 @@ class Payload:
         section_name: str = "csApplications",
     ) -> bool:
         """Process CS applications in payload and install them in Content Server.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
 
         The CS Applications need to be installed in all frontend and backends.
 
@@ -15828,6 +15327,12 @@ class Payload:
     ) -> bool:
         """Process Security Clearances for Content Server.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - level (str, required)
+            - name (str, required)
+            - description (str, optional)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -15913,6 +15418,11 @@ class Payload:
         section_name: str = "supplementalMarkings",
     ) -> bool:
         """Process Supplemental Markings for Content Server.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - code (str, required)
+            - description (str, optional)
 
         Args:
             section_name (str, optional):
@@ -16177,6 +15687,16 @@ class Payload:
     def process_holds(self, section_name: str = "holds") -> bool:
         """Process Records Management Holds.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - type (str, required)
+            - group (str, optional)
+            - comment (str, optional)
+            - alternate_id (str, optional)
+            - date_applied (str, optional)
+            - date_to_remove (str, optional)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -16325,9 +15845,15 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_additional_group_members")
     def process_additional_group_members(
         self,
-        section_name: str = "additionalGroupMemberships",
+        section_name: str = "additionalGroupMembers",
     ) -> bool:
-        """Process additional groups memberships we want to have in OTDS.
+        """Process additional OTDS group memberships.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - parent_group (str, required)
+            - user_name (str, optional; mutually exclusive with group_name)
+            - group_name (str, optional; mutually exclusive with user_name)
 
         Args:
             section_name (str, optional):
@@ -16432,7 +15958,13 @@ class Payload:
         self,
         section_name: str = "additionalApplicationRoleAssignments",
     ) -> bool:
-        """Process additional application role assignments we want to have in OTDS.
+        """Process additional OTDS application role assignments.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - role_name (str, required) format: "role" or "role@partition"
+            - user_name (str, optional; mutually exclusive with group_name)
+            - group_name (str, optional; mutually exclusive with user_name)
 
         Args:
             section_name (str, optional):
@@ -16564,9 +16096,16 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_additional_access_role_members")
     def process_additional_access_role_members(
         self,
-        section_name: str = "additionalAccessRoleMemberships",
+        section_name: str = "additionalAccessRoleMembers",
     ) -> bool:
-        """Process additional access role memberships we want to have in OTDS.
+        """Process additional OTDS access role memberships.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - access_role (str, required)
+            - user_name (str, optional)
+            - group_name (str, optional)
+            - partition_name (str, optional)
 
         Args:
             section_name (str, optional):
@@ -16692,6 +16231,15 @@ class Payload:
     def process_renamings(self, section_name: str = "renamings") -> bool:
         """Process renamings specified in payload and rename existing Content Server items.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - nodeid (int, optional)
+            - volume (int, optional)
+            - path (list, optional)
+            - nickname (str, optional)
+            - description (str, optional)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -16788,6 +16336,23 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_items")
     def process_items(self, items: list, section_name: str = "items") -> bool:
         """Process items specified in payload and create them in Content Server.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - nickname (str, optional)
+            - parent_nickname (str, optional)
+            - parent_path (list, optional)
+            - parent_volume (int, optional)
+            - original_nickname (str, optional)
+            - original_path (list, optional)
+            - type (int | str, required)
+            - url (str, optional)
+            - content (str, optional)
+            - details (dict, optional)
+            - create_details (dict, optional)
+            - actions (list, optional)
 
         Args:
             items (list):
@@ -17490,7 +17055,20 @@ class Payload:
         permissions: list,
         section_name: str = "permissions",
     ) -> bool:
-        """Process items specified in payload and upadate permissions.
+        """Process items specified in payload and update permissions.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - path (list, optional)
+            - volume (int, optional)
+            - nickname (str, optional)
+            - owner_permissions (list, optional)
+            - owner_group_permissions (list, optional)
+            - public_permissions (list, optional)
+            - users (list[dict], optional)
+            - groups (list[dict], optional)
+            - roles (list[dict], optional)
+            - apply_to (int, optional)
 
         Args:
             permissions (list):
@@ -17663,39 +17241,21 @@ class Payload:
         self,
         section_name: str = "workspacePermissions",
     ) -> bool:
-        """Process items specified in payload and upadate workspace permissions.
+        """Process workspace permission updates from the payload.
+
+        Payload item keys:
+            - workspace_type (str, required)
+            - workspace_folder (str, optional)
+            - regex (bool, optional)
+            - owner_permissions (list, optional)
+            - owner_group_permissions (list, optional)
+            - public_permissions (list, optional)
+            - groups (list[dict], optional) with name and permissions
+            - users (list[dict], optional) with name and permissions
+            - roles (list[dict], optional) with name and permissions
+            - apply_to (int, optional)
 
         Args:
-            workspace_permissions (list):
-                List of items to apply permissions to.
-                Each list item in the payload is a dict with this structure:
-                {
-                    workspace_type = "..."
-                    workspace_folder = "..."
-                    regex = True
-                    public_permissions = ["see", "see_content", ...]
-                    owner_permissions = []
-                    owner_group_permissions = []
-                    groups = [
-                        {
-                            name = "..."
-                            permissions = []
-                        }
-                    ]
-                    users = [
-                        {
-                            name = "..."
-                            permissions = []
-                        }
-                    ]
-                    roles = [
-                        {
-                            name = "..."
-                            permissions = []
-                        }
-                    ]
-                    apply_to = 2
-                }
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -17823,6 +17383,15 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_assignments")
     def process_assignments(self, section_name: str = "assignments") -> bool:
         """Process assignments and assign items (such as workspaces and items with nicknames) to users or groups.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - subject (str, required)
+            - instruction (str, optional)
+            - workspace (str, optional; mutually exclusive with nickname)
+            - nickname (str, optional; mutually exclusive with workspace)
+            - groups (list[str], optional)
+            - users (list[str], optional)
 
         Args:
             section_name (str, optional):
@@ -18022,6 +17591,15 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_category_assignments")
     def process_category_assignments(self, section_name: str = "categoryAssignments") -> bool:
         """Process category assignments for items (such as workspaces and items with nicknames).
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - item (list | str, required)
+            - category_item (list | str, required)
+            - volume (int, optional)
+            - categories (list[dict], required)
+            - apply_to_sub_items (bool, optional, default=False)
+            - inheritance (bool, optional, default=False)
 
         Args:
             section_name (str, optional):
@@ -18459,7 +18037,12 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_exec_commands")
     def process_exec_commands(self, section_name: str = "execCommands") -> bool:
-        """Process Payload items to execute a command.
+        """Process payload items to execute local commands.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - command (list | str, required)
+            - description (str, optional)
 
         Args:
             section_name (str, optional):
@@ -18557,7 +18140,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._exec_pod_commands,
+            payload_section=self._exec_commands,
         )
 
         return success
@@ -18567,6 +18150,15 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_exec_pod_commands")
     def process_exec_pod_commands(self, section_name: str = "execPodCommands") -> bool:
         """Process commands that should be executed in the Kubernetes pods.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - pod_name (str, required)
+            - command (list | str, required)
+            - container (str, optional)
+            - timeout (int, optional, default=60)
+            - description (str, optional)
+            - interactive (bool, optional, default=False)
 
         Args:
             section_name (str, optional):
@@ -18876,6 +18468,11 @@ class Payload:
     def process_exec_database_commands(self, section_name: str = "execDatabaseCommands") -> bool:
         """Process commands that should be executed in the PostgreSQL database.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - db_connection (dict, required): db_name, db_hostname, db_port, db_username, db_password
+            - db_commands (list[dict], required): command, params
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -19023,7 +18620,16 @@ class Payload:
         self,
         section_name: str = "documentGenerators",
     ) -> bool:
-        """Generate documents for a defined workspace type based on template.
+        """Generate documents for a defined workspace type based on templates.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - workspace_type (str, required)
+            - template_path (list, required)
+            - classification_path (list, required)
+            - category_name (str, optional)
+            - workspace_folder_path (list, optional)
+            - exec_as_user (str, optional)
 
         Args:
             section_name (str, optional):
@@ -19034,7 +18640,7 @@ class Payload:
                 files written to the Admin Personal Workspace.
 
         Returns:
-            bool:,
+            bool:
                 True if payload has been processed without errors, False otherwise.
 
         """
@@ -19638,6 +19244,14 @@ class Payload:
     def process_workflows(self, section_name: str = "workflows") -> bool:
         """Initiate and process workflows for a defined workspace type and folder path.
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - workflow_nickname (str, required)
+            - initiate_as_user (str, optional)
+            - workspace_type (str, required)
+            - workspace_folder_path (list, optional)
+            - steps (list[dict], required)
+
         Args:
             section_name (str, optional):
                 The name of the section. It can be overridden
@@ -19831,6 +19445,18 @@ class Payload:
         check_status: bool = True,
     ) -> bool:
         """Process Playwright-based browser automations and tests.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - base_url (str, required)
+            - user_name (str, optional)
+            - password (str, optional)
+            - wait_time (float, optional)
+            - wait_until (str, optional)
+            - debug (bool, optional, default=False)
+            - automations (list[dict], required)
 
         Args:
             browser_automations (list):
@@ -20504,6 +20130,13 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_sap_rfcs")
     def process_sap_rfcs(self, sap_rfcs: list, section_name: str = "sapRFCs") -> bool:
         """Process SAP RFCs in payload and run them in SAP S/4HANA.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - description (str, optional)
+            - parameters (dict, optional, default={})
+            - call_options (dict, optional, default={})
 
         Args:
             sap_rfcs (list):
@@ -21992,6 +21625,15 @@ class Payload:
     ) -> Data | None:
         """Process a data source that is given by a payload element.
 
+        Payload item keys:
+            From the matching bulkDatasources entry:
+            - name (str, required)
+            - type (str, required)
+            - load_data_source/save_data_source (bool, optional)
+            - filters/conditions (list, optional)
+            - cleansings, explosions, column transformations (optional)
+            - type-specific source settings (csv/json/xml/excel/web/otcs/otmm/pht/servicenow/filesystem/nhc)
+
         Parse its properties and deliver a 'Data' object which is a wrapper for
         a Pandas data frame.
 
@@ -22323,6 +21965,19 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_bulk_workspaces")
     def process_bulk_workspaces(self, section_name: str = "bulkWorkspaces") -> bool:
         """Process workspaces in payload and bulk create them in Content Server (multi-threaded).
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - type_name (str, required)
+            - data_source (str, required)
+            - force_reload/copy_data_source (bool, optional)
+            - operations/update_operations (list, optional)
+            - explosions, filters, unique, sort (optional)
+            - name/name_alt/description/description_alt (str)
+            - template_name (str, optional)
+            - categories (list, optional)
+            - external_create_date/external_modify_date (str, optional)
+            - key/replacements/nickname/nickname_alt/conditions (optional)
 
         Args:
             section_name (str, optional):
@@ -24678,6 +24333,19 @@ class Payload:
     ) -> bool:
         """Process workspaces in payload and bulk create them in Content Server (multi-threaded).
 
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - from_workspace/to_workspace (str, required)
+            - from_workspace_type/from_workspace_name/from_workspace_data_source (optional)
+            - to_workspace_type/to_workspace_name/to_workspace_data_source (optional)
+            - from_sub_workspace_name/path and to_sub_workspace_name/path (optional)
+            - type (str, optional, default="child")
+            - data_source (str, required)
+            - force_reload/copy_data_source (bool, optional)
+            - operations/explosions/filters/unique/sort/replacements (optional)
+            - thread_number (int, optional)
+            - from_workspace_lookup_error/to_workspace_lookup_error (bool, optional)
+
         Args:
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -25987,6 +25655,20 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_bulk_documents")
     def process_bulk_documents(self, section_name: str = "bulkDocuments") -> bool:
         """Process bulkDocuments in payload and bulk create them in Content Server (multi-threaded).
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - data_source (str, required)
+            - force_reload/copy_data_source (bool, optional)
+            - explosions/filters/unique/sort (optional)
+            - operations/update_operations (list, optional)
+            - name/name_alt/name_regex/description (str)
+            - download_url/download_url_alt/download_name/download_dir (optional)
+            - download_name_wildcards/delete_download/download_wait_time/download_retries (optional)
+            - file_extension/file_extension_alt/mime_type/mime_type_alt (optional)
+            - nickname/categories/workspaces (optional)
+            - external_create_date/external_modify_date/key/replacements/conditions (optional)
+            - thread_number (int, optional)
 
         Args:
             section_name (str, optional):
@@ -28329,6 +28011,18 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_bulk_items")
     def process_bulk_items(self, section_name: str = "bulkItems") -> bool:
         """Process bulkItems in payload and bulk create them in Content Server (multi-threaded).
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - data_source (str, required)
+            - force_reload/copy_data_source (bool, optional)
+            - explosions/filters/unique/sort (optional)
+            - operations/update_operations (list, optional)
+            - name/name_alt/name_regex/description/nickname (str)
+            - type/url/original_nickname/original_path (optional)
+            - categories/workspaces (optional)
+            - external_create_date/external_modify_date/key/replacements/conditions (optional)
+            - thread_number (int, optional)
 
         Args:
             section_name (str, optional):

@@ -12386,6 +12386,19 @@ class OTCS:
             list | None:
                 A List of references to business objects in external systems.
 
+        Example:
+        [
+            {
+                'business_object_id': '000-00-000103',
+                'business_object_type': 'claim',
+                'business_object_type_id': 44,
+                'external_system_id': 'Guidewire Claim Center',
+                'has_default_display': True,
+                'has_default_search': True,
+                'workspace_type_id': 41
+            }
+        ]
+
         """
 
         response = self.get_workspace(node_id=node_id, fields="workspace_references")

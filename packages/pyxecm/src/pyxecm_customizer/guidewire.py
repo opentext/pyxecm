@@ -40,9 +40,6 @@ default_logger = logging.getLogger(MODULE_NAME)
 class Guidewire:
     """Class Guidewire is used to retrieve and automate stettings and objects in Guidewire."""
 
-    _config: dict
-    _scope = None
-    _access_token = None
     logger: logging.Logger = default_logger
 
     def __init__(
@@ -103,6 +100,7 @@ class Guidewire:
                 self.logger.addFilter(logfilter)
 
         self._scope = scope
+        self._access_token = None
 
         guidewire_config = {}
         # Store the credentials and parameters in a config dictionary:

@@ -36,10 +36,6 @@ class Salesforce:
 
     logger: logging.Logger = default_logger
 
-    _config: dict
-    _access_token = None
-    _instance_url = None
-
     def __init__(
         self,
         base_url: str,
@@ -84,6 +80,8 @@ class Salesforce:
         # The instance URL is also returned by the authenticate call
         # but typically it is identical to the base_url.
         self._instance_url = base_url
+
+        self._access_token = None
 
         salesforce_config = {}
 

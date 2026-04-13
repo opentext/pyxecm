@@ -66,14 +66,6 @@ class ServiceNow:
 
     logger: logging.Logger = default_logger
 
-    _config: dict
-    _access_token = None
-    _session = None
-    _data: Data = None
-    _thread_number = 3
-    _download_dir = ""
-    _product_exclusions = None
-
     def __init__(
         self,
         base_url: str,
@@ -145,6 +137,7 @@ class ServiceNow:
 
         self._config = servicenow_config
 
+        self._access_token = None
         self._session = requests.Session()
 
         self._data = Data(logger=self.logger)

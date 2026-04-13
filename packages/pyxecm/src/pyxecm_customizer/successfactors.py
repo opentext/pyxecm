@@ -29,16 +29,13 @@ request_login_headers = {
 REQUEST_TIMEOUT = 60.0
 REQUEST_MAX_RETRIES = 5
 REQUEST_RETRY_DELAY = 60.0
+REQUEST_RETRY_STATUS_CODES = (429, 500, 502, 503, 504)
 
 
 class SuccessFactors:
-    """Class SuccessFactors is used to retrieve and automate stettings in SuccessFactors."""
+    """Class SuccessFactors is used to retrieve and automate settings in SuccessFactors."""
 
     logger: logging.Logger = default_logger
-
-    _config: dict
-    _access_token = None
-    _assertion = None
 
     def __init__(
         self,
@@ -136,6 +133,8 @@ class SuccessFactors:
         }
 
         self._config = successfactors_config
+        self._access_token = None
+        self._assertion = None
 
     # end method definition
 
@@ -199,13 +198,158 @@ class SuccessFactors:
 
     # end method definition
 
+    def do_request(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: dict | None = None,
+        data: dict | None = None,
+        json_data: dict | None = None,
+        timeout: float = REQUEST_TIMEOUT,
+        show_error: bool = True,
+        show_warning: bool = False,
+        warning_message: str = "",
+        failure_message: str = "",
+        success_message: str = "",
+        max_retries: int = REQUEST_MAX_RETRIES,
+        retry_delay: float = REQUEST_RETRY_DELAY,
+        retry_status_codes: tuple[int, ...] = REQUEST_RETRY_STATUS_CODES,
+        parse_request_response: bool = True,
+    ) -> dict | requests.Response | None:
+        """Execute an HTTP request with retries for transient failures.
+
+        Returns parsed JSON by default. Returns the raw response only when
+        `parse_request_response` is False.
+        """
+
+        retries = 0
+        message = failure_message or "request"
+
+        while True:
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    data=data,
+                    json=json_data,
+                    timeout=timeout,
+                )
+            except requests.exceptions.Timeout:
+                if show_warning:
+                    self.logger.warning(
+                        "%s. The request timed out.",
+                        warning_message or message,
+                    )
+                elif show_error:
+                    self.logger.error(
+                        "Failed to %s. The request timed out.",
+                        message,
+                    )
+                else:
+                    self.logger.debug(
+                        "Failed to %s. The request timed out.",
+                        message,
+                    )
+            except requests.exceptions.ConnectionError:
+                if show_warning:
+                    self.logger.warning(
+                        "Cannot connect to SuccessFactors while trying to %s.",
+                        warning_message or message,
+                    )
+                elif show_error:
+                    self.logger.error(
+                        "Cannot connect to SuccessFactors while trying to %s.",
+                        message,
+                    )
+                else:
+                    self.logger.debug(
+                        "Cannot connect to SuccessFactors while trying to %s.",
+                        message,
+                    )
+            except requests.exceptions.RequestException as exception:
+                if show_error:
+                    self.logger.error(
+                        "Failed to %s; error -> %s",
+                        message,
+                        exception,
+                    )
+                elif show_warning:
+                    self.logger.warning(
+                        "%s; warning -> %s",
+                        warning_message or message,
+                        exception,
+                    )
+                else:
+                    self.logger.debug(
+                        "Failed to %s; debug -> %s",
+                        message,
+                        exception,
+                    )
+                return None
+            else:
+                if response.ok:
+                    if success_message:
+                        self.logger.info(success_message)
+                    if parse_request_response:
+                        return self.parse_request_response(response_object=response)
+                    return response
+
+                if response.status_code not in retry_status_codes:
+                    if show_error:
+                        self.logger.error(
+                            "%s; status -> %s; error -> %s",
+                            message,
+                            response.status_code,
+                            response.text,
+                        )
+                    elif show_warning:
+                        self.logger.warning(
+                            "%s; status -> %s; warning -> %s",
+                            warning_message or message,
+                            response.status_code,
+                            response.text,
+                        )
+                    else:
+                        self.logger.debug(
+                            "Status -> %s; debug -> %s",
+                            response.status_code,
+                            response.text,
+                        )
+                    if parse_request_response:
+                        return None
+                    return response
+
+                self.logger.warning(
+                    "Failed to %s due to transient status -> %s.",
+                    message,
+                    response.status_code,
+                )
+
+            retries += 1
+            if retries <= max_retries:
+                retry_interval = retries * retry_delay
+                self.logger.info("Retrying in %s seconds...", str(retry_interval))
+                time.sleep(retry_interval)
+            else:
+                break
+
+        self.logger.error(
+            "Failed to %s after %s retries.",
+            message,
+            str(max_retries),
+        )
+        return None
+
+    # end method definition
+
     def parse_request_response(
         self,
         response_object: requests.Response,
         additional_error_message: str = "",
         show_error: bool = True,
     ) -> dict | None:
-        """Convert the request response (JSon) to a Python dict in a safe way.
+        """Convert the request response (JSON) to a Python dict in a safe way.
 
         It also handles exceptions. It first tries to load the response.text
         via json.loads() that produces a dict output. Only if response.text is
@@ -214,7 +358,7 @@ class SuccessFactors:
 
         Args:
             response_object (object):
-                This is reponse object delivered by the request call.
+                This is response object delivered by the request call.
             additional_error_message (str, optional):
                 Provide a  more specific error message in case of an error.
             show_error (bool):
@@ -368,33 +512,24 @@ class SuccessFactors:
 
         idp_post_body = self.config()["idpData"]
 
-        response = None
         self._assertion = None
 
-        try:
-            response = requests.post(
-                request_url,
-                data=idp_post_body,
-                timeout=REQUEST_TIMEOUT,
-            )
-        except requests.exceptions.ConnectionError:
-            self.logger.error(
-                "Unable to get SAML assertion from -> %s",
-                self.config()["idpUrl"],
-            )
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            data=idp_post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to request an SuccessFactors SAML Assertion",
+            show_warning=False,
+            parse_request_response=False,
+        )
+        if not response:
             return None
 
-        if response.ok:
-            assertion = response.text
-            self._assertion = assertion
-            self.logger.debug("Assertion -> %s", self._assertion)
-            return assertion
-
-        self.logger.error(
-            "Failed to request an SuccessFactors SAML Assertion; error -> %s",
-            response.text,
-        )
-        return None
+        assertion = response.text
+        self._assertion = assertion
+        self.logger.debug("Assertion -> %s", self._assertion)
+        return assertion
 
     # end method definition
 
@@ -414,6 +549,11 @@ class SuccessFactors:
 
         if not self._assertion:
             self._assertion = self.get_saml_assertion()
+            if not self._assertion:
+                self.logger.error(
+                    "Cannot request SuccessFactors Access Token without SAML assertion.",
+                )
+                return None
 
         # Already authenticated and session still valid?
         if self._access_token and not revalidate:
@@ -433,37 +573,26 @@ class SuccessFactors:
         authenticate_post_body = self.credentials()
         authenticate_post_body["assertion"] = self._assertion
 
-        response = None
         self._access_token = None
 
-        try:
-            # Don't use header here:
-            response = requests.post(
-                request_url,
-                data=authenticate_post_body,
-                timeout=REQUEST_TIMEOUT,
-            )
-        except requests.exceptions.ConnectionError as exception:
-            self.logger.warning(
-                "Unable to connect to -> %s : %s",
-                self.config()["authenticationUrl"],
-                exception,
-            )
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            data=authenticate_post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to request an SuccessFactors Access Token",
+            show_warning=True,
+            warning_message="Unable to connect to -> {}".format(request_url),
+        )
+        if not response:
             return None
 
-        if response.ok:
-            authenticate_dict = self.parse_request_response(response)
-            if not authenticate_dict or "access_token" not in authenticate_dict:
-                return None
-            # Store authentication access_token:
-            self._access_token = authenticate_dict["access_token"]
-            self.logger.debug("Access Token -> %s", self._access_token)
-        else:
-            self.logger.error(
-                "Failed to request an SuccessFactors Access Token; error -> %s",
-                response.text,
-            )
+        authenticate_dict = response
+        if not authenticate_dict or "access_token" not in authenticate_dict:
             return None
+        # Store authentication access_token:
+        self._access_token = authenticate_dict["access_token"]
+        self.logger.debug("Access Token -> %s", self._access_token)
 
         return self._access_token
 
@@ -474,7 +603,7 @@ class SuccessFactors:
 
         Args:
             code (str, optional):
-                3 character code for contry selection, like "USA"
+                3 character code for country selection, like "USA"
 
         Returns:
             dict | None:
@@ -506,8 +635,8 @@ class SuccessFactors:
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         request_url = (
             self.config()["asUrl"]
@@ -520,20 +649,14 @@ class SuccessFactors:
 
         request_header = self.request_header()
 
-        response = requests.get(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve country data",
         )
-        if response.status_code == 200:
-            return self.parse_request_response(response)
-        else:
-            self.logger.error(
-                "Failed to retrieve country data; status -> %s; error -> %s",
-                response.status_code,
-                response.text,
-            )
-            return None
+        return response
 
     # end method definition
 
@@ -636,15 +759,15 @@ class SuccessFactors:
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         request_url = self.config()["asUrl"] + "User"
         if user_id:
             # querying a user by key predicate:
             request_url += "('{}')".format(user_id)
 
-        # Add query parameters (these are NOT passed via JSon body!)
+        # Add query parameters (these are NOT passed via JSON body!)
         query = {}
         if field_name and field_value:
             query["$filter"] = "{} {} {}".format(
@@ -660,20 +783,14 @@ class SuccessFactors:
 
         request_header = self.request_header()
 
-        response = requests.get(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve user data",
         )
-        if response.status_code == 200:
-            return self.parse_request_response(response)
-        else:
-            self.logger.error(
-                "Failed to retrieve user data; status -> %s; error -> %s",
-                response.status_code,
-                response.text,
-            )
-            return None
+        return response
 
     # end method definition
 
@@ -718,51 +835,23 @@ class SuccessFactors:
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         request_url = self.config()["asUrl"] + "UserAccount('{}')".format(username)
 
         request_header = self.request_header()
 
-        retries = 0
-
-        while True:
-            try:
-                response = requests.get(
-                    request_url,
-                    headers=request_header,
-                    timeout=REQUEST_TIMEOUT,
-                )
-                response.raise_for_status()  # This will raise an HTTPError for bad responses
-                return self.parse_request_response(response)
-            except requests.exceptions.HTTPError:
-                self.logger.error(
-                    "Failed to retrieve user data from SuccessFactors; status -> %s",
-                    response.status_code,
-                )
-            except requests.exceptions.Timeout:
-                self.logger.warning(
-                    "Failed to retrieve user data from SuccessFactors. The request timed out.",
-                )
-            except requests.exceptions.ConnectionError:
-                self.logger.error(
-                    "Cannot connect to SuccessFactors to retrieve user data; status -> %s",
-                    response.status_code,
-                )
-            except requests.exceptions.RequestException:
-                self.logger.error(
-                    "Failed to retrieve user data from SuccessFactors; status -> %s",
-                    response.status_code,
-                )
-            retries += 1
-            if retries <= REQUEST_MAX_RETRIES:
-                self.logger.info("Retrying in %s seconds...", str(REQUEST_RETRY_DELAY))
-                time.sleep(retries * REQUEST_RETRY_DELAY)
-            else:
-                break
-
-        return None
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve user data from SuccessFactors",
+            show_warning=True,
+            warning_message="Failed to retrieve user data from SuccessFactors",
+        )
+        return response
 
     # end method definition
 
@@ -770,7 +859,7 @@ class SuccessFactors:
         self,
         user_id: str,  # this is NOT the username but really an ID like 106020
         update_data: dict,
-    ) -> dict:
+    ) -> dict | None:
         """Update user data. E.g. update the user password or email.
 
         See: https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b/47c39724e7654b99a6be2f71fce1c50b.html?locale=en-US
@@ -783,12 +872,12 @@ class SuccessFactors:
 
         Returns:
             dict:
-                Request response or None if an error occured.
+                Request response or None if an error occurred.
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         request_url = self.config()["asUrl"] + "User('{}')".format(user_id)
 
@@ -797,22 +886,18 @@ class SuccessFactors:
         # SuccessFactors to only change the new / provided fields:
         request_header["X-HTTP-METHOD"] = "MERGE"
 
-        response = requests.post(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="POST",
             headers=request_header,
-            json=update_data,
+            json_data=update_data,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update user with ID -> {}".format(user_id),
         )
-        if response.ok:
+        if response:
             self.logger.debug("User with ID -> %s updated successfully.", user_id)
-            return self.parse_request_response(response)
+            return response
         else:
-            self.logger.error(
-                "Failed to update user with ID -> %s; status -> %s; error -> %s",
-                user_id,
-                response.status_code,
-                response.text,
-            )
             return None
 
     # end method definition
@@ -825,7 +910,7 @@ class SuccessFactors:
         field_operation: str = "eq",
         max_results: int = 1,
     ) -> dict | None:
-        """Get a list of employee(s) matching given criterias.
+        """Get a list of employee(s) matching given criteria.
 
         Args:
             entity (str, optional):
@@ -940,10 +1025,10 @@ class SuccessFactors:
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
-        # Add query parameters (these are NOT passed via JSon body!)
+        # Add query parameters (these are NOT passed via JSON body!)
         query = {}
         if field_name and field_value:
             query["$filter"] = "{} {} {}".format(
@@ -961,20 +1046,14 @@ class SuccessFactors:
 
         request_header = self.request_header()
 
-        response = requests.get(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve employee data",
         )
-        if response.status_code == 200:
-            return self.parse_request_response(response)
-        else:
-            self.logger.error(
-                "Failed to retrieve employee data; status -> %s; error -> %s",
-                response.status_code,
-                response.text,
-            )
-            return None
+        return response
 
     # end method definition
 
@@ -995,8 +1074,8 @@ class SuccessFactors:
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         request_url = self.config()["asUrl"]
         if entities:
@@ -1006,19 +1085,17 @@ class SuccessFactors:
         request_header = self.request_header()
         request_header["Accept"] = "application/xml"
 
-        response = requests.get(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve entity data",
+            parse_request_response=False,
         )
-        if response.status_code == 200:
+        if response and response.status_code == 200:
             return xmltodict.parse(response.text)
         else:
-            self.logger.error(
-                "Failed to retrieve entity data; status -> %s; error -> %s",
-                response.status_code,
-                response.text,
-            )
             return None
 
     # end method definition
@@ -1036,8 +1113,8 @@ class SuccessFactors:
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         if not entity:
             return None
@@ -1048,20 +1125,14 @@ class SuccessFactors:
 
         request_header = self.request_header()
 
-        response = requests.get(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve entity data",
         )
-        if response.status_code == 200:
-            return self.parse_request_response(response)
-        else:
-            self.logger.error(
-                "Failed to retrieve entity data; status -> %s; error -> %s",
-                response.status_code,
-                response.text,
-            )
-            return None
+        return response
 
     # end method definition
 
@@ -1085,12 +1156,12 @@ class SuccessFactors:
 
         Returns:
             dict | None:
-                Request response or None if an error occured.
+                Request response or None if an error occurred.
 
         """
 
-        if not self._access_token:
-            self.authenticate()
+        if not self._access_token and not self.authenticate():
+            return None
 
         request_url = self.config()["asUrl"] + "upsert"
 
@@ -1107,26 +1178,22 @@ class SuccessFactors:
 
         request_header = self.request_header()
 
-        response = requests.post(
-            request_url,
+        response = self.do_request(
+            url=request_url,
+            method="POST",
             headers=request_header,
-            json=update_data,
+            json_data=update_data,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to set email of user with ID -> {}".format(user_id),
         )
-        if response.ok:
+        if response:
             self.logger.debug(
                 "Email of user with ID -> %s successfully updated to -> %s.",
                 user_id,
                 email_address,
             )
-            return self.parse_request_response(response)
+            return response
         else:
-            self.logger.error(
-                "Failed to set email of user with ID -> %s; status -> %s; error -> %s",
-                user_id,
-                response.status_code,
-                response.text,
-            )
             return None
 
     # end method definition

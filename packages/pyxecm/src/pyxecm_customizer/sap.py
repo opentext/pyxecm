@@ -53,8 +53,6 @@ class SAP:
 
     logger: logging.Logger = default_logger
 
-    _connection_parameters = {}
-
     def __init__(
         self,
         username: str,

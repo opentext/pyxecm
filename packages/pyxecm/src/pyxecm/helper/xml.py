@@ -750,6 +750,7 @@ class XML:
         xpath: str = "",
         setting: str = "",
         assoc_elem: str = "",
+        file_extensions: list[str] | None = None,
         logger: logging.Logger = default_logger,
     ) -> bool:
         """Replace all occurrences of the search pattern with the replace string.
@@ -773,6 +774,8 @@ class XML:
                 This parameter is optional.
             assoc_elem (str, optional):
                 Lookup a specific assoc element. This parameter is optional.
+            file_extensions (list[str] | None, optional):
+                File extensions to consider during traversal. If None, defaults to [".xml"].
             logger (logging.Logger):
                 The logging object used for all log messages.
 
@@ -788,282 +791,297 @@ class XML:
         if search_pattern:
             pattern = re.compile(search_pattern)
 
+        if not file_extensions:
+            file_extensions = [".xml"]
+
+        normalized_file_extensions: set[str] = {
+            ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in file_extensions
+        }
+
         found = False
 
         # Traverse the directory and its subdirectories
         for subdir, _, files in os.walk(directory):
             for filename in files:
-                # Check if the file is an XML file
-                if filename.endswith(".xml"):
-                    # Read the contents of the file
-                    file_path = os.path.join(subdir, filename)
+                file_extension = os.path.splitext(filename)[1].lower()
+                # Check if the file has one of the configured extensions
+                if file_extension not in normalized_file_extensions:
+                    continue
 
-                    # if xpath is given we do an intelligent replacement
-                    if xpath:
-                        xml_modified = False
-                        logger.debug("Replacement with xpath...")
-                        logger.debug(
-                            "XML path -> %s, setting -> %s, assoc element -> %s",
-                            xpath,
-                            setting,
-                            assoc_elem,
+                # Read the contents of the file
+                file_path = os.path.join(subdir, filename)
+
+                # if xpath is given we do an intelligent replacement
+                if xpath:
+                    xml_modified = False
+                    logger.debug("Replacement with xpath...")
+                    logger.debug(
+                        "XML path -> %s, setting -> %s, assoc element -> %s",
+                        xpath,
+                        setting,
+                        assoc_elem,
+                    )
+                    tree = etree.parse(file_path)
+                    if not tree:
+                        logger.error(
+                            "Cannot parse XML tree -> %s. Skipping...",
+                            file_path,
                         )
-                        tree = etree.parse(file_path)
-                        if not tree:
-                            logger.error(
-                                "Cannot parse XML tree -> %s. Skipping...",
-                                file_path,
-                            )
-                            continue
-                        root = tree.getroot()
-                        # find the matching XML elements using the given XPath:
-                        elements = root.xpath(xpath)
-                        if not elements:
+                        continue
+                    root = tree.getroot()
+                    # find the matching XML elements using the given XPath:
+                    elements = root.xpath(xpath)
+                    if not elements:
+                        logger.debug(
+                            "The XML file -> %s does not have any element with the given XML path -> %s. Skipping...",
+                            file_path,
+                            xpath,
+                        )
+                        continue
+                    for element in elements:
+                        # as XPath returns a list
+                        logger.debug(
+                            "Found XML element -> %s in file -> %s using xpath -> %s",
+                            element.tag,
+                            filename,
+                            xpath,
+                        )
+                        # the simple case: replace the complete text of the XML element
+                        if not setting and not assoc_elem:
                             logger.debug(
-                                "The XML file -> %s does not have any element with the given XML path -> %s. Skipping...",
-                                file_path,
+                                "Replace complete text of XML element -> %s from -> %s to -> %s",
                                 xpath,
+                                element.text,
+                                replace_string,
                             )
-                            continue
-                        for element in elements:
-                            # as XPath returns a list
+                            element.text = replace_string
+                            xml_modified = True
+                        # In this case we want to set a complete value of a setting (basically replacing a whole line)
+                        elif setting and not assoc_elem:
                             logger.debug(
-                                "Found XML element -> %s in file -> %s using xpath -> %s",
-                                element.tag,
-                                filename,
+                                "Replace single setting -> %s in XML element -> %s with new value -> %s",
+                                setting,
                                 xpath,
+                                replace_string,
                             )
-                            # the simple case: replace the complete text of the XML element
-                            if not setting and not assoc_elem:
+                            setting_value = cls.search_setting(
+                                element.text,
+                                setting,
+                                is_simple=True,
+                            )
+                            if setting_value:
                                 logger.debug(
-                                    "Replace complete text of XML element -> %s from -> %s to -> %s",
-                                    xpath,
-                                    element.text,
-                                    replace_string,
+                                    "Found existing setting value -> %s",
+                                    setting_value,
                                 )
-                                element.text = replace_string
-                                xml_modified = True
-                            # In this case we want to set a complete value of a setting (basically replacing a whole line)
-                            elif setting and not assoc_elem:
+                                # Check if the setting value needs to be surrounded by quotes.
+                                # Only simplistic values like booleans or numeric values don't need quotes
+                                if replace_string in ("true", "false", "none") or replace_string.isnumeric():
+                                    replace_setting = '"' + setting + '":' + replace_string
+                                else:
+                                    replace_setting = '"' + setting + '":"' + replace_string + '"'
                                 logger.debug(
-                                    "Replace single setting -> %s in XML element -> %s with new value -> %s",
-                                    setting,
-                                    xpath,
-                                    replace_string,
+                                    "Replacement setting -> %s",
+                                    replace_setting,
                                 )
-                                setting_value = cls.search_setting(
-                                    element.text,
-                                    setting,
+                                element.text = cls.replace_setting(
+                                    element_text=element.text,
+                                    setting_key=setting,
+                                    new_value=replace_setting,
                                     is_simple=True,
                                 )
-                                if setting_value:
-                                    logger.debug(
-                                        "Found existing setting value -> %s",
-                                        setting_value,
-                                    )
-                                    # Check if the setting value needs to be surrounded by quotes.
-                                    # Only simplistic values like booleans or numeric values don't need quotes
-                                    if replace_string in ("true", "false", "none") or replace_string.isnumeric():
-                                        replace_setting = '"' + setting + '":' + replace_string
-                                    else:
-                                        replace_setting = '"' + setting + '":"' + replace_string + '"'
-                                    logger.debug(
-                                        "Replacement setting -> %s",
-                                        replace_setting,
-                                    )
-                                    element.text = cls.replace_setting(
-                                        element_text=element.text,
-                                        setting_key=setting,
-                                        new_value=replace_setting,
-                                        is_simple=True,
-                                    )
-                                    xml_modified = True
-                                else:
-                                    logger.warning(
-                                        "Cannot find the value for setting -> %s. Skipping...",
-                                        setting,
-                                    )
-                                    continue
-                            # in this case the text is just one assoc (no setting substructure)
-                            elif not setting and assoc_elem:
+                                xml_modified = True
+                            else:
+                                logger.warning(
+                                    "Cannot find the value for setting -> %s. Skipping...",
+                                    setting,
+                                )
+                                continue
+                        # in this case the text is just one assoc (no setting substructure)
+                        elif not setting and assoc_elem:
+                            logger.debug(
+                                "Replace single Assoc value -> %s in XML element -> %s with -> %s",
+                                assoc_elem,
+                                xpath,
+                                replace_string,
+                            )
+                            assoc_string: str = Assoc.extract_assoc_string(
+                                input_string=element.text,
+                            )
+                            logger.debug("Assoc String -> %s", assoc_string)
+                            assoc_dict = Assoc.string_to_dict(
+                                assoc_string=assoc_string,
+                            )
+                            logger.debug("Assoc Dict -> %s", str(assoc_dict))
+                            assoc_dict[assoc_elem] = replace_string  # escaped_replace_string
+                            assoc_string_new: str = Assoc.dict_to_string(
+                                assoc_dict=assoc_dict,
+                            )
+                            logger.debug(
+                                "Replace assoc with -> %s",
+                                assoc_string_new,
+                            )
+                            element.text = assoc_string_new
+                            element.text = element.text.replace('"', "&quot;")
+                            xml_modified = True
+                        # In this case we have multiple settings with their own assocs
+                        elif setting and assoc_elem:
+                            logger.debug(
+                                "Replace single Assoc value -> %s in setting -> %s in XML element -> %s with -> %s",
+                                assoc_elem,
+                                setting,
+                                xpath,
+                                replace_string,
+                            )
+                            setting_value = cls.search_setting(
+                                element.text,
+                                setting,
+                                is_simple=False,
+                            )
+                            if setting_value:
                                 logger.debug(
-                                    "Replace single Assoc value -> %s in XML element -> %s with -> %s",
-                                    assoc_elem,
-                                    xpath,
-                                    replace_string,
+                                    "Found setting value -> %s",
+                                    setting_value,
                                 )
                                 assoc_string: str = Assoc.extract_assoc_string(
-                                    input_string=element.text,
+                                    input_string=setting_value,
                                 )
                                 logger.debug("Assoc String -> %s", assoc_string)
                                 assoc_dict = Assoc.string_to_dict(
                                     assoc_string=assoc_string,
                                 )
                                 logger.debug("Assoc Dict -> %s", str(assoc_dict))
-                                assoc_dict[assoc_elem] = replace_string  # escaped_replace_string
+                                escaped_replace_string = replace_string.replace(
+                                    "'",
+                                    "\\\\\u0027",
+                                )
+                                logger.debug(
+                                    "Escaped replacement string -> %s",
+                                    escaped_replace_string,
+                                )
+                                assoc_dict[assoc_elem] = escaped_replace_string  # escaped_replace_string
                                 assoc_string_new: str = Assoc.dict_to_string(
                                     assoc_dict=assoc_dict,
                                 )
-                                logger.debug(
-                                    "Replace assoc with -> %s",
-                                    assoc_string_new,
+                                assoc_string_new = assoc_string_new.replace(
+                                    "'",
+                                    "\\u0027",
                                 )
-                                element.text = assoc_string_new
+                                replace_setting = '"' + setting + '":"' + assoc_string_new + '"'
+                                logger.debug(
+                                    "Replacement setting -> %s",
+                                    replace_setting,
+                                )
+                                # here we need to apply a "trick". It is required
+                                # as regexp cannot handle the special unicode escapes \u0027
+                                # we require. We first insert a placeholder "PLACEHOLDER"
+                                # and let regexp find the right place for it. Then further
+                                # down we use a simple search&replace to switch the PLACEHOLDER
+                                # to the real value (replace() does not have the issues with unicode escapes)
+                                element.text = cls.replace_setting(
+                                    element_text=element.text,
+                                    setting_key=setting,
+                                    new_value="PLACEHOLDER",
+                                    is_simple=False,
+                                    is_escaped=False,
+                                )
+                                element.text = element.text.replace(
+                                    "PLACEHOLDER",
+                                    replace_setting,
+                                )
                                 element.text = element.text.replace('"', "&quot;")
                                 xml_modified = True
-                            # In this case we have multiple settings with their own assocs
-                            elif setting and assoc_elem:
-                                logger.debug(
-                                    "Replace single Assoc value -> %s in setting -> %s in XML element -> %s with -> %s",
-                                    assoc_elem,
+                            else:
+                                logger.warning(
+                                    "Cannot find the value for setting -> %s. Skipping...",
                                     setting,
-                                    xpath,
-                                    replace_string,
                                 )
-                                setting_value = cls.search_setting(
-                                    element.text,
-                                    setting,
-                                    is_simple=False,
-                                )
-                                if setting_value:
-                                    logger.debug(
-                                        "Found setting value -> %s",
-                                        setting_value,
-                                    )
-                                    assoc_string: str = Assoc.extract_assoc_string(
-                                        input_string=setting_value,
-                                    )
-                                    logger.debug("Assoc String -> %s", assoc_string)
-                                    assoc_dict = Assoc.string_to_dict(
-                                        assoc_string=assoc_string,
-                                    )
-                                    logger.debug("Assoc Dict -> %s", str(assoc_dict))
-                                    escaped_replace_string = replace_string.replace(
-                                        "'",
-                                        "\\\\\u0027",
-                                    )
-                                    logger.debug(
-                                        "Escaped replacement string -> %s",
-                                        escaped_replace_string,
-                                    )
-                                    assoc_dict[assoc_elem] = escaped_replace_string  # escaped_replace_string
-                                    assoc_string_new: str = Assoc.dict_to_string(
-                                        assoc_dict=assoc_dict,
-                                    )
-                                    assoc_string_new = assoc_string_new.replace(
-                                        "'",
-                                        "\\u0027",
-                                    )
-                                    replace_setting = '"' + setting + '":"' + assoc_string_new + '"'
-                                    logger.debug(
-                                        "Replacement setting -> %s",
-                                        replace_setting,
-                                    )
-                                    # here we need to apply a "trick". It is required
-                                    # as regexp cannot handle the special unicode escapes \u0027
-                                    # we require. We first insert a placeholder "PLACEHOLDER"
-                                    # and let regexp find the right place for it. Then further
-                                    # down we use a simple search&replace to switch the PLACEHOLDER
-                                    # to the real value (replace() does not have the issues with unicode escapes)
-                                    element.text = cls.replace_setting(
-                                        element_text=element.text,
-                                        setting_key=setting,
-                                        new_value="PLACEHOLDER",
-                                        is_simple=False,
-                                        is_escaped=False,
-                                    )
-                                    element.text = element.text.replace(
-                                        "PLACEHOLDER",
-                                        replace_setting,
-                                    )
-                                    element.text = element.text.replace('"', "&quot;")
-                                    xml_modified = True
-                                else:
-                                    logger.warning(
-                                        "Cannot find the value for setting -> %s. Skipping...",
-                                        setting,
-                                    )
-                                    continue
-                        if xml_modified:
-                            logger.debug(
-                                "XML tree has been modified. Write updated file -> %s...",
-                                file_path,
-                            )
+                                continue
+                    if xml_modified:
+                        logger.debug(
+                            "XML tree has been modified. Write updated file -> %s...",
+                            file_path,
+                        )
 
-                            new_contents = etree.tostring(
-                                tree,
-                                pretty_print=True,
-                                xml_declaration=True,
-                                encoding="UTF-8",
-                            )
-                            # we need to undo some of the stupid things tostring() did:
-                            new_contents = new_contents.replace(
-                                b"&amp;quot;",
-                                b"&quot;",
-                            )
-                            new_contents = new_contents.replace(
-                                b"&amp;apos;",
-                                b"&apos;",
-                            )
-                            new_contents = new_contents.replace(b"&amp;gt;", b"&gt;")
-                            new_contents = new_contents.replace(b"&amp;lt;", b"&lt;")
+                        new_contents = etree.tostring(
+                            tree,
+                            pretty_print=True,
+                            xml_declaration=True,
+                            encoding="UTF-8",
+                        )
+                        # we need to undo some of the stupid things tostring() did:
+                        new_contents = new_contents.replace(
+                            b"&amp;quot;",
+                            b"&quot;",
+                        )
+                        new_contents = new_contents.replace(
+                            b"&amp;apos;",
+                            b"&apos;",
+                        )
+                        new_contents = new_contents.replace(b"&amp;gt;", b"&gt;")
+                        new_contents = new_contents.replace(b"&amp;lt;", b"&lt;")
 
-                            # Replace single quotes inside double quotes strings with "&apos;" (manual escaping)
-                            # This is required as we next want to replace all double quotes with single quotes
-                            pattern = b'"([^"]*)"'
-                            new_contents = re.sub(
-                                pattern,
-                                lambda m: m.group(0).replace(b"'", b"&apos;"),
-                                new_contents,
-                            )
+                        # Replace single quotes inside double quotes strings with "&apos;" (manual escaping)
+                        # This is required as we next want to replace all double quotes with single quotes
+                        pattern = b'"([^"]*)"'
+                        new_contents = re.sub(
+                            pattern,
+                            lambda m: m.group(0).replace(b"'", b"&apos;"),
+                            new_contents,
+                        )
 
-                            # Replace single quotes in XML text elements with "&apos;"
-                            # and replace double quotes in XML text elements with "&quot;"
-                            # This is required as we next want to replace all double quotes with single quotes
-                            # to make the XML files as similar as possible with Extended ECM's format
-                            pattern = b">([^<>]+?)<"
-                            replacement = lambda match: match.group(0).replace(  # noqa: E731
-                                b'"',
-                                b"&quot;",
-                            )
-                            new_contents = re.sub(pattern, replacement, new_contents)
-                            replacement = lambda match: match.group(0).replace(  # noqa: E731
-                                b"'",
-                                b"&apos;",
-                            )
-                            new_contents = re.sub(pattern, replacement, new_contents)
+                        # Replace single quotes in XML text elements with "&apos;"
+                        # and replace double quotes in XML text elements with "&quot;"
+                        # This is required as we next want to replace all double quotes with single quotes
+                        # to make the XML files as similar as possible with Extended ECM's format
+                        pattern = b">([^<>]+?)<"
+                        replacement = lambda match: match.group(0).replace(  # noqa: E731
+                            b'"',
+                            b"&quot;",
+                        )
+                        new_contents = re.sub(pattern, replacement, new_contents)
+                        replacement = lambda match: match.group(0).replace(  # noqa: E731
+                            b"'",
+                            b"&apos;",
+                        )
+                        new_contents = re.sub(pattern, replacement, new_contents)
 
-                            # Change double quotes to single quotes across the XML file - Extended ECM has it that way:
-                            new_contents = new_contents.replace(b'"', b"'")
+                        # Change double quotes to single quotes across the XML file - Extended ECM has it that way:
+                        new_contents = new_contents.replace(b'"', b"'")
 
-                            # Write the updated contents to the file.
-                            # We DO NOT want to use tree.write() here
-                            # as it would undo the manual XML tweaks we
-                            # need for Extended ECM. We also need "wb"
-                            # as we have bytes and not str as a data type
-                            with open(file_path, "wb") as f:
-                                f.write(new_contents)
+                        # Write the updated contents to the file.
+                        # We DO NOT want to use tree.write() here
+                        # as it would undo the manual XML tweaks we
+                        # need for Extended ECM. We also need "wb"
+                        # as we have bytes and not str as a data type
+                        with open(file_path, "wb") as f:
+                            f.write(new_contents)
 
-                            found = True
-                    # this is not using xpath - do a simple search and replace
-                    else:
-                        logger.debug("Replacement without xpath...")
-                        with open(file_path, encoding="UTF-8") as f:
-                            contents = f.read()
-                        # Replace all occurrences of the search pattern with the replace string
-                        new_contents = pattern.sub(replace_string, contents)
+                        found = True
+                    # end if xml_modified
+                # end if xpath
 
-                        # Write the updated contents to the file if there were replacements
-                        if contents != new_contents:
-                            logger.debug(
-                                "Found search string -> %s in XML file -> %s. Write updated file...",
-                                search_pattern,
-                                file_path,
-                            )
-                            # Write the updated contents to the file
-                            with open(file_path, "w", encoding="UTF-8") as f:
-                                f.write(new_contents)
-                            found = True
+                # Not using xpath - do a simple search and replace:
+                else:
+                    logger.debug("Replacement without xpath (plain text)...")
+                    with open(file_path, encoding="UTF-8") as f:
+                        contents = f.read()
+                    # Replace all occurrences of the search pattern with the replace string
+                    new_contents = pattern.sub(replace_string, contents)
+
+                    # Write the updated contents to the file if there were replacements
+                    if contents != new_contents:
+                        logger.debug(
+                            "Found search string -> %s in XML file -> %s. Write updated file...",
+                            search_pattern,
+                            file_path,
+                        )
+                        # Write the updated contents to the file
+                        with open(file_path, "w", encoding="UTF-8") as f:
+                            f.write(new_contents)
+                        found = True
+            # end for files
+        # end for subdir
 
         return found
 

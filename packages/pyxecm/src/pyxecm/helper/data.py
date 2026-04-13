@@ -2335,15 +2335,15 @@ class Data:
 
     # end method definition
 
-    def cleanse(self, cleansings: dict) -> None:
+    def cleanse(self, cleansings: list) -> None:
         """Cleanse data with regular expressions and upper/lower case conversions.
 
         Args:
-            cleansings (dict):
-                Dictionary with keys that equal the column names.
-                The dictionary values are dictionaries themselves with
+            cleansings (list):
+                List of cleansing dictionaries. Each dictionary has
                 these fields:
-                * replacements (dict): name of a column in the data frame
+                * field (str, required): name of a column in the data frame
+                * replacements (dict, optional, default = {}): regex patterns and replacements
                 * upper (bool, optional, default = False): change the value to uppercase
                 * lower (bool, optional, default = False): change the value to lowercase
                 * capitalize (bool, optional, default = False) - first character upper case, rest lower-case
@@ -2352,8 +2352,13 @@ class Data:
 
         """
 
-        # Iterate over each column in the cleansing dictionary
-        for column, cleansing in cleansings.items():
+        # Iterate over each cleansing entry in the list
+        for cleansing in cleansings:
+            column = cleansing.get("field", "")
+            if not column:
+                self.logger.error("Cleansing entry is missing the 'field' key. Skipping...")
+                continue
+
             # Read the cleansing parameters:
             replacements = cleansing.get("replacements", {})
             upper = cleansing.get("upper", False)
@@ -2467,7 +2472,7 @@ class Data:
                         column,
                     )
             # end else handling strings and lists
-        # for column, cleansing in cleansings.items()
+        # for cleansing in cleansings
 
     # end method definition
 

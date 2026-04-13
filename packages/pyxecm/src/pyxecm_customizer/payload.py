@@ -2525,10 +2525,10 @@ class Payload:
                             payload_section.get("user_customization", "True"),
                         )
                         self.process_users()
-                        # Add all users with ID the a lookup dict for placeholder replacements
+                        # Add all users with ID to a lookup dict for placeholder replacements
                         # in adminSetting. This also updates the payload with user IDs from OTCS
                         # if the user already exists in Content Server. This is important especially
-                        # if the cutomizer pod is restarted / run multiple times:
+                        # if the customizer pod is restarted / run multiple times:
                         self.process_user_placeholders()
                         self._log_header_callback(
                             text="Assign OTCS licenses to users",
@@ -8523,7 +8523,7 @@ class Payload:
             - external_system_type (str, required)
             - external_system_name (str, required)
             - external_system_number (str, optional)
-            - description (str, optional)
+            - description (str | dict, optional)
             - as_url (str, required)
             - base_url (str, optional)
             - client (str, optional)
@@ -8623,6 +8623,16 @@ class Payload:
                 continue
             system_type = external_system["external_system_type"]
 
+            # Get the optional description of the external system
+            # that is used for display purposes in the SmartView if given.
+            # It can be either a string or a dict with language keys (e.g. "en", "de", ...)
+            # and text values for multilingual support.
+            # If it is a string we convert it to the dict format with "en"
+            # as default language key:
+            description = external_system.get("description")
+            if description and isinstance(description, str):
+                description = {"en": description}
+
             self._log_header_callback(
                 text="Process External System -> '{}' ({})".format(system_name, system_type),
                 char="-",
@@ -8702,11 +8712,12 @@ class Payload:
             as_url = external_system["as_url"]
 
             self.logger.info(
-                "Processing external system -> '%s' (type -> '%s', connection type -> '%s', endpoint -> '%s')...",
+                "Processing external system -> '%s' (type -> '%s', connection type -> '%s', endpoint -> '%s'%s)...",
                 system_name,
                 system_type,
                 connection_type,
                 as_url,
+                ", description -> {}".format(description) if description else "",
             )
 
             skip_connection_test = external_system.get("skip_connection_test", False)
@@ -8837,6 +8848,7 @@ class Payload:
                     )
 
                 continue
+            # end if external system exists
 
             #
             # Create External System:
@@ -8852,6 +8864,7 @@ class Payload:
                 authentication_method=auth_method,
                 client_id=oauth_client_id,
                 client_secret=oauth_client_secret,
+                display_names=description,
             )
             if response is None:
                 self.logger.error(
@@ -8905,6 +8918,7 @@ class Payload:
                     self._guidewire_policy_center = self.init_guidewire(
                         guidewire_external_system=external_system,
                     )
+        # end for external_system in self._external_systems:
 
         self.write_status_file(
             success=success,
@@ -17893,7 +17907,7 @@ class Payload:
                 The name of the license Key (e.g. "EXTENDED_ECM" or "INTELLIGENT_VIEWING").
             user_specific_payload_field (str, optional):
                 The name of the user specific field in payload
-                (if empty it will be ignored).
+                (if empty it will be ignored). Default is "licenses".
             section_name (str, optional):
                 The name of the section. It can be overridden
                 for cases where multiple sections of same type
@@ -17951,7 +17965,20 @@ class Payload:
                 )
                 continue
 
+            # Check if the user payload has specific license features defined.
+            # IMPORTANT: Empty lists are interpreted as NOT giving the use any license features,
+            # so we only check for the existence of the field in the payload:
             if user_specific_payload_field and user_specific_payload_field in user:
+                if not user[user_specific_payload_field]:
+                    self.logger.info(
+                        "User -> '%s'%s has no license. Skipping...",
+                        user_name,
+                        " (type -> '{}')".format(user["type"]) if "type" in user else "",
+                    )
+                    # Payload wants this user to have no license features,
+                    # so we skip to the next user without assigning any license
+                    # features to this user (continue in the for loop):
+                    continue
                 self.logger.info(
                     "Found specific license feature -> %s for user -> '%s'. Overwriting default license feature -> '%s'.",
                     user[user_specific_payload_field],
@@ -17959,7 +17986,7 @@ class Payload:
                     license_feature,
                 )
                 user_license_features = user[user_specific_payload_field]
-            else:  # use the default feature from the actual parameter
+            else:  # use the default feature:
                 user_license_features = [license_feature]
 
             for user_license_feature in user_license_features:
@@ -18024,6 +18051,8 @@ class Payload:
                         user_name,
                     )
                     success = False
+            # end for user_license_feature in user_license_features
+        # end for user in self._users
 
         self.write_status_file(
             success=success,
@@ -21792,7 +21821,13 @@ class Payload:
             data.get_data_frame().shape[1],
         )
 
-        cleansings = data_source.get("cleansings", {})
+        cleansings = data_source.get("cleansings", [])
+        # Backward compatibility: transform old dict syntax into new list syntax:
+        if isinstance(cleansings, dict):
+            cleansings = [{"field": field, **params} for field, params in cleansings.items()]
+            self.logger.warning(
+                "The syntax for cleansing rules in the payload has changed to a list of dicts with a new 'field' key. Please adjust your payload definition! The old syntax with a dict of field names to cleansing parameters is still supported but will be removed in the future.",
+            )
         columns_to_drop = data_source.get("columns_to_drop", [])
         columns_to_keep = data_source.get("columns_to_keep", [])
         columns_to_add = data_source.get("columns_to_add", [])

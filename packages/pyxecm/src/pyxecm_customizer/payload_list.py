@@ -34,15 +34,10 @@ default_logger = logging.getLogger("pyxecm_customizer.payload_list")
 class PayloadList:
     """Manage a sorted list of payload items using a pandas data frame.
 
-    Each payload item with metadata such as name, filename, dependency (referencing another item by index),
+    Each payload item has metadata such as name, filename, dependency (referencing another item by index),
     logfile, and status. Provides list-like functionality with additional methods
     for adding, removing, and reordering items.
     """
-
-    logger: logging.Logger = default_logger
-
-    _stopped: bool = True
-    payload_items: pd.DataFrame
 
     def __init__(self, logger: logging.Logger = default_logger) -> None:
         """Initialize the Payload List object.
@@ -52,9 +47,12 @@ class PayloadList:
                 The logging object to use for all log messages. Defaults to default_logger.
 
         """
-        if logger != default_logger:
+        if logger is not default_logger:
             self.logger = logging.getLogger(f"{logger.name}.payload_list")
+        else:
+            self.logger = default_logger
 
+        self._stopped = True
         self.payload_items = pd.DataFrame(
             columns=[
                 "name",
@@ -84,8 +82,12 @@ class PayloadList:
 
         def calculate_duration(row: pd.Series) -> str:
             if row["status"] == "running":
+                start_time = row["start_time"]
+                if pd.isna(start_time):
+                    return str(row["duration"])
+
                 now = datetime.now(UTC)
-                start_time = pd.to_datetime(row["start_time"])
+                start_time = pd.to_datetime(start_time, utc=True)
 
                 duration = now - start_time
                 hours, remainder = divmod(duration.total_seconds(), 3600)
@@ -292,11 +294,9 @@ class PayloadList:
             self.logger.error("Illegal index -> %s for payload update!", index)
             return False
 
-        for column in self.payload_items.columns:
-            if column in update_data:
-                tmp = self.payload_items.loc[index].astype(object)
-                tmp[column] = update_data[column]
-                self.payload_items.loc[index] = tmp
+        for column, value in update_data.items():
+            if column in self.payload_items.columns:
+                self.payload_items.loc[index, column] = value
 
         return True
 
@@ -464,10 +464,8 @@ class PayloadList:
         """
 
         if not {"name", "filename"}.issubset(value):
-            exception = ("Value must be a dictionary with at least 'name' and 'filename' keys",)
-            raise ValueError(
-                exception,
-            )
+            msg = "Value must be a dictionary with at least 'name' and 'filename' keys"
+            raise ValueError(msg)
 
         if index not in self.payload_items.index:
             exception = "Index -> {} is out of range".format(index)
@@ -488,7 +486,7 @@ class PayloadList:
 
         """
 
-        self.remove_item(index=index)
+        self.remove_payload_item(index=index)
 
     # end method definition
 
@@ -512,11 +510,22 @@ class PayloadList:
 
         """
 
-        if attribute in self.payload_items.columns:
-            return self.payload_items[attribute]
+        error_message = "Payload list has no attribute -> '{}'".format(attribute)
 
-        self.logger.error("Payload list has no attribute -> '%s'", attribute)
-        return None
+        try:
+            # Prevent infinite recursion in case the object is not fully initialized
+            # or the attribute is missing:
+            payload_items = object.__getattribute__(self, "payload_items")
+        except AttributeError:
+            raise AttributeError(error_message) from None
+
+        if payload_items is not None and attribute in payload_items.columns:
+            return payload_items[attribute]
+
+        logger = object.__getattribute__(self, "logger")
+        logger.error(error_message)
+
+        raise AttributeError(error_message) from None
 
     # end method definition
 
@@ -769,10 +778,11 @@ class PayloadList:
                         "An exception occurred: \n%s",
                         traceback.format_exc(),
                     )
+            # end if payload
 
             if not success:
                 thread_logger.error(
-                    "Failed to initialize payload -> '%s'!",
+                    "Failed to process payload -> '%s'!",
                     payload_item["filename"],
                 )
                 # Update the status to "failed" in the DataFrame after processing finishes
@@ -810,6 +820,7 @@ class PayloadList:
                     if concurrent and self.pick_running() >= concurrent:
                         self.logger.debug(
                             "Reached concurrency limit of %s payloads. Waiting for one to finish.",
+                            concurrent,
                         )
                         break
 

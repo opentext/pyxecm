@@ -115,6 +115,7 @@ class BrowserAutomation:
         take_screenshots: bool = False,
         automation_name: str = "",
         headless: bool = True,
+        default_timeout: float = 45.0,
         logger: logging.Logger = default_logger,
         wait_until: str | None = None,
         browser: str | None = None,
@@ -140,6 +141,9 @@ class BrowserAutomation:
                 The name of the automation. Defaults to "".
             headless (bool, optional):
                 If True, the browser will be started in headless mode. Defaults to True.
+            default_timeout (float, optional):
+                Default timeout in seconds for Playwright actions and navigation.
+                Defaults to 45.0.
             wait_until (str | None, optional):
                 Wait until a certain condition. Options are:
                 * "commit" - does not wait at all - commit the request and continue
@@ -214,6 +218,8 @@ class BrowserAutomation:
         self.logger.info("Creating page...")
         self.page: Page = self.context.new_page()
         self.main_page = self.page
+        self.logger.info("Setting default timeout to %d ms...", int(default_timeout * 1000))
+        self.set_timeout(wait_time=default_timeout)
         self.logger.info("Browser automation initialized.")
 
     # end method definition

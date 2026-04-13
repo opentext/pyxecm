@@ -497,11 +497,13 @@ class OTCS:
         otcs_config["favoritesUrl"] = otcs_rest_url + "/v2/members/favorites"
         otcs_config["reservedNodesUrl"] = otcs_rest_url + "/v2/members/reserved"
         otcs_config["recentlyAccessedUrl"] = otcs_rest_url + "/v2/members/accessed"
+        otcs_config["mytodoUrl"] = otcs_rest_url + "/v2/members/moduleassignments/ExpandAssignments/workflow"
         otcs_config["memberofUrl"] = otcs_rest_url + "/v2/members/memberof"
         otcs_config["webReportsUrl"] = otcs_rest_url + "/v1/webreports"
         otcs_config["csApplicationsUrl"] = otcs_rest_url + "/v2/csapplications"
         otcs_config["xEngProjectTemplateUrl"] = otcs_rest_url + "/v2/xengcrt/projecttemplate"
         otcs_config["rsisUrl"] = otcs_rest_url + "/v2/rsis"
+        otcs_config["searchRsisUrl"] = otcs_rest_url + "/v1/rsis"
         otcs_config["rsiSchedulesUrl"] = otcs_rest_url + "/v2/rsischedules"
         otcs_config["recordsManagementUrl"] = otcs_rest_url + "/v1/recordsmanagement"
         otcs_config["recordsManagementUrlv2"] = otcs_rest_url + "/v2/recordsmanagement"
@@ -521,6 +523,7 @@ class OTCS:
         otcs_config["workflowUrl"] = otcs_rest_url + "/v2/workflows"
         otcs_config["docWorkflowUrl"] = otcs_rest_url + "/v2/docworkflows"
         otcs_config["draftProcessUrl"] = otcs_rest_url + "/v2/draftprocesses"
+        otcs_config["startWfWithSkipStartUrl"] = otcs_rest_url + "/v2/draftprocesses/startwf"
         otcs_config["categoryFormUrl"] = otcs_rest_url + "/v1/forms/nodes/categories"
         otcs_config["nodesFormUrl"] = otcs_rest_url + "/v1/forms/nodes"
         otcs_config["draftProcessFormUrl"] = otcs_rest_url + "/v1/forms/draftprocesses"
@@ -4022,6 +4025,98 @@ class OTCS:
             headers=request_header,
             timeout=None,
             failure_message="Failed to get recently accessed items for current user",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_mytodo")
+    def get_user_mytodo(
+        self,
+        expand: str = "",
+        fields: str | list = "assignments",  # per default
+        metadata: bool | None = None,
+        sort_column: str | None = "date_due",
+        sort_type: str | None = "asc",
+        limit: int | None = 20,
+        page: int = 1,
+        where_location_name: str | None = None,
+        where_name: str | None = None,
+    ) -> dict | None:
+        """Get the user's mytodo workflow assignment items.
+
+        Args:
+            expand (str | None = None):
+                Resolve individual fields (e.g. assignments{from_user_id,location_id,workflow_id,workflow_subworkflow_id,workflow_subworkflow_task_id})
+                or entire sections (eg. expand=properties) that contain known identifiers (assigments, members, etc.).
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "assignments"
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            sort_column (str | None, optional):
+                Column to sort by (for example: `date_due`, `name`, `priority`).
+                Defaults to `date_due`.
+            sort_type (str | None, optional):
+                Sort direction prefix used with `sort_column`.
+                Use `asc` for ascending or `desc` for descending order.
+                Defaults to `asc`.
+            limit (int, optional):
+                The maximum number of results per page.
+            page (int, optional):
+                The page number to retrieve.
+            where_location_name (str, optional):
+                Filter results by location name.
+            where_name (str, optional):
+                Filter results by assignment name.
+
+        Returns:
+            dict | None:
+                Request response or None if the mytodo request has failed.
+
+        """
+
+        # Add query parameters (embedded in the URL)
+        query = {
+            key: value
+            for key, value in {
+                "expand": expand,
+                "fields": fields,
+                "limit": limit,
+                "page": page,
+                "where_location_name": where_location_name,
+                "where_name": where_name,
+            }.items()
+            if value
+        }
+        if sort_column and sort_type:
+            query["sort"] = f"{sort_type}_{sort_column}"
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["mytodoUrl"] + "?" + encoded_query
+        if metadata:
+            request_url += "&metadata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Getting mytodo  workflow assignments for current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get mytodo  workflow assignments for current user",
         )
 
     # end method definition
@@ -9697,6 +9792,8 @@ class OTCS:
         authentication_method: str = "BASIC",
         client_id: str | None = None,
         client_secret: str | None = None,
+        comment: str | None = None,
+        display_names: dict | None = None,
     ) -> dict | None:
         """Add an external system connection (e.g. SAP, Salesforce, SuccessFactors).
 
@@ -9719,10 +9816,35 @@ class OTCS:
                 The OAUTH Client ID (only required if authenticationMethod = OAUTH).
             client_secret (str | None, optional):
                 OAUTH Client Secret (only required if authenticationMethod = OAUTH).
+            comment (str | None, optional):
+                An optional comment for the connection.
+            display_names (dict | None, optional):
+                A dictionary of display names for the external system connection. It is used for the display
+                in the UI and can be multilingual. Default is None.
 
         Returns:
             dict | None:
                 External system Details or None if the REST call fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/externalsystems',
+                        'method': 'POST',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'EXTSYSTEM_NODE_ID': 391118,
+                'ID_EXTSYSTEM': 'Test Connection',
+                'OK': True
+            }
+        }
 
         """
 
@@ -9734,6 +9856,19 @@ class OTCS:
             "username": username,
             "password": password,
         }
+
+        # The 'system_comment' parameter was introduced with OTCM 26.1 so
+        # we better only set it if we have a compatible version:
+        if float(self.get_server_version()) >= 26.1 and comment is not None:
+            external_system_post_body["system_comment"] = comment
+
+        # The 'multilinguals' parameter was introduced with OTCM 26.1 so
+        # we better only set it if we have a compatible version:
+        if float(self.get_server_version()) >= 26.1 and display_names is not None:
+            # The REST API is expecting the multi-.lingual names
+            # as a JSON string, so we need to convert the dictionary to a JSON string
+            # before sending the request:
+            external_system_post_body["multilinguals"] = json.dumps(display_names)
 
         if authentication_method == "OAUTH" and client_id and client_secret:
             external_system_post_body["authentication_method"] = str(
@@ -9931,6 +10066,13 @@ class OTCS:
             try:
                 error_count = response["results"]["data"]["status"]["error_count"]
                 if error_count > 0 and retries > 0:
+                    for error in response["results"]["data"]["status"]["errors"]:
+                        self.logger.error(
+                            "Failed to deploy workbench item -> '%s' (%s); error -> %s",
+                            error["name"],
+                            error["id"],
+                            error["error"],
+                        )
                     self.logger.error(
                         "%d error%s occurred during workbench deployment and retry did not help.",
                         error_count,
@@ -9944,6 +10086,13 @@ class OTCS:
                         "s" if error_count > 1 else "",
                         REQUEST_RETRY_DELAY * 10,
                     )
+                    for error in response["results"]["data"]["status"]["errors"]:
+                        self.logger.warning(
+                            "Failed to deploy workbench item -> '%s' (%s); error -> %s",
+                            error["name"],
+                            error["id"],
+                            error["error"],
+                        )
                     # we wait a bit before retrying as sometimes the errors are related to temporary
                     # database overload:
                     time.sleep(REQUEST_RETRY_DELAY * 10)
@@ -9955,14 +10104,6 @@ class OTCS:
                         success_count,
                     )
                     break
-
-                for error in response["results"]["data"]["status"]["errors"]:
-                    self.logger.error(
-                        "Failed to deploy workbench item -> '%s' (%s); error -> %s",
-                        error["name"],
-                        error["id"],
-                        error["error"],
-                    )
 
             except Exception as e:
                 self.logger.debug(str(e))
@@ -10140,8 +10281,8 @@ class OTCS:
         )
         workbench_id = self.get_result_value(response=response, key="id")
         if workbench_id:
-            self.logger.debug(
-                "Workbench -> '%s' has already been deployed successfully; existing workbench ID -> %d; skipping transport",
+            self.logger.info(
+                "Workbench -> '%s' (%d) has already been deployed successfully before. Skipping workbench deployment...",
                 workbench_name,
                 workbench_id,
             )
@@ -10158,8 +10299,8 @@ class OTCS:
             )
             workbench_id = self.get_result_value(response=response, key="id")
             if workbench_id:
-                self.logger.debug(
-                    "Workbench -> '%s' does already exist but is not successfully deployed; existing workbench ID -> %d.",
+                self.logger.info(
+                    "Workbench -> '%s' (%d) does already exist but has not been successfully deployed.",
                     workbench_name,
                     workbench_id,
                 )
@@ -10181,7 +10322,7 @@ class OTCS:
                 )
 
         # Step 3: Unpack Transport Package to Workbench
-        self.logger.debug(
+        self.logger.info(
             "Unpack transport package -> '%s' (%d) to workbench -> '%s' (%d)...",
             package_name,
             package_id,
@@ -10252,6 +10393,7 @@ class OTCS:
                 List of replacement values; dict needs to have two values:
                 - placeholder: The text to replace.
                 - value: The replacement text.
+                - file_extensions: List of file extensions to consider (defaults to [".xml"]).
 
         Returns:
             bool:
@@ -10322,14 +10464,16 @@ class OTCS:
                     replacement["value"],
                     zip_file_folder,
                 )
+            # end if "xpath" in replacement
 
             found = XML.replace_in_xml_files(
-                zip_file_folder,
-                replacement.get("placeholder"),
-                replacement["value"],
-                replacement.get("xpath"),
-                replacement.get("setting"),
-                replacement.get("assoc_elem"),
+                directory=zip_file_folder,
+                search_pattern=replacement.get("placeholder"),
+                replace_string=replacement["value"],
+                xpath=replacement.get("xpath"),
+                setting=replacement.get("setting"),
+                assoc_elem=replacement.get("assoc_elem"),
+                file_extensions=replacement.get("file_extensions"),
                 logger=self.logger.getChild("xml"),
             )
             if found:
@@ -10829,7 +10973,8 @@ class OTCS:
     def get_business_objects(
         self,
         external_system_id: str,
-        type_name: str,
+        type_name: str | None = None,
+        type_id: int | None = None,
         where_clauses: dict | None = None,
         limit: int | None = None,
         page: int | None = None,
@@ -10839,11 +10984,16 @@ class OTCS:
         Args:
             external_system_id (str):
                 External system ID (such as "TM6")
-            type_name (str):
+            type_name (str | None, optional):
                 Type name of the business object (such as "SAP Customer").
+            type_id (int | None, optional):
+                Type ID of the business object. This is an alternative to the type_name parameter.
+                Either type_name or type_id needs to be provided.
+                If both are provided, type_id will be used and type_name will be ignored.
             where_clauses (dict | None, optional):
                 Filter the results based on one or multiple where clauses.
-                TODO: NAME CONVENTION FOR THE FIELDS
+                Use get_business_objects_search() to get information about available search fields
+                for the where clauses.
             limit (int | None, optional):
                 The maximum number of result items.
             page (int | None, optional):
@@ -10905,10 +11055,21 @@ class OTCS:
 
         """
 
+        if not type_name and not type_id:
+            self.logger.error("Either type name or type ID needs to be provided. Cannot get business objects.")
+            return None
+
+        if not external_system_id:
+            self.logger.error("External system ID needs to be provided. Cannot get business objects.")
+            return None
+
         query = {
             "ext_system_id": external_system_id,
-            "bo_type": type_name,
         }
+        if type_id:
+            query["bo_type_id"] = type_id
+        else:
+            query["bo_type"] = type_name
         if limit:
             query["limit"] = limit
         if page:
@@ -10924,8 +11085,9 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get all business objects of type -> '%s' from external system -> %s; calling -> %s",
-            type_name,
+            "Get all business objects of type%s -> '%s' from external system -> %s; calling -> %s",
+            " ID" if type_id else "",
+            type_id or type_name,
             external_system_id,
             request_url,
         )
@@ -10935,8 +11097,9 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get business objects of type -> '{}' from external system -> {}".format(
-                type_name,
+            failure_message="Failed to get business objects of type{} -> '{}' from external system -> {}".format(
+                " ID" if type_id else "",
+                type_id or type_name,
                 external_system_id,
             ),
         )
@@ -10947,30 +11110,202 @@ class OTCS:
     def get_business_objects_search(
         self,
         external_system_id: str,
-        type_name: str,
+        type_name: str | None = None,
+        type_id: int | None = None,
     ) -> dict | None:
-        """Get business object type information.
+        """Get information about search fields for a business objects of a given type.
 
-        Unfortunately this REST API is pretty much limited. It does not return
-        Field names of external system properties and also does not return property
-        groups defined.
+        This information can be used to fill the where_clauses parameter of the
+        get_business_objects method.
 
         Args:
             external_system_id (str):
                 The External system ID (such as "TM6").
-            type_name (str):
+            type_name (str | None):
                 Type name of the business object (such as "SAP Customer").
+            type_id (int | None):
+                The business object type ID. This is an alternative to the type_name parameter.
+                Either type_name or type_id needs to be provided.
+                If both are provided, type_id will be used and type_name will be ignored.
 
         Returns:
             dict | None:
                 Business Object Search Form or None if the request fails.
 
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/forms/businessobjects/search?bo_type=KNA1&ext_system_id=TE1',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': [
+                {
+                    'data': {
+                        'bo_type_id': 37,
+                        'bo_type_name': 'Customer',
+                        'bo_type': 'KNA1',
+                        'ext_system_id': 'TE1',
+                        'business_attachments': {
+                            'metadata_mapping': False
+                        }
+                    },
+                    'options': {
+                        'fields': {
+                            'bo_type_id': {
+                                'hidden': True,
+                                'hideInitValidationError': True,
+                                'label': 'Business Object Type Id',
+                                'readonly': True,
+                                'type': 'number'
+                            },
+                            'bo_type_name': {
+                                'hidden': True,
+                                'hideInitValidationError': True,
+                                'label': 'Business Object Type Name',
+                                'readonly': True,
+                                'type': 'text'
+                            },
+                            'bo_type': {
+                                'hidden': True,
+                                'hideInitValidationError': True,
+                                'label': 'Business Object Type',
+                                'readonly': True,
+                                'type': 'text'
+                            },
+                            'ext_system_id': {
+                                'hidden': True,
+                                'hideInitValidationError': True,
+                                'label': 'External Sytem Id',
+                                'readonly': True,
+                                'type': 'text'
+                            }
+                        }
+                    },
+                    'schema': {
+                        'properties': {
+                            'bo_type_id': {
+                                'readonly': True,
+                                'required': True,
+                                'title': 'Business Object Type Id',
+                                'type': 'integer'
+                            },
+                            'bo_type_name': {
+                                'readonly': True,
+                                'required': False,
+                                'title': 'Business Object Type Name',
+                                'type': 'string'
+                            },
+                            'bo_type': {
+                                'readonly': True,
+                                'required': False,
+                                'title': 'Business Object Type',
+                                'type': 'string'
+                            },
+                            'ext_system_id': {
+                                'readonly': True,
+                                'required': False,
+                                'title': 'External Sytem Id',
+                                'type': 'string'
+                            }
+                        }
+                    }
+                },
+                {
+                    'data': {
+                        'SORTL': '',
+                        'LAND1': '',
+                        'PSTLZ': '',
+                        'MCOD3': '',
+                        'MCOD1': '',
+                        'KUNNR': '',
+                        'LOEVM': ''
+                    },
+                    'options': {
+                        'fields': {
+                            'SORTL': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'Search term',
+                                'readonly': False,
+                                'type': 'text'
+                            },
+                            'LAND1': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'Country/Region Key',
+                                'readonly': False,
+                                'type': 'text'
+                            },
+                            'PSTLZ': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'Postal Code',
+                                'readonly': False,
+                                'type': 'text'
+                            },
+                            'MCOD3': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'City',
+                                'readonly': False,
+                                'type': 'text'
+                            },
+                            'MCOD1': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'Name',
+                                'readonly': False,
+                                'type': 'text'
+                            },
+                            'KUNNR': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'Customer',
+                                'readonly': False,
+                                'type': 'text'
+                            },
+                            'LOEVM': {
+                                'hidden': False,
+                                'hideInitValidationError': True,
+                                'label': 'Central Deletion Flag',
+                                'optionLabels': [...],
+                                'readonly': False,
+                                'type': 'select'
+                            }
+                        }
+                    },
+                    'schema': {'properties': {...}, 'title': 'SAP Customer', 'type': 'object'}
+                }
+            ]
+        }
+
         """
+
+        if not type_name and not type_id:
+            self.logger.error(
+                "Either type name or type ID needs to be provided. Cannot get business object search form."
+            )
+            return None
+
+        if not external_system_id:
+            self.logger.error("External system ID needs to be provided. Cannot get business object search form.")
+            return None
 
         query = {
             "ext_system_id": external_system_id,
-            "bo_type": type_name,
         }
+
+        if type_id:
+            query["bo_type_id"] = type_id
+        else:
+            query["bo_type"] = type_name
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
 
@@ -10980,8 +11315,9 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get search form for business object type -> '%s' and external system -> %s; calling -> %s",
-            type_name,
+            "Get search form for business object type%s -> '%s' and external system -> %s; calling -> %s",
+            " ID" if type_id else "",
+            type_id or type_name,
             external_system_id,
             request_url,
         )
@@ -10991,8 +11327,9 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get search form for business object type -> '{}' and external system -> {}".format(
-                type_name,
+            failure_message="Failed to get search form for business object type{} -> '{}' and external system -> {}".format(
+                " ID" if type_id else "",
+                type_id or type_name,
                 external_system_id,
             ),
         )
@@ -17223,7 +17560,7 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_records_management_rsis")
     def get_records_management_rsis(self, limit: int = 100) -> list | None:
-        """Get all Records management RSIs togther with their RSI Schedules.
+        """Get all Records management RSIs together with their RSI Schedules.
 
         Args:
             limit (int, optional):
@@ -17295,6 +17632,45 @@ class OTCS:
 
         if response and "results" in response and response["results"]:
             return response["results"]["data"]["rsis"]
+
+        return None
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="search_records_management_rsis")
+    def search_records_management_rsis(self, querystring: str = "") -> list | None:
+        """Get a list of Records management RSIs where 'querystring' is a sub-string of the RSI.
+
+        Args:
+            querystring (str, optional):
+                The query string to filter the RSIs (default = "").
+
+        Returns:
+            list | None:
+                The list of Records Management RSIs matching the query string or None if the request fails.
+
+        """
+
+        request_url = self.config()["searchRsisUrl"]
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get list of Records Management RSIs by query string -> %s; calling -> %s",
+            querystring,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data={"query": querystring},
+            timeout=None,
+            failure_message="Failed to get list of Records Management RSIs",
+        )
+
+        if response and "data" in response and response["data"]:
+            return response["data"]["fast_codes"]
 
         return None
 
@@ -18762,7 +19138,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_document_workflows")
-    def get_document_workflows(self, node_id: int, parent_id: int) -> list:
+    def get_document_workflows(self, node_id: int, parent_id: int, node_ids: list[int] | None = None) -> list:
         """Get a list of available workflows for a document ID and a parent ID.
 
         Args:
@@ -18770,6 +19146,8 @@ class OTCS:
                 The node ID of the document.
             parent_id (int):
                 The node ID of the parent.
+            node_ids (list[int] | None, optional):
+                The node IDs of the documents. Defaults to None.
 
         Returns:
             list:
@@ -18804,12 +19182,18 @@ class OTCS:
 
         """
 
-        request_url = self.config()["docWorkflowUrl"] + "?doc_id={}&parent_id={}".format(node_id, parent_id)
+        if node_ids is not None:
+            query = {"doc_id": list(node_ids), "parent_id": parent_id}
+        else:
+            query = {"doc_id": node_id, "parent_id": parent_id}
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["docWorkflowUrl"] + "?{}".format(encoded_query)
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get workflows for node ID -> %d and parent ID -> %d; calling -> %s",
-            node_id,
+            "Get workflows for node IDs -> %s and parent ID -> %d; calling -> %s",
+            node_ids if node_ids is not None else node_id,
             parent_id,
             request_url,
         )
@@ -18820,7 +19204,7 @@ class OTCS:
             headers=request_header,
             timeout=None,
             failure_message="Failed to get workflows for node ID -> {} and parent ID -> {}".format(
-                node_id,
+                node_ids if node_ids is not None else node_id,
                 parent_id,
             ),
         )
@@ -19240,13 +19624,13 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="create_draft_process")
-    def create_draft_process(self, workflow_id: int, documents: list) -> dict | None:
+    def create_draft_process(self, workflow_id: int, documents: list | None = None) -> dict | None:
         """Initiate a draft process. This is the first step to start a process (workflow instance).
 
         Args:
             workflow_id (int):
                 The node ID of the workflow map.
-            documents (list):
+            documents (list | None, optional):
                 The node IDs of the attachmewnt documents.
 
         Returns:
@@ -19268,10 +19652,11 @@ class OTCS:
 
         """
 
-        draft_process_body_post_data = {
-            "workflow_id": workflow_id,
-            "doc_ids": documents,
-        }
+        draft_process_body_post_data = {"workflow_id": workflow_id}
+
+        if documents:
+            draft_process_body_post_data["doc_ids"] = ",".join(map(str, documents))
+            draft_process_body_post_data["AttachDocuments"] = True
 
         request_url = self.config()["draftProcessUrl"]
         request_header = self.request_form_header()
@@ -19282,7 +19667,6 @@ class OTCS:
             str(draft_process_body_post_data),
             request_url,
         )
-
         return self.do_request(
             url=request_url,
             method="POST",
@@ -19290,6 +19674,50 @@ class OTCS:
             data={"body": json.dumps(draft_process_body_post_data)},
             timeout=None,
             failure_message="Failed to create draft process from workflow with ID -> {}".format(
+                workflow_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="initiate_workflow")
+    def initiate_workflow(self, workflow_id: int, documents: list | None = None) -> dict | None:
+        """Initiate a workflow with skip start step.
+
+        Args:
+            workflow_id (int):
+                The node ID of the workflow map.
+            documents (list | None, optional):
+                The node IDs of the attachment documents.
+
+        Returns:
+            dict | None:
+                Task list of the workflow instance or None if the request fails.
+
+        """
+
+        initiate_process_body_post_data = {"workflow_id": workflow_id}
+
+        if documents:
+            initiate_process_body_post_data["doc_ids"] = ",".join(map(str, documents))
+
+        request_url = self.config()["startWfWithSkipStartUrl"]
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Initiates a workflow with skip start step for workflow ID -> %d and body -> %s; calling -> %s",
+            workflow_id,
+            str(initiate_process_body_post_data),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data={"body": json.dumps(initiate_process_body_post_data)},
+            timeout=None,
+            failure_message="Failed to initiate a workflow with skip start step from workflow with ID -> {}".format(
                 workflow_id,
             ),
         )
@@ -19603,6 +20031,7 @@ class OTCS:
         task_id: int = 1,
         values: dict | None = None,
         action: str = "formUpdate",
+        assignee: int | None = None,
         custom_action: str = "",
         comment: str = "",
     ) -> dict | None:
@@ -19626,6 +20055,9 @@ class OTCS:
                 It is only used if action = "formUpdate".
             action (str, optional):
                 The name of the action to process. The default is "formUpdate".
+            assignee (int | None, optional):
+                The user ID to assign the task to for actions that require assignee
+                (for example, "Delegate" or "Review"). Defaults to None.
             custom_action (str, optional):
                 Here we can have custom actions like "Approve" or "Reject".
                 If "custom_action" is not None then the "action" parameter is ignored.
@@ -19674,6 +20106,8 @@ class OTCS:
             update_process_task_body_put_data = {
                 "action": action,
             }
+            if action in ["Delegate", "Review"]:
+                update_process_task_body_put_data["assignee"] = str(assignee)
             if action == "formUpdate":
                 update_process_task_body_put_data["values"] = values
             self.logger.debug(

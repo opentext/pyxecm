@@ -52,7 +52,7 @@ REQUEST_UPLOAD_HEADERS = {
 
 REQUEST_TIMEOUT = 60.0
 REQUEST_RETRY_DELAY = 20.0
-REQUEST_MAX_RETRIES = 2
+REQUEST_MAX_RETRIES = 3
 
 default_logger = logging.getLogger(MODULE_NAME)
 
@@ -386,6 +386,13 @@ class OTKD:
                     self.logger.info("Session has expired - try to re-authenticate...")
                     self.authenticate(revalidate=True)
                     retries += 1
+                elif response.status_code == 503 and retries <= REQUEST_MAX_RETRIES:
+                    retries += 1
+                    self.logger.warning(
+                        "Service is unavailable (HTTP response 503). Nifi service may not be ready yet. Retrying in %s seconds...",
+                        str(REQUEST_RETRY_DELAY * retries),
+                    )
+                    time.sleep(REQUEST_RETRY_DELAY * retries)  # Add a delay before retrying
                 else:
                     if show_error:
                         self.logger.error(

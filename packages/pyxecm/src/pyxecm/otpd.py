@@ -485,14 +485,24 @@ class OTPD:
                 self.authenticate(revalidate=True)
                 retries += 1
             else:
-                self.logger.error(
-                    "Failed to update PowerDocs setting -> '%s' with value -> '%s'%s; error -> %s",
+                # It may be that the PowerDocs tenant is not created yet in the setup process -
+                # then some settings cannot be applied yet. So we add some retry logic here to
+                # get around temporary issues.
+                message = "Failed to update PowerDocs setting -> '{}' with value -> '{}'{}; error -> {}".format(
                     setting_name,
                     setting_value,
-                    " (tenant -> '%s')" if tenant_name else "",
+                    " (tenant -> '{}')".format(tenant_name) if tenant_name else "",
                     response.text,
                 )
-                return None
+                if retries > REQUEST_MAX_RETRIES:
+                    message += "; maximum retries reached - aborting!"
+                    self.logger.error(message)
+                    return None
+                else:
+                    message += "; retrying..."
+                    self.logger.warning(message)
+                    retries += 1
+                    time.sleep(REQUEST_RETRY_DELAY * retries)  # Add a delay before retrying
 
     # end method definition
 

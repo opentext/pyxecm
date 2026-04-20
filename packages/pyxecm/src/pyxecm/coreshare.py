@@ -410,7 +410,7 @@ class CoreShare:
                             content_type=headers.get("Content-Type", None),
                         )
                     else:
-                        self.logger.warning(
+                        self.logger.info(
                             "Admin session has expired - try to re-authenticate...",
                         )
                         self.authenticate_admin(revalidate=True)

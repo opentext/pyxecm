@@ -1475,7 +1475,7 @@ class K8s:
         # ------------------------------------------------------------------
 
         if replicas < 2:
-            self.logger.warning(
+            self.logger.info(
                 "Stateful set -> '%s' has only %s replica(s). Proceeding with restart in downtime-allowed mode.",
                 sts_name,
                 replicas,

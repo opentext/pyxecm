@@ -2229,7 +2229,7 @@ class Payload:
                 The workspace Node ID.
 
         Side Effects:
-            The workspace items are modified by adding an "nodeId" dict element that
+            The workspace items are modified by adding an "node_id" dict element that
             includes the node ID of the workspace in Content Server. If the workspace
             name got updated based on the lookup via business object information the
             "name" dict element is updated as well. This is because the actual name of
@@ -2237,8 +2237,8 @@ class Payload:
 
         """
 
-        if "nodeId" in workspace:
-            return workspace["nodeId"]
+        if "node_id" in workspace:
+            return workspace["node_id"]
 
         # 1. First we try to lookup the workspace via type and name - this is the most reliable way
         # as the workspace name is defined in the payload in most cases match the actual workspace name in OTCS:
@@ -2251,8 +2251,8 @@ class Payload:
             if not isinstance(workspace_id, int):
                 self.logger.warning("Converting workspace ID -> %s to integer...", str(workspace_id))
                 workspace_id = int(workspace_id)
-            # Write nodeID back into the payload
-            workspace["nodeId"] = workspace_id
+            # Write node_id back into the payload
+            workspace["node_id"] = workspace_id
             return workspace_id
 
         # 2. We fallback to nickname lookup if type + name did not
@@ -2263,7 +2263,7 @@ class Payload:
             workspace_id = self._otcs.get_result_value(response=response, key="id")
             if workspace_id:
                 workspace_id = int(workspace_id)
-                workspace["nodeId"] = workspace_id
+                workspace["node_id"] = workspace_id
                 return workspace_id
 
         # 3. If we have not found the workspace yet but there are business objects specified we try to
@@ -2281,7 +2281,7 @@ class Payload:
                 workspace_name = self._otcs.get_result_value(response=response, key="name")
                 if workspace_id:
                     workspace_id = int(workspace_id)
-                    workspace["nodeId"] = workspace_id
+                    workspace["node_id"] = workspace_id
                     # If the lookup via business object is successful we also write back the workspace name
                     # into the payload as the actual name of the workspace might differ from the name specified
                     # in the payload based on the workspace type naming definition:
@@ -8014,8 +8014,8 @@ class Payload:
                 )
                 folder_id = self._otcs.get_result_value(response=folder, key="id")
             if not folder_id:
-                self.logger.warning(
-                    "Group -> '%s' has no folder associated. Cannot configure SharePoint site. Skipping...",
+                self.logger.info(
+                    "Group -> '%s' has no folder associated. Skipping configuration of SharePoint site...",
                     group_name,
                 )
                 continue
@@ -8796,7 +8796,8 @@ class Payload:
                 "Test if external system -> '%s' does already exist...",
                 system_name,
             )
-            if self._otcs.get_external_system_connection(connection_name=system_name):
+            response = self._otcs.get_external_system_connection(connection_name=system_name)
+            if response and response.get("results"):
                 self.logger.info(
                     "External system connection -> '%s' already exists.",
                     system_name,
@@ -12202,7 +12203,8 @@ class Payload:
             # If the external system is not in the current payload but in the system
             # we try to avoid errors in the following code.
             # TODO: review REST APIs in OTCS 26.1 version to see if we can improve this.
-            if not external_system and self._otcs.get_external_system_connection(connection_name=ext_system_id):
+            response = self._otcs.get_external_system_connection(connection_name=ext_system_id)
+            if not external_system and response and response.get("results"):
                 # As the REST API for reading external system data is pretty much limited
                 # we try to do the bare minimum here:
                 if "Guidewire" in business_object_data["external_system"]:
@@ -12391,7 +12393,7 @@ class Payload:
         )
         # Check if workspace does already exist
         # In case the workspace exists, determine_workspace_id()
-        # also stores the node ID into workspace["nodeId"] and
+        # also stores the node ID into workspace["node_id"] and
         # and the real workspace name into workspace["real_name"]
         # in case the name in payload is different from the real name
         # in the system (e.g. with nickname or business object lookup):
@@ -12681,7 +12683,7 @@ class Payload:
                         type_name,
                         workspace_id,
                     )
-                    workspace["nodeId"] = workspace_id
+                    workspace["node_id"] = workspace_id
                 else:
                     self.logger.error(
                         "Failed to create workspace -> '%s' of type -> '%s'!",
@@ -12692,18 +12694,18 @@ class Payload:
             # Now we add the node ID of the new workspace to the payload data structure
             # This will be reused when creating the workspace relationships!
             elif not ibo_workspace_id:
-                workspace["nodeId"] = self._otcs.get_result_value(
+                workspace["node_id"] = self._otcs.get_result_value(
                     response=response,
                     key="id",
                 )
-                workspace_id = workspace["nodeId"]
-                ibo_workspace_id = workspace["nodeId"]
+                workspace_id = workspace["node_id"]
+                ibo_workspace_id = workspace["node_id"]
 
                 # We also get the name the workspace was finally created with.
                 # This can be different form the name in the payload as additional
                 # naming conventions from the Workspace Type definitions may apply.
                 # This is important to make the python container idem-potent.
-                response = self._otcs.get_workspace(node_id=workspace["nodeId"])
+                response = self._otcs.get_workspace(node_id=workspace["node_id"])
                 workspace["name"] = self._otcs.get_result_value(
                     response=response,
                     key="name",
@@ -12715,13 +12717,13 @@ class Payload:
                     "Successfully created workspace with final name -> '%s', type -> '%s', and node ID -> %s.",
                     workspace["name"],
                     type_name,
-                    workspace["nodeId"],
+                    workspace["node_id"],
                 )
         # end for business_object in business_object_list
 
         # if the workspace creation has failed - e.g. error in lookup of business
         # object in external system then we continue with the next workspace:
-        if "nodeId" not in workspace:
+        if "node_id" not in workspace:
             self.logger.error(
                 "Couldn't create the workspace -> '%s'. Skipping to next workspace...",
                 workspace["name"],
@@ -12754,7 +12756,7 @@ class Payload:
 
         """
 
-        workspace_id = workspace.get("nodeId")
+        workspace_id = workspace.get("node_id")
         workspace_name = workspace.get("name")
         if not workspace_id:
             self.logger.error(
@@ -12845,24 +12847,46 @@ class Payload:
                 key="id",
             )
             if rm_class_node_id:
-                response = self._otcs.assign_rm_classification(
-                    node_id=workspace_id,
-                    rm_classification=rm_class_node_id,
-                    apply_to_sub_items=False,
-                )
-                if response is None:
-                    self.logger.error(
-                        "Failed to assign RM classification -> '%s' (%s) to workspace -> '%s'!",
-                        workspace["rm_classification_path"][-1],
+                # Check if the desired RM classification is already assigned.
+                # The response of get_node_records_details() is a flat dict
+                # (not wrapped in "results") with "data" being a list and
+                # "rm_metadataToken" at the top level:
+                existing_rm = self._otcs.get_node_records_details(node_id=workspace_id)
+                existing_rm_class_id = None
+                metadata_token = None
+                if existing_rm and isinstance(existing_rm, dict):
+                    rm_data = existing_rm.get("data")
+                    if rm_data and isinstance(rm_data, list):
+                        existing_rm_class_id = rm_data[0].get("rmclassification_id")
+                    metadata_token = existing_rm.get("rm_metadataToken")
+                if existing_rm_class_id and int(existing_rm_class_id) == int(rm_class_node_id):
+                    self.logger.info(
+                        "RM Classification -> '%s' (%s) is already assigned to workspace -> '%s' (%s). Skipping...",
+                        str(workspace["rm_classification_path"][-1]),
                         rm_class_node_id,
                         workspace_name,
+                        workspace_id,
                     )
                 else:
-                    self.logger.info(
-                        "Assigned RM Classification -> '%s' to workspace -> '%s'.",
-                        workspace["rm_classification_path"][-1],
-                        workspace_name,
+                    response = self._otcs.assign_rm_classification(
+                        node_id=workspace_id,
+                        rm_classification=rm_class_node_id,
+                        apply_to_sub_items=False,
+                        metadata_token=metadata_token if existing_rm_class_id else None,
                     )
+                    if response is None:
+                        self.logger.error(
+                            "Failed to assign RM classification -> '%s' (%s) to workspace -> '%s'!",
+                            workspace["rm_classification_path"][-1],
+                            rm_class_node_id,
+                            workspace_name,
+                        )
+                    else:
+                        self.logger.info(
+                            "Assigned RM Classification -> '%s' to workspace -> '%s'.",
+                            workspace["rm_classification_path"][-1],
+                            workspace_name,
+                        )
             # end if rm_class_node_id
         # end if "rm_classification_path" in workspace and workspace["rm_classification_path"] != []
 
@@ -12879,23 +12903,38 @@ class Payload:
                     key="id",
                 )
                 if class_node_id:
-                    response = self._otcs.assign_classifications(
-                        node_id=workspace_id,
-                        classifications=[class_node_id],
-                        apply_to_sub_items=False,
-                    )
-                    if response is None:
-                        self.logger.error(
-                            "Failed to assign classification -> '%s' to workspace -> '%s'!",
+                    # Check if the classification is already assigned to the workspace:
+                    existing_classifications = self._otcs.get_node_classifications(node_id=workspace_id)
+                    existing_class_ids = []
+                    if existing_classifications and isinstance(existing_classifications.get("data"), list):
+                        existing_class_ids = [int(c["id"]) for c in existing_classifications["data"] if "id" in c]
+
+                    if int(class_node_id) in existing_class_ids:
+                        self.logger.info(
+                            "Classification -> '%s' (%s) is already assigned to workspace -> '%s' (%s). Skipping...",
+                            classification_path[-1],
                             class_node_id,
                             workspace_name,
+                            workspace_id,
                         )
                     else:
-                        self.logger.info(
-                            "Successfully assigned Classification -> '%s' to workspace -> '%s'.",
-                            classification_path[-1],
-                            workspace_name,
+                        response = self._otcs.assign_classifications(
+                            node_id=workspace_id,
+                            classifications=[class_node_id],
+                            apply_to_sub_items=False,
                         )
+                        if response is None:
+                            self.logger.error(
+                                "Failed to assign classification -> '%s' to workspace -> '%s'!",
+                                class_node_id,
+                                workspace_name,
+                            )
+                        else:
+                            self.logger.info(
+                                "Successfully assigned Classification -> '%s' to workspace -> '%s'.",
+                                classification_path[-1],
+                                workspace_name,
+                            )
                 # end if class_node_id
             # end for classification_path in workspace["classification_pathes"]
         # end if "classification_pathes" in workspace and workspace["classification_pathes"] != []
@@ -12961,7 +13000,7 @@ class Payload:
                 self.logger.exception("Failed process workspace -> %s", workspace)
                 success = False
             # We need to make sure the row (and the whole data frame)
-            # gets these updates back (and adds new columns such as "nodeId"):
+            # gets these updates back (and adds new columns such as "node_id"):
             for key, value in workspace.items():
                 row[key] = value  # This will update existing keys and add new ones
             self.logger.debug("Final values of row %s -> %s", str(index), str(row))
@@ -13279,17 +13318,42 @@ class Payload:
                 volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE, path=[]
             )
         target_folder_id = self._otcs.get_result_value(response=target_folder, key="id")
-        response = self._otcs.upload_file_to_parent(
-            parent_id=target_folder_id,
-            file_name=self._otcs.ONTOLOGY_FILE_NAME,
-            file_content=json.dumps(combined_data, indent=2),
-            description=(
-                "This file contains the merged ontology information from the payload for all processed ontologies. "
-                "It is written here for usage of the Knowledge Graph AI tool for OTCM versions <= 26.2"
-            ),
-            replace_existing=True,
-            mime_type="application/json",
+
+        ontology_content = json.dumps(combined_data, indent=2)
+        ontology_description = (
+            "This file contains the merged ontology information from the payload for all processed ontologies. "
+            "It is written here for usage of the Knowledge Graph AI tool for OTCM versions <= 26.2"
         )
+
+        # Check if the ontology file already exists in the target folder.
+        # If so, add a new version instead of uploading a new file:
+        response = self._otcs.get_node_by_parent_and_name(
+            parent_id=int(target_folder_id),
+            name=self._otcs.ONTOLOGY_FILE_NAME,
+            show_error=False,
+        )
+        existing_document_id = self._otcs.get_result_value(response=response, key="id")
+        if existing_document_id:
+            self.logger.info(
+                "Ontology file -> '%s' (%s) already exists. Adding a new version...",
+                self._otcs.ONTOLOGY_FILE_NAME,
+                existing_document_id,
+            )
+            response = self._otcs.add_document_version(
+                node_id=int(existing_document_id),
+                file_name=self._otcs.ONTOLOGY_FILE_NAME,
+                file_content=ontology_content,
+                mime_type="application/json",
+                description="Updated merged ontology information",
+            )
+        else:
+            response = self._otcs.upload_file_to_parent(
+                parent_id=target_folder_id,
+                file_name=self._otcs.ONTOLOGY_FILE_NAME,
+                file_content=ontology_content,
+                description=ontology_description,
+                mime_type="application/json",
+            )
         if not response:
             self.logger.error("Failed to upload the merged ontology information file to Content Server!")
         else:
@@ -13352,7 +13416,7 @@ class Payload:
                 True, if payload has been processed without errors, False otherwise.
 
         Side Effects:
-            Set workspace["nodeId"] to the node ID of the created workspace and update
+            Set workspace["node_id"] to the node ID of the created workspace and update
             the workspace["name"] to the final name of the workspaces (which may be different
             from the ones in the payload depending on workspace type configutrations)
 
@@ -13372,7 +13436,7 @@ class Payload:
             # This is important in case of restart / rerun of customizer pod
             # as this data structure is used later on for workspace relationship
             # processing (and other) and the workspaces dictionaries have been
-            # updated with "nodeId" and "name" (the final names of the workspaces
+            # updated with "node_id" and "name" (the final names of the workspaces
             # that can be different from the names in the payload)
             self.logger.info(
                 "Re-Initialize workspace list from status file -> '%s' to have final names and node IDs...",
@@ -13392,8 +13456,8 @@ class Payload:
 
             df = Data(self._workspaces, logger=self.logger)
 
-            # Add empty column for "nodeId" so that the worker threads can properly fill it:
-            df.get_data_frame()["nodeId"] = None
+            # Add empty column for "node_id" so that the worker threads can properly fill it:
+            df.get_data_frame()["node_id"] = None
 
             self.logger.info(
                 "Created a data frame with -> %d rows from the workspaces list with -> %d elements.",
@@ -13431,11 +13495,11 @@ class Payload:
 
             # As we have basically created a copy of self._workspaces into the Pandas
             # data frame (see df = Data(...) above) and the workspace processing
-            # updates the workspaces data with "nodeID" and the final
+            # updates the workspaces data with "node_id" and the final
             # workspace names, we need to write the Pandas Data frame
             # back into the self._workspaces data structure for further processing
             # e.g. in the process_workspace_relationships. Otherwise the
-            # changes to "nodeId" or "name" would be lost. We need to do it
+            # changes to "node_id" or "name" would be lost. We need to do it
             # in 2 steps as we want to avoid to have NaN values in the resulting dicts:
             # Merge all partition updates back into the main DataFrame first.
             # Worker threads update their partition DataFrames; those updates are
@@ -13449,7 +13513,6 @@ class Payload:
             # 2. Remove any dictionary item that has a "NaN" scalar value
             # (pd.notna() only works on scalar values, not on lists!):
             self._workspaces = [
-                #                {k: v for k, v in w.items() if pd.notna(v)} for w in updated_workspaces
                 {
                     key: value
                     for key, value in updated_workspace.items()
@@ -14485,7 +14548,7 @@ class Payload:
                 )
                 continue
 
-            # We cannot just lookup with workspace.get("nodeId") as the customizer
+            # We cannot just lookup with workspace.get("node_id") as the customizer
             # may have been restarted inbetween - so we use our proper determine_workspace_id
             # here...
             workspace_id = self.determine_workspace_id(workspace=workspace)

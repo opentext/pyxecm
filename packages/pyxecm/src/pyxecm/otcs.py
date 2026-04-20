@@ -531,6 +531,7 @@ class OTCS:
         otcs_config["docGenUrl"] = otcs_url + "?func=xecmpfdocgen"
         otcs_config["facetsUrl"] = otcs_rest_url + "/v2/facets"
         otcs_config["facetBrowseUrl"] = otcs_rest_url + "/v3/app/container"
+        otcs_config["transformUrlv1"] = otcs_rest_url + "/v1/viewx/transform"
 
         self._config = otcs_config
         self._otcs_ticket = None  # will be set by authenticate()
@@ -1270,6 +1271,12 @@ class OTCS:
                         # valid JSON. So parse_request_response() may raise an ConnectionError exception that
                         # is handled in the exception block below (with waiting for readiness and retry logic)
                         parsed_response = self.parse_request_response(response_object=response)
+                        if parsed_response is None:
+                            retries += 1
+                            if retries > max_retries and not retry_forever:
+                                return None
+                            time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                            continue
                         return parsed_response
                     else:
                         return response
@@ -8412,14 +8419,14 @@ class OTCS:
             data={"body": json.dumps(upload_post_data)},
             files=upload_post_files,
             timeout=None,
-            warning_message="Cannot upload file -> '{}' from -> '{}' to parent with ID -> {}".format(
+            warning_message="Cannot upload file -> '{}'{} to parent with ID -> {}".format(
                 file_name,
-                file_url,
+                " from -> '{}' ".format(file_url) if file_url is not None else "",
                 parent_id,
             ),
-            failure_message="Failed to upload file -> '{}' from -> '{}' to parent with ID -> {}".format(
+            failure_message="Failed to upload file -> '{}'{}to parent with ID -> {}".format(
                 file_name,
-                file_url,
+                " from -> '{}' ".format(file_url) if file_url is not None else "",
                 parent_id,
             ),
             show_error=show_error,
@@ -9735,16 +9742,85 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_external_system_connection")
+    def get_external_system_connections(
+        self,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get all external system connections.
+
+        NOTE: This method only delivers all details of an external system connection with OTCM 26.1 and newer.
+
+        Args:
+            show_error (bool, optional):
+                If True, treat as error if no connections are found.
+
+        Returns:
+            list[dict] | None:
+                A list of external system connection details or None if the REST call fails.
+
+        Example:
+        {
+            'links': {
+                'data': {...}
+            },
+            'results': [
+                {
+                    'asurl': 'https://cc-ideatemstr-saextmdev.saextm.zeta1-andromeda.guidewire.net',
+                    'asurl_v4': '',
+                    'auth_method': 'BASIC',
+                    'baseurl': 'https://cc-ideatemstr-saextmdev.saextm.zeta1-andromeda.guidewire.net',
+                    'client_id': '',
+                    'conn_type': 'GWInstance',
+                    'enabled': 1,
+                    'extsystem_node_id': 22634,
+                    'id_extsystem': 'Guidewire Claim Center',
+                    'multilinguals': {'en': 'Guidewire Claim Center connection'},
+                    'OAUTH_REQUEST_TYPE': 'BASIC',
+                    'OAUTH_SCOPE': '',
+                    'SAP_CLIENT': '',
+                    'schema_version': 1,
+                    'system_comment': '',
+                    'token_endpoint': '',
+                    'username': 'su'
+                },
+                ...
+            ]
+        }
+
+        """
+
+        # We use the same method as for getting a specific connection but without
+        # providing a connection name or type to retrieve all connections:
+        return self.get_external_system_connection(connection_name=None, connection_types=None, show_error=show_error)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_external_system_connection")
     def get_external_system_connection(
         self,
-        connection_name: str,
+        connection_name: str | list | None = None,
+        connection_types: str | list | None = None,
         show_error: bool = False,
     ) -> dict | None:
         """Get external system connection (e.g. SAP, Salesforce, SuccessFactors).
 
+        This method supports the legacy (pre 26.1 "/externalsystems/<name>/config" endpoint) and the new
+        (26.1 and newer "/externalsystems" endpoint) way of retrieving external system connections.
+
         Args:
             connection_name (str):
                 The name of the connection to an external system.
+            connection_types (str | list | None, optional):
+                The type of the connection. If None (default) then connections of all types are returned.
+                Supported type names:
+                * "Business Scenario Sample",
+                * "GWInstance",
+                * "HTTP",
+                * "ot.sap.c4c.SpiAdapter",
+                * "ot.sap.c4c.SpiAdapterV2",
+                * "ot.sap.S4HANAAdapter",
+                * "SF",
+                * "SFInstance"
             show_error (bool, optional):
                 If True, treat as error if connection is not found.
 
@@ -9752,15 +9828,122 @@ class OTCS:
             dict | None:
                 External system Details or None if the REST call fails.
 
+        Example (for 26.1 or newer):
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/externalsystems?where_conntype={GWInstance,HTTP,ot.sap.c4c.SpiAdapter,ot.sap.c4c.SpiAdapterV2,ot.sap.S4HANAAdapter,SF,SFInstance}',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': [
+                {
+                    'asurl': 'https://testsap.com:8443/sap/bc/srt/xip/otx/ecmlinkservice/600/ecmlinkspiservice/basicauthbinding',
+                    'asurl_v4': '',
+                    'auth_method': 'BASIC',
+                    'baseurl': 'https://testsap.com:8443',
+                    'client_id': '',
+                    'conn_type': 'HTTP',
+                    'enabled': 1,
+                    'extsystem_node_id': 22632,
+                    'id_extsystem': 'TE1',
+                    'multilinguals': {'en': 'SAP S/4HANA'},
+                    'OAUTH_REQUEST_TYPE': 'BASIC',
+                    'OAUTH_SCOPE': '',
+                    'SAP_CLIENT': '',
+                    'schema_version': 1,
+                    'system_comment': '',
+                    'token_endpoint': '',
+                    'username': 'adminton'
+                },
+                {
+                    'asurl': 'https://test.successfactors.eu/odata/v2/',
+                    'asurl_v4': '',
+                    'auth_method': 'OAUTH',
+                    'baseurl': 'https://test.successfactors.eu/',
+                    'client_id': 'ZYY1ZjJlN2Y3Nj...',
+                    'conn_type': 'SFInstance',
+                    'enabled': 1,
+                    'extsystem_node_id': 22633,
+                    'id_extsystem': 'SuccessFactors',
+                    'multilinguals': {'en': 'SAP SuccessFactors'},
+                    'OAUTH_REQUEST_TYPE': 'BASIC',
+                    'OAUTH_SCOPE': '',
+                    'SAP_CLIENT': '',
+                    'schema_version': 1,
+                    'system_comment': '',
+                    'token_endpoint': '',
+                    'username': 'sfadmin@SFSALES009548'
+                }
+            ]
+        }
+
         """
-        # Encode special characters in connection_name
-        connection_name = connection_name.replace("\\", "0xF0A6").replace("/", "0xF0A7")
-        request_url = self.config()["externalSystemUrl"] + "/" + connection_name + "/config"
+
         request_header = self.cookie()
+        request_url = self.config()["externalSystemUrl"]
+
+        query = {}
+
+        # Prior to version 26.1 the retrieval of external systems via REST was
+        # severely limited. There was only the /config endpoint that did not
+        # really return the definition of the external system connection.
+        # So we need to differentiate a few cases here...
+        if float(self.get_server_version()) < 26.1 and connection_name is not None:
+            # Encode special characters in connection_name
+            if isinstance(connection_name, list):
+                connection_name = connection_name[
+                    0
+                ]  # if a list is provided we just take the first element for backward compatibility
+            connection_name = connection_name.replace("\\", "0xF0A6").replace("/", "0xF0A7")
+            request_url += "/" + connection_name + "/config"
+
+            self.logger.debug(
+                "Get external system connection -> '%s' (pre 26.1); calling -> %s",
+                connection_name,
+                request_url,
+            )
+        elif float(self.get_server_version()) >= 26.1 and connection_name is not None:
+            if isinstance(connection_name, str):
+                connection_name = [connection_name]
+            query["where_name"] = "{" + ",".join(connection_name) + "}"
+        elif float(self.get_server_version()) < 26.1:
+            self.logger.error("Connection name must be provided to retrieve a specific external system connection.")
+
+        if float(self.get_server_version()) >= 26.1:
+            # If neither connection types nor connection name is provided we return all
+            # connections of the supported types. If connection types are provided we
+            # filter for these, if connection name is provided we filter for the name(s)
+            # regardless of the type.
+            if connection_types is None and connection_name is None:
+                connection_types = [
+                    "GWInstance",
+                    "HTTP",
+                    "ot.sap.c4c.SpiAdapter",
+                    "ot.sap.c4c.SpiAdapterV2",
+                    "ot.sap.S4HANAAdapter",
+                    "SF",
+                    "SFInstance",
+                    "Business Scenario Sample",
+                ]
+            elif isinstance(connection_types, str):
+                connection_types = [connection_types]
+            if connection_types is not None:
+                query["where_conntype"] = "{" + ",".join(connection_types) + "}"
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+        request_url += "?" + encoded_query if encoded_query else ""
 
         self.logger.debug(
-            "Get external system connection -> '%s'; calling -> %s",
-            connection_name,
+            "Get external system connections %s%s%s; calling -> %s",
+            "with name(s) -> " + str(connection_name) if connection_name else "",
+            " and " if connection_name and connection_types else "",
+            "type(s) -> " + str(connection_types) if connection_types else "",
             request_url,
         )
 
@@ -10484,7 +10667,7 @@ class OTCS:
                 )
                 modified = True
             else:
-                self.logger.warning(
+                self.logger.info(
                     "Replacement -> %s not found in transport package -> '%s'!",
                     replacement,
                     zip_file_folder,
@@ -12023,22 +12206,25 @@ class OTCS:
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
-                Possible fields include:
-                - "properties" (can be further restricted by specifying sub-fields,
-                  e.g., "properties{id,name,parent_id,description}")
-                - "categories"
-                - "versions" (can be further restricted by specifying ".element(0)" to
-                  retrieve only the latest version)
-                - "permissions" (can be further restricted by specifying ".limit(5)" to
-                  retrieve only the first 5 permissions)
+                NOTE: For this REST API only "properties" is possible. But it can be further restricted
+                by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
                 about the data.
-                Metadata will be returned under `results.metadata`, `metadata_map`,
-                or `metadata_order`.
+                Metadata will be returned under `response.meta_data.properties` and `response.meta_data_order`.
+                NOTE: this metadata is not compatible with the metadata returned by the get_workspace() method!
+                The format is optimized for the expanded workspace widget on landing pages in SmartView.
+                Format is like this:
+                'name' = {
+                    'align': 'left',
+                    'name': 'Name',
+                    'persona': '',
+                    'sort': True,
+                    'type': -1, 'width_weight': 100
+                }
 
         Returns:
             dict | None:
@@ -12251,23 +12437,25 @@ class OTCS:
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
-                Possible fields include:
-                - "properties" (can be further restricted by specifying sub-fields,
-                  e.g., "properties{id,name,parent_id,description}")
-                - "categories"
-                - "versions" (can be further restricted by specifying ".element(0)" to
-                  retrieve only the latest version)
-                - "permissions" (can be further restricted by specifying ".limit(5)" to
-                  retrieve only the first 5 permissions)
+                NOTE: For this REST API only "properties" is possible. But it can be further restricted
+                by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
                 about the data.
-                Metadata will be returned under `results.metadata`, `metadata_map`,
-                or `metadata_order`.
-                This is NOT categories & attributes!
+                Metadata will be returned under `response.meta_data.properties` and `response.meta_data_order`.
+                NOTE: this metadata is not compatible with the metadata returned by the get_workspace() method!
+                The format is optimized for the expanded workspace widget on landing pages in SmartView.
+                Format is like this:
+                'name' = {
+                    'align': 'left',
+                    'name': 'Name',
+                    'persona': '',
+                    'sort': True,
+                    'type': -1, 'width_weight': 100
+                }
             timeout (float, optional):
                 Specific timeout for the request in seconds. The default is the standard
                 timeout value REQUEST_TIMEOUT used by the OTCS module.
@@ -12332,6 +12520,11 @@ class OTCS:
                                 ...
                                 'wnf_wksp_type_id': 16,
                                 'wnf_wksp_template_id': 28168
+                                'size_formatted': '15 Items',
+                                'type_name': 'Business Workspace',
+                                'container': True,
+                                'size': 15,
+                                ...
                             }
                         }
                     },
@@ -12381,7 +12574,7 @@ class OTCS:
             query["limit"] = limit
         if fields:
             query["fields"] = fields
-            query["action"] = "properties-"
+            query["action"] = "properties-"  # this is important - otherwise the REST API just deliveres all fields!
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
 
@@ -12713,7 +12906,7 @@ class OTCS:
         self,
         node_id: int,
     ) -> list | None:
-        """Get a workspace rewferences to business objects in external systems.
+        """Get a workspace references to business objects in external systems.
 
         Args:
             node_id (int):
@@ -15953,13 +16146,13 @@ class OTCS:
         Example:
             ```json
             {
-                'Status': {'id': '16892_25', 'type': 'String'},
-                'Customer Number': {'id': '16892_28', 'type': 'String'},
+                'Status': {'id': '16892_25', 'type': 'String', 'description': 'Customer status'},
+                'Customer Number': {'id': '16892_28', 'type': 'String', 'description': 'Internal reference number from customer DB'},
                 'Name': {'id': '16892_29', 'type': 'String'},
                 'Street': {'id': '16892_30', 'type': 'String'},
                 'Country': {'id': '16892_31', 'type': 'String'},
                 'Postal code': {'id': '16892_32', 'type': 'String'},
-                'Sales organisation': {'id': '16892_33', 'type': 'String'},
+                'Sales organisation': {'id': '16892_33', 'type': 'String', 'description': 'Internal sales organsation that responses to requests from this customer'},
                 'City': {'id': '16892_34', 'type': 'String'},
                 'Industry': {'id': '16892_37', 'type': 'String'},
                 'Object Key': {'id': '16892_38', 'type': 'String'},
@@ -16033,6 +16226,8 @@ class OTCS:
                 # Attribute types can be "String", "Date", ...
                 # For the set attribute the type_name is "Assoc"
                 att_type = category["metadata"]["categories"][att_id]["type_name"]
+                # Attribute Description as entered by the Category designer
+                att_description = category["metadata"]["categories"][att_id].get("description", "")
                 # Persona can be either "set" or "categoryattribute".
                 # If the persona is "set" we store the set information:
                 if att_persona == "set":
@@ -16052,12 +16247,14 @@ class OTCS:
                     attribute_definitions[set_name + ":" + att_name] = {
                         "id": att_id,
                         "type": att_type,
+                        "description": att_description,
                         "set_id": set_id,
                     }
                 else:
                     attribute_definitions[att_name] = {
                         "id": att_id,
                         "type": att_type,
+                        "description": att_description,
                     }
                     # As also the set attribute itself does not have an "_x_"
                     # we need to avoid resetting the set information right
@@ -17519,45 +17716,6 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="register_workspace_template")
-    def register_workspace_template(self, node_id: int) -> dict | None:
-        """Register a workspace template as project template for Extended ECM for Engineering.
-
-        Args:
-            node_id (int):
-                The node ID of the Business Workspace template.
-
-        Returns:
-            dict | None:
-                Response of request or None if the registration of the workspace template has failed.
-
-        """
-
-        registration_post_data = {"ids": "{{ {} }}".format(node_id)}
-
-        request_url = self.config()["xEngProjectTemplateUrl"]
-
-        request_header = self.request_form_header()
-
-        self.logger.debug(
-            "Register workspace template with ID -> %d for Extended ECM for Engineering; calling -> %s",
-            node_id,
-            request_url,
-        )
-
-        return self.do_request(
-            url=request_url,
-            method="POST",
-            headers=request_header,
-            data=registration_post_data,
-            timeout=None,
-            failure_message="Failed to register Workspace Template with ID -> {} for Extended ECM for Engineering".format(
-                node_id,
-            ),
-        )
-
-    # end method definition
-
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_records_management_rsis")
     def get_records_management_rsis(self, limit: int = 100) -> list | None:
         """Get all Records management RSIs together with their RSI Schedules.
@@ -18621,6 +18779,90 @@ class OTCS:
             dict | None:
                 REST response or None if the REST call fails.
 
+        Example:
+        {
+            'canBeUnclassified': True,
+            'canFinalize': True,
+            'canRemoveClass': True,
+            'canRMClassify': True,
+            'classVolumeID': 2164,
+            'data': [
+                {
+                    'inherited_rmclassification_id': None,
+                    'default_rmclassification_id': None,
+                    'multiple_classifications': [...],
+                    'rmclassification_id': 41320,
+                    'file_number': '008-7-1-4-1-2',
+                    'rsi': None,
+                    'record_date': '2026-04-16T00:00:00',
+                    'file_status': 'ACTIVE',
+                    'status_date': '2026-04-16T00:00:00',
+                    'received_date': None,
+                    'essential': 'NR',
+                    'cycle_period': None,
+                    'last_review_date': None,
+                    'next_review_date': None,
+                    'official': False,
+                    'storage': 'EL',
+                    'accession': None,
+                    'subject': None,
+                    'originator': None,
+                }
+            ],
+            'definitions': {
+                'accession': {...},
+                'addressee': {...},
+                'class_selectable': {...},
+                'cycle_period': {...},
+                'default_rmclassification_id': {...},
+                'essential': {...},
+                'establishment': {...},
+                'extradata': {...},
+                'file_number': {...},
+                'file_status': {...},
+                'inherit_from': {...},
+                'inherited_rmclassification_id': {...},
+                'is_primary': {...},
+                'last_review_date': {...},
+                'management_type': {...},
+                'multiple_classifications': {...},
+                'name': {...},
+                'next_review_date': {...},
+                'official': {...},
+                ...
+            },
+            'fields_order': ['inherited_rmclassification_id', 'default_rmclassification_id', 'multiple_classifications', 'rmclassification_id', 'file_number', 'rsi', 'record_date', 'file_status', 'status_date', 'received_date', 'essential', 'cycle_period', 'last_review_date', 'next_review_date', 'official', 'storage', 'accession', 'subject', 'originator', ...],
+            'fields_to_show': {
+                'accession': {...},
+                'addressee': {...},
+                'cycle_period': {...},
+                'essential': {...},
+                'establishment': {...},
+                'file_status': {...},
+                'last_review_date': {...},
+                'next_review_date': {...},
+                'official': {...},
+                'originator': {...},
+                'received_date': {...},
+                'record_date': {...},
+                'record_officer_id': {...},
+                'records_manager_id': {...},
+                'rsi': {...},
+                'sent_to': {...},
+                'status_date': {...},
+                'storage': {...},
+                'subject': {...}
+            },
+            'haveFAtoClassify': True,
+            'inherit_from': False,
+            'inheritanceMetadataUpdate': {'essential': True, 'file_status': True, 'official': True, 'reclassify_rsi': True, 'rsi': True, 'status_date': True, 'storage': True},
+            'multiClass': True,
+            'rm_metadataToken': '37c48414c7f729e80c7c73afaa34cccb',
+            'showTab': True,
+            'updateRSIWithRecordType': 0,
+            'vitalRecordCodes': []
+        }
+
         """
 
         request_url = self.config()["nodesUrl"] + "/{}/rmclassifications".format(node_id)
@@ -18925,6 +19167,299 @@ class OTCS:
         )
 
     # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="create_viewx_transform")
+    def create_viewx_transform(self, transform: dict) -> dict | None:
+        """Create and queue a viewx Transformation (POST /v1/viewx/transform).
+
+        Args:
+            transform (dict): The viewx_Transform object (nodes, transformOptions, outputOptions, etc).
+            nodes
+                Array of node objects
+                Example:
+                    ```json
+                    "nodes": [
+                        {
+                        "applyocr": true,
+                        "id": 0,
+                        "markup": true,
+                        "order": 0,
+                        "pageList": "1,3,5-6",
+                        "vernum": 0,
+                        "vertype": "string",
+                        "extended_data": {}
+                        }
+                    ```
+
+            transformOptions
+                Object containing transformation options. Most transformationOptions properties correspond to Viewing & Transformation features found at https://developer.opentext.com/services/products/viewing-transformation-services/documentation/transformation-service/3
+
+                The schema for any feature supported by Transformation can be retrieved using HTTP GET request to the Configuration Service using a query on the feature name and version.
+
+                For example, URL: https://configservice.dev.bp-paas.otxlab.net/api/v1/config/api/v1/features?name=<feature-name>&version=<feature-version>"
+
+                example:
+                    ```json
+                        "transformOptions": {
+                        "isoConformance": "none",
+                        "banner": {
+                        "BottomCenter": {
+                            "font": "Arial",
+                            "size": 14,
+                            "text": "Bottom Center Banner Text"
+                        }, },
+                        "colorConversion": "string",
+                        "includeLayers": "string",
+                        "markupBurnin": "comment",
+                        "pageSizeName": "string",
+                        "rotateToOrientation": "string",
+                        "useLineWeightForWidth": true,
+                        "useMinimumLineWidth": true,
+                        "bitsPerPixel": "string",
+                        "compressionType": "string",
+                        "dotsPerInch": 0,
+                        "appendedSummary": true,
+                        "appendReasons": true
+                    },
+                    ```
+
+            outputOptions
+                Object containing properties that determine how the output of the transformation is handled.
+
+        Returns:
+            dict | None: API response.
+
+        Example:
+            ```json
+            {
+                "pubs": [
+                    {
+                    "completed": "2026-01-31T14:03:19.859Z",
+                    "errors": [
+                        "string"
+                    ],
+                    "nodes": [
+                        {
+                        "applyocr": true,
+                        "id": 0,
+                        "markup": true,
+                        "order": 0,
+                        "pageList": "1,3,5-6",
+                        "vernum": 0,
+                        "vertype": "string",
+                        "extended_data": {}
+                        }
+                    ],
+                    "outputOptions": {
+                        "destination": "original",
+                        "destinationType": "original",
+                        "destinationFilename": "string",
+                        "destinationNodename": "string",
+                        "destinationNode": 0,
+                        "format": "PDF",
+                        "renditionType": "string",
+                        "splitVersions": true,
+                        "allVersions": true,
+                        "renditionTask": true,
+                        "renditionOptions": {
+                        "srcID": 0,
+                        "deleteSourceFile": true
+                        },
+                        "appendedSummary": true,
+                        "appendReasons": true,
+                        "banner": {
+                        "BottomCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "BottomLeft": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "BottomRight": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "LeftBottom": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "LeftCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "LeftTop": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "RightBottom": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "RightCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "RightTop": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "TopCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "TopLeft": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "TopRight": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "Watermark": {
+                            "bold": true,
+                            "color": "string",
+                            "font": "string",
+                            "italic": true,
+                            "opacity": 0,
+                            "text": "string",
+                            "underline": true
+                        }
+                        },
+                        "bitsPerPixel": "string",
+                        "colorConversion": "string",
+                        "compressionType": "string",
+                        "dotsPerInch": 0,
+                        "includeLayers": "string",
+                        "isoConformance": "string",
+                        "markupBurnin": "string",
+                        "pageSizeName": "string",
+                        "rotateToOrientation": "string",
+                        "saveAsVersion": true,
+                        "useLineWeightForWidth": true,
+                        "useMinimumLineWidth": true
+                    },
+                    "pubID": "string",
+                    "status": "string",
+                    "submitted": "2026-01-31T14:03:19.859Z",
+                    "taskID": 0,
+                    "transformOptions": {
+                        "isoConformance": "string",
+                        "banner": {
+                        "BottomCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "BottomLeft": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "BottomRight": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "LeftBottom": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "LeftCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "LeftTop": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "RightBottom": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "RightCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "RightTop": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "TopCenter": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "TopLeft": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "TopRight": {
+                            "font": "string",
+                            "size": 0,
+                            "text": "string"
+                        },
+                        "Watermark": {
+                            "bold": true,
+                            "color": "string",
+                            "font": "string",
+                            "italic": true,
+                            "opacity": 0,
+                            "text": "string",
+                            "underline": true
+                        }
+                        },
+                        "colorConversion": "string",
+                        "includeLayers": "string",
+                        "markupBurnin": "comment",
+                        "pageSizeName": "string",
+                        "rotateToOrientation": "string",
+                        "useLineWeightForWidth": true,
+                        "useMinimumLineWidth": true,
+                        "bitsPerPixel": "string",
+                        "compressionType": "string",
+                        "dotsPerInch": 0,
+                        "appendedSummary": true,
+                        "appendReasons": true
+                    },
+                    "updated": "2026-01-31T14:03:19.859Z",
+                    "warnings": [
+                        "string"
+                    ]
+                    }
+                ]
+                }
+            ```json
+
+        """
+
+        request_url = self.config()["transformUrlv1"]
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=self.request_form_header(),
+            data={"body": json.dumps(transform)},
+        )
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workflow_definition")
     def get_workflow_definition(self, workflow_id: int) -> dict | None:
@@ -20142,6 +20677,45 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="register_workspace_template")
+    def register_workspace_template(self, node_id: int) -> dict | None:
+        """Register a workspace template as project template for Extended ECM for Engineering.
+
+        Args:
+            node_id (int):
+                The node ID of the Business Workspace template.
+
+        Returns:
+            dict | None:
+                Response of request or None if the registration of the workspace template has failed.
+
+        """
+
+        registration_post_data = {"ids": "{{ {} }}".format(node_id)}
+
+        request_url = self.config()["xEngProjectTemplateUrl"]
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Register workspace template with ID -> %d for Extended ECM for Engineering; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=registration_post_data,
+            timeout=None,
+            failure_message="Failed to register Workspace Template with ID -> {} for Extended ECM for Engineering".format(
+                node_id,
+            ),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="check_workspace_aviator")
     def check_workspace_aviator(
         self,
@@ -21173,6 +21747,7 @@ class OTCS:
         timeout: float = 60.0,
         fields: str | list = "properties",
         metadata: bool = False,
+        business_objects: bool = False,
         **kwargs: dict,
     ) -> dict:
         """Traverse nodes using a queue and thread pool (BFS-style).
@@ -21216,6 +21791,8 @@ class OTCS:
                 The fields to retrieve for each workspace. Default is "properties".
             metadata (bool, optional):
                 Whether to include metadata in the traversal results. Default is False.
+            business_objects (bool, optional):
+                Whether to include business objects information in the traversal results. Default is False.
             kwargs (dict):
                 Additional arguments for executables.
 
@@ -21282,8 +21859,12 @@ class OTCS:
                     )
                     continue
 
+                # We set metadata to false as get_workspace_by_type_and_name()
+                # which is called by get_workspace_instances_iterator() delivers
+                # only metadata for landing page workspace widget which is useless
+                # for traversal and would just slow down the initialization of the queue:
                 workspace_instances = self.get_workspace_instances_iterator(
-                    type_id=wksp_type_id, fields=fields, metadata=metadata
+                    type_id=wksp_type_id, fields=fields, metadata=False
                 )
                 for workspace_instance in workspace_instances:
                     # Add the workspace and the current depth to the queue. Depth is 0 for the initial workspaces:
@@ -21381,6 +21962,7 @@ class OTCS:
                             result_success, result_traverse = executable(
                                 workspace_node=workspace_node,
                                 metadata=metadata,
+                                business_objects=business_objects,
                                 **kwargs,
                             )
                             if result_traverse:

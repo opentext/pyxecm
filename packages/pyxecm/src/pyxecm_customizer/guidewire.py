@@ -296,6 +296,16 @@ class Guidewire:
             method=method, url=url, headers=self.request_header(), data=data, json=json_data, params=params
         )
 
+        if response.status_code == 401:
+            self.logger.warning("Received 401 Unauthorized - attempting reauthentication...")
+            auth_result = self.authenticate()
+            if auth_result:
+                response = self._session.request(
+                    method=method, url=url, headers=self.request_header(), data=data, json=json_data, params=params
+                )
+            else:
+                self.logger.error("Reauthentication failed - returning original 401 response.")
+
         return response.json() if response.content else {}
 
     # end method definition

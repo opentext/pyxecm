@@ -34,11 +34,15 @@ USER_AGENT = (
     f"Python/{PYTHON_VERSION}; {OS_INFO}; {ARCH_INFO}; Requests/{REQUESTS_VERSION})"
 )
 
+REQUEST_TIMEOUT = 60.0
+REQUEST_RETRY_DELAY = 20.0
+REQUEST_MAX_RETRIES = 3
+
 default_logger = logging.getLogger(MODULE_NAME)
 
 
 class Guidewire:
-    """Class Guidewire is used to retrieve and automate stettings and objects in Guidewire."""
+    """Class Guidewire is used to retrieve and automate settings and objects in Guidewire."""
 
     logger: logging.Logger = default_logger
 
@@ -230,10 +234,10 @@ class Guidewire:
             auth_data["scope"] = self._scope
 
         try:
-            response = requests.post(request_url, data=auth_data)
+            response = self._session.post(request_url, data=auth_data, timeout=REQUEST_TIMEOUT)
             if response.status_code == 200:
-                self.token = response.json().get("access_token")
-                return self.token
+                self._access_token = response.json().get("access_token")
+                return self._access_token
             else:
                 self.logger.error("OAuth2 authentication failed: %s - %s", response.status_code, response.text)
         except requests.RequestException as e:
@@ -263,7 +267,7 @@ class Guidewire:
         }
 
         if self.config()["authType"] == "oauth" and self._access_token:
-            request_header["Authorization"] = ("Bearer {}".format(self._access_token),)
+            request_header["Authorization"] = "Bearer {}".format(self._access_token)
 
         return request_header
 
@@ -279,12 +283,12 @@ class Guidewire:
                 The HTTP method to use (GET, POST, PUT, DELETE).
             url (str):
                 The API endpoint to call.
-            data (dict):
-                The request payload (if applicable).
+            data (dict | None, optional):
+                The request payload (if applicable). Defaults to None.
             json_data (dict | None, optional):
                 Request payload for the JSON parameter. Defaults to None.
-            params (dict):
-                The URL parameters (if applicable).
+            params (dict | None, optional):
+                The URL parameters (if applicable). Defaults to None.
 
         Returns:
             dict:
@@ -293,7 +297,13 @@ class Guidewire:
         """
 
         response = self._session.request(
-            method=method, url=url, headers=self.request_header(), data=data, json=json_data, params=params
+            method=method,
+            url=url,
+            headers=self.request_header(),
+            data=data,
+            json=json_data,
+            params=params,
+            timeout=REQUEST_TIMEOUT,
         )
 
         if response.status_code == 401:
@@ -301,7 +311,13 @@ class Guidewire:
             auth_result = self.authenticate()
             if auth_result:
                 response = self._session.request(
-                    method=method, url=url, headers=self.request_header(), data=data, json=json_data, params=params
+                    method=method,
+                    url=url,
+                    headers=self.request_header(),
+                    data=data,
+                    json=json_data,
+                    params=params,
+                    timeout=REQUEST_TIMEOUT,
                 )
             else:
                 self.logger.error("Reauthentication failed - returning original 401 response.")
@@ -321,7 +337,7 @@ class Guidewire:
             filters (list | None, optional):
                 List of filter values. Defaults to None.
             page_size (int, optional):
-                The maximum number of groups to return.
+                The maximum number of groups to return. Defaults to 25.
 
         Returns:
             str | None:
@@ -1058,8 +1074,8 @@ class Guidewire:
                     * cn - contains
                 - "value": the filue to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return.
-            next_page_url (str, optional):
+                The maximum number of groups to return. Defaults to 25.
+            next_page_url (str | None, optional):
                 The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
                 This is used for the iterator get_groups_iterator() below.
 
@@ -1088,7 +1104,7 @@ class Guidewire:
         """Get an iterator object that can be used to traverse all Guidewire accounts.
 
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
-        can iterate over the potential large list of groups.
+        can iterate over the potential large list of accounts.
 
         Example usage:
             accounts = guidewire_object.get_accounts_iterator()
@@ -1366,9 +1382,9 @@ class Guidewire:
                 - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
                 The maximum number of groups to return.
-            next_page_url (str, optional):
+            next_page_url (str | None, optional):
                 The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
-                This is used for the iterator get_groups_iterator() below.
+                This is used for the iterator get_groups_iterator() below. Default is None for the initial call.
 
         Returns:
             dict | None:
@@ -1395,7 +1411,7 @@ class Guidewire:
         """Get an iterator object that can be used to traverse all Guidewire policies.
 
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
-        can iterate over the potential large list of groups.
+        can iterate over the potential large list of policies.
 
         Example usage:
             policies = guidewire_object.get_policies_iterator()
@@ -1605,7 +1621,7 @@ class Guidewire:
         """Get an iterator object that can be used to traverse all Guidewire claims.
 
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
-        can iterate over the potential large list of groups.
+        can iterate over the potential large list of claims.
 
         Example usage:
             claims = guidewire_object.get_claims_iterator()

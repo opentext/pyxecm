@@ -296,7 +296,7 @@ class PayloadList:
 
         for column, value in update_data.items():
             if column in self.payload_items.columns:
-                self.payload_items.loc[index, column] = value
+                self.payload_items.at[index, column] = value  # noqa: PD008 - .loc breaks with non-scalar values (list/dict)
 
         return True
 

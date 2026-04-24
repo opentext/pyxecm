@@ -19681,9 +19681,9 @@ class Payload:
                 continue
             # Wait time is a global setting (for whole browser session)
             # This makes sure a page is fully loaded and elements are present
-            # before accessing them. We set 30.0 seconds as default if not
+            # before accessing them. We set 45.0 seconds as default if not
             # otherwise specified by "wait_time" in the payload.
-            wait_time = float(browser_automation.get("wait_time", 30.0))
+            wait_time = float(browser_automation.get("wait_time", 45.0))
             browser_automation_object.set_timeout(wait_time=wait_time)
             if "wait_time" in browser_automation:
                 self.logger.info(

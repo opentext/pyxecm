@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from ipaddress import ip_address
 from typing import Self
 
 from pydantic import AliasChoices, BaseModel, Field, HttpUrl, SecretStr, model_validator
@@ -11,6 +12,38 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+
+
+def build_http_url(hostname: str, scheme: str = "http", port: str | None = None) -> HttpUrl:
+    """Build an HTTP URL from the given components.
+
+    Args:
+        hostname (str):
+            The hostname or IP address of the server.
+        scheme (str, optional):
+            The URL scheme (http or https). Defaults to "http".
+        port (str | None, optional):
+            The port number. Defaults to None.
+
+    Returns:
+        HttpUrl:
+            The constructed HTTP URL.
+
+    """
+
+    if port is None:
+        port = "80" if scheme == "http" else "443"
+
+    # Try to interpret hostname as an IP; if it is IPv6, wrap in brackets
+    try:
+        addr = ip_address(hostname)
+        host = f"[{hostname}]" if addr.version == 6 else hostname
+    except ValueError:
+        # Not an IP address, treat as regular hostname
+        host = hostname
+
+    url_str = f"{scheme}://{host}:{port}"
+    return HttpUrl(url_str)
 
 
 class CustomizerSettingsOTDS(BaseModel):
@@ -38,8 +71,9 @@ class CustomizerSettingsOTDS(BaseModel):
         """Fallback implementation to read the URL from the environment."""
 
         if not self.url:
-            self.url = HttpUrl(
-                os.environ.get("OTDS_PUBLIC_PROTOCOL", "http") + "://" + os.environ.get("OTDS_PUBLIC_URL", "otds"),
+            self.url = build_http_url(
+                hostname=os.environ.get("OTDS_PUBLIC_URL", "otds"),
+                scheme=os.environ.get("OTDS_PUBLIC_PROTOCOL", "http"),
             )
 
         # Set url_internal to the same value as url if only that one is set
@@ -47,12 +81,10 @@ class CustomizerSettingsOTDS(BaseModel):
             self.url_internal = self.url
 
         if not self.url_internal:
-            self.url_internal = HttpUrl(
-                os.environ.get("OTDS_PUBLIC_PROTOCOL", "http")
-                + "://"
-                + os.environ.get("OTDS_HOSTNAME", "otds")
-                + ":"
-                + os.environ.get("OTDS_SERVICE_PORT", "80"),
+            self.url_internal = build_http_url(
+                hostname=os.environ.get("OTDS_SERVICE_HOST", "otds"),
+                scheme=os.environ.get("OTDS_PUBLIC_PROTOCOL", "http"),
+                port=os.environ.get("OTDS_SERVICE_PORT", "80"),
             )
 
         self.password = SecretStr(os.environ.get("OTDS_PASSWORD")) if self.password is None else self.password
@@ -114,13 +146,12 @@ class CustomizerSettingsOTCS(BaseModel):
         """Fallback implementation to read the URL from the environment."""
 
         if not self.url:
-            self.url = HttpUrl(
-                os.environ.get("OTCS_PUBLIC_PROTOCOL", "https")
-                + "://"
-                + os.environ.get("OTCS_PUBLIC_URL", "otcs.public-url.undefined")
-                + ":"
-                + os.environ.get("OTCS_SERVICE_PORT_OTCS", "8080"),
+            self.url = build_http_url(
+                hostname=os.environ.get("OTCS_PUBLIC_URL", "otcs.public-url.undefined"),
+                scheme=os.environ.get("OTCS_PUBLIC_PROTOCOL", "https"),
+                port=os.environ.get("OTCS_SERVICE_PORT_OTCS", "8080"),
             )
+
         else:
             if not self.url_frontend:
                 self.url_frontend = self.url
@@ -129,19 +160,16 @@ class CustomizerSettingsOTCS(BaseModel):
                 self.url_backend = self.url
 
         if not self.url_frontend:
-            self.url_frontend = HttpUrl(
-                os.environ.get("OTCS_PROTOCOL", "http")
-                + "://"
-                + os.environ.get("OTCS_HOSTNAME_FRONTEND", "otcs-frontend"),
+            self.url_frontend = build_http_url(
+                hostname=os.environ.get("OTCS_HOSTNAME_FRONTEND", "otcs-frontend"),
+                scheme=os.environ.get("OTCS_PROTOCOL", "http"),
             )
 
         if not self.url_backend:
-            self.url_backend = HttpUrl(
-                os.environ.get("OTCS_PROTOCOL", "http")
-                + "://"
-                + os.environ.get("OTCS_HOSTNAME", "otcs-admin-0")
-                + ":"
-                + os.environ.get("OTCS_SERVICE_PORT_OTCS", "8080"),
+            self.url_backend = build_http_url(
+                hostname=os.environ.get("OTCS_HOSTNAME", "otcs-admin-0"),
+                scheme=os.environ.get("OTCS_PROTOCOL", "http"),
+                port=os.environ.get("OTCS_SERVICE_PORT_OTCS", "8080"),
             )
 
         self.password = SecretStr(os.environ.get("OTCS_PASSWORD", "")) if self.password is None else self.password
@@ -171,21 +199,17 @@ class CustomizerSettingsOTAC(BaseModel):
         """Fallback implementation to read the URL from the environment."""
 
         if not self.url:
-            self.url = HttpUrl(
-                os.environ.get("OTAC_PROTOCOL", "https")
-                + "://"
-                + os.environ.get("OTAC_PUBLIC_URL", "otac-0")
-                + ":"
-                + os.environ.get("OTAC_SERVICE_PORT", "443"),
+            self.url = build_http_url(
+                hostname=os.environ.get("OTAC_PUBLIC_URL", "otac-0"),
+                scheme=os.environ.get("OTAC_PROTOCOL", "https"),
+                port=os.environ.get("OTAC_SERVICE_PORT", "443"),
             )
 
         if not self.url_internal:
-            self.url_internal = HttpUrl(
-                os.environ.get("OTAC_PROTOCOL", "http")
-                + "://"
-                + os.environ.get("OTAC_SERVICE_HOST", "otac-0")
-                + ":"
-                + os.environ.get("OTAC_SERVICE_PORT", "8080"),
+            self.url_internal = build_http_url(
+                hostname=os.environ.get("OTAC_SERVICE_HOST", "otac-0"),
+                scheme=os.environ.get("OTAC_PROTOCOL", "http"),
+                port=os.environ.get("OTAC_SERVICE_PORT", "8080"),
             )
 
         self.password = SecretStr(os.environ.get("OTAC_PASSWORD", "")) if self.password is None else self.password
@@ -213,12 +237,10 @@ class CustomizerSettingsOTPD(BaseModel):
         """Fallback implementation to read the URL from the environment."""
 
         if not self.url:
-            self.url = HttpUrl(
-                os.environ.get("OTPD_PROTOCOL", "http")
-                + "://"
-                + os.environ.get("OTPD_SERVICE_HOST", "otpd")
-                + ":"
-                + os.environ.get("OTPD_SERVICE_PORT", "8080"),
+            self.url = build_http_url(
+                hostname=os.environ.get("OTPD_SERVICE_HOST", "otpd"),
+                scheme=os.environ.get("OTPD_PROTOCOL", "http"),
+                port=os.environ.get("OTPD_SERVICE_PORT", "8080"),
             )
 
         return self

@@ -5377,6 +5377,7 @@ class OTCS:
         self,
         node_id: int,
         fields: str | list = "properties",  # per default we just get the most important information
+        expand: str | list = "",
         metadata: bool = False,
         timeout: float = REQUEST_TIMEOUT,
     ) -> dict | None:
@@ -5399,6 +5400,9 @@ class OTCS:
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".
+            expand (str, optional):
+                A comma-separated list of relationships to expand in the response.
+                Defaults to "".
             metadata (bool, optional):
                 If True, returns metadata (data type, field length, min/max values, etc.)
                 about the data.
@@ -5484,12 +5488,16 @@ class OTCS:
         current_span = trace.get_current_span()
         current_span.set_attribute("node_id", node_id)
         current_span.set_attribute("fields", fields)
+        current_span.set_attribute("expand", expand)
         current_span.set_attribute("metadata", metadata)
         current_span.set_attribute("timeout", timeout)
 
         query = {}
         if fields:
             query["fields"] = fields
+
+        if expand:
+            query["expand"] = expand
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
 
@@ -12444,7 +12452,7 @@ class OTCS:
                 Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
-                about the data.
+                about the data. Defaults to False.
                 Metadata will be returned under `response.meta_data.properties` and `response.meta_data_order`.
                 NOTE: this metadata is not compatible with the metadata returned by the get_workspace() method!
                 The format is optimized for the expanded workspace widget on landing pages in SmartView.
@@ -13504,20 +13512,25 @@ class OTCS:
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
-                Possible fields include:
-                - "properties" (can be further restricted by specifying sub-fields,
-                  e.g., "properties{id,name,parent_id,description}")
-                - "categories"
-                - "versions" (can be further restricted by specifying ".element(0)" to
-                  retrieve only the latest version)
-                - "permissions" (can be further restricted by specifying ".limit(5)" to
-                  retrieve only the first 5 permissions)
+                NOTE: For this REST API only "properties" is possible. But it can be further restricted
+                by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
-                Defaults to "properties".
+                Defaults to "properties".                This parameter can be a string to select one field group or a list of
             metadata (bool, optional):
-                Whether or not workspace metadata (categories) should be returned.
-                Default is False.
+                Whether to return metadata (data type, field length, min/max values,...)
+                about the data. Defaults to False.
+                Metadata will be returned under `response.meta_data.properties` and `response.meta_data_order`.
+                NOTE: this metadata is not compatible with the metadata returned by the get_workspace() method!
+                The format is optimized for the expanded workspace widget on landing pages in SmartView.
+                Format is like this:
+                'name' = {
+                    'align': 'left',
+                    'name': 'Name',
+                    'persona': '',
+                    'sort': True,
+                    'type': -1, 'width_weight': 100
+                }
 
         Returns:
             dict | None:

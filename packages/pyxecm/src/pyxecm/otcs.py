@@ -11985,6 +11985,8 @@ class OTCS:
                 - "properties" (can be further restricted by specifying sub-fields,
                   e.g., "properties{id,name,parent_id,description}")
                 - "business_properties" (all the information for the business object and the external system)
+                  NOTE: this delivers only one business object per workspace. If there are multiple business objects connected to the workspace
+                  only the first one will be returned. Use "workspace_references" to get all connected business objects.
                 - "categories" (the category data of the workspace item)
                 - "workspace_references" (a list with the references to business objects in external systems)
                 - "display_urls" (a list with the URLs to external business systems)
@@ -12090,6 +12092,17 @@ class OTCS:
                                     'displayUrl': '/sap/bc/gui/sap/its/webgui?~logingroup=SPACE&~transaction=%2fOTX%2fRM_WSC_START_BO+KEY%3dpc%3AS3XljqcFfD0pakDIjUKul%3bOBJTYPE%3daccount&~OkCode=ONLI',
                                     'external_system_id': 'TE1',
                                     'external_system_name': 'SAP S/4HANA'
+                                }
+                            ]
+                            'workspace_references': [
+                                {
+                                    'business_object_id': '0000050031',
+                                    'business_object_type': 'KNA1',
+                                    'business_object_type_id': 37,
+                                    'external_system_id': 'TE1',
+                                    'has_default_display': True,
+                                    'has_default_search': True,
+                                    'workspace_type_id': 16
                                 }
                             ]
                             'wksp_info':
@@ -13516,7 +13529,7 @@ class OTCS:
                 by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
-                Defaults to "properties".                This parameter can be a string to select one field group or a list of
+                Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
                 about the data. Defaults to False.
@@ -13722,12 +13735,8 @@ class OTCS:
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
-                Possible fields include (NOTE: "categories" is not supported in this method!!):
-                - "properties" (can be further restricted by specifying sub-fields,
-                  e.g., "properties{id,name,parent_id,description}")
-                - "business_properties" (all the information for the business object and the external system)
-                - "workspace_references" (a list with the references to business objects in external systems)
-                - "wksp_info" (currently just the icon information of the workspace)
+                NOTE: For this REST API only "properties" is possible. But it can be further restricted
+                by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
                 Defaults to "properties".

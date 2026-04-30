@@ -1498,7 +1498,8 @@ class Payload:
 
         while not self._otcs.is_ready():
             self.logger.info(
-                "OTCS is not ready. Cannot check status file for -> '%s' in OTCS. Waiting 30 seconds and retry...",
+                "OTCS -> %s is not ready. Cannot check status file for -> '%s' in OTCS. Waiting 30 seconds and retry...",
+                self._otcs.hostname(),
                 payload_section_name,
             )
             time.sleep(30)
@@ -1592,7 +1593,8 @@ class Payload:
 
         while not self._otcs.is_ready():
             self.logger.info(
-                "OTCS is not ready. Cannot write status file for -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                "OTCS -> %s is not ready. Cannot write status file for -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                self._otcs.hostname(),
                 payload_section_name,
             )
             time.sleep(30)
@@ -1692,7 +1694,8 @@ class Payload:
 
         while not self._otcs.is_ready():
             self.logger.info(
-                "OTCS is not ready. Cannot read status file for -> '%s' from OTCS. Waiting 30 seconds and retry...",
+                "OTCS -> '%s' is not ready. Cannot read status file for -> '%s' from OTCS. Waiting 30 seconds and retry...",
+                self._otcs.hostname(),
                 payload_section_name,
             )
             time.sleep(30)
@@ -3775,6 +3778,11 @@ class Payload:
             client_user_type = oauth_client.get(
                 "user_type", ""
             )  # "" -> Default: Standard user, "ServiceUser" -> Service User
+            client_access_token_lifetime = oauth_client.get("access_token_lifetime", 1000)
+            client_refresh_token_lifetime = oauth_client.get("refresh_token_lifetime", 20000)
+            client_auth_code_lifetime = oauth_client.get("auth_code_lifetime", 20000)
+            client_allow_refresh_token = oauth_client.get("allow_refresh_token", True)
+            client_use_session_refresh_token_lifetime = oauth_client.get("use_session_refresh_token_lifetime", True)
 
             # Check if OAuth client does already exist
             # (in an attempt to make the code idem-potent)
@@ -3807,6 +3815,11 @@ class Payload:
                 allowed_scopes=client_permission_scopes,
                 default_scopes=client_default_scopes,
                 secret=client_secret,
+                access_token_lifetime=client_access_token_lifetime,
+                refresh_token_lifetime=client_refresh_token_lifetime,
+                auth_code_lifetime=client_auth_code_lifetime,
+                allow_refresh_token=client_allow_refresh_token,
+                use_session_refresh_token_lifetime=client_use_session_refresh_token_lifetime,
             )
             if response:
                 self.logger.info("Added OTDS OAuth client -> '%s'.", client_name)

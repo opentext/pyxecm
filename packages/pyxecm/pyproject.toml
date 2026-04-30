@@ -29,6 +29,7 @@ dependencies = [
   "suds>=1.2.0",
   "websockets>=15.0.1",
   "xmltodict>=0.14.2",
+  "zeep>=4.2.0",
 ]
 classifiers = [
   'Development Status :: 4 - Beta',

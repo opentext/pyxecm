@@ -3881,6 +3881,11 @@ class OTDS:
         allowed_scopes: list | None = None,  # in OTDS UI: Permissible scopes
         default_scopes: list | None = None,  # in OTDS UI: Default scopes
         secret: str = "",
+        access_token_lifetime: int = 1000,
+        refresh_token_lifetime: int = 20000,
+        auth_code_lifetime: int = 20000,
+        allow_refresh_token: bool = True,
+        use_session_refresh_token_lifetime: bool = True,
     ) -> dict | None:
         """Add a new OAuth client to OTDS.
 
@@ -3903,6 +3908,16 @@ class OTDS:
                 In the OTDS UI this is called Default scopes.
             secret (str, optional):
                 Predefined OAuth client secret. If empty a new secret is generated.
+            access_token_lifetime (int, optional):
+                Access token lifetime in seconds. Default is 1000 seconds.
+            refresh_token_lifetime (int, optional):
+                Refresh token lifetime in seconds. Default is 20000 seconds.
+            auth_code_lifetime (int, optional):
+                Authorization code lifetime in seconds. Default is 20000 seconds.
+            allow_refresh_token (bool, optional):
+                Whether or not to allow refresh token.
+            use_session_refresh_token_lifetime (bool, optional):
+                Whether or not to use session refresh token lifetime.
 
         Returns:
             dict | None:
@@ -3967,12 +3982,12 @@ class OTDS:
             "id": client_id,
             "description": description,
             "redirectURLs": redirect_urls,
-            "accessTokenLifeTime": 1000,
-            "refreshTokenLifeTime": 20000,
-            "authCodeLifeTime": 20000,
-            "allowRefreshToken": True,
+            "accessTokenLifeTime": access_token_lifetime,
+            "refreshTokenLifeTime": refresh_token_lifetime,
+            "authCodeLifeTime": auth_code_lifetime,
+            "allowRefreshToken": allow_refresh_token,
             "allowImpersonation": allow_impersonation,
-            "useSessionRefreshTokenLifeTime": True,
+            "useSessionRefreshTokenLifeTime": use_session_refresh_token_lifetime,
             "confidential": confidential,
             "authScopes": auth_scopes,
             "allowedScopes": allowed_scopes,

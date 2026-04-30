@@ -42,6 +42,9 @@ from queue import Empty, LifoQueue, Queue
 import requests
 import websockets
 from opentelemetry import trace
+from zeep import Client, xsd
+from zeep.helpers import serialize_object
+from zeep.transports import Transport
 
 from pyxecm.helper import XML, Data
 from pyxecm.otds import OTDS
@@ -228,6 +231,9 @@ class OTCS:
     ONTOLOGY_TEMP_DIRECTORY = "ontology"
     ONTOLOGY_FILE_NAME = "ontology.json"
     ONTOLOGY_NICK_NAME = "ontology"
+
+    # Legacy SOAP endpoint root used by Content Server CWS services:
+    SOAP_BASE_PATH = "/cws/services"
 
     @classmethod
     def cleanse_item_name(cls, item_name: str, max_length: int | None = None) -> str:
@@ -548,6 +554,8 @@ class OTCS:
         self._workspace_type_lookup: dict = {}
         self._workspace_type_names = []
         self._workspace_ontology = workspace_ontology
+        self._soap_docman_client: Client | None = None
+        self._soap_transport: Transport | None = None
 
         # Handle concurrent HTTP requests that may run into 401 errors and
         # re-authentication at the same time:
@@ -10357,7 +10365,8 @@ class OTCS:
 
         while not self.is_ready():
             self.logger.info(
-                "OTCS is not ready. Cannot deploy transport -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                "OTCS -> '%s' is not ready. Cannot deploy transport -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                self.hostname(),
                 package_name,
             )
             time.sleep(30)
@@ -16291,6 +16300,234 @@ class OTCS:
 
     # end method definition
 
+    def _get_soap_docman_client(self) -> Client | None:
+        """Get or create the SOAP DocumentManagement client.
+
+        Returns:
+            Client | None:
+                Zeep SOAP client instance, or None if initialization fails.
+
+        """
+
+        if self._soap_docman_client is not None:
+            return self._soap_docman_client
+
+        wsdl_url = self.config()["baseUrl"].rstrip("/") + self.SOAP_BASE_PATH + "/DocumentManagement?wsdl"
+
+        try:
+            session = requests.Session()
+            session.verify = False
+            self._soap_transport = Transport(session=session)
+            self._soap_docman_client = Client(wsdl=wsdl_url, transport=self._soap_transport)
+        except Exception:
+            self.logger.error("Failed to initialize SOAP client with WSDL -> %s", wsdl_url)
+            return None
+        else:
+            return self._soap_docman_client
+
+    # end method definition
+
+    def _get_soap_auth_header(self) -> xsd.Element | None:
+        """Build SOAP authentication header from the current OTCS ticket.
+
+        Returns:
+            xsd.Element | None:
+                SOAP auth header object, or None if no OTCS ticket is available.
+
+        """
+
+        auth_token = self.otcs_ticket()
+        if not auth_token:
+            self.logger.error("Cannot build SOAP header because OTCS ticket is missing.")
+            return None
+
+        header = xsd.Element(
+            "{urn:api.ecm.opentext.com}OTAuthentication",
+            xsd.ComplexType(
+                [
+                    xsd.Element(
+                        "{urn:api.ecm.opentext.com}AuthenticationToken",
+                        xsd.String(),
+                    ),
+                ],
+            ),
+        )
+        return header(AuthenticationToken=auth_token)
+
+    # end method definition
+
+    def _build_soap_category_attributes(self, attributes: list[dict[str, object]] | None) -> list[object] | None:
+        """Convert simple attribute definitions to SOAP CreateCategory attributes.
+
+        Args:
+            attributes (list[dict[str, object]] | None):
+                List of category attribute definitions.
+
+        Returns:
+            list[object] | None:
+                List of SOAP attribute objects, or None if no attributes were provided.
+
+        """
+
+        if not attributes:
+            return None
+
+        soap_client = self._get_soap_docman_client()
+        if soap_client is None:
+            return None
+
+        type_map = {
+            "string": "StringAttribute",
+            "integer": "IntegerAttribute",
+            "boolean": "BooleanAttribute",
+            "date": "DateAttribute",
+        }
+
+        soap_attributes: list[object] = []
+        for index, attribute in enumerate(attributes, start=1):
+            raw_type = str(attribute.get("type", "string")).lower()
+            soap_type = type_map.get(raw_type, "StringAttribute")
+
+            try:
+                attr_cls = soap_client.get_type("ns1:{}".format(soap_type))
+            except Exception:
+                attr_cls = soap_client.get_type("ns0:{}".format(soap_type))
+
+            soap_attributes.append(
+                attr_cls(
+                    DisplayName=attribute.get("name"),
+                    ID=int(attribute.get("ID") or attribute.get("id") or index),
+                    Key="attr_{}".format(index),
+                    MaxValues=int(attribute.get("maxvalues", 1)),
+                    MinValues=int(attribute.get("minvalues", 0)),
+                    Required=bool(attribute.get("required", False)),
+                    Searchable=bool(attribute.get("searchable", True)),
+                ),
+            )
+
+        return soap_attributes
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="create_category")
+    def create_category(
+        self,
+        parent_id: int,
+        item_name: str,
+        attributes: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        """Create a category using legacy SOAP OTCM API.
+
+        This is a compatibility bridge until equivalent REST functionality is available.
+
+        Args:
+            parent_id (int):
+                The parent node ID where the category should be created.
+            item_name (str):
+                The category name.
+            attributes (list[dict[str, object]] | None, optional):
+                Optional category attributes.
+
+        Returns:
+            dict[str, object]:
+                Result object with fields:
+                - ok (bool)
+                - data (dict | None)
+                - error (str, optional)
+
+        """
+
+        result: dict[str, object] = {"ok": True, "data": None}
+
+        soap_client = self._get_soap_docman_client()
+        if soap_client is None:
+            result["ok"] = False
+            result["error"] = "Failed to initialize SOAP DocumentManagement client"
+            return result
+
+        auth_header = self._get_soap_auth_header()
+        if auth_header is None:
+            result["ok"] = False
+            result["error"] = "Missing OTCS ticket for SOAP authentication"
+            return result
+
+        self.logger.debug(
+            "Create category via SOAP -> '%s' under parent ID -> %s",
+            item_name,
+            str(parent_id),
+        )
+
+        try:
+            attrs_payload = self._build_soap_category_attributes(attributes)
+            response = soap_client.service.CreateCategory(
+                parentID=parent_id,
+                name=item_name,
+                comment="",
+                attributes=attrs_payload,
+                metadata=None,
+                _soapheaders=[auth_header],
+            )
+            response_dict = serialize_object(response)
+            result["data"] = response_dict["body"]["CreateCategoryResult"]
+        except Exception as exception:
+            result["ok"] = False
+            result["error"] = str(exception)
+            self.logger.error(
+                "Failed to create SOAP category -> '%s' under parent ID -> %s",
+                item_name,
+                str(parent_id),
+            )
+
+        return result
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_category_definition")
+    def get_category_definition(self, category_id: int) -> dict[str, object]:
+        """Get category definition using legacy SOAP OTCM API.
+
+        Args:
+            category_id (int):
+                Category node ID.
+
+        Returns:
+            dict[str, object]:
+                Result object with fields:
+                - ok (bool)
+                - category_data (dict | None)
+                - error (str, optional)
+
+        """
+
+        result: dict[str, object] = {"ok": True, "category_data": None}
+
+        soap_client = self._get_soap_docman_client()
+        if soap_client is None:
+            result["ok"] = False
+            result["error"] = "Failed to initialize SOAP DocumentManagement client"
+            return result
+
+        auth_header = self._get_soap_auth_header()
+        if auth_header is None:
+            result["ok"] = False
+            result["error"] = "Missing OTCS ticket for SOAP authentication"
+            return result
+
+        self.logger.debug("Get category definition via SOAP for category ID -> %s", str(category_id))
+
+        try:
+            response = soap_client.service.GetCategoryDefinition(categoryID=category_id, _soapheaders=[auth_header])
+            response_dict = serialize_object(response)
+            result["category_data"] = response_dict["body"]["GetCategoryDefinitionResult"]
+        except Exception as exception:
+            result["ok"] = False
+            result["error"] = str(exception)
+            self.logger.error("Failed to get SOAP category definition for category ID -> %s", str(category_id))
+
+        return result
+
+    # end method definition
+
     def get_category_id_by_name(self, node_id: int, category_name: str) -> int | None:
         """Get the category ID by its name.
 
@@ -20213,7 +20450,7 @@ class OTCS:
 
         if documents:
             draft_process_body_post_data["doc_ids"] = ",".join(map(str, documents))
-            draft_process_body_post_data["AttachDocuments"] = True
+            draft_process_body_post_data["AttachDocuments"] = "true"
 
         request_url = self.config()["draftProcessUrl"]
         request_header = self.request_form_header()

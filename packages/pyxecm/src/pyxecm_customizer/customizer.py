@@ -8,7 +8,6 @@ __email__ = "mdiefenb@opentext.com"
 
 import logging
 import os
-import sys
 import tempfile
 import time
 from datetime import UTC, datetime
@@ -31,36 +30,33 @@ default_logger = logging.getLogger("pyxecm_customizer")
 
 
 class Customizer:
-    """Customizer Class to control the cusomization automation."""
-
-    logger: logging.Logger = default_logger
-    customizer_start_time: datetime | None
-    customizer_stop_time: datetime | None
+    """Customizer Class to control the customization automation."""
 
     def __init__(
         self,
         settings: dict | None = None,
         logger: logging.Logger = default_logger,
     ) -> None:
-        """Initialize Customzer object.
+        """Initialize Customizer object.
 
         Args:
             settings (dict | None, optional):
                 Customizer settings. Defaults to None.
             logger (logging.Logger, optional):
-                The loggoing object to be used for all log messages.
+                The logging object to be used for all log messages.
                 Defaults to default_logger.
 
         """
 
         self.logger = logger
+        self.customizer_start_time: datetime | None = None
+        self.customizer_end_time: datetime | None = None
 
         # Create Settings class, raise ValidationError if settings are invalid
         self.settings = Settings(**settings) if settings is not None else Settings()
 
         # Initialize Objects:
         self.otds_object: OTDS | None = None
-        self.otcs_object: OTCS | None = None
         self.otcs_backend_object: OTCS | None = None
         self.otcs_frontend_object: OTCS | None = None
         self.otpd_object: OTPD | None = None
@@ -122,7 +118,7 @@ class Customizer:
             None
 
         Returns:
-            M365 object:
+            M365:
                 M365 object or None if the object couldn't be created or
                 the authentication fails.
 
@@ -299,7 +295,6 @@ class Customizer:
                         app_catalog_version,
                         app_download_version,
                     )
-                    app_path = os.path.join(tempfile.gettempdir(), "ot.xecm.teams.zip")
                     response = m365_object.upload_teams_app(
                         app_path=app_path,
                         update_existing_app=True,
@@ -336,9 +331,8 @@ class Customizer:
                     self.settings.m365.teams_app_name,
                     self.settings.m365.teams_app_external_id,
                 )
-                app_path = os.path.join(tempfile.gettempdir(), "ot.xecm.teams.zip")
                 response = m365_object.upload_teams_app(
-                    app_path=app_path,
+                    app_path=file_path,
                     update_existing_app=False,
                 )
                 app_internal_id = m365_object.get_result_value(
@@ -529,7 +523,7 @@ class Customizer:
         Args:
             None
         Returns:
-            CoreShare object:
+            CoreShare:
                 Core Share object or None if the object couldn't be created or
                 the authentication fails.
 
@@ -595,7 +589,8 @@ class Customizer:
             None
 
         Returns:
-            K8s: K8s object
+            K8s:
+                Kubernetes object or None if the object couldn't be created.
 
         Side effects:
             The global variables otcs_replicas_frontend and otcs_replicas_backend are initialized
@@ -624,11 +619,11 @@ class Customizer:
             sts_name=self.settings.k8s.sts_otcs_frontend,
         )
         if not otcs_frontend_scale:
-            self.logger.error(
-                "Cannot find Kubernetes stateful set -> '%s' for OTCS Frontends!",
+            msg = "Cannot find Kubernetes stateful set -> '{}' for OTCS Frontends".format(
                 self.settings.k8s.sts_otcs_frontend,
             )
-            sys.exit()
+            self.logger.error(msg)
+            raise RuntimeError(msg)
 
         self.settings.k8s.sts_otcs_frontend_replicas = otcs_frontend_scale.spec.replicas
         self.logger.info(
@@ -642,11 +637,11 @@ class Customizer:
             sts_name=self.settings.k8s.sts_otcs_admin,
         )
         if not otcs_backend_scale:
-            self.logger.error(
-                "Cannot find Kubernetes stateful set -> '%s' for OTCS Backends!",
+            msg = "Cannot find Kubernetes stateful set -> '{}' for OTCS Backends".format(
                 self.settings.k8s.sts_otcs_admin,
             )
-            sys.exit()
+            self.logger.error(msg)
+            raise RuntimeError(msg)
 
         self.settings.k8s.sts_otcs_admin_replicas = otcs_backend_scale.spec.replicas
         self.logger.info(
@@ -892,21 +887,21 @@ class Customizer:
 
         # It is important to wait for OTCS to be configured - otherwise we
         # may interfere with the OTCS container automation and run into errors
-        self.logger.info("Wait for OTCS to be configured...")
+        self.logger.info("Wait for OTCS -> '%s' to be configured...", otcs_object.hostname())
         otcs_configured = otcs_object.is_configured()
         while not otcs_configured:
-            self.logger.warning("OTCS is not configured yet. Waiting 30 seconds...")
+            self.logger.warning("OTCS -> '%s' is not configured yet. Waiting 30 seconds...", otcs_object.hostname())
             time.sleep(30)
             otcs_configured = otcs_object.is_configured()
-        self.logger.info("OTCS is configured now.")
+        self.logger.info("OTCS -> '%s' is configured now.", otcs_object.hostname())
 
-        self.logger.info("Authenticating to OTCS...")
+        self.logger.info("Authenticating to OTCS -> '%s'...", otcs_object.hostname())
         otcs_cookie = otcs_object.authenticate()
         while otcs_cookie is None:
-            self.logger.info("Waiting 30 seconds for OTCS to become ready...")
+            self.logger.info("Waiting 30 seconds for OTCS -> '%s' to become ready...", otcs_object.hostname())
             time.sleep(30)
             otcs_cookie = otcs_object.authenticate()
-        self.logger.info("OTCS is ready now.")
+        self.logger.info("OTCS -> '%s' is ready now.", otcs_object.hostname())
 
         # Now we should be able to get the OTCS resource ID from OTDS:
         otcs_resource = self.otds_object.get_resource(
@@ -1099,7 +1094,7 @@ class Customizer:
 
         return otpd_object
 
-        # end function definition
+    # end method definition
 
     def init_otawp(self) -> OTAWP:
         """Initialize OTDS for Appworks Platform.
@@ -1335,6 +1330,15 @@ class Customizer:
         - Guarantees zero-downtime behavior
         - Avoids exec into containers
         - Avoids liveness probe manipulation
+
+        Args:
+            backend (OTCS):
+                The OTCS backend object (for re-authentication after restart).
+            frontend (OTCS):
+                The OTCS frontend object (for re-authentication after restart).
+            extra_wait_time (int, optional):
+                Additional wait time in seconds after restart for full stabilization. Defaults to 60.
+
         """
 
         if not self.k8s_object:
@@ -1434,7 +1438,8 @@ class Customizer:
         """Restart the Archive Center spawner service in OTAC pod.
 
         Returns:
-            bool: True if restart was done, False if error occured.
+            bool:
+                True if restart was done, False if error occurred.
 
         """
 
@@ -1518,8 +1523,8 @@ class Customizer:
                 response = otpd_object.import_database(file_path=filename)
                 self.logger.info("Response -> %s", response)
 
-            except requests.exceptions.HTTPError:
-                self.logger.error("HTTP request error!")
+            except requests.exceptions.RequestException:
+                self.logger.error("Failed to download PowerDocs database file!")
 
     # end method definition
 
@@ -1626,7 +1631,7 @@ class Customizer:
         )
         if not self.otcs_backend_object:
             self.logger.error("Failed to initialize OTCS backend - exiting...")
-            sys.exit()
+            return False
 
         self.log_header("Initialize OTCS frontend")
         self.otcs_frontend_object = self.init_otcs(
@@ -1843,27 +1848,28 @@ class Customizer:
                 if self.settings.otcs.upload_config_files:
                     # Wait until OTCS is ready to accept uploads. Parallel running
                     # payload processing might be in the process of restarting OTCS:
-                    while not self.otcs_backend_object.is_ready():
+                    while not self.otcs_frontend_object.is_ready():
                         self.logger.info(
-                            "OTCS is not ready. Cannot upload payload file -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                            "OTCS -> '%s' is not ready. Cannot upload payload file -> '%s' to OTCS. Waiting 30 seconds and retry...",
+                            self.otcs_frontend_object.hostname(),
                             os.path.basename(cust_payload),
                         )
                         time.sleep(30)
 
                     self.log_header("Upload Payload file to OpenText Content Management")
-                    response = self.otcs_backend_object.get_node_from_nickname(
+                    response = self.otcs_frontend_object.get_node_from_nickname(
                         nickname=self.settings.cust_target_folder_nickname,
                     )
-                    target_folder_id = self.otcs_backend_object.get_result_value(
+                    target_folder_id = self.otcs_frontend_object.get_result_value(
                         response=response,
                         key="id",
                     )
                     if not target_folder_id:
-                        response = self.otcs_backend_object.get_node_by_volume_and_path(
-                            volume_type=self.otcs_backend_object.VOLUME_TYPE_PERSONAL_WORKSPACE,
+                        response = self.otcs_frontend_object.get_node_by_volume_and_path(
+                            volume_type=self.otcs_frontend_object.VOLUME_TYPE_PERSONAL_WORKSPACE,
                         )  # write to Personal Workspace of Admin
                         target_folder_id = (
-                            self.otcs_backend_object.get_result_value(response=response, key="id") or 2004
+                            self.otcs_frontend_object.get_result_value(response=response, key="id") or 2004
                         )
 
                     # Write YAML file with upadated payload (including IDs, etc.).
@@ -1889,16 +1895,16 @@ class Customizer:
                     # Check if the payload file has been uploaded before.
                     # This can happen if we re-run the python container.
                     # In this case we add a version to the existing document:
-                    response = self.otcs_backend_object.get_node_by_parent_and_name(
+                    response = self.otcs_frontend_object.get_node_by_parent_and_name(
                         parent_id=int(target_folder_id),
                         name=os.path.basename(cust_payload),
                     )
-                    target_document_id = self.otcs_backend_object.get_result_value(
+                    target_document_id = self.otcs_frontend_object.get_result_value(
                         response=response,
                         key="id",
                     )
                     if target_document_id:
-                        response = self.otcs_backend_object.add_document_version(
+                        response = self.otcs_frontend_object.add_document_version(
                             node_id=int(target_document_id),
                             file_url=cust_payload,
                             file_name=os.path.basename(cust_payload),
@@ -1906,7 +1912,7 @@ class Customizer:
                             description="Updated payload file after re-run of customization",
                         )
                     else:
-                        response = self.otcs_backend_object.upload_file_to_parent(
+                        response = self.otcs_frontend_object.upload_file_to_parent(
                             file_url=cust_payload,
                             file_name=os.path.basename(cust_payload),
                             mime_type="text/plain",
@@ -1929,32 +1935,32 @@ class Customizer:
         # in "Administration" folder in OTCS Enterprise volume:
         if os.path.exists(self.settings.cust_log_file) and self.settings.otcs.upload_log_file:
             self.log_header("Upload log file to OpenText Content Management")
-            response = self.otcs_backend_object.get_node_from_nickname(
+            response = self.otcs_frontend_object.get_node_from_nickname(
                 nickname=self.settings.cust_target_folder_nickname,
             )
-            target_folder_id = self.otcs_backend_object.get_result_value(
+            target_folder_id = self.otcs_frontend_object.get_result_value(
                 response=response,
                 key="id",
             )
             if not target_folder_id:
-                response = self.otcs_backend_object.get_node_by_volume_and_path(
-                    volume_type=self.otcs_backend_object.VOLUME_TYPE_PERSONAL_WORKSPACE,
+                response = self.otcs_frontend_object.get_node_by_volume_and_path(
+                    volume_type=self.otcs_frontend_object.VOLUME_TYPE_PERSONAL_WORKSPACE,
                 )  # write to Personal Workspace of Admin
-                target_folder_id = self.otcs_backend_object.get_result_value(response=response, key="id") or 2004
+                target_folder_id = self.otcs_frontend_object.get_result_value(response=response, key="id") or 2004
 
             # Check if the log file has been uploaded before.
             # This can happen if we re-run the python container:
             # In this case we add a version to the existing document:
-            response = self.otcs_backend_object.get_node_by_parent_and_name(
+            response = self.otcs_frontend_object.get_node_by_parent_and_name(
                 parent_id=int(target_folder_id),
                 name=os.path.basename(self.settings.cust_log_file),
             )
-            target_document_id = self.otcs_backend_object.get_result_value(
+            target_document_id = self.otcs_frontend_object.get_result_value(
                 response=response,
                 key="id",
             )
             if target_document_id:
-                response = self.otcs_backend_object.add_document_version(
+                response = self.otcs_frontend_object.add_document_version(
                     node_id=int(target_document_id),
                     file_url=self.settings.cust_log_file,
                     file_name=os.path.basename(self.settings.cust_log_file),
@@ -1962,7 +1968,7 @@ class Customizer:
                     description="Updated Python Log after re-run of customization",
                 )
             else:
-                response = self.otcs_backend_object.upload_file_to_parent(
+                response = self.otcs_frontend_object.upload_file_to_parent(
                     file_url=self.settings.cust_log_file,
                     file_name=os.path.basename(self.settings.cust_log_file),
                     mime_type="text/plain",

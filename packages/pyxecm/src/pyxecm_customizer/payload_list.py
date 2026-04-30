@@ -212,7 +212,7 @@ class PayloadList:
         filename: str,
         logfile: str,
         dependencies: list | None = None,
-        status: str = "pending",
+        status: str = "planned",
         enabled: bool = True,
         git_url: str | None = None,
         loglevel: str = "INFO",
@@ -240,6 +240,9 @@ class PayloadList:
                 The log level for processing the payload. Either "INFO" or "DEBUG".
             customizer_settings (dict):
                 Customizer settings for the payload. Defaults to None.
+
+        Returns:
+            dict: The newly added item with its index.
 
         """
 
@@ -349,9 +352,9 @@ class PayloadList:
 
         self.payload_items.iloc[[index - 1, index]] = self.payload_items.iloc[[index, index - 1]].to_numpy()
 
-        new_postion = self.payload_items.index.get_loc(index)
+        new_position = self.payload_items.index.get_loc(index)
 
-        return new_postion
+        return new_position
 
     # end method definition
 
@@ -377,9 +380,9 @@ class PayloadList:
 
         self.payload_items.iloc[[index, index + 1]] = self.payload_items.iloc[[index + 1, index]].to_numpy()
 
-        new_postion = self.payload_items.index.get_loc(index)
+        new_position = self.payload_items.index.get_loc(index)
 
-        return new_postion
+        return new_position
 
     # end method definition
 

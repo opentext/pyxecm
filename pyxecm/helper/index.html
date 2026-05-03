@@ -3533,7 +3533,7 @@ Assoc structures inside some of the XML elements.</p>
 </span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37"></a>    <span class="c1"># end method definition</span>
 </span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38"></a>
 </span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39"></a>    <span class="nd">@classmethod</span>
-</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">escape_unicode</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">assoc_string</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">escape_unicode</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">assoc_string</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
 </span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Escape / Encode a given string in Unicode.</span>
 </span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42"></a>
 </span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="sd">        Args:</span>
@@ -3541,8 +3541,8 @@ Assoc structures inside some of the XML elements.</p>
 </span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">                The source string to escape.</span>
 </span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46"></a>
 </span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47"></a><span class="sd">        Returns:</span>
-</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48"></a><span class="sd">            str:</span>
-</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="sd">                The escaped string.</span>
+</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48"></a><span class="sd">            bytes:</span>
+</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="sd">                The escaped string as bytes.</span>
 </span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50"></a>
 </span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51"></a><span class="sd">        &quot;&quot;&quot;</span>
 </span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52"></a>
@@ -3584,7 +3584,7 @@ Assoc structures inside some of the XML elements.</p>
 </span><span id="__span-0-88"><a id="__codelineno-0-88" name="__codelineno-0-88"></a>
 </span><span id="__span-0-89"><a id="__codelineno-0-89" name="__codelineno-0-89"></a><span class="sd">        Returns:</span>
 </span><span id="__span-0-90"><a id="__codelineno-0-90" name="__codelineno-0-90"></a><span class="sd">            bool:</span>
-</span><span id="__span-0-91"><a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">                True = string is HTML escaped, False if now</span>
+</span><span id="__span-0-91"><a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">                True if string is HTML escaped, False if not</span>
 </span><span id="__span-0-92"><a id="__codelineno-0-92" name="__codelineno-0-92"></a>
 </span><span id="__span-0-93"><a id="__codelineno-0-93" name="__codelineno-0-93"></a><span class="sd">        &quot;&quot;&quot;</span>
 </span><span id="__span-0-94"><a id="__codelineno-0-94" name="__codelineno-0-94"></a>
@@ -3979,12 +3979,12 @@ Assoc structures inside some of the XML elements.</p>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>str</code></td>            <td>
-                  <code><span title="str">str</span></code>
+<td><code>bytes</code></td>            <td>
+                  <code><span title="bytes">bytes</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The escaped string.</p>
+                <p>The escaped string as bytes.</p>
               </div>
             </td>
           </tr>
@@ -4011,7 +4011,7 @@ Assoc structures inside some of the XML elements.</p>
 <span class="normal"><a href="#__codelineno-0-53">53</a></span>
 <span class="normal"><a href="#__codelineno-0-54">54</a></span>
 <span class="normal"><a href="#__codelineno-0-55">55</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39"></a><span class="nd">@classmethod</span>
-</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="k">def</span><span class="w"> </span><span class="nf">escape_unicode</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">assoc_string</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="k">def</span><span class="w"> </span><span class="nf">escape_unicode</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">assoc_string</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
 </span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Escape / Encode a given string in Unicode.</span>
 </span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42"></a>
 </span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="sd">    Args:</span>
@@ -4019,8 +4019,8 @@ Assoc structures inside some of the XML elements.</p>
 </span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">            The source string to escape.</span>
 </span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46"></a>
 </span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47"></a><span class="sd">    Returns:</span>
-</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48"></a><span class="sd">        str:</span>
-</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="sd">            The escaped string.</span>
+</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48"></a><span class="sd">        bytes:</span>
+</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="sd">            The escaped string as bytes.</span>
 </span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50"></a>
 </span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51"></a><span class="sd">    &quot;&quot;&quot;</span>
 </span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52"></a>
@@ -4420,7 +4420,7 @@ The deliminated substring or None if not found.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>True = string is HTML escaped, False if now</p>
+                <p>True if string is HTML escaped, False if not</p>
               </div>
             </td>
           </tr>
@@ -4456,7 +4456,7 @@ The deliminated substring or None if not found.</p>
 </span><span id="__span-0-88"><a id="__codelineno-0-88" name="__codelineno-0-88"></a>
 </span><span id="__span-0-89"><a id="__codelineno-0-89" name="__codelineno-0-89"></a><span class="sd">    Returns:</span>
 </span><span id="__span-0-90"><a id="__codelineno-0-90" name="__codelineno-0-90"></a><span class="sd">        bool:</span>
-</span><span id="__span-0-91"><a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">            True = string is HTML escaped, False if now</span>
+</span><span id="__span-0-91"><a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">            True if string is HTML escaped, False if not</span>
 </span><span id="__span-0-92"><a id="__codelineno-0-92" name="__codelineno-0-92"></a>
 </span><span id="__span-0-93"><a id="__codelineno-0-93" name="__codelineno-0-93"></a><span class="sd">    &quot;&quot;&quot;</span>
 </span><span id="__span-0-94"><a id="__codelineno-0-94" name="__codelineno-0-94"></a>
@@ -10956,10 +10956,10 @@ to Pandas data frame.</p>
 </span><span id="__span-0-2245"><a id="__codelineno-0-2245" name="__codelineno-0-2245"></a>
 </span><span id="__span-0-2246"><a id="__codelineno-0-2246" name="__codelineno-0-2246"></a><span class="sd">        Args:</span>
 </span><span id="__span-0-2247"><a id="__codelineno-0-2247" name="__codelineno-0-2247"></a><span class="sd">            column (pd.Series):</span>
-</span><span id="__span-0-2248"><a id="__codelineno-0-2248" name="__codelineno-0-2248"></a><span class="sd">                The pandas Series (column) to check.</span>
+</span><span id="__span-0-2248"><a id="__codelineno-0-2248" name="__codelineno-0-2248"></a><span class="sd">                The pandas Series (column) to check. If not a Series, returns False and logs an error.</span>
 </span><span id="__span-0-2249"><a id="__codelineno-0-2249" name="__codelineno-0-2249"></a><span class="sd">            threshold (float, optional):</span>
 </span><span id="__span-0-2250"><a id="__codelineno-0-2250" name="__codelineno-0-2250"></a><span class="sd">                0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage.</span>
-</span><span id="__span-0-2251"><a id="__codelineno-0-2251" name="__codelineno-0-2251"></a><span class="sd">                Default = 0.5 (50%).</span>
+</span><span id="__span-0-2251"><a id="__codelineno-0-2251" name="__codelineno-0-2251"></a><span class="sd">                Default = 0.5 (50%). If out of bounds, returns False and logs an error.</span>
 </span><span id="__span-0-2252"><a id="__codelineno-0-2252" name="__codelineno-0-2252"></a>
 </span><span id="__span-0-2253"><a id="__codelineno-0-2253" name="__codelineno-0-2253"></a><span class="sd">        Returns:</span>
 </span><span id="__span-0-2254"><a id="__codelineno-0-2254" name="__codelineno-0-2254"></a><span class="sd">            bool:</span>
@@ -10995,13 +10995,13 @@ to Pandas data frame.</p>
 </span><span id="__span-0-2284"><a id="__codelineno-0-2284" name="__codelineno-0-2284"></a>
 </span><span id="__span-0-2285"><a id="__codelineno-0-2285" name="__codelineno-0-2285"></a><span class="sd">        Args:</span>
 </span><span id="__span-0-2286"><a id="__codelineno-0-2286" name="__codelineno-0-2286"></a><span class="sd">            column (pd.Series):</span>
-</span><span id="__span-0-2287"><a id="__codelineno-0-2287" name="__codelineno-0-2287"></a><span class="sd">                The pandas Series (column) to check.</span>
+</span><span id="__span-0-2287"><a id="__codelineno-0-2287" name="__codelineno-0-2287"></a><span class="sd">                The pandas Series (column) to check. If not a Series, returns False and logs an error.</span>
 </span><span id="__span-0-2288"><a id="__codelineno-0-2288" name="__codelineno-0-2288"></a><span class="sd">            threshold (float, optional):</span>
-</span><span id="__span-0-2289"><a id="__codelineno-0-2289" name="__codelineno-0-2289"></a><span class="sd">                0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage. Default = 0.5 (50%).</span>
+</span><span id="__span-0-2289"><a id="__codelineno-0-2289" name="__codelineno-0-2289"></a><span class="sd">                0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage. Default = 0.5 (50%). If out of bounds, returns False and logs an error.</span>
 </span><span id="__span-0-2290"><a id="__codelineno-0-2290" name="__codelineno-0-2290"></a>
 </span><span id="__span-0-2291"><a id="__codelineno-0-2291" name="__codelineno-0-2291"></a><span class="sd">        Returns:</span>
 </span><span id="__span-0-2292"><a id="__codelineno-0-2292" name="__codelineno-0-2292"></a><span class="sd">            bool:</span>
-</span><span id="__span-0-2293"><a id="__codelineno-0-2293" name="__codelineno-0-2293"></a><span class="sd">                True if the column contains list-like objects, False otherwise.</span>
+</span><span id="__span-0-2293"><a id="__codelineno-0-2293" name="__codelineno-0-2293"></a><span class="sd">                True if the column contains mostly list-like objects, False otherwise.</span>
 </span><span id="__span-0-2294"><a id="__codelineno-0-2294" name="__codelineno-0-2294"></a>
 </span><span id="__span-0-2295"><a id="__codelineno-0-2295" name="__codelineno-0-2295"></a><span class="sd">        &quot;&quot;&quot;</span>
 </span><span id="__span-0-2296"><a id="__codelineno-0-2296" name="__codelineno-0-2296"></a>
@@ -18153,7 +18153,7 @@ A boolean Series where True indicates a match.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The pandas Series (column) to check.</p>
+                <p>The pandas Series (column) to check. If not a Series, returns False and logs an error.</p>
               </div>
             </td>
             <td>
@@ -18170,7 +18170,7 @@ A boolean Series where True indicates a match.</p>
             <td>
               <div class="doc-md-description">
                 <p>0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage.
-Default = 0.5 (50%).</p>
+Default = 0.5 (50%). If out of bounds, returns False and logs an error.</p>
               </div>
             </td>
             <td>
@@ -18246,10 +18246,10 @@ Default = 0.5 (50%).</p>
 </span><span id="__span-0-2245"><a id="__codelineno-0-2245" name="__codelineno-0-2245"></a>
 </span><span id="__span-0-2246"><a id="__codelineno-0-2246" name="__codelineno-0-2246"></a><span class="sd">    Args:</span>
 </span><span id="__span-0-2247"><a id="__codelineno-0-2247" name="__codelineno-0-2247"></a><span class="sd">        column (pd.Series):</span>
-</span><span id="__span-0-2248"><a id="__codelineno-0-2248" name="__codelineno-0-2248"></a><span class="sd">            The pandas Series (column) to check.</span>
+</span><span id="__span-0-2248"><a id="__codelineno-0-2248" name="__codelineno-0-2248"></a><span class="sd">            The pandas Series (column) to check. If not a Series, returns False and logs an error.</span>
 </span><span id="__span-0-2249"><a id="__codelineno-0-2249" name="__codelineno-0-2249"></a><span class="sd">        threshold (float, optional):</span>
 </span><span id="__span-0-2250"><a id="__codelineno-0-2250" name="__codelineno-0-2250"></a><span class="sd">            0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage.</span>
-</span><span id="__span-0-2251"><a id="__codelineno-0-2251" name="__codelineno-0-2251"></a><span class="sd">            Default = 0.5 (50%).</span>
+</span><span id="__span-0-2251"><a id="__codelineno-0-2251" name="__codelineno-0-2251"></a><span class="sd">            Default = 0.5 (50%). If out of bounds, returns False and logs an error.</span>
 </span><span id="__span-0-2252"><a id="__codelineno-0-2252" name="__codelineno-0-2252"></a>
 </span><span id="__span-0-2253"><a id="__codelineno-0-2253" name="__codelineno-0-2253"></a><span class="sd">    Returns:</span>
 </span><span id="__span-0-2254"><a id="__codelineno-0-2254" name="__codelineno-0-2254"></a><span class="sd">        bool:</span>
@@ -18317,7 +18317,7 @@ Default = 0.5 (50%).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The pandas Series (column) to check.</p>
+                <p>The pandas Series (column) to check. If not a Series, returns False and logs an error.</p>
               </div>
             </td>
             <td>
@@ -18333,7 +18333,7 @@ Default = 0.5 (50%).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage. Default = 0.5 (50%).</p>
+                <p>0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage. Default = 0.5 (50%). If out of bounds, returns False and logs an error.</p>
               </div>
             </td>
             <td>
@@ -18359,7 +18359,7 @@ Default = 0.5 (50%).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>True if the column contains list-like objects, False otherwise.</p>
+                <p>True if the column contains mostly list-like objects, False otherwise.</p>
               </div>
             </td>
           </tr>
@@ -18408,13 +18408,13 @@ Default = 0.5 (50%).</p>
 </span><span id="__span-0-2284"><a id="__codelineno-0-2284" name="__codelineno-0-2284"></a>
 </span><span id="__span-0-2285"><a id="__codelineno-0-2285" name="__codelineno-0-2285"></a><span class="sd">    Args:</span>
 </span><span id="__span-0-2286"><a id="__codelineno-0-2286" name="__codelineno-0-2286"></a><span class="sd">        column (pd.Series):</span>
-</span><span id="__span-0-2287"><a id="__codelineno-0-2287" name="__codelineno-0-2287"></a><span class="sd">            The pandas Series (column) to check.</span>
+</span><span id="__span-0-2287"><a id="__codelineno-0-2287" name="__codelineno-0-2287"></a><span class="sd">            The pandas Series (column) to check. If not a Series, returns False and logs an error.</span>
 </span><span id="__span-0-2288"><a id="__codelineno-0-2288" name="__codelineno-0-2288"></a><span class="sd">        threshold (float, optional):</span>
-</span><span id="__span-0-2289"><a id="__codelineno-0-2289" name="__codelineno-0-2289"></a><span class="sd">            0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage. Default = 0.5 (50%).</span>
+</span><span id="__span-0-2289"><a id="__codelineno-0-2289" name="__codelineno-0-2289"></a><span class="sd">            0.0 &lt; threshold &lt;= 1.0. Float representation of the percentage. Default = 0.5 (50%). If out of bounds, returns False and logs an error.</span>
 </span><span id="__span-0-2290"><a id="__codelineno-0-2290" name="__codelineno-0-2290"></a>
 </span><span id="__span-0-2291"><a id="__codelineno-0-2291" name="__codelineno-0-2291"></a><span class="sd">    Returns:</span>
 </span><span id="__span-0-2292"><a id="__codelineno-0-2292" name="__codelineno-0-2292"></a><span class="sd">        bool:</span>
-</span><span id="__span-0-2293"><a id="__codelineno-0-2293" name="__codelineno-0-2293"></a><span class="sd">            True if the column contains list-like objects, False otherwise.</span>
+</span><span id="__span-0-2293"><a id="__codelineno-0-2293" name="__codelineno-0-2293"></a><span class="sd">            True if the column contains mostly list-like objects, False otherwise.</span>
 </span><span id="__span-0-2294"><a id="__codelineno-0-2294" name="__codelineno-0-2294"></a>
 </span><span id="__span-0-2295"><a id="__codelineno-0-2295" name="__codelineno-0-2295"></a><span class="sd">    &quot;&quot;&quot;</span>
 </span><span id="__span-0-2296"><a id="__codelineno-0-2296" name="__codelineno-0-2296"></a>

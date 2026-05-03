@@ -37,7 +37,7 @@ class Assoc:
     # end method definition
 
     @classmethod
-    def escape_unicode(cls, assoc_string: str) -> str:
+    def escape_unicode(cls, assoc_string: str) -> bytes:
         """Escape / Encode a given string in Unicode.
 
         Args:
@@ -45,8 +45,8 @@ class Assoc:
                 The source string to escape.
 
         Returns:
-            str:
-                The escaped string.
+            bytes:
+                The escaped string as bytes.
 
         """
 
@@ -88,7 +88,7 @@ class Assoc:
 
         Returns:
             bool:
-                True = string is HTML escaped, False if now
+                True if string is HTML escaped, False if not
 
         """
 

@@ -2245,10 +2245,10 @@ class Data:
 
         Args:
             column (pd.Series):
-                The pandas Series (column) to check.
+                The pandas Series (column) to check. If not a Series, returns False and logs an error.
             threshold (float, optional):
                 0.0 < threshold <= 1.0. Float representation of the percentage.
-                Default = 0.5 (50%).
+                Default = 0.5 (50%). If out of bounds, returns False and logs an error.
 
         Returns:
             bool:
@@ -2284,13 +2284,13 @@ class Data:
 
         Args:
             column (pd.Series):
-                The pandas Series (column) to check.
+                The pandas Series (column) to check. If not a Series, returns False and logs an error.
             threshold (float, optional):
-                0.0 < threshold <= 1.0. Float representation of the percentage. Default = 0.5 (50%).
+                0.0 < threshold <= 1.0. Float representation of the percentage. Default = 0.5 (50%). If out of bounds, returns False and logs an error.
 
         Returns:
             bool:
-                True if the column contains list-like objects, False otherwise.
+                True if the column contains mostly list-like objects, False otherwise.
 
         """
 

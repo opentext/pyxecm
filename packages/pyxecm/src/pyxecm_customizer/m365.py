@@ -12,12 +12,15 @@ __email__ = "mdiefenb@opentext.com"
 import json
 import logging
 import os
+import platform
 import re
+import sys
 import time
 import urllib.parse
 import zipfile
 from datetime import UTC, datetime
 from http import HTTPStatus
+from importlib.metadata import version
 from urllib.parse import quote
 
 import requests
@@ -25,27 +28,37 @@ from pyxecm.helper import HTTP
 
 from .browser_automation import BrowserAutomation
 
-default_logger = logging.getLogger("pyxecm_customizer.m365")
+APP_NAME = "pyxecm"
+APP_VERSION = version("pyxecm")
+MODULE_NAME = APP_NAME + ".m365"
 
-request_login_headers = {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "Accept": "application/json",
-}
+PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+OS_INFO = f"{platform.system()} {platform.release()}"
+ARCH_INFO = platform.machine()
+REQUESTS_VERSION = requests.__version__
+
+USER_AGENT = (
+    f"{APP_NAME}/{APP_VERSION} ({MODULE_NAME}/{APP_VERSION}; "
+    f"Python/{PYTHON_VERSION}; {OS_INFO}; {ARCH_INFO}; Requests/{REQUESTS_VERSION})"
+)
 
 REQUEST_TIMEOUT = 60.0
 REQUEST_RETRY_DELAY = 20.0
 REQUEST_MAX_RETRIES = 3
+
+default_logger = logging.getLogger("pyxecm_customizer.m365")
+
+REQUEST_LOGIN_HEADER = {
+    "User-Agent": USER_AGENT,
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Accept": "application/json",
+}
 
 
 class M365:
     """Used to automate stettings in Microsoft 365 via the Graph API."""
 
     logger: logging.Logger = default_logger
-
-    _config: dict
-    _access_token = None
-    _user_access_token = None
-    _http_object: HTTP | None = None
 
     def __init__(
         self,
@@ -94,6 +107,7 @@ class M365:
             for logfilter in logger.filters:
                 self.logger.addFilter(logfilter)
 
+        # Initialize m365_config as an empty dictionary
         m365_config = {}
 
         # Set the authentication endpoints and credentials
@@ -135,6 +149,11 @@ class M365:
 
         self._config = m365_config
         self._http_object = HTTP(logger=self.logger)
+        self._request_session = requests.Session()
+        self._access_token: str | None = None
+        self._user_access_token: str | None = None
+
+    # end method definition
 
     def config(self) -> dict:
         """Return the configuration dictionary.
@@ -146,6 +165,8 @@ class M365:
 
         return self._config
 
+    # end method definition
+
     def credentials(self) -> dict:
         """Return the login credentials.
 
@@ -156,6 +177,8 @@ class M365:
         """
 
         return self.config()["tokenData"]
+
+    # end method definition
 
     def credentials_user(self, username: str, password: str, scope: str = "Files.ReadWrite") -> dict:
         """Get user credentials.
@@ -213,7 +236,12 @@ class M365:
 
         """
 
+        if not self._access_token:
+            self.logger.warning("No M365 session is authenticated! Authenticating now...")
+            self._access_token = self.authenticate()
+
         request_header = {
+            "User-Agent": USER_AGENT,
             "Authorization": "Bearer {}".format(self._access_token),
             "Content-Type": content_type,
         }
@@ -238,6 +266,7 @@ class M365:
         """
 
         request_header = {
+            "User-Agent": USER_AGENT,
             "Content-Type": content_type,
         }
 
@@ -247,6 +276,55 @@ class M365:
             request_header["Authorization"] = "Bearer {}".format(self._user_access_token)
 
         return request_header
+
+    # end method definition
+
+    def _log_response_error(
+        self,
+        response: requests.Response,
+        failure_message: str,
+        warning_message: str = "",
+        show_error: bool = True,
+        show_warning: bool = False,
+    ) -> None:
+        """Log HTTP error response with proper content-type handling.
+
+        Args:
+            response: The response object from requests
+            failure_message: Primary error message
+            warning_message: Alternative warning message
+            show_error: Whether to log as error
+            show_warning: Whether to log as warning
+
+        """
+        content_type = response.headers.get("content-type", None)
+        response_text = "HTML content (only printed in debug log)" if content_type == "text/html" else response.text
+
+        if show_error:
+            self.logger.error(
+                "%s; status -> %s/%s; error -> %s",
+                failure_message,
+                response.status_code,
+                HTTPStatus(response.status_code).phrase,
+                response_text,
+            )
+        elif show_warning:
+            self.logger.warning(
+                "%s; status -> %s/%s; warning -> %s",
+                warning_message or failure_message,
+                response.status_code,
+                HTTPStatus(response.status_code).phrase,
+                response_text,
+            )
+
+        if content_type == "text/html":
+            self.logger.debug(
+                "%s; status -> %s/%s; html -> %s",
+                failure_message,
+                response.status_code,
+                HTTPStatus(response.status_code).phrase,
+                response.text,
+            )
 
     # end method definition
 
@@ -335,7 +413,7 @@ class M365:
 
         while True:
             try:
-                response = requests.request(
+                response = self._request_session.request(
                     method=method,
                     url=url,
                     data=data,
@@ -354,59 +432,56 @@ class M365:
                         return self.parse_request_response(response)
                     else:
                         return response
+                # Client errors that should fail fast (4xx except 401, 429)
+                elif response.status_code in [400, 403, 404]:
+                    self._log_response_error(
+                        response,
+                        failure_message + " (not retrying; client error)",
+                        show_error=show_error,
+                    )
+                    return None
                 # Check if Session has expired - then re-authenticate and try once more
                 elif response.status_code == 401 and retries == 0:
                     self.logger.debug("Session has expired - try to re-authenticate...")
-                    self.authenticate(revalidate=True)
+                    new_token = self.authenticate(revalidate=True)
+                    if not new_token:
+                        self.logger.error("Re-authentication failed; aborting request.")
+                        return None
                     headers = self.request_header()
                     retries += 1
-                elif response.status_code in [502, 503, 504] and retries < REQUEST_MAX_RETRIES:
+                # Throttling and server errors: honor Retry-After if present
+                elif response.status_code in [429, 503] and retries < REQUEST_MAX_RETRIES:
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        wait_time = int(retry_after) if retry_after is not None else min(2**retries * 60, 3600)
+                    except (ValueError, TypeError):
+                        wait_time = min(2**retries * 60, 3600)
                     self.logger.warning(
-                        "M365 Graph API delivered server side error -> %s; retrying in %s seconds...",
+                        "M365 Graph API transient error (status %s); retrying in %s seconds...",
                         response.status_code,
-                        (retries + 1) * 60,
+                        wait_time,
                     )
-                    time.sleep((retries + 1) * 60)
+                    time.sleep(wait_time)
                     retries += 1
-                elif response.status_code in [404, 429] and retries < REQUEST_MAX_RETRIES:
+                # Other server errors (502, 504) - retry with exponential backoff
+                elif response.status_code in [502, 504] and retries < REQUEST_MAX_RETRIES:
+                    wait_time = min(2**retries * 60, 3600)
                     self.logger.warning(
-                        "M365 Graph API is too slow or throtteling calls -> %s; retrying in %s seconds...",
+                        "M365 Graph API server error (status %s); retrying in %s seconds...",
                         response.status_code,
-                        (retries + 1) * 60,
+                        wait_time,
                     )
-                    time.sleep((retries + 1) * 60)
+                    time.sleep(wait_time)
                     retries += 1
                 else:
-                    # Handle plain HTML responses to not pollute the logs
-                    content_type = response.headers.get("content-type", None)
-                    response_text = (
-                        "HTML content (only printed in debug log)" if content_type == "text/html" else response.text
+                    # Handle all other error responses
+                    self._log_response_error(
+                        response,
+                        failure_message,
+                        warning_message=warning_message,
+                        show_error=show_error,
+                        show_warning=show_warning,
                     )
-
-                    if show_error:
-                        self.logger.error(
-                            "%s; status -> %s/%s; error -> %s",
-                            failure_message,
-                            response.status_code,
-                            HTTPStatus(response.status_code).phrase,
-                            response_text,
-                        )
-                    elif show_warning:
-                        self.logger.warning(
-                            "%s; status -> %s/%s; warning -> %s",
-                            warning_message or failure_message,
-                            response.status_code,
-                            HTTPStatus(response.status_code).phrase,
-                            response_text,
-                        )
-                    if content_type == "text/html":
-                        self.logger.debug(
-                            "%s; status -> %s/%s; warning -> %s",
-                            failure_message,
-                            response.status_code,
-                            HTTPStatus(response.status_code).phrase,
-                            response.text,
-                        )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
@@ -578,7 +653,7 @@ class M365:
             index (int, optional):
                 Index to use (1st element has index 0).
                 Defaults to 0.
-            sub_dict_name (str):
+            sub_dict_name (str, optional):
                 Some MS Graph API calls include nested dict structures that can
                 be requested with an "expand" query parameter. In such
                 a case we use the sub_dict_name to access it.
@@ -641,7 +716,7 @@ class M365:
                 Value to find in the item with the matching key.
             return_key (str):
                 Name of the dictionary key whose value should be returned.
-            sub_dict_name (str):
+            sub_dict_name (str, optional):
                 Some MS Graph API calls include nested dict structures that can
                 be requested with an "expand" query parameter. In such
                 a case we use the sub_dict_name to access it.
@@ -709,7 +784,7 @@ class M365:
             return self._access_token
 
         request_url = self.config()["authenticationUrl"]
-        request_header = request_login_headers
+        request_header = REQUEST_LOGIN_HEADER
 
         self.logger.debug("Requesting M365 Access Token from -> %s", request_url)
 
@@ -759,7 +834,7 @@ class M365:
                 The name (email) of the M365 user.
             password (str):
                 The password of the M365 user.
-            scope (str):
+            scope (str | None, optional):
                 The scope of the delegated permission. E.g. "Files.ReadWrite".
                 Multiple delegated permissions should be separated by spaces.
 
@@ -771,7 +846,7 @@ class M365:
         """
 
         request_url = self.config()["authenticationUrl"]
-        request_header = request_login_headers
+        request_header = REQUEST_LOGIN_HEADER
 
         if not username:
             self.logger.error("Missing user name - cannot authenticate at M365!")
@@ -800,7 +875,7 @@ class M365:
                 headers=request_header,
                 timeout=REQUEST_TIMEOUT,
             )
-        except requests.exceptions.ConnectionError as exception:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exception:
             self.logger.warning(
                 "Unable to connect to -> %s with username -> %s: %s",
                 self.config()["authenticationUrl"],
@@ -830,19 +905,34 @@ class M365:
 
     # end method definition
 
-    def get_users(self, max_number: int = 250, next_page_url: str | None = None) -> dict | None:
-        """Get list all all users in M365 tenant.
+    def get_users(
+        self,
+        max_number: int = 250,
+        next_page_url: str | None = None,
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
+    ) -> dict | None:
+        """Get list of all (or filtered) users in M365 tenant.
 
         Args:
             max_number (int, optional):
-                The maximum result values (limit).
+                The maximum result values (limit). Defaults to 250.
             next_page_url (str, optional):
                 The MS Graph URL to retrieve the next page of M365 users (pagination).
                 This is used for the iterator get_users_iterator() below.
+            select (str, optional):
+                Fields to select from the result set (e.g., "userPrincipalName,displayName,mail").
+                If not specified, all fields are returned. Reduces payload size when set.
+            filter_expression (str, optional):
+                OData filter expression to filter the results (e.g., "accountEnabled eq true").
+                See https://learn.microsoft.com/en-us/graph/query-parameters#filter-parameter
+            order_by (str, optional):
+                Field(s) to order results by (e.g., "displayName asc" or "createdDateTime desc").
 
         Returns:
             dict | None:
-                Dictionary of all M365 users.
+                Dictionary of M365 users.
 
         """
 
@@ -855,11 +945,22 @@ class M365:
             request_url,
         )
 
+        # Build query parameters
+        params = {}
+        if not next_page_url:
+            params["$top"] = str(max_number)
+        if select:
+            params["$select"] = select
+        if filter_expression:
+            params["$filter"] = filter_expression
+        if order_by:
+            params["$orderby"] = order_by
+
         response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
-            params={"$top": str(max_number)} if not next_page_url else None,
+            params=params or None,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get list of M365 users!",
         )
@@ -870,6 +971,10 @@ class M365:
 
     def get_users_iterator(
         self,
+        max_number: int = 250,
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
     ) -> iter:
         """Get an iterator object that can be used to traverse all M365 users.
 
@@ -880,6 +985,16 @@ class M365:
             users = m365_object.get_users_iterator()
             for user in users:
                 logger.info("Traversing M365 user -> '%s'...", user.get("displayName", "<undefined name>"))
+
+        Args:
+            max_number (int, optional):
+                The maximum result values (limit) per request page. Defaults to 250.
+            select (str | None, optional):
+                Fields to select from the result set.
+            filter_expression (str | None, optional):
+                OData filter expression to filter the results.
+            order_by (str | None, optional):
+                Field(s) to order results by.
 
         Returns:
             iter:
@@ -892,7 +1007,11 @@ class M365:
 
         while True:
             response = self.get_users(
+                max_number=max_number,
                 next_page_url=next_page_url,
+                select=select,
+                filter_expression=filter_expression,
+                order_by=order_by,
             )
             if not response or "value" not in response:
                 # Don't return None! Plain return is what we need for iterators.
@@ -940,12 +1059,12 @@ class M365:
                 'givenName': 'Bob',
                 'id': '72c80809-094f-4e6e-98d4-25a736385d10',
                 'jobTitle': None,
-                'mail': 'bdavis@M365x61936377.onmicrosoft.com',
+                'mail': 'bdavis@M365x12345678.onmicrosoft.com',
                 'mobilePhone': None,
                 'officeLocation': None,
                 'preferredLanguage': None,
                 'surname': 'Davis',
-                'userPrincipalName': 'bdavis@M365x61936377.onmicrosoft.com'
+                'userPrincipalName': 'bdavis@M365x12345678.onmicrosoft.com'
             }
 
         """
@@ -1060,7 +1179,7 @@ class M365:
             url=request_url,
             method="POST",
             headers=request_header,
-            data=json.dumps(user_post_body),
+            json_data=user_post_body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add M365 user -> '{}'".format(email),
         )
@@ -1446,15 +1565,26 @@ class M365:
         self,
         max_number: int = 250,
         next_page_url: str | None = None,
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
     ) -> dict | None:
-        """Get list all all groups in M365 tenant.
+        """Get list of all groups in M365 tenant.
 
         Args:
             max_number (int, optional):
-                The maximum result values (limit).
+                The maximum result values (limit). Defaults to 250.
             next_page_url (str, optional):
                 The MS Graph URL to retrieve the next page of M365 groups (pagination).
                 This is used for the iterator get_groups_iterator() below.
+            select (str, optional):
+                Fields to select from the result set (e.g., "id,displayName,mail,visibility").
+                If not specified, all fields are returned. Reduces payload size when set.
+            filter_expression (str, optional):
+                OData filter expression to filter the results (e.g., "groupTypes/any(c:c eq 'Unified')").
+                See https://learn.microsoft.com/en-us/graph/query-parameters#filter-parameter
+            order_by (str, optional):
+                Field(s) to order results by (e.g., "displayName asc" or "createdDateTime desc").
 
         Returns:
             dict:
@@ -1471,11 +1601,22 @@ class M365:
             request_url,
         )
 
+        # Build query parameters
+        params = {}
+        if not next_page_url:
+            params["$top"] = str(max_number)
+        if select:
+            params["$select"] = select
+        if filter_expression:
+            params["$filter"] = filter_expression
+        if order_by:
+            params["$orderby"] = order_by
+
         response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
-            params={"$top": str(max_number)} if not next_page_url else None,
+            params=params or None,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get list of M365 groups",
         )
@@ -1486,6 +1627,10 @@ class M365:
 
     def get_groups_iterator(
         self,
+        max_number: int = 250,
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
     ) -> iter:
         """Get an iterator object that can be used to traverse all M365 groups.
 
@@ -1496,6 +1641,16 @@ class M365:
             groups = m365_object.get_groups_iterator()
             for group in groups:
                 logger.info("Traversing M365 group -> '%s'...", group.get("displayName", "<undefined name>"))
+
+        Args:
+            max_number (int, optional):
+                The maximum result values (limit) per request page. Defaults to 250.
+            select (str | None, optional):
+                Fields to select from the result set.
+            filter_expression (str | None, optional):
+                OData filter expression to filter the results.
+            order_by (str | None, optional):
+                Field(s) to order results by.
 
         Returns:
             iter:
@@ -1508,7 +1663,11 @@ class M365:
 
         while True:
             response = self.get_groups(
+                max_number=max_number,
                 next_page_url=next_page_url,
+                select=select,
+                filter_expression=filter_expression,
+                order_by=order_by,
             )
             if not response or "value" not in response:
                 # Don't return None! Plain return is what we need for iterators.
@@ -1559,7 +1718,7 @@ class M365:
                         'expirationDateTime': None,
                         'groupTypes': ['Unified'],
                         'isAssignableToRole': None,
-                        'mail': 'Engineering&Construction@M365x61936377.onmicrosoft.com',
+                        'mail': 'Engineering&Construction@M365x12345678.onmicrosoft.com',
                         'mailEnabled': True,
                         'mailNickname': 'Engineering&Construction',
                         'membershipRule': None,
@@ -1619,6 +1778,12 @@ class M365:
         name: str,
         security_enabled: bool = False,
         mail_enabled: bool = True,
+        description: str = "",
+        visibility: str = "Public",
+        mail_nickname: str = "",
+        owners: list | None = None,
+        members: list | None = None,
+        resource_behavior_options: list | None = None,
     ) -> dict | None:
         """Add a M365 Group.
 
@@ -1629,6 +1794,23 @@ class M365:
                 Whether or not this group is used for permission management.
             mail_enabled (bool, optional):
                 Whether or not this group is email enabled.
+            description (str, optional):
+                A description for the group. Defaults to "".
+            visibility (str, optional):
+                Group visibility. One of "Public" (default), "Private", or
+                "HiddenMembership". Only applies to Unified (Microsoft 365) groups.
+            mail_nickname (str, optional):
+                The mail alias for the group. When omitted, the display name with
+                spaces removed is used. Useful for names containing special characters.
+            owners (list | None, optional):
+                List of M365 user-object IDs to seed as group owners at creation time.
+                Supplying owners here is more efficient than calling add_group_owner()
+                afterwards because it avoids a separate API round-trip.
+            members (list | None, optional):
+                List of M365 user/group-object IDs to seed as members at creation time.
+            resource_behavior_options (list | None, optional):
+                Optional list of behavioural flags, e.g.:
+                "WelcomeEmailDisabled", "HideGroupInOutlook", "SubscribeMembersToCalendarEventsDisabled".
 
         Returns:
             dict | None:
@@ -1647,7 +1829,7 @@ class M365:
                 'expirationDateTime': None,
                 'groupTypes': ['Unified'],
                 'isAssignableToRole': None,
-                'mail': 'Diefenbruch@M365x61936377.onmicrosoft.com',
+                'mail': 'xyz@M365x12345678.onmicrosoft.com',
                 'mailEnabled': True,
                 'mailNickname': 'Test',
                 'membershipRule': None,
@@ -1661,25 +1843,38 @@ class M365:
                 'onPremisesProvisioningErrors': [],
                 'preferredDataLocation': None,
                 'preferredLanguage': None,
-                'proxyAddresses': ['SMTP:Test@M365x61936377.onmicrosoft.com'],
+                'proxyAddresses': ['SMTP:xyz@M365x12345678.onmicrosoft.com'],
                 'renewedDateTime': '2023-04-01T11:40:13Z',
                 'resourceBehaviorOptions': [],
                 'resourceProvisioningOptions': [],
                 'securityEnabled': True,
-                'securityIdentifier': 'S-1-12-1-680551520-1134470812-197642884-1433859052',
+                'securityIdentifier': 'S-1-12-1-680551520-1134470812-197772884-1433859052',
                 'theme': None,
                 'visibility': 'Public'
             }
 
         """
 
-        group_post_body = {
+        group_post_body: dict = {
             "displayName": name,
             "mailEnabled": mail_enabled,
-            "mailNickname": name.replace(" ", ""),
+            "mailNickname": mail_nickname or name.replace(" ", ""),
             "securityEnabled": security_enabled,
             "groupTypes": ["Unified"],
+            "visibility": visibility,
         }
+        if description:
+            group_post_body["description"] = description
+        if owners:
+            group_post_body["owners@odata.bind"] = [
+                self.config()["directoryObjects"] + "/" + owner_id for owner_id in owners
+            ]
+        if members:
+            group_post_body["members@odata.bind"] = [
+                self.config()["directoryObjects"] + "/" + member_id for member_id in members
+            ]
+        if resource_behavior_options:
+            group_post_body["resourceBehaviorOptions"] = resource_behavior_options
 
         request_url = self.config()["groupsUrl"]
         request_header = self.request_header()
@@ -1691,7 +1886,7 @@ class M365:
             url=request_url,
             method="POST",
             headers=request_header,
-            data=json.dumps(group_post_body),
+            json_data=group_post_body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add M365 group -> '{}'".format(name),
         )
@@ -1779,7 +1974,7 @@ class M365:
             url=request_url,
             method="POST",
             headers=request_header,
-            data=json.dumps(group_member_post_body),
+            json_data=group_member_post_body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add member -> {} to M365 group -> {}".format(
                 member_id,
@@ -1915,7 +2110,7 @@ class M365:
             url=request_url,
             method="POST",
             headers=request_header,
-            data=json.dumps(group_member_post_body),
+            json_data=group_member_post_body,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add owner -> {} to M365 group -> {}".format(
                 owner_id,
@@ -1935,28 +2130,32 @@ class M365:
         request_header = self.request_header()
 
         request_url = self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.group"
-        response = requests.get(
+        response = self.do_request(
             request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve deleted M365 groups",
         )
-        deleted_groups = self.parse_request_response(response) or {}
+        deleted_groups = response or {}
 
         for group in deleted_groups.get("value", []):
             group_id = group["id"]
-            response = self.purge_deleted_item(group_id)
+            self.purge_deleted_item(group_id)
 
         request_url = self.config()["directoryUrl"] + "/deletedItems/microsoft.graph.user"
-        response = requests.get(
+        response = self.do_request(
             request_url,
+            method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to retrieve deleted M365 users",
         )
-        deleted_users = self.parse_request_response(response) or {}
+        deleted_users = response or {}
 
         for user in deleted_users.get("value", []):
             user_id = user["id"]
-            response = self.purge_deleted_item(user_id)
+            self.purge_deleted_item(user_id)
 
     # end method definition
 
@@ -2021,8 +2220,9 @@ class M365:
         request_header = self.request_header()
 
         self.logger.debug(
-            "Check if M365 Group -> %s has a M365 Team connected; calling -> %s",
+            "Check if M365 Group -> %s (%s) has a M365 Team connected; calling -> %s",
             group_name,
+            group_id,
             request_url,
         )
 
@@ -2031,18 +2231,19 @@ class M365:
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to check if M365 Group -> '{}' has a M365 Team connected".format(
+            failure_message="Failed to check if M365 Group -> '{}' ({}) has a M365 Team connected".format(
                 group_name,
+                group_id,
             ),
             parse_request_response=False,
             show_error=False,
         )
 
         if response and response.status_code == 200:  # Group has a Team assigned!
-            self.logger.debug("Group -> '%s' has a M365 Team connected.", group_name)
+            self.logger.debug("Group -> '%s' (%s) has a M365 Team connected.", group_name, group_id)
             return True
         elif not response or response.status_code == 404:  # Group does not have a Team assigned!
-            self.logger.debug("Group -> '%s' has no M365 Team connected.", group_name)
+            self.logger.debug("Group -> '%s' (%s) has no M365 Team connected.", group_name, group_id)
             return False
 
         return False
@@ -2119,7 +2320,15 @@ class M365:
 
     # end method definition
 
-    def add_team(self, name: str, template_name: str = "standard") -> dict | None:
+    def add_team(
+        self,
+        name: str,
+        template_name: str = "standard",
+        member_settings: dict | None = None,
+        guest_settings: dict | None = None,
+        messaging_settings: dict | None = None,
+        fun_settings: dict | None = None,
+    ) -> dict | None:
         """Add M365 Team based on an existing M365 Group.
 
         Args:
@@ -2127,9 +2336,48 @@ class M365:
                 The name of the team. It is assumed that a group with the same name does already exist!
             template_name (str, optional):
                 The name of the team template. "standard" is the default value.
+            member_settings (dict | None, optional):
+                Controls what regular members may do, e.g.::
+
+                    {
+                        "allowCreateUpdateChannels": True,
+                        "allowDeleteChannels": False,
+                        "allowAddRemoveApps": True,
+                        "allowCreateUpdateRemoveTabs": True,
+                        "allowCreateUpdateRemoveConnectors": True,
+                    }
+
+            guest_settings (dict | None, optional):
+                Controls what guest users may do, e.g.::
+
+                    {
+                        "allowCreateUpdateChannels": False,
+                        "allowDeleteChannels": False,
+                    }
+
+            messaging_settings (dict | None, optional):
+                Controls messaging behaviour, e.g.::
+
+                    {
+                        "allowUserEditMessages": True,
+                        "allowUserDeleteMessages": False,
+                        "allowOwnerDeleteMessages": True,
+                        "allowTeamMentions": True,
+                        "allowChannelMentions": True,
+                    }
+
+            fun_settings (dict | None, optional):
+                Controls fun features, e.g.::
+
+                    {
+                        "allowGiphy": True,
+                        "giphyContentRating": "moderate",
+                        "allowStickersAndMemes": True,
+                        "allowCustomMemes": False,
+                    }
 
         Returns:
-            dict:
+            dict | None:
                 Team information (json - empty text!) or None if the team couldn't be created
                 (e.g. because it exisits already).
 
@@ -2152,13 +2400,21 @@ class M365:
             )
             return None
 
-        team_post_body = {
+        team_post_body: dict = {
             "template@odata.bind": "{}('{}')".format(
                 self.config()["teamsTemplatesUrl"],
                 template_name,
             ),
             "group@odata.bind": "{}('{}')".format(self.config()["groupsUrl"], group_id),
         }
+        if member_settings:
+            team_post_body["memberSettings"] = member_settings
+        if guest_settings:
+            team_post_body["guestSettings"] = guest_settings
+        if messaging_settings:
+            team_post_body["messagingSettings"] = messaging_settings
+        if fun_settings:
+            team_post_body["funSettings"] = fun_settings
 
         request_url = self.config()["teamsUrl"]
         request_header = self.request_header()
@@ -2169,7 +2425,7 @@ class M365:
         return self.do_request(
             url=request_url,
             method="POST",
-            data=json.dumps(team_post_body),
+            json_data=team_post_body,
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to add M365 Team -> '{}'".format(name),
@@ -2177,12 +2433,14 @@ class M365:
 
     # end method definition
 
-    def delete_team(self, team_id: str) -> dict | None:
+    def delete_team(self, team_id: str, show_error: bool = True) -> dict | None:
         """Delete Microsoft 365 Team with a specific ID.
 
         Args:
             team_id (str):
                 The ID of the Microsoft 365 Team to delete.
+            show_error (bool):
+                Should an error be logged if the team cannot be deleted.
 
         Returns:
             dict | None:
@@ -2205,7 +2463,9 @@ class M365:
             method="DELETE",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            warning_message="M365 Team with ID -> {} is already deleted.".format(team_id),
             failure_message="Failed to delete M365 Team with ID -> {}".format(team_id),
+            show_error=show_error,
         )
 
     # end method definition
@@ -2282,7 +2542,7 @@ class M365:
 
     # end method definition
 
-    def delete_all_teams(self, exception_list: list, pattern_list: list) -> bool:
+    def delete_all_teams(self, exception_list: list | None = None, pattern_list: list | None = None) -> bool:
         """Delete all teams (groups) based on patterns and exceptions.
 
         Only delete MS Teams that are NOT on the exception list AND
@@ -2293,9 +2553,9 @@ class M365:
         may take some days until M365 finally deletes them.
 
         Args:
-            exception_list (list):
+            exception_list (list | None):
                 A list of group names that should not be deleted.
-            pattern_list (list):
+            pattern_list (list | None):
                 A list of patterns for group names to be deleted
                 (regular expression).
 
@@ -2309,50 +2569,91 @@ class M365:
             "Delete existing M365 groups/teams matching delete pattern and not on exception list...",
         )
 
-        # Get list of all existing M365 groups/teams:
+        # Phase 1: Build a stable deletion list first, then delete in phase 2.
+        # This avoids mutating the paged collection while iterating over it.
         groups = self.get_groups_iterator()
+        deletion_candidates: list[tuple[str, str]] = []
 
-        # Process all groups and check if they should be deleted:
         for group in groups:
+            group_id = group.get("id", None)
             group_name = group.get("displayName", None)
-            if not group_name:
+            if not group_name or not group_id:
                 continue
+
             # Check if group is in exception list:
-            if group_name in exception_list:
+            if group_name in (exception_list or []):
                 self.logger.info(
-                    "M365 Group name -> '%s' is on the exception list. Skipping...",
+                    "M365 Group -> '%s' (%s) is on the exception list. Skipping...",
                     group_name,
+                    group_id,
                 )
                 continue
+
             # Check that at least one pattern is found that matches the group:
-            for pattern in pattern_list:
+            for pattern in pattern_list or []:
                 result = re.search(pattern, group_name)
                 if result:
                     self.logger.info(
-                        "M365 Group name -> '%s' is matching pattern -> '%s'. Deleting...",
+                        "M365 Group -> '%s' (%s) is matching pattern -> '%s'. Marking for deletion...",
                         group_name,
+                        group_id,
                         pattern,
                     )
-                    self.delete_teams(name=group_name)
+                    deletion_candidates.append((group_id, group_name))
                     break
             else:
                 self.logger.info(
-                    "M365 Group name -> '%s' is not matching any delete pattern. Skipping...",
+                    "M365 Group -> '%s' (%s) is not matching any delete pattern. Skipping...",
                     group_name,
+                    group_id,
                 )
+
+        # Phase 2: Delete collected groups by ID.
+        deleted_counter = 0
+        for group_id, group_name in deletion_candidates:
+            self.logger.info(
+                "Deleting M365 Group -> '%s' (%s)...",
+                group_name,
+                group_id,
+            )
+            response = self.delete_team(team_id=group_id, show_error=False)
+            if response:
+                deleted_counter += 1
+
+        self.logger.info(
+            "Deleted %s of %s matching M365 group%s/team%s.",
+            str(deleted_counter),
+            str(len(deletion_candidates)),
+            "" if len(deletion_candidates) == 1 else "s",
+            "" if len(deletion_candidates) == 1 else "s",
+        )
         return True
 
     # end method definition
 
-    def get_team_channels(self, name: str) -> dict | None:
+    def get_team_channels(
+        self,
+        name: str,
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
+    ) -> dict | None:
         """Get channels of a M365 Team based on the team name.
 
         Args:
             name (str):
                 The name of the M365 team.
+            select (str, optional):
+                Fields to select from the result set (e.g., "id,displayName,description").
+                If not specified, all fields are returned. Reduces payload size when set.
+            filter_expression (str, optional):
+                OData filter expression to filter the results (e.g., "displayName eq 'General'").
+                See https://learn.microsoft.com/en-us/graph/query-parameters#filter-parameter
+            order_by (str, optional):
+                Field(s) to order results by (e.g., "displayName asc" or "createdDateTime desc").
 
         Returns:
-            dict:
+            dict | None:
                 The channel data structure (dictionary) or None if the request fails.
 
         Example:
@@ -2391,10 +2692,20 @@ class M365:
             request_url,
         )
 
+        # Build query parameters
+        params = {}
+        if select:
+            params["$select"] = select
+        if filter_expression:
+            params["$filter"] = filter_expression
+        if order_by:
+            params["$orderby"] = order_by
+
         return self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
+            params=params or None,
             timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get Channels for M365 Team -> '{}' ({})".format(
                 name,
@@ -2779,7 +3090,7 @@ class M365:
                 after installation (which is tenant specific).
 
         Returns:
-            dict:
+            dict | None:
                 Response of the MS GRAPH API REST call or None if the request fails
                 The responses are different depending if it is an install or upgrade!!
 
@@ -2882,14 +3193,17 @@ class M365:
         request_header = self.request_header_user()
 
         # Make the DELETE request to remove the app from the app catalog
-        response = requests.delete(
+        response = self.do_request(
             request_url,
+            method="DELETE",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            parse_request_response=False,
+            failure_message="Failed to remove M365 Teams app with ID -> {} from app catalog".format(app_id),
         )
 
         # Check the status code of the response
-        if response.status_code == 204:
+        if response and response.status_code == 204:
             self.logger.debug(
                 "The M365 Teams app with ID -> %s has been successfully removed from the app catalog.",
                 app_id,
@@ -3080,7 +3394,7 @@ class M365:
                 The installation ID of the app. Default is None.
 
         Returns:
-            dict:
+            dict | None:
                 Response of the MS Graph API call or None if the call fails.
 
         """
@@ -3189,7 +3503,7 @@ class M365:
                 The exact name of the app.
 
         Returns:
-            dict:
+            dict | None:
                 The response of the MS Graph API call or None if the call fails.
 
         """
@@ -3259,7 +3573,7 @@ class M365:
                 The node ID of the target workspace or container in Extended ECM.
 
         Returns:
-            dict:
+            dict | None:
                 Return data structure (dictionary) or None if the request fails.
 
             Example return data:
@@ -3354,7 +3668,7 @@ class M365:
                 The node ID of the target workspace or container in Content Server.
 
         Returns:
-            dict:
+            dict | None:
                 Return data structure (dictionary) or None if the request fails.
 
         """
@@ -3598,7 +3912,8 @@ class M365:
                 Enable marking. Defaults to False.
 
         Returns:
-            Request reponse or None if the request fails.
+            dict | None:
+                Request response or None if the request fails.
 
         """
 
@@ -3623,16 +3938,17 @@ class M365:
             request_url,
         )
 
-        # Send the POST request to create the label
-        response = requests.post(
+        response = self.do_request(
             request_url,
+            method="POST",
             headers=request_header,
-            data=json.dumps(payload),
+            json_data=payload,
             timeout=REQUEST_TIMEOUT,
+            parse_request_response=False,
+            failure_message="Failed to create the M365 label -> '{}'".format(name),
         )
 
-        # Check the response status code
-        if response.status_code == 201:
+        if response and response.status_code == 201:
             self.logger.debug("Label -> '%s' has been created successfully!", name)
             return response
         else:
@@ -3797,7 +4113,7 @@ class M365:
                 'isDeviceOnlyAuthSupported': None,
                 'isFallbackPublicClient': None,
                 'notes': None,
-                'publisherDomain': 'M365x41497014.onmicrosoft.com',
+                'publisherDomain': 'M365x12345678.onmicrosoft.com',
                 'signInAudience': 'AzureADMyOrg',
                 ...
                 'requiredResourceAccess': [
@@ -3905,10 +4221,19 @@ class M365:
     def get_mail(
         self,
         user_id: str,
-        sender: str,
-        subject: str,
+        sender: str = "",
+        subject: str = "",
         num_emails: int | None = None,
         show_error: bool = False,
+        folder: str = "inbox",
+        select_fields: list[str] | None = None,
+        order_by: str = "receivedDateTime desc",
+        received_after: str | None = None,
+        include_attachments: bool = False,
+        use_server_filter: bool = False,
+        additional_filter: str | None = None,
+        exact_sender_match: bool = True,
+        case_sensitive_subject: bool = False,
     ) -> dict | None:
         """Get email from inbox of a given user and a given sender (from).
 
@@ -3919,13 +4244,38 @@ class M365:
                 The M365 ID of the user.
             sender (str):
                 The sender email address to filter for.
+                If empty no sender filtering is performed.
             subject (str):
                 The subject to filter for.
+                If empty no subject filtering is performed.
             num_emails (int, optional):
                 The number of matching emails to retrieve.
             show_error (bool, optional):
                 Whether or not an error should be displayed if the
                 user is not found.
+            folder (str, optional):
+                Mail folder to query (e.g. "inbox", "sentitems").
+                Defaults to "inbox".
+            select_fields (list[str] | None, optional):
+                Optional list of fields for $select.
+            order_by (str, optional):
+                Value for $orderby. Defaults to "receivedDateTime desc".
+            received_after (str | None, optional):
+                If set, adds a receivedDateTime ge filter. Use ISO8601 format
+                (e.g. "2026-05-03T00:00:00Z").
+            include_attachments (bool, optional):
+                Whether to expand attachments in the response.
+            use_server_filter (bool, optional):
+                If True, applies sender/subject/date filters via Graph $filter.
+                If False (default), sender/subject filtering happens client-side
+                for maximum compatibility.
+            additional_filter (str | None, optional):
+                Additional raw Graph $filter expression combined with "and".
+            exact_sender_match (bool, optional):
+                For client-side filtering: exact sender match if True,
+                substring match if False.
+            case_sensitive_subject (bool, optional):
+                For client-side filtering: case-sensitive subject matching if True.
 
         Returns:
             dict:
@@ -3933,27 +4283,46 @@ class M365:
 
         """
 
-        # Attention: you  can easily run in limitation of the MS Graph API. If selection + filtering
-        # is too complex you can get this error: "The restriction or sort order is too complex for this operation."
-        # that's why we first just do the ordering and then do the filtering on sender and subject
-        # separately
-        request_url = (
-            self.config()["usersUrl"]
-            + "/"
-            + user_id
-            #            + "/messages?$filter=from/emailAddress/address eq '{}' and contains(subject, '{}')&$orderby=receivedDateTime desc".format(
-            + "/messages?$orderby=receivedDateTime desc"
-        )
+        request_url = self.config()["usersUrl"] + "/" + user_id
+        if folder:
+            request_url += "/mailFolders/{}/messages".format(folder)
+        else:
+            request_url += "/messages"
+
+        query_params: dict[str, str] = {}
+        if order_by:
+            query_params["$orderby"] = order_by
         if num_emails:
-            request_url += "&$top={}".format(num_emails)
+            query_params["$top"] = str(num_emails)
+        if select_fields:
+            query_params["$select"] = ",".join(select_fields)
+        if include_attachments:
+            query_params["$expand"] = "attachments"
+
+        if use_server_filter:
+            filter_parts: list[str] = []
+            if sender:
+                escaped_sender = sender.replace("'", "''")
+                filter_parts.append("from/emailAddress/address eq '{}'".format(escaped_sender))
+            if subject:
+                escaped_subject = subject.replace("'", "''")
+                filter_parts.append("contains(subject, '{}')".format(escaped_subject))
+            if received_after:
+                filter_parts.append("receivedDateTime ge {}".format(received_after))
+            if additional_filter:
+                filter_parts.append(additional_filter)
+            if filter_parts:
+                query_params["$filter"] = " and ".join(filter_parts)
 
         request_header = self.request_header()
 
         self.logger.debug(
-            "Get mails for user -> %s from -> '%s' with subject -> '%s'; calling -> %s",
+            "Get mails for user -> %s from -> '%s' with subject -> '%s'; folder -> '%s'; server_filter -> %s; calling -> %s",
             user_id,
             sender,
             subject,
+            folder,
+            use_server_filter,
             request_url,
         )
 
@@ -3961,6 +4330,7 @@ class M365:
             url=request_url,
             method="GET",
             headers=request_header,
+            params=query_params,
             timeout=REQUEST_TIMEOUT,
             failure_message="Cannot retrieve emails for M365 user -> {}".format(user_id),
             show_error=show_error,
@@ -3969,14 +4339,40 @@ class M365:
         if response and "value" in response:
             messages = response["value"]
 
-            # Filter the messages by sender and subject in code
-            filtered_messages = [
-                msg
-                for msg in messages
-                if msg.get("from", {}).get("emailAddress", {}).get("address") == sender
-                and subject in msg.get("subject", "")
-            ]
-            response["value"] = filtered_messages
+            # Client-side filtering remains default for compatibility because
+            # some Graph combinations of sort/filter can fail with complexity errors.
+            if not use_server_filter:
+                filtered_messages = []
+                sender_cmp = sender.lower()
+                subject_cmp = subject if case_sensitive_subject else subject.lower()
+
+                for msg in messages:
+                    sender_ok = True
+                    subject_ok = True
+                    date_ok = True
+
+                    if sender:
+                        message_sender = msg.get("from", {}).get("emailAddress", {}).get("address", "")
+                        message_sender_cmp = message_sender.lower()
+                        if exact_sender_match:
+                            sender_ok = message_sender_cmp == sender_cmp
+                        else:
+                            sender_ok = sender_cmp in message_sender_cmp
+
+                    if subject:
+                        message_subject = msg.get("subject", "")
+                        message_subject_cmp = message_subject if case_sensitive_subject else message_subject.lower()
+                        subject_ok = subject_cmp in message_subject_cmp
+
+                    if received_after:
+                        message_received = msg.get("receivedDateTime", "")
+                        date_ok = bool(message_received and message_received >= received_after)
+
+                    if sender_ok and subject_ok and date_ok:
+                        filtered_messages.append(msg)
+
+                response["value"] = filtered_messages
+
             return response
 
         return None

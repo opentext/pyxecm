@@ -7478,23 +7478,26 @@ class Payload:
             if not m365_group_id:
                 # The "m365_id" value is set by the method process_groups_m365()
                 self.logger.error(
-                    "No M365 group exist for group -> '%s' (M365 group creation may have failed). Skipping...",
+                    "M365 group -> '%s' (%s) does not exist. Cannot create M365 team (M365 group creation may have failed). Skipping...",
                     group_name,
+                    m365_group_id,
                 )
                 success = False
                 continue
 
             if self._m365.has_team(group_name=group_name):
                 self.logger.info(
-                    "M365 group -> '%s' already has an MS Team connected. Skipping...",
+                    "M365 group -> '%s' (%s) already has an MS Team connected. Skipping...",
                     group_name,
+                    m365_group_id,
                 )
                 continue
 
             self.logger.info(
-                "Create M365 team -> '%s' for existing M365 group -> '%s'...",
+                "Create M365 team -> '%s' for existing M365 group -> '%s' (%s)...",
                 group_name,
                 group_name,
+                m365_group_id,
             )
             # Now "upgrading" this group to a MS Team:
             new_team = self._m365.add_team(name=group_name)
@@ -7899,7 +7902,10 @@ class Payload:
             r"^AGILUM.*$",
             r"^HD-102T.*$",
             r"^SG325A.*$",
-            r"^[A-Za-z0-9]{18} - .*$",  # delete teams that start with the typical Salesforce IDs (e.g. opportunities)
+            r"^DCTM\s-\s.*$",  # delete DCTM material team
+            r"^CM\s-\s.*$",  # delete CM material team
+            r"^[A-Za-z0-9]{18}\s-\s.*$",  # delete teams that start with the typical Salesforce IDs (e.g. opportunities)
+            r"^[A-Z]\d{9}\s.*$",  # delete teams that seems to be created as examples in a M365 subscription
             r".*\s\([A-Z]{3,4}\)$",  # delete stale Locations from NTSB scenario
         ]
 

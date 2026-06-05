@@ -33,11 +33,12 @@ import warnings
 import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import cache
 from http import HTTPStatus
 from importlib.metadata import version
 from queue import Empty, LifoQueue, Queue
+from typing import Literal
 
 import requests
 import websockets
@@ -114,15 +115,18 @@ class OTCS:
     VOLUME_TYPE_CATEGORIES_VOLUME = 133
     VOLUME_TYPE_CLASSIFICATION_VOLUME = 198
     VOLUME_TYPE_CONTENT_SERVER_DOCUMENT_TEMPLATES = 20541
+    VOLUME_TYPE_DOCUMENT_EDITING_RECOVERY_VOLUME = 1296
     VOLUME_TYPE_ENTERPRISE_WORKSPACE = 141
     VOLUME_TYPE_EXTENDED_ECM = 882
     VOLUME_TYPE_FACETS_VOLUME = 901
+    VOLUME_TYPE_GOVERNMENT_DESKTOP_INBOX_VOLUME = 4240
     VOLUME_TYPE_O365_OFFICE_ONLINE_VOLUME = 1296
     VOLUME_TYPE_PERSONAL_WORKSPACE = 142
     VOLUME_TYPE_PERSPECTIVES = 908
     VOLUME_TYPE_PERSPECTIVE_ASSETS = 954
     VOLUME_TYPE_PHYSICAL_OBJECTS_WORKSPACE = 413
     VOLUME_TYPE_RECORDS_MANAGEMENT = 550
+    VOLUME_TYPE_SMART_DOCUMENT_TYPES = 876
     VOLUME_TYPE_SUPPORT_ASSET_VOLUME = 1309
     VOLUME_TYPE_TRANSPORT_WAREHOUSE = 525
     VOLUME_TYPE_TRANSPORT_WAREHOUSE_WORKBENCH = 528
@@ -147,6 +151,8 @@ class OTCS:
     ITEM_TYPE_NEWS = 208
     ITEM_TYPE_PROJECT = 202
     ITEM_TYPE_SHORTCUT = 1
+    ITEM_TYPE_SMART_DOCUMENT_TYPE = 877
+    ITEM_TYPE_SMART_DOCUMENT_TYPE_FOLDER = 878
     ITEM_TYPE_POLL = 218
     ITEM_TYPE_RELATED_WORKSPACE = 854
     ITEM_TYPE_REPLY = 134
@@ -268,6 +274,46 @@ class OTCS:
             item_name = item_name[:max_length]
 
         return item_name
+
+    # end method definition
+
+    def _format_reminder_date(self, reminder_date_value: str | date) -> str:
+        """Format date input to the OTCS reminder date format."""
+
+        parsed_date: date | None = None
+        if isinstance(reminder_date_value, date):
+            parsed_date = reminder_date_value
+        elif isinstance(reminder_date_value, str):
+            reminder_date_clean = reminder_date_value.strip()
+            if reminder_date_clean.startswith("D/"):
+                parts = reminder_date_clean[2:].split(":", 1)[0].split("/")
+                if len(parts) >= 3:
+                    try:
+                        parsed_date = date(
+                            year=int(parts[0]),
+                            month=int(parts[1]),
+                            day=int(parts[2]),
+                        )
+                    except ValueError:
+                        parsed_date = None
+            else:
+                try:
+                    parsed_date = date.fromisoformat(reminder_date_clean)
+                except ValueError:
+                    try:
+                        parsed_date = datetime.fromisoformat(reminder_date_clean).date()
+                    except ValueError:
+                        parsed_date = None
+
+        if parsed_date is None:
+            message = "Unsupported reminder date value -> {}".format(reminder_date_value)
+            raise ValueError(message)
+
+        return "D/{}/{}/{}:0:0:0".format(
+            parsed_date.year,
+            parsed_date.month,
+            parsed_date.day,
+        )
 
     # end method definition
 
@@ -499,6 +545,8 @@ class OTCS:
         otcs_config["businessWorkspaceTypesUrlv2"] = otcs_rest_url + "/v2/businessworkspacetypes"
         otcs_config["businessworkspacecreateform"] = otcs_rest_url + "/v2/forms/businessworkspaces/create"
         otcs_config["businessWorkspacesUrl"] = otcs_rest_url + "/v2/businessworkspaces"
+        otcs_config["smartDocumentTypesUrl"] = otcs_rest_url + "/v2/smartdocumenttypes"
+        otcs_config["expressionBuilderUrl"] = otcs_rest_url + "/v2/expressionbuilder"
         otcs_config["uniqueNamesUrl"] = otcs_rest_url + "/v2/uniquenames"
         otcs_config["favoritesUrl"] = otcs_rest_url + "/v2/members/favorites"
         otcs_config["reservedNodesUrl"] = otcs_rest_url + "/v2/members/reserved"
@@ -514,6 +562,7 @@ class OTCS:
         otcs_config["recordsManagementUrl"] = otcs_rest_url + "/v1/recordsmanagement"
         otcs_config["recordsManagementUrlv2"] = otcs_rest_url + "/v2/recordsmanagement"
         otcs_config["userSecurityUrl"] = otcs_rest_url + "/v2/members/usersecurity"
+        otcs_config["fdaUsersUrl"] = otcs_rest_url + "/v2/fdausers"
         otcs_config["physicalObjectsUrl"] = otcs_rest_url + "/v1/physicalobjects"
         otcs_config["securityClearancesUrl"] = otcs_rest_url + "/v1/securityclearances"
         otcs_config["holdsUrl"] = otcs_rest_url + "/v1/holds"
@@ -532,6 +581,7 @@ class OTCS:
         otcs_config["startWfWithSkipStartUrl"] = otcs_rest_url + "/v2/draftprocesses/startwf"
         otcs_config["categoryFormUrl"] = otcs_rest_url + "/v1/forms/nodes/categories"
         otcs_config["nodesFormUrl"] = otcs_rest_url + "/v1/forms/nodes"
+        otcs_config["resubmissionUrl"] = otcs_rest_url + "/v2/resubmission"
         otcs_config["draftProcessFormUrl"] = otcs_rest_url + "/v1/forms/draftprocesses"
         otcs_config["processTaskUrl"] = otcs_rest_url + "/v1/forms/processes/tasks/update"
         otcs_config["docGenUrl"] = otcs_url + "?func=xecmpfdocgen"
@@ -675,6 +725,32 @@ class OTCS:
         """
 
         self._otds_token = token
+
+    # end method definition
+
+    def otds_object(self) -> OTDS | None:
+        """Get the OTDS object.
+
+        Returns:
+            OTDS | None:
+                The OTDS object or None.
+
+        """
+
+        return self._otds_object
+
+    # end method definition
+
+    def set_otds_object(self, otds_object: OTDS | None) -> None:
+        """Set the OTDS object.
+
+        Args:
+            otds_object (OTDS | None):
+                The OTDS object to set, or None to clear it.
+
+        """
+
+        self._otds_object = otds_object
 
     # end method definition
 
@@ -4347,6 +4423,7 @@ class OTCS:
     def get_groups(
         self,
         where_name: str | None = None,
+        where_type: int | None = 1,
         sort: str | None = None,
         limit: int = 20,
         page: int = 1,
@@ -4357,6 +4434,9 @@ class OTCS:
         Args:
             where_name (str | None, optional):
                 The name of the group to look up.
+            where_type (int | None, optional):
+                The type of the group to look up. For OTCS groups, use type = 1.
+                Default is 1. Use type = 101 for eSign signing groups.
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = id, sort = name, sort = group_id.
@@ -4432,7 +4512,7 @@ class OTCS:
 
         # Add query parameters (embedded in the URL)
         # Using type = 1 for OTCS groups:
-        query = {"where_type": 1}
+        query = {"where_type": where_type}
         if where_name:
             query["where_name"] = where_name
         if sort:
@@ -4476,6 +4556,7 @@ class OTCS:
     def get_groups_iterator(
         self,
         where_name: str | None = None,
+        where_type: int | None = 1,
         sort: str | None = None,
         limit: int = 20,
     ) -> iter:
@@ -4500,6 +4581,9 @@ class OTCS:
         Args:
             where_name (str | None, optional):
                 Name of the user (login).
+            where_type (int | None, optional):
+                The type of the group to look up. For OTCS groups, use type = 1.
+                Default is 1. Use type = 101 for eSign signing groups.
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name ).
                 Format can be sort = id, sort = name, sort = group_id.
@@ -4519,6 +4603,7 @@ class OTCS:
         # First we probe how many members we have:
         response = self.get_groups(
             where_name=where_name,
+            where_type=where_type,
             limit=1,
             page=1,
         )
@@ -4548,6 +4633,7 @@ class OTCS:
             # Get the next page of sub node items:
             response = self.get_groups(
                 where_name=where_name,
+                where_type=where_type,
                 sort=sort,
                 limit=limit,
                 page=page,
@@ -4567,7 +4653,9 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_group")
-    def get_group(self, name: str | None = None, group_id: int | None = None, show_error: bool = False) -> dict | None:
+    def get_group(
+        self, name: str | None = None, group_id: int | None = None, group_type: int = 1, show_error: bool = False
+    ) -> dict | None:
         """Get the Content Server group with a given name.
 
         Args:
@@ -4577,6 +4665,9 @@ class OTCS:
                 The ID of the group to look up. If provided, this will be used to find
                 the group instead of the name.
                 Defaults to None.
+            group_type (int, optional):
+                The type of the group to look up. Defaults to 1 (OTCS groups).
+                Other potential value: 101 for Signing Groups (esign)
             show_error (bool, optional):
                 If True, treats the absence of the group as an error. Defaults to False.
 
@@ -4647,7 +4738,7 @@ class OTCS:
         if group_id is None:
             # Add query parameters (embedded in the URL)
             # Using type = 1 for OTCS groups:
-            query = {"where_type": 1}
+            query = {"where_type": group_type}
             query["where_name"] = name
             encoded_query = urllib.parse.urlencode(query=query, doseq=True)
             request_url = self.config()["membersUrlv2"] + "?{}".format(encoded_query)
@@ -4676,12 +4767,17 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_group")
-    def add_group(self, name: str) -> dict | None:
+    def add_group(self, name: str, group_type: int = 1) -> dict | None:
         """Add Content Server group.
 
         Args:
             name (str):
                 The name of the group.
+            group_type (int, optional):
+                The type of the group to add. Defaults to 1 (OTCS groups).
+                NOTE: The POST /v2/members endpoint only supports type 0 (user)
+                and type 1 (group). Other types such as 101 (Signing Groups)
+                cannot be created via the REST API.
 
         Returns:
             dict | None:
@@ -4689,7 +4785,17 @@ class OTCS:
 
         """
 
-        group_post_body = {"type": 1, "name": name}
+        if group_type != 1:
+            self.logger.error(
+                "Cannot create group -> '%s' with type -> %d. "
+                "The POST /v2/members endpoint currently only supports groups with type = 1 (regular group). "
+                "Signing Groups (type 101) and other special types must be created via the Content Server admin UI.",
+                name,
+                group_type,
+            )
+            return None
+
+        group_post_body = {"type": group_type, "name": name}
 
         request_url = self.config()["membersUrlv2"]
         request_header = self.request_form_header()
@@ -4708,6 +4814,191 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_signing_group")
+    def add_signing_group(self, name: str) -> dict | None:
+        """Add a Signing Group (eSignature) to Content Server.
+
+        Signing Groups (type 101) cannot be created via the REST API
+        POST /v2/members endpoint. This method uses the classic Content Server
+        func=fdauser.creategroup2 form submission that the web UI uses internally.
+
+        Note: The current session must be authenticated as a user with Signing
+        Authority Administrator privileges. Users with System Administration
+        privileges cannot manage signing groups. The caller is responsible for
+        impersonating the appropriate user before calling this method (e.g. via
+        Payload.start_impersonation()).
+
+        Args:
+            name (str):
+                The name of the signing group.
+
+        Returns:
+            dict | None:
+                Group information (from a subsequent REST API lookup) or None
+                if the group couldn't be created.
+
+        """
+
+        base_url = self.config()["csUrl"]
+
+        # Use the current session cookie (the caller must ensure the session
+        # is authenticated as a user with Signing Authority Admin privileges):
+        with self._session_lock:
+            request_cookie = self.cookie().copy()
+
+        next_url = "/cs/cs?func=user.ListUsers"
+
+        # Step 1: GET the "Create Group" form to extract the secureRequestToken (CSRF token)
+        form_url = base_url + "?func=user.newgroup&SpaceID=0&nextURL=" + urllib.parse.quote(next_url, safe="")
+
+        self.logger.debug("Getting create group form to extract CSRF token; calling -> %s", form_url)
+
+        # Build headers with Referer to pass Content Server's CSRF origin check
+        request_headers = self.request_form_header() | request_cookie
+        request_headers["Referer"] = base_url
+
+        try:
+            form_response = requests.get(
+                url=form_url,
+                headers=request_headers,
+                cookies=request_cookie,
+                timeout=REQUEST_TIMEOUT,
+            )
+            form_response.raise_for_status()
+        except requests.exceptions.RequestException:
+            self.logger.error("Failed to load signing group create form from -> %s", form_url)
+            return None
+
+        # Extract the secureRequestToken from the form HTML
+        match = re.search(
+            r'name="secureRequestToken"\s+[^>]*value="([^"]+)"',
+            form_response.text,
+        )
+        if not match:
+            # Try alternative attribute order (value before name)
+            match = re.search(
+                r'value="([^"]+)"\s+[^>]*name="secureRequestToken"',
+                form_response.text,
+            )
+        if not match:
+            self.logger.error(
+                "Failed to extract secureRequestToken from create group form. "
+                "This may indicate insufficient privileges. Ensure the session is impersonated "
+                "as a user with Signing Authority Admin privileges (see start_impersonation())."
+            )
+            return None
+
+        secure_request_token = match.group(1)
+
+        # Step 2: POST the form to create the signing group.
+        # NOTE: The form's hidden field has func=user.savegroup, but the browser's
+        # JavaScript Submit handler changes it to fdauser.creategroup2 for signing groups.
+        post_data = {
+            "func": "fdauser.creategroup2",
+            "nextURL": next_url,
+            "secureRequestToken": secure_request_token,
+            "GroupType": 101,  # 101 = Signing Group Type,
+            "GroupName": name,
+        }
+
+        self.logger.debug("Adding signing group -> '%s'; calling -> %s", name, base_url)
+
+        # Set Referer to the form URL (mimics browser behavior for CSRF check)
+        post_headers = self.request_form_header() | request_cookie
+        post_headers["Referer"] = form_url
+
+        try:
+            response = requests.post(
+                url=base_url,
+                data=post_data,
+                headers=post_headers,
+                cookies=request_cookie,
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=True,
+            )
+        except requests.exceptions.RequestException:
+            self.logger.error("Failed to create signing group -> '%s'", name)
+            return None
+
+        # The classic UI returns an HTML page - check for errors
+        if not response.ok:
+            self.logger.error(
+                "Failed to create signing group -> '%s'; status -> %s/%s",
+                name,
+                response.status_code,
+                HTTPStatus(response.status_code).phrase,
+            )
+            return None
+
+        # Check if the response HTML indicates an error (e.g. group already exists)
+        if "Error" in response.text and "already exists" in response.text:
+            self.logger.warning("Signing group -> '%s' already exists", name)
+            return response
+
+        # Check for other errors in the HTML response
+        if "<TITLE>Error</TITLE>" in response.text:
+            error_match = re.search(r'class="cs-form-message-error"[^>]*>\s*(.*?)\s*</div>', response.text, re.DOTALL)
+            error_detail = error_match.group(1).strip() if error_match else "Unknown error"
+            # Strip HTML tags from error detail
+            error_detail = re.sub(r"<[^>]+>", " ", error_detail).strip()
+            self.logger.error("Failed to create signing group -> '%s'; error -> %s", name, error_detail)
+            return None
+
+        self.logger.debug("Successfully created signing group -> '%s'", name)
+
+        return response
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_signing_groups")
+    def get_signing_groups(self, query: str = "", limit: int = 20) -> dict | None:
+        """Get Signing Groups (eSignature) from Content Server.
+
+        This method calls the signingusers endpoint and filters
+        the results to only include groups with type = 101.
+        NOTE: this method needs to be called with an authenticated session of a user
+              with Signing Authority Admin privileges.
+
+        Args:
+            query (str, optional):
+                Search query string to filter signing groups. Defaults to "".
+            limit (int, optional):
+                Maximum number of results to return. Defaults to 20.
+
+        Returns:
+            dict | None:
+                Response with signing groups (type 101) or None if the request fails.
+
+        """
+
+        query_params = {"limit": limit, "query": query}
+        encoded_query = urllib.parse.urlencode(query=query_params, doseq=True)
+        request_url = self.config()["membersUrlv2"] + "/signingusers?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug("Get signing groups with query -> '%s'; calling -> %s", query, request_url)
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get signing groups",
+        )
+
+        # Filter for groups only:
+        if response and "results" in response:
+            response["results"] = [
+                result
+                for result in response["results"]
+                if result.get("data", {}).get("properties", {}).get("type") == 101
+            ]
+
+        return response
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_group_members")
     def get_group_members(
         self,
@@ -4717,6 +5008,7 @@ class OTCS:
         where_first_name: str | None = None,
         where_last_name: str | None = None,
         where_business_email: str | None = None,
+        fields: str | list | None = None,  # per default we get all member properties
         limit: int = 100,
         page: int = 1,
     ) -> dict | None:
@@ -4737,6 +5029,11 @@ class OTCS:
                 Filters the results, returning the members where the last name matches the specified string.
             where_business_email (str | None, optional):
                 Filters the results, returning the members where the business email address matches the specified string.
+            fields (str | list | None, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name}")
             limit (int, optional):
                 The maximum number of results per page (internal default is 25)
             page (int, optional):
@@ -4758,6 +5055,8 @@ class OTCS:
             query["where_last_name"] = where_last_name
         if where_business_email:
             query["where_business_email"] = where_business_email
+        if fields:
+            query["fields"] = fields
         if limit:
             query["limit"] = limit
         if page:
@@ -4901,12 +5200,12 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_group_member")
-    def add_group_member(self, member_id: int, group_id: int) -> dict | None:
+    def add_group_member(self, member_id: int | list, group_id: int) -> dict | None:
         """Add a user or group to a target group.
 
         Args:
-            member_id (int):
-                The ID of the user or group to add.
+            member_id (int | list):
+                The ID (or IDs) of the user(s) or group(s) to add.
             group_id (int):
                 The ID of the target group the member should be added to.
 
@@ -4922,8 +5221,9 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Adding member with ID -> %d to group with ID -> %d; calling -> %s",
-            member_id,
+            "Adding member with ID%s -> %s to group with ID -> %d; calling -> %s",
+            "s" if isinstance(member_id, list) else "",
+            str(member_id),
             group_id,
             request_url,
         )
@@ -7591,6 +7891,7 @@ class OTCS:
         limit: int = 100,
         page: int = 1,
         sort: str = "desc_audit_date",
+        expand: str = "audit{user_id,target_user_id}",
     ) -> dict | None:
         """Get the audit information for a given node ID.
 
@@ -7625,6 +7926,8 @@ class OTCS:
             sort (str, optional):
                 Sort order of audit results. Format can be sort=desc_audit_date or sort=asc_audit_date.
                 Results are sorted in descending order by default.
+            expand (str, optional):
+                Additional information to expand in the response. Defaults to "audit{user_id,target_user_id}"
 
         Returns:
             dict | None:
@@ -7699,7 +8002,7 @@ class OTCS:
         """
 
         # Add query parameters (these are NOT passed via JSon body!)
-        query = {"limit": limit, "sort": sort}
+        query = {"limit": limit, "sort": sort, "expand": expand}
         if filter_event_type:
             query["where_type"] = filter_event_type
         if filter_user_id:
@@ -11532,6 +11835,790 @@ class OTCS:
                 type_id or type_name,
                 external_system_id,
             ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_smart_document_type")
+    def add_smart_document_type(
+        self,
+        parent_id: int,
+        name: str,
+        classification_id: int,
+        description: str = "",
+        inactive: bool = True,
+    ) -> dict | None:
+        """Add a Smart Document Type.
+
+        This internally reuses create_item() with type 877 (Smart Document Type)
+        and passes the classification-specific fields as additional kwargs.
+
+        Args:
+            parent_id (int):
+                The node ID of the parent container.
+            name (str):
+                The name of the Smart Document Type.
+            classification_id (int):
+                The classification node ID to associate.
+            description (str, optional):
+                The description of the Smart Document Type.
+            inactive (bool, optional):
+                Whether the Smart Document Type is inactive. Defaults to True.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        self.logger.debug(
+            "Add Smart Document Type -> '%s' with classification -> %d under parent -> %d",
+            name,
+            classification_id,
+            parent_id,
+        )
+
+        return self.create_item(
+            parent_id=parent_id,
+            item_type=self.ITEM_TYPE_SMART_DOCUMENT_TYPE,
+            item_name=name,
+            item_description=description,
+            container=True,
+            inactive=inactive,
+            classificationId=classification_id,
+            classification=classification_id,
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_smart_document_type_folder")
+    def add_smart_document_type_folder(
+        self,
+        parent_id: int,
+        name: str,
+        description: str = "",
+    ) -> dict | None:
+        """Add a Smart Document Type Folder.
+
+        This internally reuses create_item() with type 878 (Smart Document Type Folder)
+        and passes the classification-specific fields as additional kwargs.
+
+        Args:
+            parent_id (int):
+                The node ID of the parent container.
+            name (str):
+                The name of the Smart Document Type Folder.
+            description (str, optional):
+                The description of the Smart Document Type Folder.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        self.logger.debug(
+            "Add Smart Document Type Folder -> '%s' under parent -> %d",
+            name,
+            parent_id,
+        )
+
+        return self.create_item(
+            parent_id=parent_id,
+            item_type=self.ITEM_TYPE_SMART_DOCUMENT_TYPE_FOLDER,
+            item_name=name,
+            item_description=description,
+            container=True,
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_smart_document_types")
+    def get_smart_document_types(self) -> dict | None:
+        """Get Smart Document Types.
+
+        REST operation: GET /v2/smartdocumenttypes
+
+        Returns:
+            dict | None:
+                Smart Document Types response or None in case of an error.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/smartdocumenttypes',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'data': [
+                    {
+                        'classification_expand': {
+                            'advanced_versioning': None,
+                            'class_selectable': True,
+                            'container': True,
+                            'container_size': 0,
+                            'create_date': '2023-03-22T10:20:08',
+                            'create_user_id': 1000,
+                            'description': 'Accord Non-Divulgation Candidat (FR)',
+                            'description_multilingual': {...},
+                            'external_create_date': None,
+                            'external_identity': '',
+                            'external_identity_type': '',
+                            'external_modify_date': None,
+                            'external_source': '',
+                            'favorite': False,
+                            'guid': None,
+                            'hidden': False,
+                            'icon': '/cssupport/classification/classification.gif',
+                            'icon_large': '/cssupport/classification/classification_large.gif',
+                            'id': 27318,
+                        },
+                        'classification_id': 27318,
+                        'classification_name': 'Accord Non-Divulgation Candidat (FR)',
+                        'dataId': 41881,
+                        'name': 'Accord Non-Divulgation Candidat (FR)',
+                        'type': 877,
+                        'typeName': 'Smart Document Type',
+                        'workspace_template_names': 'Employee - France, Candidate',
+                        'workspaceTemplatesCount': 2
+                    }
+                    ...
+                ],
+                'ok': True
+            }
+        }
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"]
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get Smart Document Types; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get Smart Document Types",
+        )
+
+    # end method definition
+
+    def get_smart_document_types_iterator(self) -> iter:
+        """Get an iterator object to traverse all Smart Document Types.
+
+        Returning a generator avoids loading a large number of Smart Document Types
+        at once. Instead you can iterate over the potential large list of items.
+
+        Example usage:
+            ```python
+            smart_document_types = otcs_object.get_smart_document_types_iterator()
+            for smart_document_type in smart_document_types:
+                name = smart_document_type.get("name")
+                data_id = smart_document_type.get("dataId")
+                classification_id = smart_document_type.get("classification_id")
+            ```
+
+        Returns:
+            iter:
+                An iterator to traverse all Smart Document Types.
+
+        """
+
+        response = self.get_smart_document_types()
+        if not response or "results" not in response:
+            self.logger.warning("Failed to get Smart Document Types or no results found.")
+            return
+
+        results = response["results"]
+        if not isinstance(results, dict) or "data" not in results:
+            self.logger.warning("Unexpected response structure for Smart Document Types.")
+            return
+
+        yield from results["data"]
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_smart_document_type")
+    def get_smart_document_type(self, smart_document_type_id: int) -> dict | None:
+        """Get Smart Document Type details.
+
+        REST operation: GET /v2/smartdocumenttypes/smartdocumenttypedetails
+
+        Args:
+            smart_document_type_id (int):
+                The Smart Document Type node ID.
+
+        Returns:
+            dict | None:
+                Smart Document Type detail response or None in case of an error.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/smartdocumenttypes/smartdocumenttypedetails?smart_document_type_id=41881',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'data': [
+                    {
+                        'based_on_attr_id': 0,
+                        'based_on_cat_id': 4924,
+                        'classification_id': 27318,
+                        'delete_review_required': None,
+                        'delete_review_wf_id': None,
+                        'disable_review_upload_bot': True,
+                        'document_generation': 0,
+                        'extended_data': "A<1,?,'tabs'={'context','uploadcontrol'}>",
+                        'is_dyn_perm_enabled': False,
+                        'is_othcm_template': True,
+                        'location': '42011:42043',
+                        'priority': 13,
+                        'required': 0,
+                        'review_required': 0,
+                        'rule_data': "{A<1,?,'Key'='Generic','Operand'='Default','Operator'='=','Value'='true'>}",
+                        'rule_expression': 'Default=true',
+                        'rule_id': 415,
+                        'signer_bot_enabled': False,
+                        'smartdocumenttype_id': 41881,
+                        'template_id': 41864,
+                        'template_name': 'Employee - France',
+                        'upload_review_required': None,
+                        'upload_review_wf_id': None,
+                        'validity': 0,
+                        'validity_required': 0
+                    }
+                    ...
+                ],
+                'ok': True,
+                'statusCode': 200
+            }
+        }
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/smartdocumenttypedetails"
+        request_header = self.request_form_header()
+
+        # Add the required query parameter
+        query = {"smart_document_type_id": smart_document_type_id}
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+        request_url += "?{}".format(encoded_query)
+
+        self.logger.debug(
+            "Get Smart Document Type -> %d; calling -> %s",
+            smart_document_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get Smart Document Type -> {}".format(smart_document_type_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_smart_document_type_template")
+    def delete_smart_document_type_template(
+        self,
+        smart_document_type_id: int,
+        template_id: int,
+    ) -> dict | None:
+        """Delete a template link from a Smart Document Type.
+
+        REST operation: DELETE /v2/smartdocumenttypes/{smart_document_type_id}/template/{template_id}
+
+        Args:
+            smart_document_type_id (int):
+                The Smart Document Type ID.
+            template_id (int):
+                The template node ID.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/{}/template/{}".format(
+            smart_document_type_id,
+            template_id,
+        )
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Delete template -> %d from Smart Document Type -> %d; calling -> %s",
+            template_id,
+            smart_document_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to delete template -> {} from Smart Document Type -> {}".format(
+                template_id,
+                smart_document_type_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="create_smart_document_type_rule")
+    def create_smart_document_type_rule(
+        self,
+        smart_document_type_id: int,
+        classification_id: int,
+        template_id: int,
+        mandatory: bool | None = None,
+        validity_required: bool | None = None,
+        validity_years: int | None = None,
+        validity_months: int | None = None,
+        based_on_category: int | None = None,
+        based_on_attribute: int | None = None,
+        location: str | None = None,
+        upload_member_list: str | None = None,
+        upload_dynperm_list: str | None = None,
+        delete_member_list: str | None = None,
+        delete_dynperm_list: str | None = None,
+        docgen: bool | None = None,
+        upload_review_required: bool | None = None,
+        upload_review_workflow_map_id: int | None = None,
+        upload_review_member: str | None = None,
+        upload_review_dynperm: str | None = None,
+        delete_review_required: bool | None = None,
+        delete_review_workflow_map_id: int | None = None,
+        delete_review_member: str | None = None,
+        delete_review_dynperm: str | None = None,
+    ) -> dict | None:
+        """Create a Smart Document Type rule.
+
+        Swagger operation: POST /v2/smartdocumenttypes/rules
+
+        Args:
+            smart_document_type_id (int):
+                Node ID of the smart document type.
+            classification_id (int):
+                Classification Node ID to be associated with the smart document type.
+            template_id (int):
+                Template Node ID to be associated with the smart document type.
+            mandatory (bool | None, optional):
+                Mandatory flag.
+            validity_required (bool | None, optional):
+                Validity flag.
+            validity_years (int | None, optional):
+                Number of years the document is valid.
+            validity_months (int | None, optional):
+                Number of months the document is valid.
+            based_on_category (int | None, optional):
+                Category Node ID.
+            based_on_attribute (int | None, optional):
+                Attribute ID.
+            location (str | None, optional):
+                Location ID of the folder.
+            upload_member_list (str | None, optional):
+                List of member IDs allowed to upload documents.
+            upload_dynperm_list (str | None, optional):
+                List of dynamic permission role IDs for upload.
+            delete_member_list (str | None, optional):
+                List of member IDs allowed to delete documents.
+            delete_dynperm_list (str | None, optional):
+                List of dynamic permission role IDs for delete.
+            docgen (bool | None, optional):
+                Docgen flag.
+            upload_review_required (bool | None, optional):
+                Flag to enable approval workflow for uploads.
+            upload_review_workflow_map_id (int | None, optional):
+                Upload approval workflow map ID.
+            upload_review_member (str | None, optional):
+                Mapping of workflow map and workspace user ID.
+            upload_review_dynperm (str | None, optional):
+                Mapping of workflow role with dynamic permission role ID.
+            delete_review_required (bool | None, optional):
+                Flag to enable approval workflow for deletion.
+            delete_review_workflow_map_id (int | None, optional):
+                Delete approval workflow map ID.
+            delete_review_member (str | None, optional):
+                Mapping of workflow map and workspace user ID for delete review.
+            delete_review_dynperm (str | None, optional):
+                Mapping of workflow role with dynamic permission role ID for delete review.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/rules"
+        request_header = self.request_form_header()
+
+        # Build formData payload with required and optional fields
+        post_data = {
+            "smart_document_type_id": smart_document_type_id,
+            "classification_id": classification_id,
+            "template_id": template_id,
+        }
+        if mandatory is not None:
+            post_data["mandatory"] = mandatory
+        if validity_required is not None:
+            post_data["validity_required"] = validity_required
+        if validity_years is not None:
+            post_data["validity_years"] = validity_years
+        if validity_months is not None:
+            post_data["validity_months"] = validity_months
+        if based_on_category is not None:
+            post_data["based_on_category"] = based_on_category
+        if based_on_attribute is not None:
+            post_data["based_on_attribute"] = based_on_attribute
+        if location is not None:
+            post_data["location"] = location
+        if upload_member_list is not None:
+            post_data["upload_member_list"] = upload_member_list
+        if upload_dynperm_list is not None:
+            post_data["upload_dynperm_list"] = upload_dynperm_list
+        if delete_member_list is not None:
+            post_data["delete_member_list"] = delete_member_list
+        if delete_dynperm_list is not None:
+            post_data["delete_dynperm_list"] = delete_dynperm_list
+        if docgen is not None:
+            post_data["docgen"] = docgen
+        if upload_review_required is not None:
+            post_data["upload_review_required"] = upload_review_required
+        if upload_review_workflow_map_id is not None:
+            post_data["upload_review_workflow_map_id"] = upload_review_workflow_map_id
+        if upload_review_member is not None:
+            post_data["upload_review_member"] = upload_review_member
+        if upload_review_dynperm is not None:
+            post_data["upload_review_dynperm"] = upload_review_dynperm
+        if delete_review_required is not None:
+            post_data["delete_review_required"] = delete_review_required
+        if delete_review_workflow_map_id is not None:
+            post_data["delete_review_workflow_map_id"] = delete_review_workflow_map_id
+        if delete_review_member is not None:
+            post_data["delete_review_member"] = delete_review_member
+        if delete_review_dynperm is not None:
+            post_data["delete_review_dynperm"] = delete_review_dynperm
+
+        self.logger.debug(
+            "Create Smart Document Type rule for type -> %d; calling -> %s",
+            smart_document_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=post_data,
+            timeout=None,
+            failure_message="Failed to create Smart Document Type rule for type -> {}".format(
+                smart_document_type_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_smart_document_type_rule")
+    def delete_smart_document_type_rule(self, rule_id: int) -> dict | None:
+        """Delete a Smart Document Type rule.
+
+        REST operation: DELETE /v2/smartdocumenttypes/rules/{rule_id}
+
+        Args:
+            rule_id (int):
+                The rule ID.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/rules/{}".format(rule_id)
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Delete Smart Document Type rule -> %d; calling -> %s",
+            rule_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to delete Smart Document Type rule -> {}".format(rule_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_smart_document_type_rule_bots")
+    def get_smart_document_type_rule_bots(
+        self,
+        rule_id: int,
+        bot_key: str | None = None,
+        action: str | None = None,
+    ) -> dict | None:
+        """Get bot forms for a Smart Document Type rule.
+
+        REST operation: GET /v2/smartdocumenttypes/rules/{rule_id}/bots
+
+        Args:
+            rule_id (int):
+                The rule ID.
+            bot_key (str | None, optional):
+                Name of the bot key, e.g. uploadcontrol, deletecontrol,
+                createdocument, context, completenesscheck,
+                uploadwithapproval, deletewithapproval.
+            action (str | None, optional):
+                Type of action, e.g. create or normal read.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/rules/{}/bots".format(rule_id)
+        request_header = self.request_form_header()
+
+        # Add optional query parameters
+        query = {}
+        if bot_key is not None:
+            query["bot_key"] = bot_key
+        if action is not None:
+            query["action"] = action
+        if query:
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url += "?{}".format(encoded_query)
+
+        self.logger.debug(
+            "Get Smart Document Type bots for rule -> %d; calling -> %s",
+            rule_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get Smart Document Type bots for rule -> {}".format(rule_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="save_smart_document_type_rule_bot")
+    def save_smart_document_type_rule_bot(
+        self,
+        rule_id: int,
+        bot_key: str,
+        body: str | None = None,
+    ) -> dict | None:
+        """Save a Smart Document Type rule bot.
+
+        REST operation: PUT /v2/smartdocumenttypes/rules/{rule_id}/bots/{bot_key}
+
+        Args:
+            rule_id (int):
+                The rule ID.
+            bot_key (str):
+                Bot key identifier, e.g. uploadcontrol, deletecontrol,
+                createdocument, context, completenesscheck,
+                uploadwithapproval, deletewithapproval.
+            body (str | None, optional):
+                Bot body content as a string.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/rules/{}/bots/{}".format(rule_id, bot_key)
+        request_header = self.request_form_header()
+
+        # Build formData payload
+        post_data = {}
+        if body is not None:
+            post_data["body"] = body
+
+        self.logger.debug(
+            "Save Smart Document Type bot -> %s for rule -> %d; calling -> %s",
+            bot_key,
+            rule_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data=post_data,
+            timeout=None,
+            failure_message="Failed to save Smart Document Type bot -> '{}' for rule -> {}".format(
+                bot_key,
+                rule_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_smart_document_type_rule_bot")
+    def delete_smart_document_type_rule_bot(self, rule_id: int, bot_key: str) -> dict | None:
+        """Delete a Smart Document Type rule bot.
+
+        REST operation: DELETE /v2/smartdocumenttypes/rules/{rule_id}/bots/{bot_key}
+
+        Args:
+            rule_id (int):
+                The rule ID.
+            bot_key (str):
+                Bot key identifier.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["smartDocumentTypesUrl"] + "/rules/{}/bots/{}".format(rule_id, bot_key)
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Delete Smart Document Type bot -> %s for rule -> %d; calling -> %s",
+            bot_key,
+            rule_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to delete Smart Document Type bot -> '{}' for rule -> {}".format(
+                bot_key,
+                rule_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_expression_builder_data")
+    def get_expression_builder_data(
+        self,
+        usage_type: int,
+        subtype: int,
+        key: str,
+    ) -> dict | None:
+        """Get Expression Builder data.
+
+        REST operation: GET /v2/expressionbuilder/expressiondata
+
+        Args:
+            usage_type (int):
+                Usage Type.
+            subtype (int):
+                Usage SubType.
+            key (str):
+                Usage Key.
+
+        Returns:
+            dict | None:
+                Expression Builder data or None in case of an error.
+
+        """
+
+        request_url = self.config()["expressionBuilderUrl"] + "/expressiondata"
+        request_header = self.request_form_header()
+
+        # Add required query parameters
+        query = {
+            "type": usage_type,
+            "subtype": subtype,
+            "key": key,
+        }
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+        request_url += "?{}".format(encoded_query)
+
+        self.logger.debug(
+            "Get Expression Builder data; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get Expression Builder data",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_expression_builder_data")
+    def update_expression_builder_data(self, expression_data: dict) -> dict | None:
+        """Update Expression Builder data.
+
+        REST operation: POST /v2/expressionbuilder/saveexpressiondata
+
+        The expression_data dict should contain the required formData fields:
+        type (int), subtype (int), key (str), nRows (int), and optional
+        expression row fields (Type1, Operand2, Operator2, Value2, etc.).
+
+        Args:
+            expression_data (dict):
+                Expression Builder formData payload. Required keys:
+                type, subtype, key, nRows. Optional keys include
+                Type1..Type9, Operand2..Operand8, Operator2..Operator8,
+                Value2..Value8, Conjunct4, Conjunct7.
+
+        Returns:
+            dict | None:
+                REST response or None in case of an error.
+
+        """
+
+        request_url = self.config()["expressionBuilderUrl"] + "/saveexpressiondata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Save Expression Builder data; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=expression_data,
+            timeout=None,
+            failure_message="Failed to save Expression Builder data",
         )
 
     # end method definition
@@ -15735,6 +16822,143 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_permission")
+    def get_permission(
+        self,
+        node_id: int,
+        assignee: int = 0,
+    ) -> dict | None:
+        """Get permissions for a user or group for a Content Server item.
+
+        This method allows you to retrieve the permissions for a user or group for a given
+        Content Server item (node).
+
+        Args:
+            node_id (int): The ID of the OTCS item (node) for which to retrieve permissions.
+            assignee (int, optional): The ID of the user or group (referred to as "right ID").
+
+        Returns:
+            dict | None:
+                The response containing the permissions for the specified assignee, or None if the operation fails.
+
+        Notes:
+            - This method retrieves the permissions for the specified assignee for the specified ECM item.
+
+        """
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/permissions/effective/" + str(assignee)
+
+        request_header = self.request_form_header()
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get permissions for user -> {} to item with ID -> {}".format(assignee, node_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_permission")
+    def delete_permission(
+        self,
+        node_id: int,
+        assignee_type: str,
+        assignee: int = 0,
+        apply_to: int = 0,
+    ) -> dict | None:
+        """Delete permissions from a user or group for an Content Server item.
+
+        This method allows you to delete specified permissions from a user or group for a given
+        Content Server item (node). The permissions can be applied to the item itself, its sub-items,
+        or both.
+
+        Args:
+            node_id (int): The ID of the OTCS item (node) from which permissions are being deleted.
+            assignee_type (str): The type of assignee. This can be one of the following:
+                - "owner": Permissions are assigned to the owner.
+                - "group": Permissions are assigned to the owner group.
+                - "public": Permissions are assigned to the public (all users).
+                - "custom": Permissions are assigned to a specific user or group (specified by `assignee`).
+            assignee (int, optional):
+                The ID of the user or group (referred to as "right ID").
+                If `assignee` is 0 and `assignee_type` is "owner" or "group",
+                the owner or group will not be changed.
+            apply_to (int, optional): The scope of the permission assignment. Possible values:
+                - 0 = Apply to this item only (default)
+                - 1 = Apply to sub-items only
+                - 2 = Apply to this item and its sub-items
+                - 3 = Apply to this item and its immediate sub-items
+
+        Returns:
+            dict | None:
+                The response of the permission assignment request, or None if the operation fails.
+
+        Notes:
+            - If `assignee_type` is "custom", `assignee` must refer to a valid user or group ID.
+            - The method modifies the permissions of the specified assignee for the specified ECM item.
+
+        """
+
+        if not assignee_type or assignee_type not in OTCS.PERMISSION_ASSIGNEE_TYPES:
+            self.logger.error(
+                "Missing or wrong assignee type. Needs to be one of %s!", str(OTCS.PERMISSION_ASSIGNEE_TYPES)
+            )
+            return None
+        if assignee_type == "custom" and not assignee:
+            self.logger.error("Assignee type is 'custom' but permission assignee is missing!")
+            return None
+
+        permission_delete_data = {
+            "apply_to": apply_to,
+        }
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/permissions/" + assignee_type
+
+        # Assignees can be specified for owner and group and must be specified for custom:
+        #
+        if assignee_type == "custom" and assignee:
+            request_url = request_url + "/" + str(assignee)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Delete permissions from item with ID -> %d; assignee type -> '%s'; apply to -> '%d'; calling -> %s",
+            node_id,
+            assignee_type,
+            apply_to,
+            request_url,
+        )
+
+        if assignee_type == "custom":
+            # Custom also has a REST POST - we prefer this one as to
+            # also allows to add a new assigned permission (user or group):
+            return self.do_request(
+                url=request_url,
+                method="DELETE",
+                headers=request_header,
+                data={"body": json.dumps(permission_delete_data)},
+                timeout=None,
+                failure_message="Failed to delete 'custom' permissions from item with ID -> {} (apply to -> {})".format(
+                    node_id, apply_to
+                ),
+            )
+        else:
+            # Owner, Owner Group and Public require REST PUT:
+            return self.do_request(
+                url=request_url,
+                method="DELETE",
+                headers=request_header,
+                data={"body": json.dumps(permission_delete_data)},
+                timeout=None,
+                failure_message="Failed to delete -> '{}' permissions from item with ID -> {} (apply to -> {})".format(
+                    assignee_type, node_id, apply_to
+                ),
+            )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="check_user_node_permissions")
     def check_user_node_permissions(self, node_ids: list[int], user_id: int | None = None) -> dict | None:
         """Check if the current user (or a specified user) has permissions to access a given list of Content Server nodes.
@@ -19421,6 +20645,57 @@ class OTCS:
             timeout=None,
             failure_message="Failed to assign supplemental markings -> {} to user with ID -> {}".format(
                 supplemental_markings,
+                user_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_user_signing_authority_admin")
+    def assign_user_signing_authority_admin(
+        self,
+        user_id: int,
+        enable: bool = True,
+    ) -> dict | None:
+        """Assign or revoke the Signing Authority Admin role for a Content Server user.
+
+        REST operation: PUT /v2/fdausers/{user_id}/signingauthorityadmin/{on_off}
+
+        Args:
+            user_id (int):
+                The ID of the user.
+            enable (bool, optional):
+                Whether to enable or disable the Signing Authority Admin role.
+                True = enable (on), False = disable (off). Defaults to True.
+
+        Returns:
+            dict | None:
+                REST response or None if the REST call fails.
+
+        """
+
+        #        on_off = "on" if enable else "off"
+
+        request_url = self.config()["fdaUsersUrl"] + "/{}/signingauthorityadmin/{}".format(
+            user_id,
+            enable,
+        )
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Set signing authority admin to -> '%s' for user with ID -> %d; calling -> %s",
+            enable,
+            user_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to set signing authority admin -> '{}' for user with ID -> {}".format(
+                enable,
                 user_id,
             ),
         )
@@ -23813,5 +25088,1820 @@ class OTCS:
         payload = ET.tostring(root, encoding="utf8").decode("utf8")
 
         return payload
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_clients")
+    def get_reminder_clients(
+        self,
+        client_id: int | None = None,
+    ) -> list[dict] | None:
+        """Get all reminder clients and their available reminder types.
+
+        REST API endpoint: GET /v1/forms/nodes/followup/getClientTypes
+
+        This method is a wrapper around the get_reminder_types method to extract all available
+        reminder clients and their types.
+
+        Args:
+            client_id (int | None, optional):
+                The reminder client ID to filter by. Defaults to None.
+
+        Returns:
+            list[dict] | None:
+                List of reminder clients and their types, or None if a request fails.
+
+        Example:
+                [
+                    {
+                        'id': 374122,
+                        'name': 'Workspace',
+                        'types': [
+                            {'id': 1, 'name': 'Review'},
+                            {'id': 2, 'name': 'Approval'}
+                        ]
+                    }
+                ]
+
+        """
+
+        def _extract_field_mappings(form_item: dict, field_name: str) -> list[dict]:
+            """Extract value/label mappings for a specific field from options and schema."""
+
+            options_values = []
+            schema_values = []
+
+            options = form_item.get("options", {})
+            fields = options.get("fields", {}) if isinstance(options, dict) else {}
+            field_options = fields.get(field_name, {}) if isinstance(fields, dict) else {}
+            option_entries = field_options.get("optionLabels", []) if isinstance(field_options, dict) else []
+
+            if isinstance(option_entries, list):
+                for entry in option_entries:
+                    if isinstance(entry, str):
+                        options_values.append({"name": entry})
+                    elif isinstance(entry, dict):
+                        if "value" in entry and "label" in entry:
+                            options_values.append({"id": entry["value"], "name": entry["label"]})
+                        elif "id" in entry and "name" in entry:
+                            options_values.append({"id": entry["id"], "name": entry["name"]})
+                        elif "key" in entry and "title" in entry:
+                            options_values.append({"id": entry["key"], "name": entry["title"]})
+
+            schema = form_item.get("schema", {})
+            schema_props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+            schema_field = schema_props.get(field_name, []) if isinstance(schema_props, dict) else []
+
+            if isinstance(schema_field, list):
+                schema_values.extend({"id": enum_value} for enum_value in schema_field)
+            elif isinstance(schema_field, dict):
+                enum_values = schema_field.get("enum", [])
+                enum_names = schema_field.get("enumNames", [])
+
+                if isinstance(enum_values, list):
+                    for index, enum_value in enumerate(enum_values):
+                        enum_name = ""
+                        if isinstance(enum_names, list) and index < len(enum_names):
+                            enum_name = enum_names[index]
+                        schema_values.append({"id": enum_value, "name": enum_name})
+
+            if schema_values and options_values and len(schema_values) == len(options_values):
+                return [
+                    {
+                        "id": schema_values[index].get("id", options_values[index].get("id")),
+                        "name": options_values[index].get("name", schema_values[index].get("name", "")),
+                    }
+                    for index in range(len(schema_values))
+                ]
+
+            if schema_values:
+                return schema_values
+
+            return options_values
+
+        # end method definition of _extract_field_mappings()
+
+        response = self.get_reminder_types(client_id=client_id)
+        if not response:
+            return None
+
+        forms = response.get("forms", [])
+        if not forms or not isinstance(forms[0], dict):
+            return []
+
+        client_mappings = _extract_field_mappings(form_item=forms[0], field_name="followup_client_name")
+
+        clients = []
+        for client in client_mappings:
+            client_id = client.get("id")
+            client_name = client.get("name")
+
+            client_response = self.get_reminder_types(client_id=client_id)
+            if not client_response:
+                return None
+
+            client_forms = client_response.get("forms", [])
+            client_types = []
+            if client_forms and isinstance(client_forms[0], dict):
+                client_types = _extract_field_mappings(
+                    form_item=client_forms[0],
+                    field_name="followup_type_name",
+                )
+
+            clients.append(
+                {
+                    "id": client_id,
+                    "name": client_name,
+                    "types": client_types,
+                },
+            )
+
+        self.logger.debug(
+            "Found %d clients -> %s",
+            len(clients),
+            str(clients),
+        )
+
+        return clients
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_valid_reminder_types")
+    def get_valid_reminder_type_ids(self) -> list[int]:
+        """Get a flat list of all valid reminder type IDs.
+
+        This method uses get_reminder_clients() and extracts type IDs from all clients.
+
+        Returns:
+            list[int]:
+                Flat list of unique reminder type IDs (sorted ascending).
+                Returns an empty list if none are found.
+
+        Example:
+                [1, 2, 3, 4, 5]
+
+        """
+
+        clients = self.get_reminder_clients()
+        if not clients:
+            return []
+
+        valid_type_ids = []
+        seen_ids = set()
+
+        for client in clients:
+            client_types = client.get("types", [])
+            if not isinstance(client_types, list):
+                continue
+
+            for reminder_type in client_types:
+                type_id = reminder_type.get("id") if isinstance(reminder_type, dict) else None
+                if isinstance(type_id, int) and type_id not in seen_ids:
+                    seen_ids.add(type_id)
+                    valid_type_ids.append(type_id)
+
+        valid_type_ids.sort()
+
+        self.logger.debug(
+            "Found %d valid reminder type IDs -> %s",
+            len(valid_type_ids),
+            str(valid_type_ids),
+        )
+
+        return valid_type_ids
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_valid_reminder_type_names")
+    def get_valid_reminder_type_names(self) -> list[str]:
+        """Get a flat list of all valid reminder type names.
+
+        This method uses get_reminder_clients() and extracts type names from all clients.
+
+        Returns:
+            list[str]:
+                Flat list of unique reminder type names (sorted ascending).
+                Returns an empty list if none are found.
+
+        Example:
+                ["Type1", "Type2", "Type3", "Type4", "Type5"]
+
+        """
+
+        clients = self.get_reminder_clients()
+        if not clients:
+            return []
+
+        valid_type_names = []
+        seen_names = set()
+
+        for client in clients:
+            client_types = client.get("types", [])
+            if not isinstance(client_types, list):
+                continue
+
+            for reminder_type in client_types:
+                type_name = reminder_type.get("name") if isinstance(reminder_type, dict) else None
+                if isinstance(type_name, str) and type_name not in seen_names:
+                    seen_names.add(type_name)
+                    valid_type_names.append(type_name)
+
+        valid_type_names.sort()
+
+        self.logger.debug(
+            "Found %d valid reminder type names -> %s",
+            len(valid_type_names),
+            str(valid_type_names),
+        )
+
+        return valid_type_names
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_type")
+    def get_reminder_type(self, type_id: int) -> str | None:
+        """Get the reminder type name for a given reminder type ID.
+
+        This method uses get_reminder_clients() and returns the matching
+        reminder type name.
+
+        Args:
+            type_id (int):
+                The reminder type ID.
+
+        Returns:
+            str | None:
+                The reminder type name if found, otherwise None.
+
+        """
+
+        clients = self.get_reminder_clients()
+        if not clients:
+            return None
+
+        for client in clients:
+            client_types = client.get("types", [])
+            if not isinstance(client_types, list):
+                continue
+
+            for reminder_type in client_types:
+                if not isinstance(reminder_type, dict):
+                    continue
+
+                reminder_type_id = reminder_type.get("id")
+                if reminder_type_id == type_id:
+                    reminder_type_name = reminder_type.get("name")
+                    if isinstance(reminder_type_name, str):
+                        return reminder_type_name
+                    return None
+
+        self.logger.debug(
+            "Reminder type with ID -> %d does not exist.",
+            type_id,
+        )
+
+        return None
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_type_id")
+    def get_reminder_type_id(
+        self,
+        type_name: str,
+        client_name: str | None = None,
+        clients: list[dict] | None = None,
+    ) -> int | None:
+        """Get the reminder type ID for a given client name and type name.
+
+        This method uses get_reminder_clients() and returns the matching
+        reminder type ID.
+
+        Args:
+            type_name (str):
+                The reminder type name.
+            client_name (str | None, optional):
+                The reminder client name. If None, the method will search across all clients.
+            clients (list[dict] | None, optional):
+                The list of reminder clients to search through. If None, the method will call get_reminder_clients() to retrieve the clients.
+
+        Returns:
+            int | None:
+                The reminder type ID if found, otherwise None.
+
+        """
+
+        if clients is None:
+            clients = self.get_reminder_clients()
+        if not clients:
+            return None
+
+        for client in clients:
+            if not isinstance(client, dict):
+                continue
+
+            if client_name is not None and client.get("name") != client_name:
+                continue
+
+            client_types = client.get("types", [])
+            if not isinstance(client_types, list):
+                continue
+
+            for reminder_type in client_types:
+                if not isinstance(reminder_type, dict):
+                    continue
+
+                if reminder_type.get("name") == type_name:
+                    reminder_type_id = reminder_type.get("id")
+                    if isinstance(reminder_type_id, int):
+                        return reminder_type_id
+                    return None
+
+        self.logger.error(
+            "Reminder type with name -> '%s'%s  does not exist.",
+            type_name,
+            " for client -> '{}'".format(client_name) if client_name else "",
+        )
+
+        return None
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_types")
+    def get_reminder_types(
+        self,
+        client_id: int | None = None,
+        type_id: int | None = None,
+    ) -> dict | None:
+        """Get the available reminder types .
+
+        REST API endpoint: GET /v1/forms/nodes/followup/getClientTypes
+
+        Args:
+            client_id (int | None, optional):
+                The reminder client ID to filter by. Defaults to None.
+            type_id (int | None, optional):
+                The reminder type ID to filter by. Defaults to None.
+
+        Returns:
+            dict | None:
+                Reminder client types information, or None if the request fails.
+
+        Example:
+                {
+                    'forms': [
+                        {
+                            'data': {
+                                'client_id': 1,
+                                'name': 'Reminder'
+                            }
+                        }
+                    ]
+                }
+
+        """
+
+        query = {}
+        if client_id is not None:
+            query["client_id"] = client_id
+        if type_id is not None:
+            query["id"] = type_id
+
+        request_url = self.config()["nodesFormUrl"] + "/followup/getClientTypes"
+        if query:
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url += "?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get reminder types for client -> %d; calling -> %s",
+            client_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get reminder types for client -> {}".format(client_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminders")
+    def get_reminders(
+        self,
+        node_id: int,
+        actions: bool = False,
+        escalation: bool = False,
+    ) -> dict | None:
+        """Get all reminders for a given node.
+
+        REST API endpoint: GET /v2/nodes/{node_id}/followups
+
+        Args:
+            node_id (int):
+                The ID of the node to get reminders for.
+            actions (bool, optional):
+                Whether to include available actions in the response. Defaults to False.
+            escalation (bool, optional):
+                Whether to include escalation fields from reminder view form.
+                Defaults to False. This information is not included in the reminder list response
+                and requires additional requests per reminder, so it should only be activated if
+                really needed.
+
+        Returns:
+            dict | None:
+                Reminder information as a dictionary, or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {...}
+            },
+            'results': {
+                'followups': [
+                    {
+                        'data': {
+                            'followup': {
+                                'activation_by_day': 0,
+                                'activation_date': None,
+                                'assignees': [...],
+                                'create_date': '2026-05-28T16:35:45Z',
+                                'create_user_id': 1000,
+                                'data_id': 53429,
+                                'description': 'test',
+                                'due_date': '2026-05-28T00:00:00Z',
+                                'end_sequence_date': None,
+                                'followup_client': 374122,
+                                'followup_client_name': 'Test',
+                                'followup_handler': 1,
+                                'followup_id': 23,
+                                'followup_type': 2,
+                                'followup_type_name': 'Test1',
+                                'parent_id': 23,
+                                'rule': 0,
+                                'start_sequence_date': None,
+                                'status': 1,
+                                'status_by': None,
+                                'escalation_enabled': True,
+                                'escalation_period': 6,
+                                'escalation_when': -1,
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+
+        """
+
+        query = {}
+        if actions:
+            query["actions"] = "true"
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/followups"
+        if query:
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url += "?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get reminders for node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get reminders for node with ID -> {}".format(
+                node_id,
+            ),
+        )
+
+        if not response or not escalation:
+            return response
+
+        reminders = response.get("results", {}).get("followups", [])
+        if not isinstance(reminders, list):
+            return response
+
+        for reminder in reminders:
+            if not isinstance(reminder, dict):
+                continue
+
+            followup = reminder.get("data", {}).get("followup", {})
+            if not isinstance(followup, dict):
+                continue
+
+            reminder_id = followup.get("followup_id")
+            if reminder_id is None:
+                continue
+
+            view_form = self.get_reminder_view_form(
+                node_id=node_id,
+                reminder_id=reminder_id,
+            )
+            if not view_form:
+                continue
+
+            forms = view_form.get("forms", [])
+            if not forms or not isinstance(forms[0], dict):
+                continue
+
+            form_data = forms[0].get("data", {})
+            escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
+            send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
+            send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
+
+            if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
+                followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
+            if isinstance(send_in, dict) and "escalation_period" in send_in:
+                followup["escalation_period"] = send_in.get("escalation_period")
+            if isinstance(send_in, dict) and "escalation_when" in send_in:
+                followup["escalation_when"] = send_in.get("escalation_when")
+            if isinstance(send_to, list) and send_to:
+                followup["escalation_recipient_list"] = send_to
+
+        return response
+
+    # end method definition
+
+    def get_reminders_iterator(
+        self,
+        node_id: int,
+        actions: bool = False,
+        escalation: bool = False,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse reminders of a node.
+
+        Using a generator avoids additional list processing in caller code.
+
+        Args:
+            node_id (int):
+                The ID of the node to get reminders for.
+            actions (bool, optional):
+                Whether to include available actions in the response. Defaults to False.
+            escalation (bool, optional):
+                Whether to include escalation fields from reminder view form.
+                Defaults to False. This information is not included in the reminder list response
+                and requires additional requests per reminder, so it should only be activated if really needed.
+
+        Returns:
+            iter:
+                A generator yielding one reminder entry per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        response = self.get_reminders(node_id=node_id, actions=actions, escalation=escalation)
+        if not response:
+            return
+
+        reminders = response.get("results", {}).get("followups")
+        if not reminders:
+            self.logger.debug(
+                "No reminders found for node with ID -> %d. Cannot iterate reminders.",
+                node_id,
+            )
+            return
+
+        yield from reminders
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder")
+    def get_reminder(
+        self,
+        node_id: int,
+        reminder_id: int,
+        actions: bool = False,
+        escalation: bool = False,
+    ) -> dict | None:
+        """Get details of a specific reminder for a given node.
+
+        REST API endpoint: GET /v2/nodes/{node_id}/followups/{reminder_id}
+
+        Args:
+            node_id (int):
+                The ID of the node the reminder belongs to.
+            reminder_id (int):
+                The ID of the reminder to retrieve.
+            actions (bool, optional):
+                Whether to include available actions in the response. Defaults to False.
+            escalation (bool, optional):
+                Whether to include escalation fields from reminder view form.
+                Defaults to False.
+
+        Returns:
+            dict | None:
+                Reminder detail information as a dictionary, or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/nodes/54882/followups/64',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'data': {
+                    'followup': {
+                        'activation_by_day': 1,
+                        'activation_date': '2026-05-28T00:00:00Z',
+                        'create_date': '2026-05-30T10:51:56Z',
+                        'create_user_id': 1000,
+                        'data_id': 54882,
+                        'description': 'test 2026-05-30T10:51:55.775536+00:00',
+                        'due_date': '2026-05-31T00:00:00Z',
+                        'end_sequence_date': None,
+                        'followup_client': 374122,
+                        'followup_client_name': 'Test',
+                        'followup_handler': 1,
+                        'followup_id': 64,
+                        'followup_type': 5,
+                        'followup_type_name': 'TestAllIn',
+                        'parent_id': 64,
+                        'rule': 0,
+                        'start_sequence_date': None,
+                        'status': 2,
+                        'status_by': 1000,
+                        'escalation_enabled': True, # this field is only included if escalation=True
+                        'escalation_period': 6,     # this field is only included if escalation=True
+                        'escalation_when': -1,      # this field is only included if escalation=True
+                    }
+                }
+            }
+        }
+
+        """
+
+        query = {}
+        if actions:
+            query["actions"] = "true"
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/followups/" + str(reminder_id)
+        if query:
+            encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+            request_url += "?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get reminder with ID -> %d for node with ID -> %d; calling -> %s",
+            reminder_id,
+            node_id,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get reminder with ID -> {} for node with ID -> {}".format(
+                reminder_id,
+                node_id,
+            ),
+        )
+
+        if not response or not escalation:
+            return response
+
+        # If escalation information is requested, we need to get the reminder view form to extract
+        # escalation fields, as they are not included in the reminder details response:
+        view_form = self.get_reminder_view_form(
+            node_id=node_id,
+            reminder_id=reminder_id,
+        )
+        if not view_form:
+            return response
+
+        forms = view_form.get("forms", [])
+        if not forms or not isinstance(forms[0], dict):
+            return response
+
+        form_data = forms[0].get("data", {})
+        escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
+        send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
+        send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
+
+        followup = response.get("results", {}).get("data", {}).get("followup", {})
+
+        if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
+            followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
+        if isinstance(send_in, dict) and "escalation_period" in send_in:
+            followup["escalation_period"] = send_in.get("escalation_period")
+        if isinstance(send_in, dict) and "escalation_when" in send_in:
+            followup["escalation_when"] = send_in.get("escalation_when")
+        if isinstance(send_to, list) and send_to:
+            followup["escalation_recipient_list"] = send_to
+
+        return response
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_status")
+    def get_reminder_status(
+        self,
+        node_id: int,
+        reminder_id: int,
+    ) -> int | None:
+        """Get the current status of a reminder.
+
+        This method uses ``get_reminder_view_form()`` to retrieve the reminder
+        view form and extracts the status from the form options.
+
+        Args:
+            node_id (int):
+                The ID of the node the reminder belongs to.
+            reminder_id (int):
+                The ID of the reminder.
+
+        Returns:
+            int | None:
+                The current status value (1 = Open, -2 = In Progress, 2 = Completed),
+                or None if the status cannot be determined.
+
+        """
+
+        reminder = self.get_reminder(
+            node_id=node_id,
+            reminder_id=reminder_id,
+        )
+        if not reminder:
+            return None
+
+        status = reminder.get("results", {}).get("data", {}).get("followup", {}).get("status")
+        if status is not None:
+            return status
+
+        self.logger.debug(
+            "Cannot determine status for reminder with ID -> %d and node with ID -> %d from view form.",
+            reminder_id,
+            node_id,
+        )
+
+        return None
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_view_form")
+    def get_reminder_view_form(
+        self,
+        node_id: int,
+        reminder_id: int,
+    ) -> dict | None:
+        """Get the reminder view form for a given node and reminder.
+
+        Args:
+            node_id (int):
+                The ID of the node the reminder belongs to.
+            reminder_id (int):
+                The ID of the reminder to view.
+
+        Returns:
+            dict | None:
+                Reminder view form data, or None if the request fails.
+
+        Example:
+        {
+            "forms": [
+                {
+                    "data": {
+                        "activation_alert": {
+                            "send_in": {
+                                "activation_period": 10,
+                                "activation_unit": 1
+                            }
+                        },
+                        "assignees": [
+                            22783
+                        ],
+                        "description": "This is a test description",
+                        "duein": null,
+                        "escalation_alert": {
+                            "escalation_enabled": true,
+                            "send_in": {
+                                "escalation_period": 5,
+                                "escalation_when": 1
+                            },
+                            "send_to": [
+                                54889
+                            ]
+                        },
+                        "followup_client_name": 374122,
+                        "followup_type_name": 5,
+                        "general": {
+                            "Created_by": 22783,
+                            "Created_on": "2026-05-30T09:34:58",
+                            "Modified_by": 22783,
+                            "Modified_on": "2026-05-30T09:34:58"
+                        },
+                        "priority": 100,
+                        "schedule": {
+                            "due": 1,
+                            "due_in": {
+                                "due_in_period": 20,
+                                "due_in_unit": 1
+                            },
+                            "due_on": "2026-06-19T09:34:58",
+                            "end_date": "",
+                            "month_recursive": "1",
+                            "predefined": true,
+                            "reoccuring": false,
+                            "repeat_month": {
+                                "month_day": 1,
+                                "month_unit": "RULE_MONTH_1",
+                                "month_weekday": 1
+                            },
+                            "repeat_on": "",
+                            "repeat_week": 1,
+                            "repeat_year": {
+                                "year_on_month": 1,
+                                "year_on_month_day": 1,
+                                "year_on_month_unit": "RULE_YEAR_1",
+                                "year_on_month_weekday": 1
+                            },
+                            "start_date": "",
+                            "week_recursive": "1",
+                            "year_recursive": "1"
+                        }
+                    },
+                    "form": {
+                        "attributes": {
+                            "action": "/api/v1/forms/nodes/54882/reminder/view",
+                            "method": "GET"
+                        },
+                        "renderForm": true
+                    },
+                    "options": {
+                        ...
+                    },
+                    "schema": {
+                        ...
+                    }
+                }
+            ]
+        }
+
+        """
+
+        query = {"id": reminder_id}
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = (
+            self.config()["nodesFormUrl"] + "/" + str(node_id) + "/reminder/view" + "?{}".format(encoded_query)
+        )
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get viewing form for reminder with ID -> %d and node with ID -> %d; calling -> %s",
+            reminder_id,
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get viewing form for reminder with ID -> {} and node with ID -> {}".format(
+                reminder_id,
+                node_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_reminder_create_form")
+    def get_reminder_create_form(
+        self,
+        node_id: int,
+        client_id: int | None = None,
+        reminder_id: int | None = None,
+    ) -> dict | None:
+        """Get the reminder creation form.
+
+        Args:
+            node_id (int):
+                The node ID to create the reminder for.
+            client_id (int | None, optional):
+                The client ID for the reminder type. Defaults to None.
+            reminder_id (int | None, optional):
+                The reminder ID. Defaults to None.
+
+        Returns:
+            dict | None:
+                Reminder creation form data, or None if the request fails.
+
+        Example:
+                {
+                    'forms': [
+                        {
+                            'data': {
+                                'RSTYPE': 1,
+                                'PRIORITY': 0,
+                                ...
+                            }
+                        }
+                    ]
+                }
+
+        """
+
+        query = {"node_id": node_id}
+        if client_id is not None:
+            query["client_id"] = client_id
+        if reminder_id is not None:
+            query["id"] = reminder_id
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["nodesFormUrl"] + "/reminder/create" + "?{}".format(encoded_query)
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get reminder create form for node with ID -> %d and reminder client with ID -> %d; calling -> %s",
+            node_id,
+            client_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get reminder create form (client_id -> {})".format(
+                client_id,
+            ),
+        )
+
+    # end method definition
+
+    def _build_reminder_payload(
+        self,
+        reminder_type: int,
+        recipients: list[int] | None = None,
+        description: str = "",
+        priority: Literal["low", "medium", "high"] | None = "medium",
+        due_date: str | date | None = None,
+        due_in_value: int | None = None,
+        due_in_unit: Literal["day", "week", "month", "year"] | None = None,
+        activation_value: int | None = None,
+        activation_unit: Literal["day", "week", "month", "year"] | None = None,
+        activation_business_day: bool | None = None,
+        recurring: bool = False,
+        recurring_start_date: date | None = None,
+        recurring_end_date: date | None = None,
+        recurring_pattern: Literal[
+            "daily",
+            "weekly",
+            "bi-weekly",
+            "monthly",
+            "every 2 months",
+            "quarterly",
+            "semi-annually",
+            "yearly",
+        ]
+        | None = None,
+        recurring_business_day: bool | None = None,
+        escalation: bool = False,
+        escalation_recipients: list[int] | None = None,
+        escalation_when: Literal["before", "after"] | None = None,
+        escalation_value: int | None = None,
+        escalation_unit: Literal["day", "week", "month", "year"] | None = None,
+        escalation_business_day: bool | None = None,
+        reminder_status: int | str | None = None,
+        node_id: int | None = None,
+        reminder_id: int | None = None,
+    ) -> dict | None:
+        """Validate reminder parameters and build the shared payload dictionary.
+
+        This is a private helper used by ``add_reminder`` and ``update_reminder``
+        to avoid duplicating validation logic and payload construction.
+
+        Args:
+            reminder_type (int):
+                ID of the reminder type (RSTYPE).
+            recipients (list[int] | None, optional):
+                List of recipient user/group IDs. Defaults to None.
+            description (str, optional):
+                Description of the reminder. Defaults to "".
+            priority (Literal["low", "medium", "high"] | None, optional):
+                Priority of the reminder. Mapped to API values
+                (low=0, medium=50, high=100). Defaults to "medium".
+            due_date (str | date | None, optional):
+                Due date for the reminder ("Due On"). Converted to OTCS format.
+                Defaults to None.
+            due_in_value (int | None, optional):
+                Rule value for relative due date / recurrence interval. Defaults to None.
+            due_in_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Rule unit for relative due date / recurrence interval. Defaults to None.
+            activation_value (int | None, optional):
+                Activation offset value. Defaults to None.
+            activation_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Activation unit. Defaults to None.
+            activation_business_day (bool | None, optional):
+                Whether activation should use business days. Defaults to None.
+            recurring (bool):
+                True for recurrence (RSRULE = 2). Defaults to False.
+            recurring_start_date (date | None, optional):
+                Recurrence start date. Required when ``recurring`` is True.
+            recurring_end_date (date | None, optional):
+                Recurrence end date. Defaults to None.
+            recurring_pattern (Literal[...] | None, optional):
+                Human-readable recurrence pattern. Defaults to None.
+            recurring_business_day (bool | None, optional):
+                Whether recurrence uses business days only.
+                Move Followup Date to previous business day if it falls on a weekend.
+                Defaults to None. REST API calls this field "MOVEPREV" and expects "1" for True and "0" for False.
+            escalation (bool, optional):
+                Whether escalation is enabled. Defaults to False.
+            escalation_recipients (list[int] | None, optional):
+                List of user/group IDs to escalate to. Defaults to None.
+            escalation_when (Literal["before", "after"] | None, optional):
+                When to escalate. Defaults to None.
+            escalation_value (int | None, optional):
+                Escalation offset value. Defaults to None.
+            escalation_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Escalation unit. Defaults to None.
+            escalation_business_day (bool | None, optional):
+                Whether escalation uses business days. Defaults to None.
+            reminder_status (int | str | None, optional):
+                Reminder status (RSSTATUS).
+                Possible int values: -2 (In Progress), 1 (Open), 2 (Completed).
+                Possible str values: "open", "in_progress", "completed".
+                String values are normalized case-insensitively.
+                Defaults to None (no status in payload).
+            node_id (int | None, optional):
+                The node ID. Required together with ``reminder_id`` to validate
+                status transitions against the current reminder status.
+                Defaults to None.
+            reminder_id (int | None, optional):
+                The reminder ID. Required together with ``node_id`` to validate
+                status transitions against the current reminder status.
+                Defaults to None.
+
+        Returns:
+            dict | None:
+                The constructed payload dictionary, or None if validation fails.
+
+        """
+
+        reminder_unit_map = {
+            "day": 1,
+            "week": 2,
+            "month": 3,
+            "year": 4,
+        }
+        recurring_pattern_map = {
+            "daily": "DY 0 0 * * *",
+            "weekly": "WE 0 0 * * 1 1 1",
+            "bi-weekly": "WE 0 0 * * 1 2 1",
+            "monthly": "M1 0 0 1 * * 1 1",
+            "every 2 months": "M1 0 0 1 * * 2 1",
+            "quarterly": "M1 0 0 1 * * 3 1",
+            "semi-annually": "M1 0 0 1 * * 6 1",
+            "yearly": "Y1 0 0 1 1 * 1 1",
+        }
+        escalation_when_map = {
+            "before": -1,
+            "after": 1,
+        }
+        reminder_priority_map = {
+            "low": 0,
+            "medium": 50,
+            "high": 100,
+        }
+
+        if reminder_id is not None and node_id is not None:
+            # What updates are allowed depend on the current status of the reminder, so we need to get it:
+            current_status = self.get_reminder_status(
+                node_id=node_id,
+                reminder_id=reminder_id,
+            )
+            if current_status is None:
+                self.logger.error(
+                    "Cannot determine current status for reminder with ID -> %d and node with ID -> %d. Cannot validate reminder update parameters.",
+                    reminder_id,
+                    node_id,
+                )
+                return None
+        else:
+            current_status = None
+
+        # Determine if we are in an initial state where all reminder details can be edited
+        # (either creating a new reminder or editing an existing reminder that is still open):
+        initial_status = current_status == 1 or current_status is None
+
+        # Validate reminder type:
+        valid_reminder_type_ids = self.get_valid_reminder_type_ids()
+        if not valid_reminder_type_ids:
+            self.logger.error(
+                "No valid reminder types found. There may not be any reminder type configured or the user does not have access to any. Cannot create or update reminder."
+            )
+            return None
+        if reminder_type not in valid_reminder_type_ids:
+            self.logger.error(
+                "Invalid reminder type ID -> '%s'. Cannot create or update reminder. Valid IDs -> %s",
+                reminder_type,
+                str(valid_reminder_type_ids),
+            )
+            return None
+
+        # Validate units:
+        valid_units = list(reminder_unit_map.keys())
+        if activation_unit is not None and activation_unit not in reminder_unit_map:
+            self.logger.error(
+                "Invalid activation unit -> '%s'. Valid units -> %s",
+                activation_unit,
+                str(valid_units),
+            )
+            return None
+        if due_in_unit is not None and due_in_unit not in reminder_unit_map:
+            self.logger.error(
+                "Invalid due in unit -> '%s'. Valid units -> %s",
+                due_in_unit,
+                str(valid_units),
+            )
+            return None
+        if escalation and escalation_unit is not None and escalation_unit not in reminder_unit_map:
+            self.logger.error(
+                "Invalid escalation unit -> '%s'. Valid units -> %s",
+                escalation_unit,
+                str(valid_units),
+            )
+            return None
+        valid_escalation_when = list(escalation_when_map.keys())
+        if escalation and escalation_when is not None and escalation_when not in escalation_when_map:
+            self.logger.error(
+                "Invalid escalation_when -> %s. Valid values -> %s",
+                str(escalation_when),
+                str(valid_escalation_when),
+            )
+            return None
+
+        # Validate and map priority:
+        priority_value = None
+        if priority is not None:
+            if priority not in reminder_priority_map:
+                self.logger.error(
+                    "Invalid reminder priority -> '%s'. Valid priorities -> %s",
+                    priority,
+                    str(list(reminder_priority_map.keys())),
+                )
+                return None
+            priority_value = reminder_priority_map[priority]
+
+        # Format due date:
+        if due_date is not None:
+            try:
+                due_date_formatted = self._format_reminder_date(due_date)
+            except ValueError:
+                self.logger.error(
+                    "Invalid reminder date -> '%s'. Expected OTCS format ('D/YYYY/M/D:0:0:0') or ISO date string.",
+                    due_date,
+                )
+                return None
+        else:
+            due_date_formatted = None
+
+        # Determine reminder rule:
+        if recurring:
+            reminder_rule = 2
+            if not recurring_start_date:
+                self.logger.error("A start date is required for configuration of recurring reminders!")
+                return None
+        elif due_date_formatted is not None:
+            reminder_rule = 0
+        else:
+            reminder_rule = 1
+            if due_in_unit is None:
+                self.logger.error(
+                    "A unit (day, week, month, year) is required for reminders with relative due dates.",
+                )
+                return None
+            if due_in_value is None:
+                self.logger.error(
+                    "A value (# of days, # of months, etc.) is required for reminders with relative due dates.",
+                )
+                return None
+
+        # Build general parameters:
+        payload: dict = {
+            "RSTYPE": str(reminder_type),
+        }
+        if initial_status:
+            payload["RSRULE"] = str(reminder_rule)
+            payload["escalationEnabled"] = str(1 if escalation else 0)
+
+        if recipients is not None:
+            payload["recipients"] = recipients
+        if priority_value is not None:
+            payload["PRIORITY"] = str(priority_value)
+        if description:
+            payload["RSDESCRIPTION"] = description
+
+        # Activation parameters:
+        if initial_status:
+            if activation_business_day is not None:
+                payload["RSACTIVATIONBDAY"] = str(1 if activation_business_day else 0)
+            if activation_unit is not None:
+                payload["RSACTIVATIONUNIT"] = str(reminder_unit_map[activation_unit])
+            if activation_value is not None:
+                payload["RSACTIVATION"] = activation_value
+
+        # Schedule / recurring parameters:
+        if initial_status:
+            if reminder_rule == 2:
+                if recurring_start_date:
+                    payload["RSSEQSTARTDATE"] = self._format_reminder_date(recurring_start_date)
+                if recurring_end_date:
+                    payload["RSSEQENDDATE"] = self._format_reminder_date(recurring_end_date)
+                if recurring_pattern:
+                    payload["RSSEQUENCECODE"] = recurring_pattern_map[recurring_pattern]
+                if recurring_business_day is not None:
+                    payload["MOVEPREV"] = str(1 if recurring_business_day else 0)
+            elif reminder_rule == 1:
+                payload["RSRULEUNIT"] = reminder_unit_map[due_in_unit]
+                payload["RSRULEVALUE"] = str(due_in_value)
+            elif reminder_rule == 0:
+                payload["RSDATE"] = due_date_formatted
+
+        # Escalation parameters:
+        if initial_status and escalation:
+            if escalation_recipients is not None:
+                payload["escalationrecipient_list"] = escalation_recipients
+            if escalation_when is not None:
+                payload["escalationWhen"] = str(escalation_when_map[escalation_when])
+            if escalation_value is not None:
+                payload["escalation"] = str(escalation_value)
+            if escalation_unit is not None:
+                payload["EscalationUnit"] = str(reminder_unit_map[escalation_unit])
+            if escalation_business_day is not None:
+                payload["escalationOnBusinessDay"] = 1 if escalation_business_day else 0
+
+        # Validate and set reminder status:
+        reminder_status_value: int | None = None
+        if reminder_status is not None:
+            if isinstance(reminder_status, str):
+                status_map = {
+                    "open": 1,
+                    "in_progress": -2,
+                    "completed": 2,
+                }
+                if reminder_status not in status_map:
+                    self.logger.error(
+                        "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
+                        str(reminder_status),
+                    )
+                    return None
+                reminder_status_value = status_map[reminder_status]
+            elif isinstance(reminder_status, int):
+                if reminder_status not in (-2, 1, 2):
+                    self.logger.error(
+                        "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
+                        str(reminder_status),
+                    )
+                    return None
+                reminder_status_value = reminder_status
+            else:
+                self.logger.error(
+                    "Invalid reminder status type -> %s. Expected int (-2, 1, 2) or str ('open', 'in_progress', 'completed').",
+                    type(reminder_status).__name__,
+                )
+                return None
+        if reminder_status_value is not None:
+            # Validate status transition if current_status is set:
+            if current_status is not None:
+                allowed_transitions = {
+                    1: (1, -2, 2),  # Open -> Open, In Progress or Completed
+                    -2: (-2, 2),  # In Progress -> In Progress or Completed
+                }
+                allowed = allowed_transitions.get(current_status, ())
+                if reminder_status_value not in allowed:
+                    status_names = {1: "Open", -2: "In Progress", 2: "Completed"}
+                    self.logger.error(
+                        "Invalid status transition for reminder with ID -> %d: %s (%d) -> %s (%d). Allowed targets from %s: %s",
+                        reminder_id,
+                        status_names.get(current_status, "Unknown"),
+                        current_status,
+                        status_names.get(reminder_status_value, "Unknown"),
+                        reminder_status_value,
+                        status_names.get(current_status, "Unknown"),
+                        ", ".join(status_names.get(s, "Unknown") for s in allowed) if allowed else "none",
+                    )
+                    return None
+
+            payload["RSSTATUS"] = str(reminder_status_value)
+
+        return payload
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_reminder")
+    def add_reminder(
+        self,
+        node_id: int,
+        reminder_type: int,
+        recipients: list[int],
+        description: str = "",
+        priority: Literal["low", "medium", "high"] = "medium",
+        due_date: str | date | None = None,
+        due_in_value: int | None = None,
+        due_in_unit: Literal["day", "week", "month", "year"] | None = None,
+        activation_value: int = 1,
+        activation_unit: Literal["day", "week", "month", "year"] | None = None,
+        activation_business_day: bool = True,
+        recurring: bool = False,
+        recurring_start_date: date | None = None,
+        recurring_end_date: date | None = None,
+        recurring_pattern: Literal[
+            "daily",
+            "weekly",
+            "bi-weekly",
+            "monthly",
+            "every 2 months",
+            "quarterly",
+            "semi-annually",
+            "yearly",
+        ]
+        | None = None,
+        recurring_business_day: bool | None = None,
+        escalation: bool = False,
+        escalation_recipients: list[int] | None = None,
+        escalation_when: Literal["before", "after"] | None = None,
+        escalation_value: int | None = None,
+        escalation_unit: Literal[
+            "day", "week", "month", "year"
+        ] = "day",  # the UI does only allow to specify "day" so we make it the default
+        escalation_business_day: bool | None = None,
+    ) -> dict | None:
+        """Create a new reminder for a given node.
+
+        Args:
+            node_id (int):
+                The ID of the node to add the reminder to.
+            reminder_type (int):
+                ID of the reminder type (RSTYPE).
+            recipients (list[int]):
+                List of recipient user/group IDs for the reminder.
+            description (str, optional):
+                Description of the reminder. Defaults to "".
+            priority (Literal["low", "medium", "high", "Low", "Medium", "High"] | None, optional):
+                Priority of the reminder. Accepted values are "low", "medium", "high"
+                and title case variants. They are mapped to API values
+                (low=0, medium=50, high=100).
+                Defaults to None.
+            due_date (date | None, optional):
+                Due date for the reminder ("Due On"). It is converted to OTCS format,
+                for example "D/2026/5/28:0:0:0". Defaults to None.
+            due_in_value (int | None, optional):
+                Rule value for recurrence. E.g. number of days, number of weeks, etc. Defaults to None.
+                Reminder form schema indicates recurrence interval fields with range 1..9.
+            due_in_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Rule unit for recurrence. Defaults to None. (day=1, week=2, month=3, year=4)
+            activation_value (int, optional):
+                Activation offset value that corresponds to `activation_unit`.
+                For example, with `activation_unit="day"`, a value of 2 means 2 days.
+                Reminder form schema indicates `due_in_period` range 1..999.
+            activation_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Activation unit. Defaults to None. (day=1, week=2, month=3, year=4)
+            activation_business_day (bool, optional):
+                Whether activation should use business days. Defaults to True.
+            recurring (bool):
+                True for recurrence (RSRULE = 2), False for no recurrence (RSRULE = 0).
+            recurring_start_date (date | None, optional):
+                Recurrence start date. Converted to OTCS format. Only sent when
+                ``RSRULE = 2``. Defaults to None.
+            recurring_end_date (date | None, optional):
+                Recurrence end date. Converted to OTCS format. Only sent when
+                ``RSRULE = 2``. Defaults to None.
+            recurring_pattern (Literal["daily", "weekly", "bi-weekly", "monthly", "every 2 months", "quarterly", "semi-annually", "yearly"] | None, optional):
+                Recurrence pattern for the reminder sequence. Only relevant when
+                ``recurring`` is True. Defaults to None.
+            recurring_business_day (bool | None, optional):
+                Whether recurrence uses business days only.
+                Move Followup Date to previous business day if it falls on a weekend.
+                Defaults to None. REST API calls this field "MOVEPREV" and expects "1" for True and "0" for False.
+            escalation (bool, optional):
+                Whether escalation is enabled. Defaults to False.
+            escalation_recipients (list[int] | None, optional):
+                List of user/group IDs to escalate to. Defaults to None.
+            escalation_when (Literal["before", "after"] | None, optional):
+                When to escalate. Defaults to None.
+                Mapped to API values: before=-1, after=1.
+            escalation_value (int | None, optional):
+                Escalation offset value. Defaults to None.
+            escalation_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Escalation unit. Defaults to None. (day=1, week=2, month=3, year=4)
+            escalation_business_day (bool | None, optional):
+                Whether escalation uses business days. Defaults to None.
+
+        Returns:
+            dict | None:
+                Response from the server, or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/resubmission/54882/addreminder',
+                        'method': 'POST',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {} # seems to be always empty - also on success
+        }
+
+        """
+
+        # Build the payload. Omit the reminder_status parameter here, as the API does not allow
+        # setting the status upon creation (it is always set to Open (1) when creating a reminder
+        # via the API, and there is no option to set a different initial status). The payload builder
+        # will validate all parameters and log errors for invalid values.
+        post_data = self._build_reminder_payload(
+            reminder_type=reminder_type,
+            recipients=recipients,
+            description=description,
+            priority=priority,
+            due_date=due_date,
+            due_in_value=due_in_value,
+            due_in_unit=due_in_unit,
+            activation_value=activation_value,
+            activation_unit=activation_unit,
+            activation_business_day=activation_business_day,
+            recurring=recurring,
+            recurring_start_date=recurring_start_date,
+            recurring_end_date=recurring_end_date,
+            recurring_pattern=recurring_pattern,
+            recurring_business_day=recurring_business_day,
+            escalation=escalation,
+            escalation_recipients=escalation_recipients,
+            escalation_when=escalation_when,
+            escalation_value=escalation_value,
+            escalation_unit=escalation_unit,
+            escalation_business_day=escalation_business_day,
+        )
+        if post_data is None:
+            return None
+
+        if "recipients" not in post_data:
+            self.logger.error("Recipients are required for adding a reminder.")
+            return None
+
+        request_url = self.config()["resubmissionUrl"] + "/" + str(node_id) + "/addreminder"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Add reminder for node with ID -> %d with data -> %s; calling -> %s",
+            node_id,
+            str(post_data),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data={"data": json.dumps(post_data)},
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add reminder for node with ID -> {}".format(
+                node_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_reminder_status")
+    def update_reminder_status(
+        self,
+        node_id: int,
+        reminder_id: int,
+        status: int | str,
+    ) -> dict | None:
+        """Update the status of a reminder for a given node.
+
+        REST API endpoint: PUT /v2/nodes/{node_id}/followups/{reminder_id}
+
+        Args:
+            node_id (int):
+                The ID of the node the reminder belongs to.
+            reminder_id (int):
+                The ID of the reminder to update.
+            status (int | str):
+                The new status value.
+                Possible values for int parameter type:
+                -2 : In Progress
+                1: Open (this is the initial status after creation of the reminder - a reminder cannot be reset to this value after status update)
+                2 : Completed
+                Possible values for str parameter type:
+                "open"
+                "in_progress"
+                "completed"
+                String values are normalized case-insensitively and accept separators
+                as underscore, hyphen, or space (for example: "in-progress", "In Progress").
+                Allowed status transitions:
+                1 -> -2 (Open -> In Progress)
+                1 -> 2 (Open -> Completed)
+                -2 -> 2 (In Progress -> Completed)
+
+        Returns:
+            dict | None:
+                Response from the server, or None if the request fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/nodes/54882/followups/66',
+                        'method': 'PUT',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {} # seems to be always empty - also on success
+        }
+
+        """
+
+        status_value: int
+
+        if isinstance(status, str):
+            normalized_status = status.strip().lower().replace("-", "_").replace(" ", "_")
+            status_map = {
+                "open": 1,
+                "in_progress": -2,
+                "completed": 2,
+            }
+            if normalized_status not in status_map:
+                self.logger.error(
+                    "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
+                    str(status),
+                )
+                return None
+            status_value = status_map[normalized_status]
+        elif isinstance(status, int):
+            if status not in (-2, 1, 2):
+                self.logger.error(
+                    "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
+                    str(status),
+                )
+                return None
+            status_value = status
+        else:
+            self.logger.error(
+                "Invalid reminder status type -> %s. Expected int (-2, 1, 2) or str ('open', 'in_progress', 'completed').",
+                type(status).__name__,
+            )
+            return None
+
+        if status_value == 1:
+            self.logger.error(
+                "Invalid status transition to Open (1). Status can only be set to Open upon reminder creation. Allowed status transitions are: 1 -> -2 (Open -> In Progress), 1 -> 2 (Open -> Completed), -2 -> 2 (In Progress -> Completed)",
+            )
+            return None
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/followups/" + str(reminder_id)
+        request_header = self.request_form_header()
+
+        put_body = {"status": status_value}
+
+        self.logger.debug(
+            "Update reminder with ID -> %d for node with ID -> %d to status -> %d; calling -> %s",
+            reminder_id,
+            node_id,
+            status_value,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data=put_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update reminder with ID -> {} for node with ID -> {}".format(
+                reminder_id,
+                node_id,
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_reminder")
+    def update_reminder(
+        self,
+        node_id: int,
+        reminder_id: int,
+        reminder_type: int,
+        recipients: list[int] | None = None,
+        description: str = "",
+        priority: Literal["low", "medium", "high"] = "medium",
+        due_date: str | date | None = None,
+        due_in_value: int | None = None,
+        due_in_unit: Literal["day", "week", "month", "year"] | None = None,
+        activation_value: int | None = None,
+        activation_unit: Literal["day", "week", "month", "year"] | None = None,
+        activation_business_day: bool | None = None,
+        recurring: bool = False,
+        recurring_start_date: date | None = None,
+        recurring_end_date: date | None = None,
+        recurring_pattern: Literal[
+            "daily",
+            "weekly",
+            "bi-weekly",
+            "monthly",
+            "every 2 months",
+            "quarterly",
+            "semi-annually",
+            "yearly",
+        ]
+        | None = None,
+        recurring_business_day: bool | None = None,
+        escalation: bool = False,
+        escalation_recipient_list: list[int] | None = None,
+        escalation_when: Literal["before", "after"] | None = None,
+        escalation_value: int | None = None,
+        escalation_unit: Literal["day", "week", "month", "year"] | None = None,
+        escalation_business_day: bool | None = None,
+        reminder_status: int | str | None = None,
+    ) -> dict | None:
+        """Update an existing reminder for a given node.
+
+        REST API endpoint: PUT /v2/nodes/{node_id}/updatereminder
+
+        Args:
+            node_id (int):
+                The ID of the node the reminder belongs to.
+            reminder_id (int):
+                The ID of the reminder to update (RSID).
+            reminder_type (int):
+                Type of the reminder (RSTYPE).
+            recipients (list[int] | None, optional):
+                List of recipient user/group IDs for the reminder. Defaults to None.
+            description (str, optional):
+                Description of the reminder. Defaults to "".
+            priority (Literal["low", "medium", "high"]):
+                Priority of the reminder. Accepted values are "low", "medium", "high".
+                They are mapped to API values (low=0, medium=50, high=100). Defaults to "medium".
+            due_date (str | date | None, optional):
+                Due date for the reminder ("Due On"). If a Python date is passed it is
+                converted to OTCS format, for example "D/2026/5/28:0:0:0".
+                If provided and ``recurring`` is False, the payload uses ``RSRULE = 0``.
+                If omitted and ``recurring`` is False, the payload uses ``RSRULE = 1``
+                ("Due In") and no ``RSDATE`` key is sent. Defaults to None.
+            due_in_value (int | None, optional):
+                Rule value for relative due date calculation. Defaults to None (RSRULEVALUE).
+                Reminder form schema indicates relative due date fields with range 1..9.
+            due_in_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Rule unit for relative due date calculation. Defaults to None. (day=1, week=2, month=3, year=4)
+            activation_value (int, optional):
+                Activation offset value that corresponds to `activation_unit`.
+                For example, with `activation_unit="day"`, a value of 2 means 2 days.
+                Reminder form schema indicates `due_in_period` range 1..999.
+            activation_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Activation unit. Defaults to None. (day=1, week=2, month=3, year=4)
+            activation_business_day (bool | None, optional):
+                Whether activation should use business days. Defaults to None.
+            recurring (bool):
+                True for recurrence (RSRULE = 2), False for non-recurring behavior.
+                When False, ``RSRULE`` is derived from ``due_date``:
+                ``RSRULE = 0`` when ``due_date`` is provided, otherwise ``RSRULE = 1``.
+            recurring_start_date (date | None, optional):
+                Recurrence start date. Converted to OTCS format. Only sent when
+                ``RSRULE = 2``. Defaults to None.
+            recurring_end_date (date | None, optional):
+                Recurrence end date. Converted to OTCS format. Only sent when
+                ``RSRULE = 2``. Defaults to None.
+            recurring_pattern (Literal["daily", "weekly", "bi-weekly", "monthly", "every 2 months", "quarterly", "semi-annually", "yearly"] | None, optional):
+                Recurrence pattern for the reminder sequence. Only relevant when
+                ``recurring`` is True. Defaults to None.
+            recurring_business_day (bool | None, optional):
+                Whether recurrence uses business days only.
+                Move Followup Date to previous business day if it falls on a weekend.
+                Defaults to None. REST API calls this field "MOVEPREV" and expects "1" for True and "0" for False.
+            escalation (bool, optional):
+                Whether escalation is enabled. Defaults to False.
+            escalation_recipient_list (list[int] | None, optional):
+                List of user/group IDs to escalate to. Defaults to None.
+            escalation_when (Literal["before", "after"] | None, optional):
+                When to escalate. Defaults to None.
+                Mapped to API values: before=-1, after=1.
+            escalation_value (int | None, optional):
+                Escalation offset value. Defaults to None.
+            escalation_unit (Literal["day", "week", "month", "year"] | None, optional):
+                Escalation unit. Defaults to None. (day=1, week=2, month=3, year=4)
+            escalation_business_day (bool | None, optional):
+                Whether escalation uses business days. Defaults to None.
+            reminder_status (int | str | None, optional):
+                Reminder status (RSSTATUS).
+                Possible values for int parameter type:
+                -2 : In Progress
+                1 : Open
+                2 : Completed
+                Possible values for str parameter type:
+                "open"
+                "in_progress"
+                "completed"
+                String values are normalized case-insensitively and accept separators
+                as underscore, hyphen, or space (for example: "in-progress", "In Progress").
+                Defaults to None.
+
+        Returns:
+            dict | None:
+                Response from the server, or None if the request fails.
+
+        Example:
+        {
+            'results': {
+                'id': 12345,
+                'RSTYPE': 1,
+                'RSDATE': '2025-06-15',
+                ...
+            }
+        }
+
+        """
+
+        # Build the payload. The payload builder will validate all parameters and log errors for invalid values.
+        # Note that the payload builder does not validate the reminder ID, as it is not part of the payload but
+        # a separate parameter for the update endpoint.
+        put_data = self._build_reminder_payload(
+            reminder_type=reminder_type,
+            recipients=recipients,
+            description=description,
+            priority=priority,
+            due_date=due_date,
+            due_in_value=due_in_value,
+            due_in_unit=due_in_unit,
+            activation_value=activation_value,
+            activation_unit=activation_unit,
+            activation_business_day=activation_business_day,
+            recurring=recurring,
+            recurring_start_date=recurring_start_date,
+            recurring_end_date=recurring_end_date,
+            recurring_pattern=recurring_pattern,
+            recurring_business_day=recurring_business_day,
+            escalation=escalation,
+            escalation_recipients=escalation_recipient_list,
+            escalation_when=escalation_when,
+            escalation_value=escalation_value,
+            escalation_unit=escalation_unit,
+            escalation_business_day=escalation_business_day,
+            reminder_status=reminder_status,
+            node_id=node_id,
+            reminder_id=reminder_id,
+        )
+        if put_data is None:
+            return None
+
+        # Update-specific fields:
+        put_data["RSID"] = reminder_id
+        put_data["RSPARENTID"] = reminder_id
+
+        request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/updatereminder"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Update reminder with ID -> %d for node with ID -> %d with data -> %s; calling -> %s",
+            reminder_id,
+            node_id,
+            str(put_data),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data={"data": json.dumps(put_data)},
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update reminder with ID -> {} for node with ID -> {}".format(
+                reminder_id,
+                node_id,
+            ),
+        )
 
     # end method definition

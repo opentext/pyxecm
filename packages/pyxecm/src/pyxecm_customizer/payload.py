@@ -383,6 +383,7 @@ class Payload:
         self._exec_pod_commands: list = []
         self._external_systems: list = []
         self._groups: list = []
+        self._groups_post: list = []
         self._holds: list = []
         self._items: list = []
         self._items_post: list = []
@@ -410,6 +411,7 @@ class Payload:
         self._trusted_sites: list = []
         self._user_customization: bool = True
         self._users: list = []
+        self._users_post: list = []
         self._web_reports: list = []
         self._web_reports_post: list = []
         self._webhooks: list = []
@@ -534,10 +536,12 @@ class Payload:
         self._system_attributes = self.get_payload_section("systemAttributes")
         self._docgen_settings = self.get_payload_section("docgenSettings")
         self._groups = self.get_payload_section("groups")
+        self._groups_post = self.get_payload_section("groupsPost")
         self._users = self.get_payload_section("users")
         if self._users:
             # Check if multiple user instances should be created
             self.init_payload_user_instances()
+        self._users_post = self.get_payload_section("usersPost")
         self._admin_settings = self.get_payload_section("adminSettings")
         self._admin_settings_post = self.get_payload_section("adminSettingsPost")
         self._exec_pod_commands = self.get_payload_section("execPodCommands")
@@ -603,6 +607,7 @@ class Payload:
         self._avts_questions = self.get_payload_section("avtsQuestions")
         self._embeddings = self.get_payload_section("embeddings")
         self._nifi_flows = self.get_payload_section("nifi")
+        self._aviator_mcp_servers = self.get_payload_section("aviatorMcpServers")
 
         return self._payload
 
@@ -1899,8 +1904,9 @@ class Payload:
             self.logger.error("Group needs a name to lookup the ID!")
             return 0
         group_name = group["name"]
+        group_type = int(group.get("type", 1))  # default to 1 for regular groups if not specified
 
-        existing_groups = self._otcs.get_group(name=group_name)
+        existing_groups = self._otcs.get_group(name=group_name, group_type=group_type)
         # We use the lookup method here as get_group() could deliver more
         # then 1 result element (in edge cases):
         existing_group_id = self._otcs.lookup_result_value(
@@ -2506,59 +2512,70 @@ class Payload:
                         if self._otpd and isinstance(self._otpd, OTPD):
                             self._log_header_callback(text="Process OTPD Settings")
                             self.process_docgen_settings()
-                    case "groups":
-                        self._log_header_callback(text="Process Groups")
-                        self.process_groups()
+                    case "groups" | "groupsPost":
+                        is_post = payload_section["name"] == "groupsPost"
+                        post_label = " (post)" if is_post else ""
+                        groups = self._groups_post if is_post else self._groups
+                        self._log_header_callback(text=f"Process Groups{post_label}")
+                        self.process_groups(groups=groups, section_name=payload_section["name"])
                         # Add all groups with ID the a lookup dict for placeholder replacements
                         # in adminSetting. This also updates the payload with group IDs from OTCS
                         # if the group already exists in Content Server. This is important especially
                         # if the customizer pod is restarted / run multiple times:
-                        self.process_group_placeholders()
+                        self.process_group_placeholders(groups=groups)
                         if self._core_share and isinstance(self._core_share, CoreShare):
-                            self._log_header_callback(text="Process Core Share Groups", char="-")
-                            self.process_groups_core_share()
+                            self._log_header_callback(text=f"Process Core Share Groups{post_label}", char="-")
+                            self.process_groups_core_share(groups=groups, section_name=payload_section["name"])
                         if self._m365 and isinstance(self._m365, M365):
-                            self._log_header_callback(text="Cleanup existing M365 Teams", char="-")
-                            self.cleanup_all_teams_m365()
-                            self._log_header_callback(text="Process M365 Groups", char="-")
-                            self.process_groups_m365()
-                    case "users":
-                        self._log_header_callback(text="Process Users")
+                            self._log_header_callback(text=f"Cleanup existing M365 Teams{post_label}", char="-")
+                            if not is_post:
+                                # We don't want to do this cleanup for the groupsPost section!
+                                self.cleanup_all_teams_m365()
+                            self._log_header_callback(text=f"Process M365 Groups{post_label}", char="-")
+                            self.process_groups_m365(groups=groups, section_name=payload_section["name"])
+                    case "users" | "usersPost":
+                        is_post = payload_section["name"] == "usersPost"
+                        post_label = " (post)" if is_post else ""
+                        users = self._users_post if is_post else self._users
+                        self._log_header_callback(text=f"Process Users{post_label}")
                         self._user_customization = bool(
                             payload_section.get("user_customization", "True"),
                         )
-                        self.process_users()
+                        self.process_users(users=users, section_name=payload_section["name"])
                         # Add all users with ID to a lookup dict for placeholder replacements
                         # in adminSetting. This also updates the payload with user IDs from OTCS
                         # if the user already exists in Content Server. This is important especially
                         # if the customizer pod is restarted / run multiple times:
-                        self.process_user_placeholders()
+                        self.process_user_placeholders(users=users)
                         self._log_header_callback(
-                            text="Assign OTCS licenses to users",
+                            text=f"Assign OTCS licenses to users{post_label}",
                             char="-",
                         )
                         self.process_user_licenses(
                             resource_name=self._otcs.config()["resource"],
                             license_feature=self._otcs.config()["license"],
                             user_specific_payload_field="licenses",
+                            users=users,
                         )
                         self._log_header_callback(
-                            text="Process OTDS user settings",
+                            text=f"Process OTDS user settings{post_label}",
                             char="-",
                         )
-                        self.process_user_settings()
+                        self.process_user_settings(users=users)
                         if self._core_share and isinstance(self._core_share, CoreShare):
-                            self._log_header_callback(text="Process Core Share users", char="-")
-                            self.process_users_core_share()
+                            self._log_header_callback(text=f"Process Core Share users{post_label}", char="-")
+                            self.process_users_core_share(users=users)
                         if self._m365 and isinstance(self._m365, M365):
-                            self._log_header_callback(text="Process M365 users", char="-")
-                            self.process_users_m365()
+                            self._log_header_callback(text=f"Process M365 users{post_label}", char="-")
+                            self.process_users_m365(users=users)
                             # We need to do the MS Teams creation after the creation of
                             # the M365 users as we require Group Owners to create teams.
                             # Note: this is just for the teams of the top-level OTCS groups
                             # (departments), not the MS Teams for the Workspaces. These
                             # are created via the scheduled bots!
-                            self._log_header_callback(text="Process M365 Teams for departmental groups", char="-")
+                            self._log_header_callback(
+                                text=f"Process M365 Teams for departmental groups{post_label}", char="-"
+                            )
                             self.process_teams_m365()
                     case "adminSettings":
                         self._log_header_callback(
@@ -2907,6 +2924,14 @@ class Payload:
                     case "nifi":
                         self._log_header_callback("Process Knowledge Discovery Nifi Flows")
                         self.process_nifi_flows()
+                    case "aviatorMcpServers":
+                        if self._otca and isinstance(self._otca, OTCA):
+                            self._log_header_callback("Process Aviator MCP Servers")
+                            self.process_mcp_servers()
+                        else:
+                            self.logger.warning(
+                                "aviatorMcpServers in payload but Content Aviator (OTCA) is not configured! MCP servers will not be processed.",
+                            )
                     case _:
                         self.logger.error(
                             "Illegal payload section name -> '%s' in payloadSections!",
@@ -2925,22 +2950,23 @@ class Payload:
                     )
 
         with tracer.start_as_current_span("process_payload_users"):
-            if self._users and self._user_customization:
-                self._log_header_callback("Process User Profile Photos")
-                self.process_user_photos()
-                if self._m365 and isinstance(self._m365, M365):
-                    self._log_header_callback("Process M365 User Profile Photos")
-                    self.process_user_photos_m365()
-                if self._salesforce and isinstance(self._salesforce, Salesforce):
-                    self._log_header_callback("Process Salesforce User Profile Photos")
-                    self.process_user_photos_salesforce()
-                if self._core_share and isinstance(self._core_share, CoreShare):
-                    self._log_header_callback("Process Core Share User Profile Photos")
-                    self.process_user_photos_core_share()
-                self._log_header_callback("Process User Favorites and Profiles")
-                self.process_user_favorites_and_profiles()
-                self._log_header_callback("Process User Security")
-                self.process_user_security()
+            for users_label, users_list in [("", self._users), (" (post)", self._users_post)]:
+                if users_list and self._user_customization:
+                    self._log_header_callback(f"Process User Profile Photos{users_label}")
+                    self.process_user_photos(users=users_list)
+                    if self._m365 and isinstance(self._m365, M365):
+                        self._log_header_callback(f"Process M365 User Profile Photos{users_label}")
+                        self.process_user_photos_m365(users=users_list)
+                    if self._salesforce and isinstance(self._salesforce, Salesforce):
+                        self._log_header_callback(f"Process Salesforce User Profile Photos{users_label}")
+                        self.process_user_photos_salesforce(users=users_list)
+                    if self._core_share and isinstance(self._core_share, CoreShare):
+                        self._log_header_callback(f"Process Core Share User Profile Photos{users_label}")
+                        self.process_user_photos_core_share(users=users_list)
+                    self._log_header_callback(f"Process User Favorites and Profiles{users_label}")
+                    self.process_user_favorites_and_profiles(users=users_list)
+                    self._log_header_callback(f"Process User Security{users_label}")
+                    self.process_user_security(users=users_list)
 
     # end method definition
 
@@ -4562,18 +4588,26 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_group_placeholders")
-    def process_group_placeholders(self) -> None:
+    def process_group_placeholders(self, groups: list | None = None) -> None:
         """Replace a group placeholder (sourrounded by %%...%%) with the actual ID of the Content Server group.
 
         For this we prepare a lookup dict. The dict self._placeholder_values already includes
         lookups for the OTCS and OTAWP OTDS resource IDs (see main.py)
 
-        Payload item keys (from _groups):
+        Payload item keys (from parameter or self._groups):
             * name (str, mandatory) - group name
             * enabled (bool, optional, default = True)
+
+        Args:
+            groups (list | None, optional):
+                The list of groups to process. If None, defaults to self._groups.
+
         """
 
-        for group in self._groups:
+        if not groups:
+            groups = self._groups
+
+        for group in groups:
             group_name = group.get("name")
             if not group_name:
                 self.logger.error(
@@ -4613,18 +4647,26 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_placeholders")
-    def process_user_placeholders(self) -> None:
+    def process_user_placeholders(self, users: list | None = None) -> None:
         """Replace a user placeholder (sourrounded by %%...%%) with the ID of the Content Server user.
 
         For this we prepare a lookup dict. The dict self._placeholder_values already includes
         lookups for the OTCS and OTAWP OTDS resource IDs (see customizer.py).
 
-        Payload item keys (from _users):
+        Payload item keys (from parameter or self._users):
             * name (str, mandatory) - user login name
             * enabled (bool, optional, default = True)
+
+        Args:
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
+
         """
 
-        for user in self._users:
+        if not users:
+            users = self._users
+
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error(
@@ -4664,19 +4706,36 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_groups")
-    def process_groups(self, section_name: str = "groups") -> bool:
+    def process_groups(self, groups: list | None = None, section_name: str = "groups") -> bool:
         """Process groups in payload and create them in Content Server.
 
         Payload item keys:
             - enabled (bool, optional, default=True)
             - name (str, required)
             - parent_groups (list, optional)
+            - users (list, optional) - list of user login names to be added to the group
+              as members. The users must already exist in the system (e.g. created by a
+              prior process_users() call). For regular groups (type 1) the members are
+              added via the REST API after group creation. For signing groups (type 101)
+              the members are added during the impersonated signing admin session inside
+              add_signing_group() because signing group management requires Signing
+              Authority Administrator privileges.
+            - groups (list, optional) - list of group names to be added to the group
+              as members. Member groups must have been created earlier in the payload
+              or already exist in the system. For signing groups (type 101) the members
+              are added during the impersonated signing admin session.
             - usage_privileges (list, optional)
+            - object_privileges (list, optional)
+            - type (int, optional, default=1) - the type of the group (1 = regular group, 101 = eSign Signing group)
+            - signing_admin (str, optional, required if type = 101) - login name of the user who is the signing admin for the eSign signing group
             - enable_o365 (bool, optional, default=False)
             - enable_salesforce (bool, optional, default=False)
             - enable_core_share (bool, optional, default=False)
 
         Args:
+            groups (list, optional):
+                A list of groups to process. If not provided, the method will use self._groups. This allows to reuse the method for processing groups
+                in different payload sections (e.g. "Groups" and "Post" sections).
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -4694,7 +4753,10 @@ class Payload:
 
         """
 
-        if not self._groups:
+        if not groups:
+            groups = self._groups
+
+        if not groups:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -4710,10 +4772,10 @@ class Payload:
 
         # First run through groups: create all groups in payload
         # and store the IDs of the created groups:
-        for group in self._groups:
+        for group in groups:
             group_name = group.get("name")
             if not group_name:
-                self.logger.error("Group needs a name inb payload! Skipping...")
+                self.logger.error("Group needs a name in payload! Skipping...")
                 success = False
                 continue
 
@@ -4736,21 +4798,197 @@ class Payload:
                 )
                 continue
 
+            member_users = group.get("users", [])
+            member_groups = group.get("groups", [])
+
+            # Resolve member user names to Content Server IDs:
+            member_user_ids = []
+            for member_user_name in member_users:
+                member_user_id = self.determine_user_id(user={"name": member_user_name})
+                if member_user_id:
+                    member_user_ids.append(member_user_id)
+                else:
+                    self.logger.warning(
+                        "Member user -> '%s' for group -> '%s' not found in system! Skipping this member...",
+                        member_user_name,
+                        group_name,
+                    )
+            # end for member_user_name in member_users
+
+            # Resolve member group names to Content Server IDs.
+            # Member groups must have been created earlier in the payload
+            # (or exist already in the system) to be resolvable:
+            member_group_ids = []
+            for member_group_name in member_groups:
+                # First, try to find the member group in the payload (it may have
+                # been created earlier in this loop and have an "id" field):
+                member_group_entry = next(
+                    (item for item in groups if item.get("name") == member_group_name),
+                    None,
+                )
+                if member_group_entry and "id" in member_group_entry:
+                    member_group_ids.append(member_group_entry["id"])
+                else:
+                    # Fall back to looking up the group in OTCS:
+                    member_group_id = self.determine_group_id(group={"name": member_group_name})
+                    if member_group_id:
+                        member_group_ids.append(member_group_id)
+                    else:
+                        self.logger.warning(
+                            "Member group -> '%s' for group -> '%s' not found in system! Skipping this member...",
+                            member_group_name,
+                            group_name,
+                        )
+            # end for member_group_name in member_groups
+
             # Now we know it is a new group...
-            new_group = self._otcs.add_group(name=group_name)
-            if new_group:
-                new_group_id = self._otcs.get_result_value(response=new_group, key="id")
+            # We check if it is a regular group or an eSign signing group based on the "type" element
+            # in the payload. If the type is 101, it is an eSign signing group and we need to provide
+            # the signing admin when creating the group. For regular groups (type = 1 or if type is not provided),
+            # there is no signing admin.
+            group_type = int(group.get("type", 1))
+            if group_type == 101:
+                signing_admin_name = group.get("signing_admin")
+                if not signing_admin_name:
+                    self.logger.error(
+                        "Group -> '%s' is of type signing group but does not have a signing admin defined in payload! Skipping...",
+                        group_name,
+                    )
+                    success = False
+                    continue
+                signing_admin_id = self.determine_user_id(
+                    user={"name": signing_admin_name},
+                )
+                if not signing_admin_id:
+                    self.logger.error(
+                        "Signing admin -> '%s' for signing group -> '%s' not found in system! Skipping...",
+                        signing_admin_name,
+                        group_name,
+                    )
+                    success = False
+                    continue
+
+                # Impersonate as the signing admin user because signing group
+                # management (creation and member assignment) requires Signing
+                # Authority Administrator privileges that the system admin does
+                # not have:
                 self.logger.info(
-                    "Successfully created group -> '%s' (%s).",
+                    "Impersonate signing admin user -> '%s' for signing group -> '%s'...",
+                    signing_admin_name,
+                    group_name,
+                )
+                if not self.start_impersonation(username=signing_admin_name):
+                    self.logger.error(
+                        "Failed to impersonate signing admin user -> '%s'! Cannot create signing group -> '%s'. Skipping...",
+                        signing_admin_name,
+                        group_name,
+                    )
+                    success = False
+                    continue
+
+                self.logger.info(
+                    "Creating signing group -> '%s' with signing admin -> '%s' (%s)...",
+                    group_name,
+                    signing_admin_name,
+                    signing_admin_id,
+                )
+                new_group = self._otcs.add_signing_group(name=group_name)
+                if new_group:
+                    # We have to interrupt the impersonation here
+                    # because the signing admin cannot retrieve the group
+                    # it just created and the add_signing_group() does not
+                    # return the ID of the created group as it is not a REST API call.
+                    # NOTE: this is a product limitation / bug!
+                    #                    self.stop_impersonation()
+
+                    # Verify creation by looking up the group via the REST API
+                    new_group = self._otcs.get_signing_groups(query=group_name)
+                    if new_group is None:
+                        self.logger.error(
+                            "Signing group -> '%s' was not found after creation attempt",
+                            group_name,
+                        )
+                        success = False
+                        continue
+                # end if new_group:
+            # end if group_type == 101:
+
+            else:
+                self.logger.info(
+                    "Creating regular group -> '%s'...",
+                    group_name,
+                )
+                new_group = self._otcs.add_group(name=group_name)
+
+            new_group_id = self._otcs.get_result_value(response=new_group, key="id")
+            if new_group_id:
+                self.logger.info(
+                    "Successfully created %s group -> '%s' (%s).",
+                    "signing" if group_type == 101 else "regular",
                     group_name,
                     new_group_id,
                 )
                 # Remember the OTCS group ID in the payload structure:
                 group["id"] = new_group_id
             else:
-                self.logger.error("Failed to create group -> '%s'!", group_name)
+                self.logger.error(
+                    "Failed to create %s group -> '%s'!", "signing" if group_type == 101 else "regular", group_name
+                )
+                # Stop impersonation before skipping to next group:
+                if group_type == 101:
+                    self.stop_impersonation()
                 success = False
                 continue
+
+            # if group_type == 101:
+            #     self.logger.info(
+            #         "Restart impersonation of signing admin user -> '%s' to assign signing group members...",
+            #         signing_admin_name,
+            #     )
+            #     if not self.start_impersonation(username=signing_admin_name):
+            #         success = False
+            #         continue
+
+            # Add member users and member groups to the new group.
+            # For signing groups this runs under the impersonated signing admin
+            # session. For regular groups it uses the normal admin session:
+            all_member_ids = member_user_ids + member_group_ids
+            if all_member_ids:
+                response = self._otcs.add_group_member(
+                    member_id=all_member_ids,
+                    group_id=new_group_id,
+                )
+                if response:
+                    self.logger.info(
+                        "Successfully added members with IDs -> %s to %s group -> '%s' (%s).",
+                        str(all_member_ids),
+                        "signing" if group_type == 101 else "",
+                        group_name,
+                        new_group_id,
+                    )
+                else:
+                    self.logger.error(
+                        "Failed to add members with IDs -> %s to %s group -> '%s' (%s)!",
+                        str(all_member_ids),
+                        "signing" if group_type == 101 else "",
+                        group_name,
+                        new_group_id,
+                    )
+                    success = False
+            # end if all_member_ids:
+
+            # Stop impersonation after signing group creation and member assignment:
+            if group_type == 101:
+                self.logger.info(
+                    "Stop impersonation of signing admin user -> '%s'...",
+                    signing_admin_name,
+                )
+                if not self.stop_impersonation():
+                    self.logger.error(
+                        "Failed to stop impersonation of signing admin user -> '%s'!",
+                        signing_admin_name,
+                    )
+                    success = False
 
             # Assign usage privileges to the new group:
             usage_privileges = group.get("usage_privileges", [])
@@ -4773,8 +5011,9 @@ class Payload:
                         group_name,
                         new_group_id,
                     )
+            # end for usage_privilege in usage_privileges:
 
-            # Assign usage privileges to the new group:
+            # Assign object privileges to the new group:
             object_privileges = group.get("object_privileges", [])
             for object_type in object_privileges:
                 response = self._otcs.assign_object_privilege(
@@ -4795,12 +5034,13 @@ class Payload:
                         group_name,
                         new_group_id,
                     )
+            # end for object_type in object_privileges:
 
         # end for group in self._groups: (first run)
 
         # Second run through groups: create all group memberships
         # (nested groups) based on the IDs created in first run:
-        for group in self._groups:
+        for group in groups:
             group_name = group.get("name")
             group_id = group.get("id")  # this should have been set in the first loop
             if not group_id:
@@ -4880,8 +5120,8 @@ class Payload:
                 self.logger.info(
                     "Group -> '%s' has application roles -> %s. Assigning...", group_name, str(application_roles)
                 )
+            group_partition = self._otcs.config()["partition"] if application_roles else None
             for role in application_roles:
-                group_partition = self._otcs.config()["partition"]
                 if not group_partition:
                     self.logger.error("Group partition not found! Skipping application role -> %s...", str(role))
                     success = False
@@ -4924,7 +5164,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._groups,
+            payload_section=groups,
         )
 
         return success
@@ -4932,7 +5172,7 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_groups_m365")
-    def process_groups_m365(self, section_name: str = "groupsM365") -> bool:
+    def process_groups_m365(self, groups: list | None = None, section_name: str = "groupsM365") -> bool:
         """Process groups in payload and create them in Microsoft 365.
 
         Payload item keys (from _groups):
@@ -4942,6 +5182,8 @@ class Payload:
             * m365_id (str, optional, output field set by method) - Microsoft 365 group ID
 
         Args:
+            groups (list | None, optional):
+                The list of groups to process. If None, defaults to self._groups.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -4962,7 +5204,10 @@ class Payload:
             )
             return False
 
-        if not self._groups:
+        if not groups:
+            groups = self._groups
+
+        if not groups:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -4978,7 +5223,7 @@ class Payload:
 
         # First run through groups: create all groups in payload
         # and store the IDs of the created groups:
-        for group in self._groups:
+        for group in groups:
             group_name = group.get("name")
             if not group_name:
                 self.logger.error("Group needs a name. Skipping...")
@@ -5051,7 +5296,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._groups,
+            payload_section=groups,
         )
 
         return success
@@ -5242,7 +5487,7 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_groups_core_share")
-    def process_groups_core_share(self, section_name: str = "groupsCoreShare") -> bool:
+    def process_groups_core_share(self, groups: list | None = None, section_name: str = "groupsCoreShare") -> bool:
         """Process groups in payload and create them in Core Share.
 
         Payload item keys (from _groups):
@@ -5252,6 +5497,8 @@ class Payload:
             * core_share_id (str, optional, output field set by method) - Core Share group ID
 
         Args:
+            groups (list | None, optional):
+                The list of groups to process. If None, defaults to self._groups.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -5272,7 +5519,10 @@ class Payload:
             )
             return False
 
-        if not self._groups:
+        if not groups:
+            groups = self._groups
+
+        if not groups:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -5288,7 +5538,7 @@ class Payload:
 
         # Create all groups specified in payload
         # and store the IDs of the created Core Share groups:
-        for group in self._groups:
+        for group in groups:
             group_name = group.get("name")
             if not group_name:
                 self.logger.error("Group needs a name. Skipping...")
@@ -5373,7 +5623,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._groups,
+            payload_section=groups,
         )
 
         return success
@@ -5381,7 +5631,9 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_users")
-    def process_users(self, section_name: str = "users") -> bool:
+    def process_users(
+        self, users: list | None = None, section_name: str = "users", use_browser_automation: bool = False
+    ) -> bool:
         """Process users in payload and create them in Content Server.
 
         Payload item keys:
@@ -5399,12 +5651,16 @@ class Payload:
             - privileges (list, optional)
 
         Args:
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
                 are used (e.g. the "Post" sections).
                 This name is also used for the "success" status
                 files written to the Admin Personal Workspace.
+            use_browser_automation (bool, optional):
+                Whether to use browser automation for user creation. Default is False.
 
         Returns:
             bool:
@@ -5416,7 +5672,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -5430,7 +5689,7 @@ class Payload:
 
         # Add all users in payload and establish membership in
         # specified groups:
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error("User is missing a login. Skipping to next user...")
@@ -5552,6 +5811,7 @@ class Payload:
                         user_name,
                         new_user_id,
                     )
+            # end for usage_privilege in usage_privileges:
 
             # Assign usage privileges to the new user:
             object_privileges = user.get("object_privileges", [])
@@ -5574,6 +5834,99 @@ class Payload:
                         user_name,
                         new_user_id,
                     )
+            # end for object_type in object_privileges:
+
+            # Assign usage privileges to the new user:
+            signing_admin = user.get("signing_admin", False)
+            if signing_admin and use_browser_automation:
+                self.logger.info(
+                    "User -> '%s' (%s) is a designated signing authority. Using browser automation with URL -> '%s' to update user setting for signing authority...",
+                    user_name,
+                    new_user_id,
+                    self._otcs.cs_public_url(),
+                )
+                browser_automation_object = BrowserAutomation(
+                    base_url=self._otcs.cs_public_url(),
+                    user_name=self._otcs.config()["username"],
+                    user_password=self._otcs.config()["password"],
+                    take_screenshots=True,
+                    automation_name="Set-Signing-Authority",
+                    wait_until="networkidle",
+                    browser="chromium",
+                )
+
+                result = browser_automation_object.run_login()
+                if result:
+                    url = "?func=user.edituser&userID={}&ntab=LivelinkUsersAndGroupsGeneral&nextURL=%2Fcs%2Fcs%3Ffunc%3Duser.listusers".format(
+                        new_user_id
+                    )
+                    self.logger.info(
+                        "Open user edit page -> %s for user -> '%s' (%s) to set signing authority flag...",
+                        self._otcs.cs_public_url() + url,
+                        user_name,
+                        new_user_id,
+                    )
+                    result = browser_automation_object.get_page(url=url)
+                    if result:
+                        result = browser_automation_object.find_elem_and_click(
+                            selector_type="role",
+                            role_type="checkbox",
+                            selector="Signing Authority",
+                            scroll_to_element=False,
+                            desired_checkbox_state=True,
+                        )
+                        if result:
+                            result = browser_automation_object.find_elem_and_click(
+                                selector_type="role",
+                                role_type="button",
+                                selector="Update",
+                                scroll_to_element=True,
+                            )
+                    # end if result
+                # end if result
+
+                if result:
+                    self.logger.info(
+                        "Successfully set user -> '%s' (%s) as signing authority administrator.",
+                        user_name,
+                        new_user_id,
+                    )
+                else:
+                    self.logger.error(
+                        "Failed to set user -> '%s' (%s) as signing authority administrator!",
+                        user_name,
+                        new_user_id,
+                    )
+
+                # Cleanup session and and remove reference to the object:
+                browser_automation_object.end_session()
+                browser_automation_object = None
+
+            # end if signing_admin and use_browser_automation:
+            elif signing_admin and not use_browser_automation:
+                self.logger.info(
+                    "User -> '%s' (%s) is a designated signing authority. Update user setting for signing authority by using direct REST call.",
+                    user_name,
+                    new_user_id,
+                )
+                response = self._otcs.assign_user_signing_authority_admin(
+                    user_id=new_user_id,
+                    enable=True,
+                )
+                if response:
+                    self.logger.info(
+                        "Successfully set user -> '%s' (%s) as signing authority administrator.",
+                        user_name,
+                        new_user_id,
+                    )
+                else:
+                    self.logger.error(
+                        "Failed to set user -> '%s' (%s) as signing authority administrator!",
+                        user_name,
+                        new_user_id,
+                    )
+
+            # end if signing_admin and use_browser_automation:
 
             # Process group memberships of new user:
             user_groups = user.get("groups", [])  # list of groups the user is in
@@ -5721,7 +6074,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -6402,6 +6755,7 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_users_core_share")
     def process_users_core_share(
         self,
+        users: list | None = None,
         section_name: str = "usersCoreShare",
     ) -> bool:
         """Process users in payload and sync them with Core Share (passwords and email).
@@ -6418,6 +6772,8 @@ class Payload:
             * core_share_user_id (str, optional, output field set by method) - Core Share user ID
 
         Args:
+            users (list, optional):
+                List of user dicts to process. If not provided, it will be taken from self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -6436,7 +6792,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -6457,7 +6816,7 @@ class Payload:
         success: bool = True
 
         # traverse all users in payload:
-        for user in self._users:
+        for user in users:
             user_last_name = user.get("lastname", "")  # Default is important here
             user_first_name = user.get("firstname", "")
             user_name = " ".join(filter(None, [user_first_name, user_last_name]))
@@ -6901,7 +7260,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -6909,7 +7268,7 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_users_m365")
-    def process_users_m365(self, section_name: str = "usersM365") -> bool:
+    def process_users_m365(self, users: list | None = None, section_name: str = "usersM365") -> bool:
         """Process users in payload and create them in Microsoft 365 via MS Graph API.
 
         Payload item keys (from _users):
@@ -6926,6 +7285,8 @@ class Payload:
             * m365_id (str, optional, output field set by method) - Microsoft 365 user ID
 
         Args:
+            users (list, optional):
+                List of user dicts to process. If not provided, it will be taken from self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -6946,7 +7307,10 @@ class Payload:
             )
             return False
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -6962,7 +7326,7 @@ class Payload:
 
         # Add all users in payload and establish membership in
         # specified groups:
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error("User is missing a login. Skipping to next user...")
@@ -7395,7 +7759,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -9234,7 +9598,7 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_photos")
-    def process_user_photos(self, section_name: str = "userPhotos") -> bool:
+    def process_user_photos(self, users: list | None = None, section_name: str = "userPhotos") -> bool:
         """Process user photos in payload and assign them to Content Server users.
 
         Payload item keys (from _users):
@@ -9243,6 +9607,8 @@ class Payload:
             * type (str, optional, default = "User") - photo type
 
         Args:
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -9256,7 +9622,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -9272,7 +9641,7 @@ class Payload:
 
         # we assume the nickname of the photo item equals the login name of the user
         # we also assume that the photos have been uploaded / transported into the target system
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error("User is missing a login. Skipping to next user...")
@@ -9334,7 +9703,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -9342,7 +9711,7 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_photos_m365")
-    def process_user_photos_m365(self, section_name: str = "userPhotosM365") -> bool:
+    def process_user_photos_m365(self, users: list | None = None, section_name: str = "userPhotosM365") -> bool:
         """Process user photos in payload and assign them to Microsoft 365 users.
 
         Payload item keys (from _users):
@@ -9353,6 +9722,8 @@ class Payload:
             * m365_id (str, optional, output field set/updated by method) - Microsoft 365 user ID
 
         Args:
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -9373,7 +9744,10 @@ class Payload:
             )
             return False
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -9389,7 +9763,7 @@ class Payload:
 
         # we assume the nickname of the photo item equals the login name of the user
         # we also assume that the photos have been uploaded / transported into the target system
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error("User is missing a login. Skipping to next user...")
@@ -9538,7 +9912,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -9548,6 +9922,7 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_photos_salesforce")
     def process_user_photos_salesforce(
         self,
+        users: list | None = None,
         section_name: str = "userPhotosSalesforce",
     ) -> bool:
         """Process user photos in payload and assign them to Salesforce users.
@@ -9559,6 +9934,8 @@ class Payload:
             * extra_attributes (dict, mandatory if enable_salesforce=True) - Salesforce-specific attributes
 
         Args:
+            users (list, optional):
+                List of user dicts to process. If not provided, it will be taken from self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -9579,7 +9956,10 @@ class Payload:
             )
             return False
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -9595,7 +9975,7 @@ class Payload:
 
         # we assume the nickname of the photo item equals the login name of the user
         # we also assume that the photos have been uploaded / transported into the target system
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error("User is missing a login. Skipping to next user...")
@@ -9707,7 +10087,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -9717,6 +10097,7 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_photos_core_share")
     def process_user_photos_core_share(
         self,
+        users: list | None = None,
         section_name: str = "userPhotosCoreShare",
     ) -> bool:
         """Process user photos in payload and assign them to Core Share users.
@@ -9729,6 +10110,8 @@ class Payload:
             * enable_core_share (bool, optional, default = False) - enable photo update for Core Share user
 
         Args:
+            users (list, optional):
+                List of user dicts to process. If not provided, it will be taken from self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -9749,7 +10132,10 @@ class Payload:
             )
             return False
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -9765,7 +10151,7 @@ class Payload:
 
         # we assume the nickname of the photo item equals the login name of the user
         # we also assume that the photos have been uploaded / transported into the target system
-        for user in self._users:
+        for user in users:
             if "name" not in user:
                 self.logger.error(
                     "User is missing login name. Skipping to next user...",
@@ -9871,7 +10257,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -14898,12 +15284,14 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_settings")
-    def process_user_settings(self, section_name: str = "userSettings") -> bool:
+    def process_user_settings(self, users: list | None = None, section_name: str = "userSettings") -> bool:
         """Process user settings in payload and apply them in OTDS.
 
         This includes password settings and user display settings.
 
         Args:
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -14917,7 +15305,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -14931,7 +15322,7 @@ class Payload:
 
         success: bool = True
 
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error(
@@ -15020,7 +15411,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -15030,6 +15421,7 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_favorites_and_profiles")
     def process_user_favorites_and_profiles(
         self,
+        users: list | None = None,
         section_name: str = "userFavoritesAndProfiles",
     ) -> bool:
         """Process user favorites in payload and create them in Content Server.
@@ -15038,6 +15430,8 @@ class Payload:
         widgets on the landing pages and sets personal preferences.
 
         Args:
+            users (list, optional):
+                List of user dicts to process. If not provided, it will be taken from self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -15051,7 +15445,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -15075,7 +15472,7 @@ class Payload:
         # The following code (for loop) will change the authenticated user - we need to
         # switch it back to admin user later so we safe the admin credentials for this:
 
-        for user in self._users:
+        for user in users:
             with tracer.start_as_current_span("process_user_favorites_and_profiles-user") as t:
                 t.set_attribute("class", "otcs")
                 user_name = user.get("name")
@@ -15409,7 +15806,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -15589,10 +15986,12 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_security")
-    def process_user_security(self, section_name: str = "userSecurity") -> bool:
+    def process_user_security(self, users: list | None = None, section_name: str = "userSecurity") -> bool:
         """Process Security Clearance and Supplemental Markings for Content Server users.
 
         Args:
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -15606,7 +16005,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -15620,7 +16022,7 @@ class Payload:
 
         success: bool = True
 
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
 
             # Check if user has been explicitly disabled in payload
@@ -15659,7 +16061,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -15941,7 +16343,7 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_additional_group_members")
     def process_additional_group_members(
         self,
-        section_name: str = "additionalGroupMembers",
+        section_name: str = "additionalGroupMemberships",
     ) -> bool:
         """Process additional OTDS group memberships.
 
@@ -17974,6 +18376,7 @@ class Payload:
         license_feature: str,
         license_name: str = "EXTENDED_ECM",
         user_specific_payload_field: str = "licenses",
+        users: list | None = None,
         section_name: str = "userLicenses",
     ) -> bool:
         """Assign a specific OTDS license feature to all Content Server users.
@@ -17990,6 +18393,8 @@ class Payload:
             user_specific_payload_field (str, optional):
                 The name of the user specific field in payload
                 (if empty it will be ignored). Default is "licenses".
+            users (list | None, optional):
+                The list of users to process. If None, defaults to self._users.
             section_name (str, optional):
                 The name of the section. It can be overridden
                 for cases where multiple sections of same type
@@ -18003,7 +18408,10 @@ class Payload:
 
         """
 
-        if not self._users:
+        if not users:
+            users = self._users
+
+        if not users:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -18030,7 +18438,7 @@ class Payload:
             self.logger.error("OTCS user partition not found in OTDS!")
             return False
 
-        for user in self._users:
+        for user in users:
             user_name = user.get("name")
             if not user_name:
                 self.logger.error(
@@ -18139,7 +18547,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._users,
+            payload_section=users,
         )
 
         return success
@@ -19797,7 +20205,7 @@ class Payload:
                         self.logger.info(
                             "Successfully logged into page -> %s. Page title -> '%s'.",
                             base_url + page,
-                            browser_automation_object.get_title(),
+                            browser_automation_object.get_title(retry_attempts=0) or "<no title>",
                         )
                     case "get_page":
                         page = automation_step.get("page", "")
@@ -19860,7 +20268,7 @@ class Payload:
                         self.logger.info(
                             "Successfully loaded page -> %s. Page title -> '%s'.",
                             base_url + page,
-                            browser_automation_object.get_title(),
+                            browser_automation_object.get_title(retry_attempts=0) or "<no title>",
                         )
                     case "click_elem":
                         # We keep the deprecated "elem" syntax supported (for now)
@@ -31273,12 +31681,21 @@ class Payload:
         if "ticket" in response:
             otds_ticket = response.get("ticket", None)
             otcs_object.set_otds_ticket(ticket=otds_ticket)
+            otcs_object.set_otds_token(None)  # clear token to prevent admin fallback
         elif "access_token" in response:
             access_token = response.get("access_token", None)
             otcs_object.set_otds_token(token=access_token)
+            otcs_object.set_otds_ticket(None)  # clear ticket to prevent admin fallback
         else:
-            self.logger.error("Impersonation response does not contain ticket or access_token!")
+            self.logger.error("Impersonation response does not contain ticket or access token!")
             return False
+
+        # Clear the OTDS object reference to prevent authenticate()
+        # from overwriting the impersonated token with an admin token.
+        # The reference stays cleared for the entire impersonation window
+        # so that reauthenticate() also cannot inject admin credentials.
+        # It is restored in stop_impersonation().
+        otcs_object.set_otds_object(None)
 
         otcs_object.invalidate_authentication_ticket()
         response = otcs_object.authenticate(revalidate=False)
@@ -31312,6 +31729,9 @@ class Payload:
 
         # Reauthenticate as admin (using username / password of OTCS object):
         response = otcs_object.authenticate(revalidate=True)
+
+        # Restore the OTDS object reference that was cleared in start_impersonation():
+        otcs_object.set_otds_object(self._otds)
 
         return bool(response)
 
@@ -31469,6 +31889,153 @@ class Payload:
             success=success,
             payload_section_name=section_name,
             payload_section=self._nifi_flows,
+        )
+
+        return success
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_mcp_servers")
+    def process_mcp_servers(self, section_name: str = "aviatorMcpServers") -> bool:
+        """Process Aviator MCP server configurations in payload and create them via Content Aviator.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+            - url (str, optional) - URL for HTTP-based servers.
+            - transport (str, required) - Transport type: "streamable_http", "sse", or "stdio".
+            - tool_scope (str, optional) - Where tools should be available: "default" or "custom".
+            - auth_schema (dict, optional) - Authentication configuration.
+            - command (str, optional) - Command for STDIO servers.
+            - args (list[str], optional) - Arguments for STDIO command.
+
+        Args:
+            section_name (str, optional):
+                The name of the payload section. It can be overridden
+                for cases where multiple sections of same type
+                are used (e.g. the "Post" sections).
+                This name is also used for the "success" status
+                files written to the Admin Personal Workspace.
+
+        Returns:
+            bool:
+                True, if payload has been processed without errors, False otherwise.
+
+        """
+
+        if not self._aviator_mcp_servers:
+            self.logger.info(
+                "Payload section -> '%s' is empty. Skipping...",
+                section_name,
+            )
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(payload_section_name=section_name):
+            return True
+
+        valid_transports = {"streamable_http", "sse", "stdio"}
+
+        success: bool = True
+
+        for mcp_server in self._aviator_mcp_servers:
+            server_name = mcp_server.get("name")
+            if not server_name:
+                self.logger.error("Content Aviator MCP server needs a name in payload! Skipping...")
+                success = False
+                continue
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if not mcp_server.get("enabled", True):
+                self.logger.info(
+                    "Payload for Content Aviator MCP server -> '%s' is disabled. Skipping...",
+                    server_name,
+                )
+                continue
+
+            # Validate transport:
+            transport = mcp_server.get("transport", "streamable_http")
+            if not transport:
+                self.logger.error(
+                    "Content Aviator MCP server -> '%s' needs a transport in payload! Skipping...",
+                    server_name,
+                )
+                success = False
+                continue
+
+            if transport not in valid_transports:
+                self.logger.error(
+                    "Content Aviator MCP server -> '%s' has invalid transport -> '%s'! Valid values are: %s. Skipping...",
+                    server_name,
+                    transport,
+                    ", ".join(sorted(valid_transports)),
+                )
+                success = False
+                continue
+
+            # For HTTP-based transports, URL is required:
+            if transport in {"streamable_http", "sse"} and not mcp_server.get("url"):
+                self.logger.error(
+                    "Content Aviator MCP server -> '%s' with transport -> '%s' needs a url in payload! Skipping...",
+                    server_name,
+                    transport,
+                )
+                success = False
+                continue
+
+            # For STDIO transport, command is required:
+            if transport == "stdio" and not mcp_server.get("command"):
+                self.logger.error(
+                    "Content Aviator MCP server -> '%s' with transport -> 'stdio' needs a command in payload! Skipping...",
+                    server_name,
+                )
+                success = False
+                continue
+
+            # Build server config - pass through the payload keys that
+            # create_mcp_server expects:
+            server_config = {
+                "name": server_name,
+                "active": mcp_server.get("enabled", True),
+                "transport": transport,
+            }
+
+            if mcp_server.get("url"):
+                server_config["url"] = mcp_server["url"]
+            if mcp_server.get("command"):
+                server_config["command"] = mcp_server["command"]
+            if mcp_server.get("args"):
+                server_config["args"] = mcp_server["args"]
+            if mcp_server.get("tool_scope"):
+                server_config["tool_scope"] = mcp_server["tool_scope"]
+            if mcp_server.get("auth_schema"):
+                server_config["auth_schema"] = mcp_server["auth_schema"]
+
+            response = self._otca.create_mcp_server(server_config=server_config)
+            if response:
+                server_id = response.get("id", "unknown ID")
+                self.logger.info(
+                    "Created configuration for Content Aviator MCP server -> '%s' (%s), transport -> '%s'.",
+                    server_name,
+                    server_id,
+                    transport,
+                )
+                mcp_server["id"] = server_id  # record the created server ID in the payload
+            else:
+                self.logger.error(
+                    "Failed to create Content Aviator MCP server -> '%s', transport -> '%s'!",
+                    server_name,
+                    transport,
+                )
+                success = False
+        # end for mcp_server in self._aviator_mcp_servers:
+
+        self.write_status_file(
+            success=success,
+            payload_section_name=section_name,
+            payload_section=self._aviator_mcp_servers,
         )
 
         return success

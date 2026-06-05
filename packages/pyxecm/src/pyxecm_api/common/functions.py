@@ -5,7 +5,6 @@ import os
 from typing import Annotated
 
 from fastapi import Depends
-from pyxecm.otca import OTCA
 from pyxecm.otcs import OTCS
 from pyxecm_customizer.k8s import K8s
 from pyxecm_customizer.payload_list import PayloadList
@@ -99,47 +98,6 @@ def get_otcs_object_from_otcsticket(otcs_ticket: Annotated[str, Depends(get_otcs
     otcs._otcs_ticket = otcs_ticket  # noqa: SLF001
 
     return otcs
-
-
-def get_otca_object(otcs_object: OTCS | None = None) -> OTCA:
-    """Get the Content Aviator (OTCA) object.
-
-    Args:
-        otcs_object (OTCS | None, optional):
-            The Content Server (OTCS) object. Defaults to None.
-
-    Returns:
-        OTCA:
-            The new Content Aviator object.
-
-    """
-
-    settings = Settings()
-
-    # Get the Kubernetes object:
-    k8s_object = get_k8s_object()
-    content_system = {}
-    # Read the content system (e.g. OTCM) from the Kubernetes Config Map:
-    for service in ["chat", "embed"]:
-        cm = k8s_object.get_config_map(f"csai-{service}-svc")
-        if cm:
-            content_system[service] = cm.data.get("CONTENT_SYSTEM", "none")
-            logger.info("Set content system for '%s' to -> '%s'.", service, content_system[service])
-
-    # Create the Content Aviator object (OTCA class):
-    otca = OTCA(
-        chat_url=str(settings.aviator.chat_svc_url),
-        embed_url=str(settings.aviator.embed_svc_url),
-        studio_url=str(settings.aviator.studio_url),
-        otds_url=str(settings.otds.url_internal),
-        client_id=settings.aviator.oauth_client,
-        client_secret=settings.aviator.oauth_secret,
-        otcs_object=otcs_object,
-        content_system=content_system,
-        logger=logger.getChild("otca"),
-    )
-
-    return otca
 
 
 def get_settings() -> CustomizerAPISettings:

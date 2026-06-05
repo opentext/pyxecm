@@ -375,14 +375,8 @@ class CustomizerSettingsAviator(BaseModel):
     enabled: bool = Field(default=False, description="Content Aviator enabled")
     oauth_client: str = Field(default="", description="OAuth Client ID for Content Aviator")
     oauth_secret: str = Field(default="", description="OAuth Client Secret for Content Aviator")
-    chat_svc_url: HttpUrl = Field(
-        default=HttpUrl("http://csai-chat-svc:3000"), description="Chat Service URL for Content Aviator"
-    )
-    embed_svc_url: HttpUrl = Field(
-        default=HttpUrl("http://csai-embed-svc:3000"), description="Embed Service URL for Content Aviator"
-    )
-    studio_url: HttpUrl = Field(
-        default=HttpUrl("http://csai-aviator-studio"), description="Service URL for Aviator Studio"
+    base_url: HttpUrl | None = Field(
+        default=HttpUrl("http://csai-chat-svc:3000"), description="Base URL for Content Aviator"
     )
 
 

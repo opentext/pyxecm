@@ -33,7 +33,6 @@ from .common.metrics import payload_logs_by_payload, payload_logs_total
 from .common.router import router as common_router
 from .settings import api_settings
 from .terminal.router import router as terminal_router
-from .v1_csai.router import router as v1_csai_router
 from .v1_maintenance.router import router as v1_maintenance_router
 from .v1_otcs.router import router as v1_otcs_router
 from .v1_payload.functions import import_payload
@@ -146,10 +145,6 @@ app.include_router(router=v1_payload_router)
 
 if api_settings.ws_terminal:
     app.include_router(router=terminal_router)
-
-if api_settings.csai:
-    app.include_router(router=v1_csai_router)
-
 
 ## Add Prometheus Instrumentator for /metrics,
 if api_settings.metrics:

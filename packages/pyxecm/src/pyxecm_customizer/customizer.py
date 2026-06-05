@@ -9,6 +9,7 @@ __email__ = "mdiefenb@opentext.com"
 import logging
 import os
 import tempfile
+import threading
 import time
 from datetime import UTC, datetime
 
@@ -390,12 +391,8 @@ class Customizer:
         """
 
         self.logger.info(
-            "Content Aviator Chat URL  = %s",
-            self.settings.aviator.chat_svc_url,
-        )
-        self.logger.info(
-            "Content Aviator Embed URL = %s",
-            self.settings.aviator.embed_svc_url,
+            "Content Aviator Base URL  = %s",
+            self.settings.aviator.base_url,
         )
         self.logger.info(
             "Content Aviator Client ID = %s",
@@ -406,24 +403,10 @@ class Customizer:
             self.settings.aviator.oauth_secret,
         )
 
-        content_system = None
-
-        # Read the Content_System from the ConfigMaps - This controls the authentication system for OTCA
-        if self.k8s_object:
-            content_system = {}
-            for service in ["chat", "embed"]:
-                cm = self.k8s_object.get_config_map(f"csai-{service}-svc")
-                if cm:
-                    content_system[service] = cm.data.get("CONTENT_SYSTEM", "none")
-
         return OTCA(
-            chat_url=str(self.settings.aviator.chat_svc_url),
-            embed_url=str(self.settings.aviator.embed_svc_url),
-            studio_url=str(self.settings.aviator.studio_url),
+            base_url=str(self.settings.aviator.base_url),
             client_id=self.settings.avts.client_id,
             client_secret=self.settings.avts.client_secret,
-            content_system=content_system,
-            otds_url=str(self.settings.otds.url),
             otcs_object=self.otcs_backend_object,
             logger=self.logger,
         )
@@ -880,6 +863,7 @@ class Customizer:
             user_partition=self.settings.otcs.partition,
             resource_name=self.settings.otcs.resource_name,
             otds_ticket=otds_ticket,
+            otds_object=self.otds_object,
             base_path=self.settings.otcs.base_path,
             feme_uri=self.settings.otcs.feme_uri,
             logger=self.logger,
@@ -1350,55 +1334,65 @@ class Customizer:
         self.logger.info("Starting (zero-downtime) OTCS rolling restart...")
 
         # ------------------------------------------------------------------
-        # Distributed Agent Pods
+        # Helper to restart a single StatefulSet (used by threads below)
         # ------------------------------------------------------------------
-        if self.settings.k8s.sts_otcs_da:
-            self.log_header(text="Rolling restart of OTCS Distributed Agents", char="-")
-
-            success = self.k8s_object.restart_stateful_set(
-                sts_name=self.settings.k8s.sts_otcs_da,
-                wait=True,
-            )
+        def _restart_sts(
+            header: str,
+            sts_name: str,
+            error_msg: str,
+            endpoint_service_name: str | None = None,
+        ) -> None:
+            self.log_header(text=header, char="-")
+            kwargs: dict = {"sts_name": sts_name, "wait": True}
+            if endpoint_service_name is not None:
+                kwargs["endpoint_service_name"] = endpoint_service_name
+            success = self.k8s_object.restart_stateful_set(**kwargs)
             if not success:
-                self.logger.error(
-                    "Rolling restart failed for Distributed Agent StatefulSet -> '%s'", self.settings.k8s.sts_otcs_da
-                )
-        # end if self.settings.k8s.sts_otcs_da
+                self.logger.error(error_msg, sts_name)
 
-        # ------------------------------------------------------------------
-        # Frontend Pods
-        # ------------------------------------------------------------------
+        # end method _restart_sts definition
+
+        # Build the list of restart tasks that are actually configured
+        restart_tasks: list[dict] = []
+
+        if self.settings.k8s.sts_otcs_da:
+            restart_tasks.append(
+                {
+                    "header": "Rolling restart of OTCS Distributed Agents",
+                    "sts_name": self.settings.k8s.sts_otcs_da,
+                    "error_msg": "Rolling restart failed for Distributed Agent StatefulSet -> '%s'",
+                }
+            )
 
         if self.settings.k8s.sts_otcs_frontend:
-            self.log_header(text="Rolling restart of OTCS Frontends", char="-")
-
-            success = self.k8s_object.restart_stateful_set(
-                sts_name=self.settings.k8s.sts_otcs_frontend,
-                wait=True,
-                endpoint_service_name=self.settings.k8s.svc_otcs_frontend,
+            restart_tasks.append(
+                {
+                    "header": "Rolling restart of OTCS Frontends",
+                    "sts_name": self.settings.k8s.sts_otcs_frontend,
+                    "error_msg": "Rolling restart failed for OTCS frontend stateful set -> '%s'",
+                    "endpoint_service_name": self.settings.k8s.svc_otcs_frontend,
+                }
             )
-            if not success:
-                self.logger.error(
-                    "Rolling restart failed for OTCS frontend stateful set -> '%s'", self.settings.k8s.sts_otcs_frontend
-                )
-        # end if self.settings.k8s.sts_otcs_frontend
 
-        # ------------------------------------------------------------------
-        # Backend (Admin) Pods
-        # ------------------------------------------------------------------
         if self.settings.k8s.sts_otcs_admin:
-            self.log_header(text="Restart of OTCS Admin", char="-")
-
-            success = self.k8s_object.restart_stateful_set(
-                sts_name=self.settings.k8s.sts_otcs_admin,
-                wait=True,
-                endpoint_service_name=self.settings.k8s.svc_otcs_admin,
+            restart_tasks.append(
+                {
+                    "header": "Restart of OTCS Admin",
+                    "sts_name": self.settings.k8s.sts_otcs_admin,
+                    "error_msg": "Restart failed for OTCS admin stateful set -> '%s'",
+                    "endpoint_service_name": self.settings.k8s.svc_otcs_admin,
+                }
             )
 
-            if not success:
-                self.logger.error(
-                    "Restart failed for OTCS admin stateful set -> '%s'", self.settings.k8s.sts_otcs_admin
-                )
+        # Execute all restart tasks in parallel
+        threads: list[threading.Thread] = []
+        for task in restart_tasks:
+            t = threading.Thread(target=_restart_sts, kwargs=task, name=task["sts_name"])
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
 
         # ------------------------------------------------------------------
         # Re-authentication after restart

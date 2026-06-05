@@ -484,6 +484,7 @@ class BrowserAutomation:
     def get_title(
         self,
         wait_until: str | None = None,
+        retry_attempts: int = REQUEST_MAX_RETRIES,
     ) -> str | None:
         """Get the browser title.
 
@@ -502,30 +503,38 @@ class BrowserAutomation:
                   This seems to be the safest one for OpenText Content Server.
                 * "domcontentloaded" - waits for the DOMContentLoaded event (HTML is parsed,
                   but subresources may still load).
+            retry_attempts (int, optional):
+                The number of times to retry getting the page title in case of failure.
 
         Returns:
-            str:
-                The title of the browser page.
+            str | None:
+                The title of the browser page, or None if it cannot be determined.
 
         """
 
-        for attempt in range(REQUEST_MAX_RETRIES):
+        for attempt in range(1 + retry_attempts):
             try:
                 if wait_until:
-                    self.page.wait_for_load_state(state=wait_until, timeout=REQUEST_TIMEOUT)
+                    # Timeout is in ms so we need to convert it from seconds by multiplying with 1000:
+                    self.page.wait_for_load_state(state=wait_until, timeout=REQUEST_TIMEOUT * 1000)
                 title = self.page.title()
                 if title:
                     return title
-                time.sleep(REQUEST_RETRY_DELAY)
-                self.logger.info("Retry attempt %d/%d", attempt + 1, REQUEST_MAX_RETRIES)
-            except Exception as e:
-                if "Execution context was destroyed" in str(e):
-                    self.logger.info(
-                        "Execution context was destroyed, retrying after %s seconds...", REQUEST_RETRY_DELAY
-                    )
+                if attempt < retry_attempts:
                     time.sleep(REQUEST_RETRY_DELAY)
                     self.logger.info("Retry attempt %d/%d", attempt + 1, REQUEST_MAX_RETRIES)
-                    continue
+                else:
+                    break
+            except Exception as e:
+                if "Execution context was destroyed" in str(e):
+                    if attempt < retry_attempts:
+                        self.logger.info(
+                            "Execution context was destroyed, retrying after %s seconds...", REQUEST_RETRY_DELAY
+                        )
+                        time.sleep(REQUEST_RETRY_DELAY)
+                        self.logger.info("Retry attempt %d/%d", attempt + 1, REQUEST_MAX_RETRIES)
+                        continue
+                    break
                 self.logger.error("Could not get page title; error -> %s", str(e))
                 break
 
@@ -605,50 +614,38 @@ class BrowserAutomation:
         try:
             name_or_text = re.compile(selector) if regex else selector
 
+            # Determine the base frame to search in (iframe or main page):
+            frame = self.page if iframe is None else self.page.locator("iframe[name='{}']".format(iframe)).content_frame
+
             match selector_type:
                 case "id":
-                    locator = self.page.locator("#{}".format(selector))
+                    locator = frame.locator("#{}".format(selector))
                 case "name":
-                    locator = self.page.locator("[name='{}']".format(selector))
+                    locator = frame.locator("[name='{}']".format(selector))
                 case "class_name":
-                    locator = self.page.locator(".{}".format(selector))
+                    locator = frame.locator(".{}".format(selector))
                 case "xpath":
-                    locator = self.page.locator("xpath={}".format(selector))
+                    locator = frame.locator("xpath={}".format(selector))
                 case "css":
-                    if iframe is None:
-                        locator = self.page.locator(selector)
-                    else:
-                        locator = self.page.locator("iframe[name='{}']".format(iframe)).content_frame.locator(selector)
+                    locator = frame.locator(selector)
                 case "text":
-                    if iframe is None:
-                        locator = self.page.get_by_text(text=name_or_text)
-                    else:
-                        locator = self.page.locator("iframe[name='{}']".format(iframe)).content_frame.get_by_text(
-                            name_or_text
-                        )
+                    locator = frame.get_by_text(text=name_or_text)
                 case "title":
-                    locator = self.page.get_by_title(text=name_or_text)
+                    locator = frame.get_by_title(text=name_or_text)
                 case "label":
-                    locator = self.page.get_by_label(text=name_or_text)
+                    locator = frame.get_by_label(text=name_or_text)
                 case "placeholder":
-                    locator = self.page.get_by_placeholder(text=name_or_text)
+                    locator = frame.get_by_placeholder(text=name_or_text)
                 case "alt":
-                    locator = self.page.get_by_alt_text(text=name_or_text)
+                    locator = frame.get_by_alt_text(text=name_or_text)
                 case "role":
                     if not role_type:
                         self.logger.error("Role type must be specified when using find method 'role'!")
                         return None
-                    if iframe is None:
-                        if regex:
-                            locator = self.page.get_by_role(role=role_type, name=name_or_text)
-                        else:
-                            locator = self.page.get_by_role(role=role_type, name=selector, exact=exact_match)
+                    if regex:
+                        locator = frame.get_by_role(role=role_type, name=name_or_text)
                     else:
-                        content_frame = self.page.locator("iframe[name='{}']".format(iframe)).content_frame
-                        if regex:
-                            locator = content_frame.get_by_role(role=role_type, name=name_or_text)
-                        else:
-                            locator = content_frame.get_by_role(role=role_type, name=selector, exact=exact_match)
+                        locator = frame.get_by_role(role=role_type, name=selector, exact=exact_match)
                 case _:
                     self.logger.error("Unsupported selector type -> '%s'", selector_type)
                     return None
@@ -978,6 +975,27 @@ class BrowserAutomation:
                 # Let Playwright handle checkbox state:
                 elem.set_checked(desired_checkbox_state)
                 self.logger.debug("Set checkbox -> '%s' to value -> %s.", selector, desired_checkbox_state)
+            # The element is not a checkbox itself (e.g. a table row) but a
+            # desired checkbox state was requested. Try to find a checkbox
+            # descendant within the matched element:
+            elif desired_checkbox_state is not None:
+                checkbox = elem.get_by_role("checkbox")
+                if checkbox.count() == 0:
+                    # Fallback: look for an input[type='checkbox'] within the element:
+                    checkbox = elem.locator("input[type='checkbox']")
+                if checkbox.count() > 0:
+                    checkbox.first.set_checked(desired_checkbox_state)
+                    self.logger.debug(
+                        "Set child checkbox in element -> '%s' to value -> %s.",
+                        selector,
+                        desired_checkbox_state,
+                    )
+                else:
+                    self.logger.error(
+                        "Element -> '%s' is not a checkbox and no checkbox found within it.",
+                        selector,
+                    )
+                    success = False
             # Handle non-checkboxes:
             else:
                 # Will this click trigger a naviagation?
@@ -1059,6 +1077,7 @@ class BrowserAutomation:
         value: str | bool,
         selector_type: str = "id",
         role_type: str | None = None,
+        wait_state: str = "visible",
         occurrence: int = 1,
         is_sensitive: bool = False,
         press_enter: bool = False,
@@ -1081,6 +1100,15 @@ class BrowserAutomation:
             role_type (str | None, optional):
                 ARIA role when using selector_type="role", e.g., "button", "textbox".
                 If irrelevant then None should be passed for role_type.
+            wait_state (str, optional):
+                Defines if we wait for attached (element is part of DOM) or
+                if we wait for elem to be visible (attached, displayed, and has non-zero size).
+                Possible values are:
+                * "attached" - the element is present in the DOM.
+                * "detached" - the element is not present in the DOM.
+                * "visible" - the element is visible (attached, displayed, and has non-zero size).
+                * "hidden" - the element is hidden (attached, but not displayed).
+                Default is "visible".
             occurrence (int, optional):
                 If multiple elements match the selector, this defines which one to return.
                 Default is 1 (the first one).
@@ -1112,6 +1140,7 @@ class BrowserAutomation:
             selector=selector,
             selector_type=selector_type,
             role_type=role_type,
+            wait_state=wait_state,
             exact_match=exact_match,
             regex=regex,
             occurrence=occurrence,
@@ -1486,6 +1515,7 @@ class BrowserAutomation:
         page: str = "",
         wait_until: str | None = None,
         selector_type: str = "id",
+        check_title: bool = True,
     ) -> bool:
         """Login to target system via the browser.
 
@@ -1512,6 +1542,9 @@ class BrowserAutomation:
                 One of "id", "name", "class_name", "xpath", "css", "role", "text", "title",
                 "label", "placeholder", "alt".
                 Default is "id".
+            check_title (bool, optional):
+                If True, validate login result using the browser page title.
+                If False, skip title validation. Defaults to True.
 
         Returns:
             bool:
@@ -1546,22 +1579,25 @@ class BrowserAutomation:
         self.logger.debug("Wait for -> '%s' to assure login is completed and target page is loaded.", wait_until)
         self.page.wait_for_load_state(wait_until)
 
-        title = self.get_title()
-        if not title:
-            self.logger.error(
-                "Cannot read page title after login - you may have the wrong 'wait until' strategy configured! Strategy used -> '%s'.",
-                wait_until,
-            )
-            return False
+        if check_title:
+            title = self.get_title()
+            if not title:
+                self.logger.error(
+                    "Cannot read page title after login - you may have the wrong 'wait until' strategy configured! Strategy used -> '%s'.",
+                    wait_until,
+                )
+                return False
 
-        if "Verify" in title:
-            self.logger.error("Site is asking for a verification token. You may need to whitelist your IP!")
-            return False
-        if "Login" in title:
-            self.logger.error("Authentication failed. You may have given the wrong password!")
-            return False
+            if title and "Verify" in title:
+                self.logger.error("Site is asking for a verification token. You may need to whitelist your IP!")
+                return False
+            if title and "Login" in title:
+                self.logger.error("Authentication failed. You may have given the wrong password!")
+                return False
+            self.logger.info("Login completed successfully! Page title -> '%s'", title)
+        else:
+            self.logger.info("Login completed successfully! Page title check is disabled.")
 
-        self.logger.info("Login completed successfully! Page title -> '%s'", title)
         self.logged_in = True
 
         return True

@@ -595,7 +595,10 @@ class PayloadList:
             # Check if all dependencies have been completed
             dependencies: list[int] = row["dependencies"]
 
-            return all(self.payload_items.loc[dep, "status"] == "completed" for dep in dependencies or [])
+            return all(
+                self.payload_items.loc[dep, "status"] == "completed" or not self.payload_items.loc[dep, "enabled"]
+                for dep in dependencies or []
+            )
 
         # end sub-method definition
 

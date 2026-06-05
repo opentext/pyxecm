@@ -112,16 +112,6 @@ class CustomizerAPISettings(BaseSettings):
         description="Port of the VictoriaLogs Server",
     )
 
-    csai: bool = Field(
-        default=False,
-        description="Enable the CSAI integration",
-    )
-
-    csai_prefix: str = Field(
-        default="csai",
-        description="Prefix for the CSAI",
-    )
-
     upload_folder: str = Field(default=os.path.join(tempfile.gettempdir(), "upload"), description="Folder for uploads")
 
     upload_key: str = Field(default=str(uuid.uuid4()), description="Upload key for the Logs")

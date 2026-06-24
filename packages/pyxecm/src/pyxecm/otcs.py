@@ -546,6 +546,7 @@ class OTCS:
         otcs_config["businessworkspacecreateform"] = otcs_rest_url + "/v2/forms/businessworkspaces/create"
         otcs_config["businessWorkspacesUrl"] = otcs_rest_url + "/v2/businessworkspaces"
         otcs_config["smartDocumentTypesUrl"] = otcs_rest_url + "/v2/smartdocumenttypes"
+        otcs_config["smartDocumentTypesChildrenUrl"] = otcs_rest_url + "/v2/smartdocumenttypeschildren"
         otcs_config["expressionBuilderUrl"] = otcs_rest_url + "/v2/expressionbuilder"
         otcs_config["uniqueNamesUrl"] = otcs_rest_url + "/v2/uniquenames"
         otcs_config["favoritesUrl"] = otcs_rest_url + "/v2/members/favorites"
@@ -1913,10 +1914,10 @@ class OTCS:
             data = results["data"]
             if isinstance(data, dict):
                 # data is a dict - we don't need index value:
-                properties = data[property_name]
+                properties = data.get(property_name, data)
             elif isinstance(data, list):
                 # data is a list - this has typically just one item, so we use 0 as index
-                properties = data[0][property_name]
+                properties = data[0].get(property_name, data[0])
             else:
                 self.logger.error(
                     "Data needs to be a list or dict but it is -> %s",
@@ -5827,6 +5828,56 @@ class OTCS:
             headers=request_header,
             timeout=timeout,
             failure_message="Failed to get node with ID -> {}".format(node_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_nodes")
+    def get_nodes(self, node_ids: list[int], fields: str | list | None = None) -> dict | None:
+        """Get multiple nodes based on their node IDs.
+
+        Args:
+            node_ids (list[int]):
+                The node IDs to retrieve.
+            fields (str | list | None, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)"
+                  to retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)"
+                  to retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to None.
+
+        Returns:
+            dict | None:
+                Node information as a dictionary, or None if the nodes cannot be retrieved.
+
+        """
+
+        request_url = self.config()["nodesUrlv2"] + "/list"
+
+        request_header = self.request_form_header()
+        post_data = {"ids": node_ids, "fields": fields} if fields else {"ids": node_ids}
+
+        self.logger.debug(
+            "Get nodes with IDs -> %s; calling -> %s",
+            str(node_ids),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            data=post_data,
+            timeout=None,
+            failure_message="Failed to get nodes with IDs -> {}".format(node_ids),
         )
 
     # end method definition
@@ -11869,10 +11920,58 @@ class OTCS:
             dict | None:
                 REST response or None in case of an error.
 
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/nodes',
+                        'method': 'POST',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'data': {
+                    'properties': {
+                        'advanced_versioning': None,
+                        'classification_expand': {...},
+                        'classification_id': '26874',
+                        'classification_name': 'Certificate of Employment',
+                        'container': False,
+                        'container_size': 0,
+                        'create_date': '2026-06-09T06:19:01Z',
+                        'create_user_id': 1000,
+                        'description': 'Test Smart Document Type',
+                        'description_multilingual': {...},
+                        'external_create_date': None,
+                        'external_identity': '',
+                        'external_identity_type': '',
+                        'external_modify_date': None,
+                        'external_source': '',
+                        'favorite': False,
+                        'hidden': False,
+                        'icon': '/cssupport/xecmpf/smart_doc_type.png',
+                        'icon_large': '/cssupport/xecmpf/smart_doc_type_large.png',
+                        'id': 41984,
+                        'name': 'Test Smart Document Type',
+                        'parent_id': 41983,
+                        ...
+                        'type': 877,
+                        'type_name': 'Smart Document Type',
+                        'workspace_template_names': '',
+                        'workspace_templates_count': 0
+                    }
+                }
+            }
+        }
+
         """
 
         self.logger.debug(
-            "Add Smart Document Type -> '%s' with classification -> %d under parent -> %d",
+            "Add Smart Document Type -> '%s' with classification -> %d under parent with ID -> %d",
             name,
             classification_id,
             parent_id,
@@ -11934,10 +12033,40 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_smart_document_types")
-    def get_smart_document_types(self) -> dict | None:
+    def get_smart_document_types(
+        self,
+        parent_id: int | None = None,
+        expand: str = "properties",
+        where_classification_name: str | None = None,
+        where_workspace_template_name: str | None = None,
+        sort: str | None = None,
+        page: int | None = None,
+        limit: int | None = None,
+    ) -> dict | None:
         """Get Smart Document Types.
 
         REST operation: GET /v2/smartdocumenttypes
+
+        Args:
+            parent_id (int | None, optional):
+                The node ID of the parent container to filter Smart Document Types.
+            expand (str, optional):
+                The fields to expand in the response. Default is "properties".
+            where_classification_name (str | None, optional):
+                Filter Smart Document Types by classification name.
+            where_workspace_template_name (str | None, optional):
+                Filter Smart Document Types by workspace template name.
+            sort (str | None, optional):
+                Order by named column (Using prefixes such as "asc" and "desc", e.g.,
+                "sort=asc_name", "sort=desc_name", "sort=desc_modify_date", "sort=asc_sdt_classification_name").
+                Default is None.
+            page (int | None, optional):
+                The page to be returned (if more smart document types exist
+                than given by the page limit).
+                The default is None.
+            limit (int | None, optional):
+                The maximum number of smart document types that should be delivered
+                in one page. The default is None.
 
         Returns:
             dict | None:
@@ -11997,7 +12126,35 @@ class OTCS:
 
         """
 
-        request_url = self.config()["smartDocumentTypesUrl"]
+        query = {"expand": expand}
+        if sort:
+            query["sort"] = sort
+        if page:
+            query["page"] = page
+        if limit:
+            query["limit"] = limit
+        if parent_id:
+            query["parent_id"] = parent_id
+        if where_classification_name:
+            query["where_sdt_classification_name"] = where_classification_name
+        if where_workspace_template_name:
+            query["where_workspace_template_names"] = where_workspace_template_name
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        if parent_id is None:
+            request_url = self.config()["smartDocumentTypesUrl"] + "?{}".format(
+                encoded_query,
+            )
+        else:
+            request_url = (
+                self.config()["smartDocumentTypesChildrenUrl"]
+                + "/"
+                + str(parent_id)
+                + "?{}".format(
+                    encoded_query,
+                )
+            )
         request_header = self.request_form_header()
 
         self.logger.debug(
@@ -12015,7 +12172,16 @@ class OTCS:
 
     # end method definition
 
-    def get_smart_document_types_iterator(self) -> iter:
+    def get_smart_document_types_iterator(
+        self,
+        parent_id: int | None = None,
+        expand: str = "properties",
+        where_classification_name: str | None = None,
+        where_workspace_template_name: str | None = None,
+        sort: str | None = None,
+        page_size: int = 100,
+        limit: int | None = None,
+    ) -> iter:
         """Get an iterator object to traverse all Smart Document Types.
 
         Returning a generator avoids loading a large number of Smart Document Types
@@ -12030,23 +12196,75 @@ class OTCS:
                 classification_id = smart_document_type.get("classification_id")
             ```
 
+        Args:
+            parent_id (int | None, optional):
+                The node ID of the parent container to filter Smart Document Types.
+            expand (str, optional):
+                The fields to expand in the response. Default is "properties".
+            where_classification_name (str | None, optional):
+                Filter Smart Document Types by classification name.
+            where_workspace_template_name (str | None, optional):
+                Filter Smart Document Types by workspace template name.
+            sort (str | None, optional):
+                Order by named column.
+            page_size (int, optional):
+                The maximum number of smart document types to return per page.
+                For the iterator this is basically the chunk size. Defaults to 100.
+            limit (int | None, optional):
+                The maximum number of smart document types to return in total.
+                If None (default) all smart document types are returned.
+                If a number is provided only up to this number of results is returned.
+
         Returns:
             iter:
                 An iterator to traverse all Smart Document Types.
 
         """
 
-        response = self.get_smart_document_types()
-        if not response or "results" not in response:
-            self.logger.warning("Failed to get Smart Document Types or no results found.")
-            return
+        page = 1
+        remaining = limit
 
-        results = response["results"]
-        if not isinstance(results, dict) or "data" not in results:
-            self.logger.warning("Unexpected response structure for Smart Document Types.")
-            return
+        while True:
+            effective_limit = min(page_size, remaining) if remaining is not None else page_size
 
-        yield from results["data"]
+            response = self.get_smart_document_types(
+                parent_id=parent_id,
+                expand=expand,
+                where_classification_name=where_classification_name,
+                where_workspace_template_name=where_workspace_template_name,
+                sort=sort,
+                page=page,
+                limit=effective_limit,
+            )
+
+            total_pages = response.get("collection", {}).get("paging", {}).get("page_total") if response else None
+
+            results = response.get("results") if response else None
+            if not results:
+                return
+
+            # Depending if the OTCS endpoint is called with or without a parent_id,
+            # the smart document types are either directly in the "data" field of the
+            # results or in a nested "data" field. The following handles both cases.
+            if "data" in results:
+                results = results["data"]
+
+            yield from results
+
+            if remaining is not None:
+                remaining -= len(results)
+                if remaining <= 0:
+                    return
+
+            # Fewer results than requested means this was the last page
+            if len(results) < effective_limit:
+                return
+
+            # Guard against OTCS delivering non-empty out-of-range pages.
+            if total_pages and page >= total_pages:
+                return
+            page += 1
+        # end while True
 
     # end method definition
 
@@ -12115,6 +12333,10 @@ class OTCS:
 
         """
 
+        if not smart_document_type_id:
+            self.logger.error("Smart Document Type ID needs to be provided. Cannot get Smart Document Type details.")
+            return None
+
         request_url = self.config()["smartDocumentTypesUrl"] + "/smartdocumenttypedetails"
         request_header = self.request_form_header()
 
@@ -12134,7 +12356,9 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get Smart Document Type -> {}".format(smart_document_type_id),
+            failure_message="Failed to get definition for Smart Document Type with ID -> {}".format(
+                smart_document_type_id
+            ),
         )
 
     # end method definition
@@ -12187,34 +12411,137 @@ class OTCS:
 
     # end method definition
 
+    def build_role_info(
+        self,
+        member_ids: list,
+        template_id: int,
+    ) -> list:
+        """Build membersData list for Smart Document Type bot payloads.
+
+        Expands a list of member IDs (workspace role IDs or group IDs)
+        into the membersData structure expected by the OTCS REST API.
+
+        Args:
+            member_ids (list):
+                List of member IDs to expand (role IDs or group IDs).
+            template_id (int):
+                Workspace template ID used to look up workspace roles.
+
+        Returns:
+            list:
+                List of membersData dictionaries.
+
+        """
+
+        members_data = []
+
+        # Fetch all workspace roles for the template and index them by ID.
+        # This allows us to distinguish role IDs (type 848) from group IDs (type 1)
+        # since both can appear in the same member_ids list.
+        workspace_roles = self.get_workspace_roles(workspace_id=template_id)
+        roles_by_id = {}
+        leader_role = None
+        if workspace_roles:
+            for role in self.get_result_values_iterator(response=workspace_roles):
+                roles_by_id[role["id"]] = role
+                # Identify the leader role - needed because the UI includes
+                # leader_id in every role entry. We skip inherited leader roles
+                # (from parent workspaces) by checking inherited_from_id is None.
+                if role.get("leader") and role.get("inherited_from_id") is None:
+                    leader_role = role
+
+        for member_id in member_ids:
+            if member_id in roles_by_id:
+                # Member ID is a workspace role (type 848).
+                # The UI nests the leader role info as an object inside "leader_id"
+                # for every role entry - not just the leader role itself.
+                role = roles_by_id[member_id]
+                leader_data = None
+                if leader_role:
+                    leader_data = {
+                        "deleted": False,
+                        "id": leader_role["id"],
+                        "leader_id": leader_role["id"],
+                        "name": leader_role["name"],
+                        "name_formatted": leader_role["name"],
+                        "photo_url": "api/v1/members/{}/photo".format(leader_role["id"]),
+                        "type": 848,
+                        "type_name": "Business Workspace Role",
+                    }
+                member_entry = {
+                    "id": role["id"],
+                    "deleted": False,
+                    "display_name": role["name"],
+                    "initials": role["name"][0] if role.get("name") else "",
+                    "leader_id": leader_data,
+                    "name": role["name"],
+                    "photo_url": None,
+                    "type": 848,
+                    "type_name": "Business Workspace Role",
+                }
+                members_data.append(member_entry)
+            else:
+                # Member ID was not found among workspace roles, so it is
+                # likely a group ID (type 1). Look it up via get_group().
+                # The group entry has a different structure than roles: it
+                # wraps the properties in a nested "data.properties" object
+                # AND duplicates some fields at the top level. This matches
+                # the payload structure the UI sends for group members.
+                group_response = self.get_group(group_id=member_id)
+                if group_response:
+                    group_results = group_response.get("results", [])
+                    if group_results:
+                        group_props = group_results[0].get("data", {}).get("properties", {})
+                        member_entry = {
+                            "data": {"properties": group_props},
+                            "deleted": False,
+                            "id": group_props.get("id", member_id),
+                            "initials": group_props.get("initials", ""),
+                            "leader_id": group_props.get("leader_id"),
+                            "name": group_props.get("name", ""),
+                            "name_formatted": group_props.get("name_formatted", ""),
+                            "type": 1,
+                            "type_name": "Group",
+                            "display_name": group_props.get("name", ""),
+                        }
+                        members_data.append(member_entry)
+
+        return members_data
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="create_smart_document_type_rule")
     def create_smart_document_type_rule(
         self,
         smart_document_type_id: int,
         classification_id: int,
         template_id: int,
+        location: int | None = None,
         mandatory: bool | None = None,
+        mimetypes: list | None = None,
         validity_required: bool | None = None,
         validity_years: int | None = None,
         validity_months: int | None = None,
         based_on_category: int | None = None,
-        based_on_attribute: int | None = None,
-        location: str | None = None,
-        upload_member_list: str | None = None,
-        upload_dynperm_list: str | None = None,
-        delete_member_list: str | None = None,
-        delete_dynperm_list: str | None = None,
+        based_on_attribute: str | None = None,
+        upload_members: list | None = None,
+        delete_members: list | None = None,
         docgen: bool | None = None,
         upload_review_required: bool | None = None,
         upload_review_workflow_map_id: int | None = None,
-        upload_review_member: str | None = None,
-        upload_review_dynperm: str | None = None,
+        upload_review_workflow_role_mapping: list[dict] | None = None,
         delete_review_required: bool | None = None,
         delete_review_workflow_map_id: int | None = None,
-        delete_review_member: str | None = None,
-        delete_review_dynperm: str | None = None,
+        delete_review_workflow_role_mapping: list[dict] | None = None,
     ) -> dict | None:
-        """Create a Smart Document Type rule.
+        """Create a Smart Document Type rule and associate a workspace template with a Smart Document Type.
+
+        NOTE: This method has some complexity as a Smart Document Type rule consists of multiple
+        options for bot activities that need to be added by subsequent REST calls. The reason is
+        that some bot settings require the rule to already exist and reference rule details (such as attribute ID
+        and category ID for based_on settings) while other settings need to be set at the time of rule creation.
+        To avoid the need of multiple method calls from the caller side, this method takes care of the necessary
+        sequence of REST calls to set all provided options in one go.
 
         Swagger operation: POST /v2/smartdocumenttypes/rules
 
@@ -12225,8 +12552,12 @@ class OTCS:
                 Classification Node ID to be associated with the smart document type.
             template_id (int):
                 Template Node ID to be associated with the smart document type.
+            location (int | None, optional):
+                Location ID of the folder in the workspace template.
             mandatory (bool | None, optional):
                 Mandatory flag.
+            mimetypes: list | None = None
+                List of allowed mimetypes for upload.
             validity_required (bool | None, optional):
                 Validity flag.
             validity_years (int | None, optional):
@@ -12234,46 +12565,86 @@ class OTCS:
             validity_months (int | None, optional):
                 Number of months the document is valid.
             based_on_category (int | None, optional):
-                Category Node ID.
+                Category Node ID. This category needs to be eitehr the default category
+                for Smart Document Types or needs to be assigned to the classification item.
             based_on_attribute (int | None, optional):
                 Attribute ID.
-            location (str | None, optional):
-                Location ID of the folder.
-            upload_member_list (str | None, optional):
+            upload_members (list | None, optional):
                 List of member IDs allowed to upload documents.
-            upload_dynperm_list (str | None, optional):
-                List of dynamic permission role IDs for upload.
-            delete_member_list (str | None, optional):
+            delete_members (list | None, optional):
                 List of member IDs allowed to delete documents.
-            delete_dynperm_list (str | None, optional):
-                List of dynamic permission role IDs for delete.
             docgen (bool | None, optional):
                 Docgen flag.
             upload_review_required (bool | None, optional):
                 Flag to enable approval workflow for uploads.
             upload_review_workflow_map_id (int | None, optional):
                 Upload approval workflow map ID.
-            upload_review_member (str | None, optional):
-                Mapping of workflow map and workspace user ID.
-            upload_review_dynperm (str | None, optional):
-                Mapping of workflow role with dynamic permission role ID.
+            upload_review_workflow_role_mapping (list[dict] | None, optional):
+                Mapping of workflow map roles and workspace roles for upload review.
+                NOTE: The workflow map needs to have a role model enabled!
+                Each list item has these keys:
+                "workflowRole" (mandatory) - value is a role name (str) from the workflow map
+                "member" (mandatory) - value is an ID (int)
+                "memberData" (optional ?)
             delete_review_required (bool | None, optional):
                 Flag to enable approval workflow for deletion.
             delete_review_workflow_map_id (int | None, optional):
                 Delete approval workflow map ID.
-            delete_review_member (str | None, optional):
-                Mapping of workflow map and workspace user ID for delete review.
-            delete_review_dynperm (str | None, optional):
-                Mapping of workflow role with dynamic permission role ID for delete review.
+            delete_review_workflow_role_mapping (list[dict] | None, optional):
+                Mapping of workflow map roles and workspace roles for delete review.
+                NOTE: The workflow map needs to have a role model enabled!
+                Each list item has these keys:
+                "workflowRole" (mandatory) - value is a role name (str) from the workflow map
+                "member" (mandatory) - value is an ID (int)
+                "memberData" (optional ?)
 
         Returns:
             dict | None:
                 REST response or None in case of an error.
 
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/smartdocumenttypes/rules',
+                        'method': 'POST',
+                        'name': ''
+                    }
+                }
+            },
+            'results':
+                'disable_review_upload_bot': True,
+                'is_dyn_perm_enabled': False,
+                'is_othcm_template': False,
+                'ok': True,
+                'rule_id': 801,
+                'statusCode': 200
+            }
+        }
+
         """
+
+        if not smart_document_type_id:
+            self.logger.error("Smart Document Type ID needs to be provided. Cannot create Smart Document Type rule.")
+            return None
+
+        if not classification_id:
+            self.logger.error("Classification ID needs to be provided. Cannot create Smart Document Type rule.")
+            return None
+
+        if not template_id:
+            self.logger.error("Template ID needs to be provided. Cannot create Smart Document Type rule.")
+            return None
 
         request_url = self.config()["smartDocumentTypesUrl"] + "/rules"
         request_header = self.request_form_header()
+
+        #
+        # 1: Create the Smart Document Type Template with basic Rule information:
+        #
 
         # Build formData payload with required and optional fields
         post_data = {
@@ -12281,63 +12652,216 @@ class OTCS:
             "classification_id": classification_id,
             "template_id": template_id,
         }
-        if mandatory is not None:
-            post_data["mandatory"] = mandatory
-        if validity_required is not None:
-            post_data["validity_required"] = validity_required
-        if validity_years is not None:
-            post_data["validity_years"] = validity_years
-        if validity_months is not None:
-            post_data["validity_months"] = validity_months
-        if based_on_category is not None:
-            post_data["based_on_category"] = based_on_category
-        if based_on_attribute is not None:
-            post_data["based_on_attribute"] = based_on_attribute
         if location is not None:
             post_data["location"] = location
-        if upload_member_list is not None:
-            post_data["upload_member_list"] = upload_member_list
-        if upload_dynperm_list is not None:
-            post_data["upload_dynperm_list"] = upload_dynperm_list
-        if delete_member_list is not None:
-            post_data["delete_member_list"] = delete_member_list
-        if delete_dynperm_list is not None:
-            post_data["delete_dynperm_list"] = delete_dynperm_list
-        if docgen is not None:
-            post_data["docgen"] = docgen
-        if upload_review_required is not None:
-            post_data["upload_review_required"] = upload_review_required
-        if upload_review_workflow_map_id is not None:
-            post_data["upload_review_workflow_map_id"] = upload_review_workflow_map_id
-        if upload_review_member is not None:
-            post_data["upload_review_member"] = upload_review_member
-        if upload_review_dynperm is not None:
-            post_data["upload_review_dynperm"] = upload_review_dynperm
-        if delete_review_required is not None:
-            post_data["delete_review_required"] = delete_review_required
-        if delete_review_workflow_map_id is not None:
-            post_data["delete_review_workflow_map_id"] = delete_review_workflow_map_id
-        if delete_review_member is not None:
-            post_data["delete_review_member"] = delete_review_member
-        if delete_review_dynperm is not None:
-            post_data["delete_review_dynperm"] = delete_review_dynperm
 
-        self.logger.debug(
-            "Create Smart Document Type rule for type -> %d; calling -> %s",
-            smart_document_type_id,
-            request_url,
-        )
-
-        return self.do_request(
+        smart_document_type_response = self.do_request(
             url=request_url,
             method="POST",
             headers=request_header,
             data=post_data,
             timeout=None,
-            failure_message="Failed to create Smart Document Type rule for type -> {}".format(
-                smart_document_type_id,
+            failure_message="Failed to create Smart Document Type rule for Smart Document Type with ID -> {}, classification ID -> {}, template ID -> {}".format(
+                smart_document_type_id, classification_id, template_id
             ),
         )
+        if not smart_document_type_response:
+            return None
+        smart_document_type_rule_id = smart_document_type_response.get("results", {}).get("rule_id")
+
+        # We need to determine the category ID and attribute ID for date fields if any of the bots that we want
+        # to set require this information. The category and attribute can either be provided directly as parameters
+        # or we try to retrieve them from the Smart Document Type details. If we cannot determine the category ID
+        # and attribute ID, we cannot set bots that require this information but we can still proceed with setting other bots.
+        if not based_on_category:
+            response = self.get_smart_document_type(smart_document_type_id=smart_document_type_id)
+            if not response:
+                return None
+            # Each Smart Document Type can have multiple workspace templates
+            # so we need to look through the data list to find the entry with the
+            # matching template ID to get the correct category and attribute IDs:
+            data_list = response.get("results", {}).get("data", [{}])
+            for data in data_list:
+                if data.get("template_id") == template_id:
+                    based_on_category = data.get("based_on_cat_id")
+                    if based_on_attribute is None:
+                        based_on_attribute = data.get("based_on_attr_id")
+                    break
+
+        if not smart_document_type_rule_id:
+            self.logger.error(
+                "Failed to retrieve Smart Document Type rule ID from response. Cannot update bots for the created rule."
+            )
+            return None
+
+        #
+        # 2: Update the created Smart Document Type Rule with bot information:
+        #
+
+        # Mimetypes (file types):
+
+        if mimetypes is not None:
+            put_data = {
+                "mimetype": mimetypes,
+                "rule_expression": {"expressionText": "", "expressionData": [], "expressionDataKey": ""},
+                "bot_action": "update",  # this needs "update", others below need "add"
+                "location": location or "",  # needs to be present here - even if empty
+                "based_on_category": str(based_on_category) if based_on_category else "",  # UI sends this as a string
+            }
+
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/context",
+                method="PUT",
+                headers=request_header,
+                data={"body": json.dumps(put_data)},
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with mimetypes = {}".format(
+                    smart_document_type_id, mimetypes
+                ),
+            )
+            if not response:
+                return None
+
+        # Mandatory setting:
+
+        if mandatory is not None:
+            put_data = {"mandatory": mandatory, "bot_action": "add"}
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/makemandatory",
+                method="PUT",
+                headers=request_header,
+                data=put_data,
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with mandatory = {}".format(
+                    smart_document_type_id, mandatory
+                ),
+            )
+            if not response:
+                return None
+
+        # Document validity settings (expiration) and completeness check:
+
+        if validity_required is not None:
+            put_data = {"validity_required": validity_required, "bot_action": "add"}
+            if validity_required and validity_years is not None:
+                put_data["validity_years"] = validity_years
+            if validity_required and validity_months is not None:
+                put_data["validity_months"] = str(validity_months)
+            if based_on_category is not None:
+                put_data["based_on_category"] = based_on_category
+            if based_on_attribute is not None:
+                put_data["based_on_attribute"] = str(
+                    based_on_attribute
+                )  # for some strange reasons this needs to be a string
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/completenesscheck",
+                method="PUT",
+                headers=request_header,
+                data={"body": json.dumps(put_data)},
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with completeness check = {}".format(
+                    smart_document_type_id, put_data
+                ),
+            )
+            if not response:
+                return None
+
+        # Restrict which role can upload documents:
+
+        if upload_members is not None:
+            put_data = {"member": upload_members, "bot_action": "add"}
+            put_data["membersData"] = self.build_role_info(member_ids=upload_members, template_id=template_id)
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/uploadcontrol",
+                method="PUT",
+                headers=request_header,
+                data={"body": json.dumps(put_data)},
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with upload control = {}".format(
+                    smart_document_type_id, put_data
+                ),
+            )
+            if not response:
+                return None
+
+        # Restrict which role can delete documents:
+
+        if delete_members is not None:
+            put_data = {"member": delete_members, "bot_action": "add"}
+            put_data["membersData"] = self.build_role_info(member_ids=delete_members, template_id=template_id)
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/deletecontrol",
+                method="PUT",
+                headers=request_header,
+                data={"body": json.dumps(put_data)},
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with delete control = {}".format(
+                    smart_document_type_id, put_data
+                ),
+            )
+            if not response:
+                return None
+
+        # Enable document generation (PowerDocs based):
+
+        if docgen is not None:
+            put_data = {"docgen": docgen, "docgen_upload_only": False, "bot_action": "add"}
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/createdocument",
+                method="PUT",
+                headers=request_header,
+                data=put_data,
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with document generation = {}".format(
+                    smart_document_type_id, put_data
+                ),
+            )
+            if not response:
+                return None
+
+        # Configure a document upload workflow:
+
+        if upload_review_required is not None:
+            put_data = {"review_required": upload_review_required, "bot_action": "add"}
+            if upload_review_workflow_map_id is not None:
+                put_data["review_workflow_location"] = upload_review_workflow_map_id
+            if upload_review_workflow_role_mapping is not None:
+                put_data["role_mappings"] = upload_review_workflow_role_mapping
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/uploadwithapproval",
+                method="PUT",
+                headers=request_header,
+                data=put_data,
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with upload review = {}".format(
+                    smart_document_type_id, put_data
+                ),
+            )
+            if not response:
+                return None
+
+        # Configure a document deletion workflow:
+
+        if delete_review_required is not None:
+            put_data = {"review_required": delete_review_required, "bot_action": "add"}
+            if delete_review_workflow_map_id is not None:
+                put_data["review_workflow_location"] = delete_review_workflow_map_id
+            if delete_review_workflow_role_mapping is not None:
+                put_data["role_mappings"] = delete_review_workflow_role_mapping
+            response = self.do_request(
+                url=request_url + "/" + str(smart_document_type_rule_id) + "/bots/deletewithapproval",
+                method="PUT",
+                headers=request_header,
+                data=put_data,
+                timeout=None,
+                failure_message="Failed to update rule for Smart Document Type with ID -> {} with delete review = {}".format(
+                    smart_document_type_id, put_data
+                ),
+            )
+            if not response:
+                return None
+
+        return smart_document_type_response
 
     # end method definition
 
@@ -12463,9 +12987,9 @@ class OTCS:
         request_header = self.request_form_header()
 
         # Build formData payload
-        post_data = {}
+        put_data = {}
         if body is not None:
-            post_data["body"] = body
+            put_data["body"] = body
 
         self.logger.debug(
             "Save Smart Document Type bot -> %s for rule -> %d; calling -> %s",
@@ -12478,7 +13002,7 @@ class OTCS:
             url=request_url,
             method="PUT",
             headers=request_header,
-            data=post_data,
+            data=put_data,
             timeout=None,
             failure_message="Failed to save Smart Document Type bot -> '{}' for rule -> {}".format(
                 bot_key,
@@ -13311,15 +13835,15 @@ class OTCS:
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Default is None.
+            page (int | None, optional):
+                The page to be returned (if more workspace instances exist
+                than given by the page limit).
+                The default is None.
             limit (int | None, optional):
                 The maximum number of workspace instances that should be delivered
                 in one page.
                 The default is None, in this case the internal OTCS limit
                 seems to be 500.
-            page (int | None, optional):
-                The page to be returned (if more workspace instances exist
-                than given by the page limit).
-                The default is None.
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
@@ -15020,12 +15544,15 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_roles")
-    def get_workspace_roles(self, workspace_id: int) -> dict | None:
+    def get_workspace_roles(self, workspace_id: int, role_id: int | None = None) -> dict | None:
         """Get the Workspace roles.
 
         Args:
             workspace_id (int):
                 The ID of the workspace template or workspace.
+            role_id (int | None, optional):
+                The ID of the workspace role. If provided, only the data for this role is returned.
+                If None (default), all roles of the workspace are returned.
 
         Returns:
             dict | None:
@@ -15034,6 +15561,8 @@ class OTCS:
         """
 
         request_url = self.config()["businessWorkspacesUrl"] + "/" + str(workspace_id) + "/roles"
+        if role_id is not None:
+            request_url += "/" + str(role_id)
         request_header = self.request_form_header()
 
         self.logger.debug(
@@ -15489,6 +16018,216 @@ class OTCS:
                     file_path,
                 ),
             )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_doctypes")
+    def get_workspace_doctypes(
+        self,
+        workspace_id: int,
+        document_generation_only: bool = False,
+        skip_docgen_upload_only: bool = True,
+        skip_validation: bool = False,
+        document_type_rule: bool = True,
+        expand_fields: list[str] | None = None,
+        sort_by: Literal["Priority", "DocumentType"] = "Priority",
+    ) -> dict | None:
+        """Get the Smart Document Types (doc types) for a Business Workspace.
+
+        REST operation: GET /v2/businessworkspaces/{bw_id}/doctypes
+
+        Args:
+            workspace_id (int):
+                Workspace ID or Workspace template ID.
+            document_generation_only (bool, optional):
+                Filter the document types to those with document generation enabled.
+                Defaults to False.
+            skip_docgen_upload_only (bool, optional):
+                Skip document-generation upload-only document types.
+                Defaults to True.
+            skip_validation (bool, optional):
+                Skip rule expression and permission evaluation on document types.
+                If a workspace template ID is passed for workspace_id this is always
+                treated as True by the REST API. If validation is active
+                (skip_validation=False), the REST API will perform rule expression
+                evaluation and filter the results accordingly. If validation is skipped
+                (skip_validation=True), the REST API will return all document types regardless
+                of rule expression evaluation. Defaults to False.
+            document_type_rule (bool, optional):
+                If True, include complete document type rule details in the response.
+                If False, include only classification details.
+                Defaults to True.
+            expand_fields (list[str] | None, optional):
+                Expand additional response details, for example:
+                * "template_id": expland the workspace template information
+                * "smart_document_type_id": expand the smart document type information
+                * "member_info": expand the member information
+                Defaults to None.
+            sort_by (Literal["Priority", "DocumentType"], optional):
+                Field used to sort the results. Supported values are
+                "Priority" and "DocumentType".
+                Defaults to "Priority".
+
+        Returns:
+            dict | None:
+                Doc types response or None in case of an error.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/businessworkspaces/82228/doctypes?document_generation_only=false&document_type_rule=true&skip_docgen_upload_only=false&skip_validation=false&sort_by=Priority',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': [
+                {
+                    'data': {
+                        'properties': {
+                            'attribute_id': 2,
+                            'category_id': 3692,
+                            'classification_description': '',
+                            'classification_id': 29021,
+                            'classification_name': 'Sales Contract',
+                            'delete_dynperm_roles': [],
+                            'delete_members': [],
+                            'delete_review_dynperm_roles': [],
+                            'delete_review_members': [],
+                            'delete_review_required': False,
+                            'delete_workflow_id': None,
+                            'document_generation': 1,
+                            'location': '82235',
+                            'mime_types': [],
+                            'payloadurl': '/cs/cs?func=xecmpfdocgen.PowerDocsPayload&wsID=82228&selfServ=1&docTypeID=29021',
+                            'priority': 1,
+                            'reminder_assignees': [],
+                            'reminder_escalation_assignees': [],
+                            'required': 1,
+                            'review_members': [],
+                            'roles': '',
+                            'rs_type': 0,
+                            'rule_data': "{A<1,?,'Key'='Generic','Operand'='Default','Operator'='=','Value'='true'>}",
+                            'rule_exp': 'Default=true',
+                            'rule_id': 580,
+                            'smart_document_type_expand': {
+                                'advanced_versioning': None,
+                                'classification_expand': {...},
+                                'classification_id': '29021',
+                                'classification_name': 'Sales Contract',
+                                'container': False,
+                                'container_size': 0,
+                                'create_date': '2026-06-24T00:33:14Z',
+                                'create_user_id': 2170,
+                                'description': '',
+                                'description_multilingual': {...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'external_source': '',
+                                'favorite': False,
+                                'hidden': False,
+                                'icon': '/cssupport/xecmpf/smart_doc_type.png',
+                                'icon_large': '/cssupport/xecmpf/smart_doc_type_large.png',
+                                'id': 40472,
+                                ...
+                                'name': 'Sales Contract',
+                                'parent_id': 471111,
+                                ...
+                                'type': 877,
+                                'type_name': 'Smart Document Type',
+                                'volume_id': -5486,
+                                'workspace_template_names': 'Sales Contract',
+                                'workspace_template_count': 1,
+                            },
+                            'smart_document_type_id': 40472,
+                            'template_expand': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 7,
+                                'create_date': '2016-03-03T06:26:38Z',
+                                'create_user_id': 1000,
+                                'description': 'SAP Sales Contract (Business Object BUS2034) and SFDC Contract',
+                                'description_multilingual': {...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'external_source': '',
+                                'favorite': False,
+                                'hidden': False,
+                                'icon': '/cssupport/otsapxecm/wksp_contract_cust.png',
+                                'icon_large': '/cssupport/otsapxecm/wksp_contract_cust_large.png',
+                                'id': 40468,
+                                'image_url': '/appimg/ot_bws/icons/37562.svg?v=162055_18696',
+                                'mime_type': None,
+                                ...
+                                'name': 'Sales Contract',
+                                'parent_id': 471111,
+                                'type': 848,
+                                'type_name': 'Business Workspace',
+                                'wksp_type_name': 'Business Workspace',
+                                'volume_id': -5486,
+                            },
+                            'template_id': 40468,
+                            'type': '',
+                            'upload_dynperm_roles': [],
+                            'upload_members': [{...}],
+                            'upload_review_dynperm_roles': [],
+                            'upload_review_members': [],
+                            'upload_review_required': False,
+                            'upload_workflow_id': None,
+                            'validity': 12,
+                            'validity_required': True
+                        }
+                    }
+                }
+            ]
+        }
+
+        """
+
+        query = {
+            "skip_validation": skip_validation,
+            "document_type_rule": document_type_rule,
+            "document_generation_only": document_generation_only,
+            "skip_docgen_upload_only": skip_docgen_upload_only,
+            "sort_by": sort_by,
+        }
+        if expand_fields and float(self.get_server_version()) >= 26.2:
+            query["expand_fields"] = expand_fields
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = (
+            self.config()["businessWorkspacesUrl"]
+            + "/"
+            + str(workspace_id)
+            + "/doctypes?{}".format(
+                encoded_query,
+            )
+        )
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get smart document types for workspace with ID -> %d with query -> %s; calling -> %s",
+            workspace_id,
+            str(query),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get smart document types for workspace with ID -> {}".format(workspace_id),
+        )
 
     # end method definition
 
@@ -25495,6 +26234,8 @@ class OTCS:
         node_id: int,
         actions: bool = False,
         escalation: bool = False,
+        activation: bool = False,
+        schedule: bool = False,
     ) -> dict | None:
         """Get all reminders for a given node.
 
@@ -25507,6 +26248,16 @@ class OTCS:
                 Whether to include available actions in the response. Defaults to False.
             escalation (bool, optional):
                 Whether to include escalation fields from reminder view form.
+                Defaults to False. This information is not included in the reminder list response
+                and requires additional requests per reminder, so it should only be activated if
+                really needed.
+            activation (bool, optional):
+                Whether to include activation fields from reminder view form.
+                Defaults to False. This information is not included in the reminder list response
+                and requires additional requests per reminder, so it should only be activated if
+                really needed.
+            schedule (bool, optional):
+                Whether to include schedule fields from reminder view form.
                 Defaults to False. This information is not included in the reminder list response
                 and requires additional requests per reminder, so it should only be activated if
                 really needed.
@@ -25584,7 +26335,7 @@ class OTCS:
             ),
         )
 
-        if not response or not escalation:
+        if not response or (not escalation and not activation and not schedule):
             return response
 
         reminders = response.get("results", {}).get("followups", [])
@@ -25615,18 +26366,36 @@ class OTCS:
                 continue
 
             form_data = forms[0].get("data", {})
-            escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
-            send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
-            send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
+            if "priority" not in followup and "priority" in form_data:
+                followup["priority"] = form_data.get("priority")
 
-            if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
-                followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
-            if isinstance(send_in, dict) and "escalation_period" in send_in:
-                followup["escalation_period"] = send_in.get("escalation_period")
-            if isinstance(send_in, dict) and "escalation_when" in send_in:
-                followup["escalation_when"] = send_in.get("escalation_when")
-            if isinstance(send_to, list) and send_to:
-                followup["escalation_recipient_list"] = send_to
+            if escalation:
+                escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
+                send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
+                send_to = escalation_alert.get("send_to", []) if isinstance(escalation_alert, dict) else []
+
+                if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
+                    followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
+                if isinstance(send_in, dict) and "escalation_period" in send_in:
+                    followup["escalation_period"] = send_in.get("escalation_period")
+                if isinstance(send_in, dict) and "escalation_when" in send_in:
+                    followup["escalation_when"] = send_in.get("escalation_when")
+                if isinstance(send_to, list) and send_to:
+                    followup["escalation_recipient_list"] = send_to
+
+            if activation:
+                activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
+                send_in = activation_data.get("send_in", {}) if isinstance(activation_data, dict) else {}
+                if isinstance(send_in, dict) and "activation_period" in send_in:
+                    followup["activation_period"] = send_in.get("activation_period")
+                if isinstance(send_in, dict) and "activation_unit" in send_in:
+                    followup["activation_unit"] = send_in.get("activation_unit")
+
+            if schedule:
+                schedule_data = form_data.get("schedule", {}) if isinstance(form_data, dict) else {}
+                if schedule_data:
+                    followup["schedule"] = schedule_data
+        # end for loop to enrich reminders with view form information
 
         return response
 
@@ -25682,6 +26451,8 @@ class OTCS:
         reminder_id: int,
         actions: bool = False,
         escalation: bool = False,
+        activation: bool = False,
+        schedule: bool = False,
     ) -> dict | None:
         """Get details of a specific reminder for a given node.
 
@@ -25697,6 +26468,10 @@ class OTCS:
             escalation (bool, optional):
                 Whether to include escalation fields from reminder view form.
                 Defaults to False.
+            activation (bool, optional):
+                Whether to include activation fields from reminder view form.
+            schedule (bool, optional):
+                Whether to include schedule fields from reminder view form.
 
         Returns:
             dict | None:
@@ -25740,6 +26515,8 @@ class OTCS:
                         'escalation_enabled': True, # this field is only included if escalation=True
                         'escalation_period': 6,     # this field is only included if escalation=True
                         'escalation_when': -1,      # this field is only included if escalation=True
+                        'activation_period': 6,     # this field is only included if activation=True
+                        'activation_when': -1,      # this field is only included if activation=True
                     }
                 }
             }
@@ -25776,8 +26553,10 @@ class OTCS:
             ),
         )
 
-        if not response or not escalation:
+        if not response or (not escalation and not activation and not schedule):
             return response
+
+        followup = response.get("results", {}).get("data", {}).get("followup", {})
 
         # If escalation information is requested, we need to get the reminder view form to extract
         # escalation fields, as they are not included in the reminder details response:
@@ -25793,20 +26572,31 @@ class OTCS:
             return response
 
         form_data = forms[0].get("data", {})
-        escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
-        send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
-        send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
 
-        followup = response.get("results", {}).get("data", {}).get("followup", {})
+        if escalation:
+            escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
+            send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
+            send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
 
-        if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
-            followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
-        if isinstance(send_in, dict) and "escalation_period" in send_in:
-            followup["escalation_period"] = send_in.get("escalation_period")
-        if isinstance(send_in, dict) and "escalation_when" in send_in:
-            followup["escalation_when"] = send_in.get("escalation_when")
-        if isinstance(send_to, list) and send_to:
-            followup["escalation_recipient_list"] = send_to
+            if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
+                followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
+            if isinstance(send_in, dict) and "escalation_period" in send_in:
+                followup["escalation_period"] = send_in.get("escalation_period")
+            if isinstance(send_in, dict) and "escalation_when" in send_in:
+                followup["escalation_when"] = send_in.get("escalation_when")
+            if isinstance(send_to, list) and send_to:
+                followup["escalation_recipient_list"] = send_to
+        if activation:
+            activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
+            send_in = activation_data.get("send_in", {}) if isinstance(activation_data, dict) else {}
+            if isinstance(send_in, dict) and "activation_period" in send_in:
+                followup["activation_period"] = send_in.get("activation_period")
+            if isinstance(send_in, dict) and "activation_unit" in send_in:
+                followup["activation_unit"] = send_in.get("activation_unit")
+        if schedule:
+            schedule_data = form_data.get("schedule", {}) if isinstance(form_data, dict) else {}
+            if schedule_data:
+                followup["schedule"] = schedule_data
 
         return response
 
@@ -26290,12 +27080,14 @@ class OTCS:
             reminder_rule = 0
         else:
             reminder_rule = 1
-            if due_in_unit is None:
+            # if we are "in progress" state due in is not required:
+            if due_in_unit is None and initial_status:
                 self.logger.error(
                     "A unit (day, week, month, year) is required for reminders with relative due dates.",
                 )
                 return None
-            if due_in_value is None:
+            # if we are "in progress" state due in is not required:
+            if due_in_value is None and initial_status:
                 self.logger.error(
                     "A value (# of days, # of months, etc.) is required for reminders with relative due dates.",
                 )
@@ -26741,7 +27533,7 @@ class OTCS:
         | None = None,
         recurring_business_day: bool | None = None,
         escalation: bool = False,
-        escalation_recipient_list: list[int] | None = None,
+        escalation_recipients: list[int] | None = None,
         escalation_when: Literal["before", "after"] | None = None,
         escalation_value: int | None = None,
         escalation_unit: Literal["day", "week", "month", "year"] | None = None,
@@ -26804,7 +27596,7 @@ class OTCS:
                 Defaults to None. REST API calls this field "MOVEPREV" and expects "1" for True and "0" for False.
             escalation (bool, optional):
                 Whether escalation is enabled. Defaults to False.
-            escalation_recipient_list (list[int] | None, optional):
+            escalation_recipients (list[int] | None, optional):
                 List of user/group IDs to escalate to. Defaults to None.
             escalation_when (Literal["before", "after"] | None, optional):
                 When to escalate. Defaults to None.
@@ -26865,7 +27657,7 @@ class OTCS:
             recurring_pattern=recurring_pattern,
             recurring_business_day=recurring_business_day,
             escalation=escalation,
-            escalation_recipients=escalation_recipient_list,
+            escalation_recipients=escalation_recipients,
             escalation_when=escalation_when,
             escalation_value=escalation_value,
             escalation_unit=escalation_unit,

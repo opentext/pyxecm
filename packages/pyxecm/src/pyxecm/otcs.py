@@ -13269,7 +13269,7 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_by_name")
-    def get_workspace_type_by_name(self, type_name: str) -> dict | None:
+    def get_workspace_type_by_name(self, type_name: str, locale: str | None = None) -> dict | None:
         """Get information for a given workspace type.
 
         This is a convinience method. It's implementation is potentially
@@ -13279,6 +13279,8 @@ class OTCS:
         Args:
             type_name (str):
                 The name of the workspace type to retrieve.
+            locale (str | None, optional):
+                The locale to use for the workspace type name comparison.
 
         Returns:
             dict | None:
@@ -13287,10 +13289,25 @@ class OTCS:
         """
 
         workspace_types = self.get_workspace_types_iterator()
+        type_name_lower = type_name.lower()
+
         for workspace_type in workspace_types:
             workspace_type_name = self.get_result_value(response=workspace_type, key="wksp_type_name")
-            if workspace_type_name.lower() == type_name.lower():
+            if workspace_type_name and workspace_type_name.lower() == type_name_lower:
                 return workspace_type
+
+            workspace_type_names_multilingual = self.get_result_value(response=workspace_type, key="wksp_type_names")
+            if not workspace_type_names_multilingual:
+                continue
+
+            if locale:
+                localized_name = workspace_type_names_multilingual.get(locale)
+                if localized_name and localized_name.lower() == type_name_lower:
+                    return workspace_type
+            else:
+                for localized_name in workspace_type_names_multilingual.values():
+                    if localized_name and localized_name.lower() == type_name_lower:
+                        return workspace_type
 
         return None
 
@@ -16035,6 +16052,11 @@ class OTCS:
         """Get the Smart Document Types (doc types) for a Business Workspace.
 
         REST operation: GET /v2/businessworkspaces/{bw_id}/doctypes
+
+        NOTE: the response field `validity` is the number of MONTHS a document
+        of this type is valid. The UI has two separate fields validity in months
+        and validity in years. The REST API returns validity = validity_in_months + (validity_in_years * 12).
+        So if the UI shows 1 year and 6 months, the REST API returns validity = 18.
 
         Args:
             workspace_id (int):

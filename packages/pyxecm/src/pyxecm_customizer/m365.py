@@ -21,6 +21,7 @@ import zipfile
 from datetime import UTC, datetime
 from http import HTTPStatus
 from importlib.metadata import version
+from typing import Literal
 from urllib.parse import quote
 
 import requests
@@ -145,7 +146,25 @@ class M365:
         m365_config["securityUrl"] = m365_config["betaUrl"] + "security"
         m365_config["applicationsUrl"] = m365_config["graphUrl"] + "applications"
 
-        m365_config["sitesUrl"] = m365_config["betaUrl"] + "sites"
+        m365_config["sitesUrl"] = m365_config["graphUrl"] + "sites"
+        m365_config["searchQueryUrl"] = m365_config["betaUrl"] + "search/query"
+
+        # SharePoint Embedded (SPE) URLs:
+        m365_config["fileStorageContainersUrl"] = m365_config["graphUrl"] + "storage/fileStorage/containers"
+        m365_config["deletedContainersUrl"] = m365_config["graphUrl"] + "storage/fileStorage/deletedContainers"
+        m365_config["containerTypesUrl"] = m365_config["betaUrl"] + "storage/fileStorage/containerTypes"
+
+        # Drive API URLs (used for SPE containers and OneDrive/SharePoint drives):
+        m365_config["drivesUrl"] = m365_config["graphUrl"] + "drives"
+        m365_config["drivesUrlBeta"] = m365_config["betaUrl"] + "drives"
+
+        # Audit trail URLs:
+        # Per-item / drive activities are exposed via the Graph beta drive API.
+        # The tenant-wide unified audit log (all file access events across all
+        # users and containers) is exposed via the Office 365 Management
+        # Activity API which lives on a separate host and requires its own
+        # ActivityFeed.Read permission and access token.
+        m365_config["managementActivityUrl"] = "https://manage.office.com/api/v1.0/{}/activity/feed".format(tenant_id)
 
         self._config = m365_config
         self._http_object = HTTP(logger=self.logger)
@@ -5146,6 +5165,70 @@ class M365:
 
     # end method definition
 
+    def get_sharepoint_site_drive(self, site_id: str) -> dict | None:
+        """Get the default document library drive of a SharePoint site.
+
+        This returns the drive resource for the site's default document
+        library. The returned drive ID can then be used with the drive item
+        methods (``get_drive_items()``, ``upload_drive_item()``, etc.) to
+        manage files and folders in the site's document library.
+
+        Args:
+            site_id (str):
+                The ID of the SharePoint site.
+
+        Returns:
+            dict | None:
+                The drive resource data or None if the request fails.
+
+        Example:
+            {
+                'id': 'b!ISJs1WRro0y0EWgkUYcktDa0mE8zSlFEqFzqRn70Zwp1CEtDEBZgQICPkRbil_5Z',
+                'driveType': 'documentLibrary',
+                'name': 'Documents',
+                'webUrl': 'https://contoso.sharepoint.com/sites/MySite/Shared Documents',
+                'owner': {
+                    'group': {
+                        'displayName': 'MySite Owners',
+                        'id': '...'
+                    }
+                },
+                'quota': {
+                    'total': 27487790694400,
+                    'used': 1048576,
+                    'remaining': 27487789645824
+                }
+            }
+
+            Usage with drive item methods:
+
+                site = m365.get_sharepoint_site_by_name("MySite")
+                site_id = site["id"]
+                drive = m365.get_sharepoint_site_drive(site_id=site_id)
+                drive_id = drive["id"]
+                items = m365.get_drive_items(drive_id=drive_id)
+
+        """
+
+        request_url = self.config()["sitesUrl"] + "/" + site_id + "/drive"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get drive for SharePoint site with ID -> %s; calling -> %s",
+            site_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Cannot get drive for SharePoint site with ID -> '{}'".format(site_id),
+        )
+
+    # end method definition
+
     def get_sharepoint_pages(self, site_id: str) -> dict:
         """Retrieve a list of SharePoint site pages accessible to the authenticated user.
 
@@ -6235,5 +6318,3902 @@ class M365:
         )
 
         return response
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - Container Type Methods
+    #####################################################################
+
+    def get_container_types(self) -> dict | None:
+        """Get a list of container types in the tenant.
+
+        Container types are managed via the beta endpoint. Non-administrator
+        users see only container types they have a permission on. SharePoint
+        Embedded Administrators and Global Administrators see every container
+        type in the tenant.
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of container
+                types, or None if the request fails.
+
+        Example:
+            {
+                '@odata.context': 'https://graph.microsoft.com/beta/$metadata#storage/fileStorage/containerTypes',
+                'value': [
+                    {
+                        'id': 'e2756c4d-fa33-4452-9c36-2325686e1082',
+                        'displayName': 'My Container Type',
+                        'owningAppId': 'd288ba5f-9313-4b38-b4a4-d7edcce089b0',
+                        'billingClassification': 'standard',
+                        'createdDateTime': '2024-01-15T10:00:00Z'
+                    }
+                ]
+            }
+
+        """
+
+        request_url = self.config()["containerTypesUrl"]
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get SPE container types; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get SPE container types",
+        )
+
+    # end method definition
+
+    def get_container_type(self, container_type_id: str) -> dict | None:
+        """Get a specific container type by its ID.
+
+        Args:
+            container_type_id (str):
+                The ID of the container type.
+
+        Returns:
+            dict | None:
+                The container type data or None if the request fails.
+
+        Example:
+            {
+                '@odata.context': 'https://graph.microsoft.com/beta/$metadata#storage/fileStorage/containerTypes/$entity',
+                'id': 'e2756c4d-fa33-4452-9c36-2325686e1082',
+                'displayName': 'My Container Type',
+                'owningAppId': 'd288ba5f-9313-4b38-b4a4-d7edcce089b0',
+                'billingClassification': 'standard',
+                'createdDateTime': '2024-01-15T10:00:00Z'
+            }
+
+        """
+
+        request_url = self.config()["containerTypesUrl"] + "/" + container_type_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get SPE container type with ID -> %s; calling -> %s",
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get SPE container type with ID -> {}".format(
+                container_type_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_container_type(
+        self,
+        name: str,
+        owning_app_id: str,
+        billing_classification: Literal["trial", "standard", "directToCustomer"] = "trial",
+        settings: dict | None = None,
+    ) -> dict | None:
+        """Create a new container type.
+
+        The calling user must be a non-guest member of the owning tenant.
+        The calling user is automatically assigned as an owner of the new
+        container type. Requires the FileStorageContainerType.Manage.All
+        delegated permission.
+
+        Container type settings control platform-level features for all
+        containers of this type. These settings are managed via the beta
+        API endpoint.
+
+        Args:
+            name (str):
+                A user-friendly name for the container type.
+            owning_app_id (str):
+                The application ID of the owning app registration.
+            billing_classification (Literal["trial", "standard", "directToCustomer"], optional):
+                The billing classification. Valid values are "trial",
+                "standard", or "directToCustomer". Defaults to "trial".
+
+                **Important**: Once a container type is created, its billing
+                model cannot be changed — create a new container type to
+                switch billing models.
+
+                Billing Model Details:
+
+                - ``trial``: Trial billing model for testing and evaluation.
+                - ``standard``: Best for ISVs where you want to centralize
+                  and own all costs. Also suited for enterprises that have
+                  many departments and need to charge back costs to them.
+                - ``directToCustomer``: The customer pays for SPE Containers
+                  and consumption directly.
+            settings (dict | None, optional):
+                Optional settings for the container type. Supported keys:
+
+                - ``isSearchEnabled`` (bool): Whether search is enabled for
+                  containers of this type. When True, content in containers
+                  is indexed and searchable. Defaults to False.
+                - ``isDiscoverabilityEnabled`` (bool): Whether items from
+                  containers are surfaced in experiences such as My Activity
+                  or Microsoft 365 search results.
+                - ``isItemVersioningEnabled`` (bool): Whether versioning is
+                  enabled for items in containers of this type.
+                - ``itemMajorVersionLimit`` (int): Maximum number of major
+                  versions. Requires ``isItemVersioningEnabled`` to be True.
+                - ``isSharingRestricted`` (bool): When True, only managers
+                  and owners can share files in the container.
+                - ``sharingCapability`` (str): Sharing capabilities permitted
+                  for containers. Possible values: "disabled",
+                  "externalUserSharingOnly", "externalUserAndGuestSharing",
+                  "existingExternalUserSharingOnly".
+                - ``maxStoragePerContainerInBytes`` (int): Maximum storage
+                  size per container in bytes. Only applied at container
+                  creation time; changing this later does not affect
+                  existing containers.
+                - ``urlTemplate`` (str): URL pattern used to redirect files
+                  opened from the container.
+                - ``agent`` (dict): Agent (Copilot) settings. Use
+                  ``{"isAgentContainerDefault": True}`` to enable Copilot
+                  agent integration for containers of this type.
+                - ``consumingTenantOverridables`` (str): Comma-separated
+                  list of settings that consuming tenants can override.
+                  Possible values: "urlTemplate",
+                  "isDiscoverabilityEnabled", "isSearchEnabled",
+                  "isItemVersioningEnabled", "itemMajorVersionLimit",
+                  "maxStoragePerContainerInBytes".
+
+        Returns:
+            dict | None:
+                The created container type data or None if the request fails.
+
+        Example:
+            {
+                'id': 'e2756c4d-fa33-4452-9c36-2325686e1082',
+                'displayName': 'My Container Type',
+                'owningAppId': 'd288ba5f-9313-4b38-b4a4-d7edcce089b0',
+                'billingClassification': 'trial',
+                'createdDateTime': '2024-01-15T10:00:00Z'
+            }
+
+            Example settings to enable search, Copilot, and versioning:
+
+            {
+                'isSearchEnabled': True,
+                'isDiscoverabilityEnabled': True,
+                'isItemVersioningEnabled': True,
+                'itemMajorVersionLimit': 50,
+                'agent': {
+                    'isAgentContainerDefault': True
+                }
+            }
+
+        """
+
+        request_url = self.config()["containerTypesUrl"]
+        request_header = self.request_header()
+
+        post_body = {
+            "name": name,
+            "owningAppId": owning_app_id,
+            "billingClassification": billing_classification,
+        }
+        if settings:
+            post_body["settings"] = settings
+
+        self.logger.debug(
+            "Create SPE container type -> '%s' for app -> %s; calling -> %s",
+            name,
+            owning_app_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create SPE container type -> '{}'".format(name),
+        )
+
+    # end method definition
+
+    def update_container_type(
+        self,
+        container_type_id: str,
+        display_name: str | None = None,
+        settings: dict | None = None,
+    ) -> dict | None:
+        """Update an existing container type.
+
+        Updating settings on a container type may take up to 24 hours
+        for the new values to be replicated on all consuming tenants.
+        If a consuming tenant applied overrides on container type settings,
+        the new values are not applied and the overrides remain in place.
+
+        Args:
+            container_type_id (str):
+                The ID of the container type to update.
+            display_name (str | None, optional):
+                The new display name for the container type.
+            settings (dict | None, optional):
+                The updated settings for the container type. See
+                ``add_container_type()`` for the full list of supported
+                settings keys (``isSearchEnabled``, ``isDiscoverabilityEnabled``,
+                ``agent``, ``isItemVersioningEnabled``, etc.).
+
+        Returns:
+            dict | None:
+                The updated container type data or None if the request fails.
+
+        """
+
+        request_url = self.config()["containerTypesUrl"] + "/" + container_type_id
+        request_header = self.request_header()
+
+        patch_body = {}
+        if display_name:
+            patch_body["displayName"] = display_name
+        if settings:
+            patch_body["settings"] = settings
+
+        self.logger.debug(
+            "Update SPE container type with ID -> %s; calling -> %s",
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update SPE container type with ID -> {}".format(
+                container_type_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_container_type(self, container_type_id: str) -> dict | None:
+        """Delete a trial container type.
+
+        Only trial container types can be deleted. Before deleting a container
+        type, all containers of that type must be removed, including from
+        the deleted container collection.
+
+        Args:
+            container_type_id (str):
+                The ID of the container type to delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["containerTypesUrl"] + "/" + container_type_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete SPE container type with ID -> %s; calling -> %s",
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete SPE container type with ID -> {}".format(
+                container_type_id,
+            ),
+        )
+
+    # end method definition
+
+    def register_container_type(
+        self,
+        container_type_id: str,
+        application_permissions: list | None = None,
+        delegated_permissions: list | None = None,
+    ) -> dict | None:
+        """Register a container type in a consuming tenant.
+
+        The owning application defines the permissions for the container type.
+        This step is required before containers of this type can be created
+        or accessed in the consuming tenant.
+
+        Args:
+            container_type_id (str):
+                The ID of the container type to register.
+            application_permissions (list | None, optional):
+                A list of application permission strings (e.g. ["full", "readContent"]).
+            delegated_permissions (list | None, optional):
+                A list of delegated permission strings.
+
+        Returns:
+            dict | None:
+                The registration response or None if the request fails.
+
+        """
+
+        request_url = self.config()["containerTypesUrl"] + "/" + container_type_id + "/registrations"
+        request_header = self.request_header()
+
+        post_body = {}
+        if application_permissions:
+            post_body["applicationPermissions"] = application_permissions
+        if delegated_permissions:
+            post_body["delegatedPermissions"] = delegated_permissions
+
+        self.logger.debug(
+            "Register SPE container type with ID -> %s; calling -> %s",
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to register SPE container type with ID -> {}".format(
+                container_type_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - File Storage Container Methods
+    #####################################################################
+
+    def get_containers(
+        self,
+        container_type_id: str,
+        filter_expression: str | None = None,
+    ) -> dict | None:
+        """Get a list of file storage containers for a given container type.
+
+        The containerTypeId filter parameter is required by the Graph API.
+
+        Args:
+            container_type_id (str):
+                The ID of the container type to filter by (required).
+            filter_expression (str | None, optional):
+                Additional OData filter expression to combine with the
+                required containerTypeId filter (e.g.
+                "viewpoint/effectiveRole eq 'principalOwner'").
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of
+                containers, or None if the request fails.
+
+        Example:
+            {
+                '@odata.context': 'https://graph.microsoft.com/v1.0/storage/fileStorage/containers',
+                '@odata.count': 1,
+                'value': [
+                    {
+                        'id': 'b!ISJs1WRro0y0EWgkUYcktDa0mE8zSlFEqFzqRn70Zwp1CEtDEBZgQICPkRbil_5Z',
+                        'displayName': 'My File Storage Container',
+                        'containerTypeId': 'e2756c4d-fa33-4452-9c36-2325686e1082',
+                        'createdDateTime': '2021-11-24T15:41:52.347Z'
+                    }
+                ]
+            }
+
+        """
+
+        filter_value = "containerTypeId eq {}".format(container_type_id)
+        if filter_expression:
+            filter_value += " and " + filter_expression
+
+        query = {"$filter": filter_value}
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+        request_url = self.config()["fileStorageContainersUrl"] + "?" + encoded_query
+
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get SPE containers for container type -> %s; calling -> %s",
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get SPE containers for container type -> {}".format(
+                container_type_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_container(self, container_id: str) -> dict | None:
+        """Get a specific file storage container by its ID.
+
+        Args:
+            container_id (str):
+                The ID of the file storage container.
+
+        Returns:
+            dict | None:
+                The container data or None if the request fails.
+
+        Example:
+            {
+                '@odata.type': '#microsoft.graph.fileStorageContainer',
+                'id': 'b!ISJs1WRro0y0EWgkUYcktDa0mE8zSlFEqFzqRn70Zwp1CEtDEBZgQICPkRbil_5Z',
+                'displayName': 'My File Storage Container',
+                'description': 'Description of My Application Storage Container',
+                'containerTypeId': 'e2756c4d-fa33-4452-9c36-2325686e1082',
+                'status': 'active',
+                'createdDateTime': '2021-11-24T15:41:52.347Z'
+            }
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_container(
+        self,
+        display_name: str,
+        container_type_id: str,
+        description: str = "",
+        settings: dict | None = None,
+    ) -> dict | None:
+        """Create a new file storage container.
+
+        The container type identified by containerTypeId must be registered
+        in the tenant. For delegated calls, the calling user is set as the
+        owner of the container. Newly created containers have status "inactive"
+        and must be activated within 24 hours or they are automatically deleted.
+
+        Note: Platform-level features like Search, Copilot, Discoverability,
+        and Sharing are controlled at the **container type** level (see
+        ``add_container_type()`` and ``update_container_type()``). The
+        container-level settings below only control OCR and versioning
+        overrides.
+
+        Args:
+            display_name (str):
+                The display name of the container.
+            container_type_id (str):
+                The container type ID for the new container.
+            description (str, optional):
+                A user-visible description of the container.
+            settings (dict | None, optional):
+                Optional container-level settings. Supported keys:
+
+                - ``isOcrEnabled`` (bool): Whether Optical Character
+                  Recognition (OCR) is enabled for this container. When
+                  True, OCR extraction is performed for new and updated
+                  documents of supported types, making extracted text
+                  searchable. Defaults to False.
+                - ``isItemVersioningEnabled`` (bool): Whether versioning
+                  is enabled for items in this container. Overrides the
+                  container type setting if the container type allows it.
+                - ``itemMajorVersionLimit`` (int): Maximum number of major
+                  versions for items in this container.
+
+        Returns:
+            dict | None:
+                The created container data or None if the request fails.
+
+        Example:
+            {
+                'id': 'b!ISJs1WRro0y0EWgkUYcktDa0mE8zSlFEqFzqRn70Zwp1CEtDEBZgQICPkRbil_5Z',
+                'displayName': 'My Application Storage Container',
+                'description': 'Description of My Application Storage Container',
+                'containerTypeId': '91710488-5756-407f-9046-fbe5f0b4de73',
+                'status': 'inactive',
+                'createdDateTime': '2021-11-24T15:41:52.347Z',
+                'settings': {
+                    'isOcrEnabled': True,
+                    'isItemVersioningEnabled': True,
+                    'itemMajorVersionLimit': 50
+                }
+            }
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"]
+        request_header = self.request_header()
+
+        post_body = {
+            "displayName": display_name,
+            "containerTypeId": container_type_id,
+        }
+        if description:
+            post_body["description"] = description
+        if settings:
+            post_body["settings"] = settings
+
+        self.logger.debug(
+            "Create SPE container -> '%s' of type -> %s; calling -> %s",
+            display_name,
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create SPE container -> '{}'".format(
+                display_name,
+            ),
+        )
+
+    # end method definition
+
+    def update_container(
+        self,
+        container_id: str,
+        display_name: str | None = None,
+        description: str | None = None,
+        settings: dict | None = None,
+    ) -> dict | None:
+        """Update an existing file storage container.
+
+        Note: Platform-level features like Search, Copilot, Discoverability,
+        and Sharing are controlled at the **container type** level (see
+        ``add_container_type()`` and ``update_container_type()``). Only
+        OCR and versioning settings can be changed at the container level.
+
+        Args:
+            container_id (str):
+                The ID of the container to update.
+            display_name (str | None, optional):
+                The new display name for the container.
+            description (str | None, optional):
+                The new description for the container.
+            settings (dict | None, optional):
+                Updated container-level settings. Supported keys:
+
+                - ``isOcrEnabled`` (bool): Enable or disable OCR for
+                  this container.
+                - ``isItemVersioningEnabled`` (bool): Enable or disable
+                  versioning for items in this container.
+                - ``itemMajorVersionLimit`` (int): Maximum number of
+                  major versions.
+
+        Returns:
+            dict | None:
+                The updated container data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id
+        request_header = self.request_header()
+
+        patch_body = {}
+        if display_name is not None:
+            patch_body["displayName"] = display_name
+        if description is not None:
+            patch_body["description"] = description
+        if settings:
+            patch_body["settings"] = settings
+
+        self.logger.debug(
+            "Update SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_container(self, container_id: str) -> dict | None:
+        """Delete (soft-delete) a file storage container.
+
+        The container is moved to the deleted container collection and
+        can be restored within the retention period.
+
+        Args:
+            container_id (str):
+                The ID of the container to delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def activate_container(self, container_id: str) -> dict | None:
+        """Activate a newly created file storage container.
+
+        Containers are created as inactive and require activation within
+        24 hours. Inactive containers that are not activated are
+        automatically deleted.
+
+        Args:
+            container_id (str):
+                The ID of the container to activate.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/activate"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Activate SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to activate SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def restore_container(self, container_id: str) -> dict | None:
+        """Restore a soft-deleted file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the deleted container to restore.
+
+        Returns:
+            dict | None:
+                The restored container data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/restore"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Restore deleted SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to restore deleted SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def permanently_delete_container(self, container_id: str) -> dict | None:
+        """Permanently delete a file storage container.
+
+        This action is irreversible. The container and all its contents
+        will be permanently removed.
+
+        Args:
+            container_id (str):
+                The ID of the container to permanently delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permanentDelete"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Permanently delete SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to permanently delete SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def lock_container(self, container_id: str) -> dict | None:
+        """Lock a file storage container.
+
+        A locked container is set to read-only. No new content can be
+        added and existing content cannot be modified.
+
+        Args:
+            container_id (str):
+                The ID of the container to lock.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/lock"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Lock SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to lock SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def unlock_container(self, container_id: str) -> dict | None:
+        """Unlock a locked file storage container.
+
+        Removes the read-only lock from the container, allowing
+        content modifications again.
+
+        Args:
+            container_id (str):
+                The ID of the container to unlock.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/unlock"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Unlock SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to unlock SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - Container Permission Methods
+    #####################################################################
+
+    def get_container_permissions(self, container_id: str) -> dict | None:
+        """List permissions on a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of
+                permissions, or None if the request fails.
+
+        Example:
+            {
+                '@odata.context': '...',
+                'value': [
+                    {
+                        'id': 'cmVhZGVyX2...',
+                        'roles': ['reader'],
+                        'grantedToV2': {
+                            'user': {
+                                'id': 'user-id',
+                                'displayName': 'John Doe'
+                            }
+                        }
+                    }
+                ]
+            }
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permissions"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get permissions for SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get permissions for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_container_permission(self, container_id: str, permission_id: str) -> dict | None:
+        """Get a specific permission on a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            permission_id (str):
+                The ID of the permission.
+
+        Returns:
+            dict | None:
+                The permission data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permissions/" + permission_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get permission -> %s for SPE container with ID -> %s; calling -> %s",
+            permission_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get permission -> {} for SPE container with ID -> {}".format(
+                permission_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_container_permission(
+        self,
+        container_id: str,
+        user_id: str,
+        role: str = "reader",
+    ) -> dict | None:
+        """Add a permission to a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            user_id (str):
+                The M365 user ID to grant access to.
+            role (str, optional):
+                The role to assign. Valid values are "reader", "writer",
+                "manager", or "owner". Defaults to "reader".
+
+        Returns:
+            dict | None:
+                The created permission data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permissions"
+        request_header = self.request_header()
+
+        post_body = {
+            "roles": [role],
+            "grantedToV2": {
+                "user": {
+                    "userPrincipalName": user_id,
+                },
+            },
+        }
+
+        self.logger.debug(
+            "Add permission (role -> '%s') for user -> %s on SPE container with ID -> %s; calling -> %s",
+            role,
+            user_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add permission for user -> {} on SPE container with ID -> {}".format(
+                user_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def update_container_permission(
+        self,
+        container_id: str,
+        permission_id: str,
+        role: str,
+    ) -> dict | None:
+        """Update a permission on a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            permission_id (str):
+                The ID of the permission to update.
+            role (str):
+                The new role. Valid values are "reader", "writer",
+                "manager", or "owner".
+
+        Returns:
+            dict | None:
+                The updated permission data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permissions/" + permission_id
+        request_header = self.request_header()
+
+        patch_body = {
+            "roles": [role],
+        }
+
+        self.logger.debug(
+            "Update permission -> %s (new role -> '%s') on SPE container with ID -> %s; calling -> %s",
+            permission_id,
+            role,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update permission -> {} on SPE container with ID -> {}".format(
+                permission_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_container_permission(self, container_id: str, permission_id: str) -> dict | None:
+        """Delete a permission from a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            permission_id (str):
+                The ID of the permission to delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permissions/" + permission_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete permission -> %s from SPE container with ID -> %s; calling -> %s",
+            permission_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete permission -> {} from SPE container with ID -> {}".format(
+                permission_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - Container Custom Property Methods
+    #####################################################################
+
+    def get_container_custom_properties(self, container_id: str) -> dict | None:
+        """List custom properties of a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+
+        Returns:
+            dict | None:
+                The custom properties dictionary or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/customProperties"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get custom properties for SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get custom properties for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_container_custom_property(
+        self,
+        container_id: str,
+        property_name: str,
+        value: str,
+        is_searchable: bool = False,
+    ) -> dict | None:
+        """Add a custom property to a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            property_name (str):
+                The name (key) of the custom property.
+            value (str):
+                The value of the custom property.
+            is_searchable (bool, optional):
+                Whether the property should be searchable.
+                Defaults to False.
+
+        Returns:
+            dict | None:
+                The updated custom properties or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/customProperties"
+        request_header = self.request_header()
+
+        post_body = {
+            property_name: {
+                "value": value,
+                "isSearchable": is_searchable,
+            },
+        }
+
+        self.logger.debug(
+            "Add custom property -> '%s' to SPE container with ID -> %s; calling -> %s",
+            property_name,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add custom property -> '{}' to SPE container with ID -> {}".format(
+                property_name,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def update_container_custom_property(
+        self,
+        container_id: str,
+        property_name: str,
+        value: str,
+        is_searchable: bool = False,
+    ) -> dict | None:
+        """Update a custom property on a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            property_name (str):
+                The name (key) of the custom property.
+            value (str):
+                The new value of the custom property.
+            is_searchable (bool, optional):
+                Whether the property should be searchable.
+                Defaults to False.
+
+        Returns:
+            dict | None:
+                The updated custom properties or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/customProperties"
+        request_header = self.request_header()
+
+        patch_body = {
+            property_name: {
+                "value": value,
+                "isSearchable": is_searchable,
+            },
+        }
+
+        self.logger.debug(
+            "Update custom property -> '%s' on SPE container with ID -> %s; calling -> %s",
+            property_name,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update custom property -> '{}' on SPE container with ID -> {}".format(
+                property_name,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_container_custom_property(
+        self,
+        container_id: str,
+        property_name: str,
+    ) -> dict | None:
+        """Delete a custom property from a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            property_name (str):
+                The name (key) of the custom property to delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = (
+            self.config()["fileStorageContainersUrl"] + "/" + container_id + "/customProperties/" + property_name
+        )
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete custom property -> '%s' from SPE container with ID -> %s; calling -> %s",
+            property_name,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete custom property -> '{}' from SPE container with ID -> {}".format(
+                property_name,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - Container Column Methods
+    #####################################################################
+
+    def get_container_columns(self, container_id: str) -> dict | None:
+        """List column definitions of a file storage container.
+
+        Columns define custom structured metadata supported by the container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of
+                column definitions, or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/columns"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get columns for SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get columns for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_container_column(self, container_id: str, column_id: str) -> dict | None:
+        """Get a specific column definition of a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            column_id (str):
+                The ID of the column.
+
+        Returns:
+            dict | None:
+                The column definition data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/columns/" + column_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get column -> %s for SPE container with ID -> %s; calling -> %s",
+            column_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get column -> {} for SPE container with ID -> {}".format(
+                column_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_container_column(
+        self,
+        container_id: str,
+        name: str,
+        column_definition: dict | None = None,
+    ) -> dict | None:
+        """Create a column for a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            name (str):
+                The name of the column.
+            column_definition (dict | None, optional):
+                The column definition body. If not provided, a basic text
+                column is created. The dict should follow the Graph API
+                columnDefinition resource schema (e.g. include "text",
+                "number", "dateTime", "choice", etc.).
+
+        Returns:
+            dict | None:
+                The created column definition or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/columns"
+        request_header = self.request_header()
+
+        post_body = column_definition or {}
+        post_body["name"] = name
+        if "text" not in post_body and not any(
+            key in post_body for key in ("number", "dateTime", "choice", "boolean", "lookup", "personOrGroup")
+        ):
+            post_body["text"] = {}
+
+        self.logger.debug(
+            "Add column -> '%s' to SPE container with ID -> %s; calling -> %s",
+            name,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to add column -> '{}' to SPE container with ID -> {}".format(
+                name,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def update_container_column(
+        self,
+        container_id: str,
+        column_id: str,
+        column_definition: dict,
+    ) -> dict | None:
+        """Update a column definition of a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            column_id (str):
+                The ID of the column to update.
+            column_definition (dict):
+                The updated column definition body following the Graph
+                API columnDefinition resource schema.
+
+        Returns:
+            dict | None:
+                The updated column definition or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/columns/" + column_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Update column -> %s on SPE container with ID -> %s; calling -> %s",
+            column_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=column_definition,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update column -> {} on SPE container with ID -> {}".format(
+                column_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_container_column(self, container_id: str, column_id: str) -> dict | None:
+        """Delete a column definition from a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            column_id (str):
+                The ID of the column to delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/columns/" + column_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete column -> %s from SPE container with ID -> %s; calling -> %s",
+            column_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete column -> {} from SPE container with ID -> {}".format(
+                column_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - Container Drive & Recycle Bin Methods
+    #####################################################################
+
+    def get_container_drive(self, container_id: str) -> dict | None:
+        """Get the drive resource of a file storage container.
+
+        The drive is the entry point for accessing files (driveItems)
+        stored within the container using the standard OneDrive/SharePoint
+        drive API.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+
+        Returns:
+            dict | None:
+                The drive resource data or None if the request fails.
+
+        Example:
+            {
+                'id': 'b!ISJs1WRro0y0EWgkUYcktDa0mE8zSlFEqFzqRn70Zwp1CEtDEBZgQICPkRbil_5Z',
+                'driveType': 'documentLibrary',
+                'name': 'My Application Storage Container',
+                'webUrl': 'https://contoso.sharepoint.com/contentstorage/...',
+                'owner': {...},
+                'quota': {
+                    'total': 27487790694400,
+                    'used': 0,
+                    'remaining': 27487790694400
+                }
+            }
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/drive"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get drive for SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get drive for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_container_recycle_bin_items(self, container_id: str) -> dict | None:
+        """List recycle bin items in a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of
+                recycle bin items, or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/recycleBin/items"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get recycle bin items for SPE container with ID -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get recycle bin items for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def restore_container_recycle_bin_items(
+        self,
+        container_id: str,
+        item_ids: list,
+    ) -> dict | None:
+        """Restore recycle bin items in a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            item_ids (list):
+                A list of recycle bin item IDs to restore.
+
+        Returns:
+            dict | None:
+                The restored items data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/recycleBin/items/restore"
+        request_header = self.request_header()
+
+        post_body = {
+            "ids": item_ids,
+        }
+
+        self.logger.debug(
+            "Restore %d recycle bin item(s) for SPE container with ID -> %s; calling -> %s",
+            len(item_ids),
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to restore recycle bin items for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_container_recycle_bin_item(
+        self,
+        container_id: str,
+        item_id: str,
+    ) -> dict | None:
+        """Permanently delete a recycle bin item from a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            item_id (str):
+                The ID of the recycle bin item to permanently delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/recycleBin/items/" + item_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete recycle bin item -> %s from SPE container with ID -> %s; calling -> %s",
+            item_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete recycle bin item -> {} from SPE container with ID -> {}".format(
+                item_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def update_container_recycle_bin_settings(
+        self,
+        container_id: str,
+        retention_period_days: int,
+    ) -> dict | None:
+        """Update recycle bin settings for a file storage container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            retention_period_days (int):
+                The number of days items are retained in the recycle bin
+                before automatic permanent deletion.
+
+        Returns:
+            dict | None:
+                The updated recycle bin settings or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/recycleBinSettings"
+        request_header = self.request_header()
+
+        patch_body = {
+            "retentionPeriodInDays": retention_period_days,
+        }
+
+        self.logger.debug(
+            "Update recycle bin settings (retention -> %d days) for SPE container with ID -> %s; calling -> %s",
+            retention_period_days,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update recycle bin settings for SPE container with ID -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # Drive Item Methods (SPE Containers, OneDrive, SharePoint Drives)
+    #####################################################################
+
+    def get_drive_items(
+        self,
+        drive_id: str,
+        folder_path: str = "",
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
+        limit: int | None = None,
+    ) -> dict | None:
+        """List items (files and folders) in the root or a specific folder of a drive.
+
+        This method works with any drive — SPE container drives, OneDrive,
+        or SharePoint document library drives. To get the drive ID for an
+        SPE container, use ``get_container_drive()`` first:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            items = m365.get_drive_items(drive_id=drive_id)
+
+        Args:
+            drive_id (str):
+                The ID of the drive. Obtain this from ``get_container_drive()``,
+                ``get_user_drive()``, or the SharePoint site's drive.
+            folder_path (str, optional):
+                A path relative to the drive root (e.g. "Documents/Reports").
+                If empty, lists items in the drive root. Use forward slashes.
+            select (str | None, optional):
+                Comma-separated list of fields to select
+                (e.g. "id,name,size,lastModifiedDateTime").
+            filter_expression (str | None, optional):
+                OData filter expression (e.g. "file ne null" to list only files).
+            order_by (str | None, optional):
+                Field(s) to order results by (e.g. "name asc").
+            limit (int | None, optional):
+                Maximum number of items to return ($top).
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing a list of driveItem
+                resources, or None if the request fails.
+
+        Example:
+            {
+                '@odata.context': '...',
+                'value': [
+                    {
+                        'id': '01ABCDEF...',
+                        'name': 'Report.pdf',
+                        'size': 1048576,
+                        'file': {'mimeType': 'application/pdf'},
+                        'lastModifiedDateTime': '2024-03-15T10:30:00Z',
+                        'createdBy': {'user': {'displayName': 'John Doe'}}
+                    },
+                    {
+                        'id': '01GHIJKL...',
+                        'name': 'Archive',
+                        'folder': {'childCount': 5},
+                        'lastModifiedDateTime': '2024-03-10T08:00:00Z'
+                    }
+                ]
+            }
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id
+        if folder_path:
+            request_url += "/root:/" + quote(folder_path, safe="/") + ":/children"
+        else:
+            request_url += "/root/children"
+
+        query = {}
+        if select:
+            query["$select"] = select
+        if filter_expression:
+            query["$filter"] = filter_expression
+        if order_by:
+            query["$orderby"] = order_by
+        if limit:
+            query["$top"] = limit
+
+        if query:
+            encoded_query = urllib.parse.urlencode(query, doseq=True)
+            request_url += "?" + encoded_query
+
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get drive items for drive -> %s, path -> '%s'; calling -> %s",
+            drive_id,
+            folder_path or "/",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get items for drive -> {} path -> '{}'".format(
+                drive_id,
+                folder_path or "/",
+            ),
+        )
+
+    # end method definition
+
+    def get_drive_item_children(
+        self,
+        drive_id: str,
+        item_id: str,
+        select: str | None = None,
+        filter_expression: str | None = None,
+        order_by: str | None = None,
+        limit: int | None = None,
+    ) -> dict | None:
+        """List children of a specific folder (by item ID) in a drive.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            item_id (str):
+                The ID of the folder item to list children for.
+            select (str | None, optional):
+                Comma-separated list of fields to select.
+            filter_expression (str | None, optional):
+                OData filter expression.
+            order_by (str | None, optional):
+                Field(s) to order results by.
+            limit (int | None, optional):
+                Maximum number of items to return ($top).
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing a list of driveItem
+                resources (children), or None if the request fails.
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/children"
+
+        query = {}
+        if select:
+            query["$select"] = select
+        if filter_expression:
+            query["$filter"] = filter_expression
+        if order_by:
+            query["$orderby"] = order_by
+        if limit:
+            query["$top"] = limit
+
+        if query:
+            encoded_query = urllib.parse.urlencode(query, doseq=True)
+            request_url += "?" + encoded_query
+
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get children of item -> %s in drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get children of item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_drive_item(
+        self,
+        drive_id: str,
+        item_id: str | None = None,
+        item_path: str | None = None,
+        select: str | None = None,
+    ) -> dict | None:
+        """Get metadata for a specific item (file or folder) in a drive.
+
+        You can identify the item either by its ID or by its path relative
+        to the drive root. Exactly one of ``item_id`` or ``item_path`` must
+        be provided.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            item_id (str | None, optional):
+                The ID of the item. Provide either this or ``item_path``.
+            item_path (str | None, optional):
+                The path to the item relative to the drive root
+                (e.g. "Documents/Report.pdf"). Provide either this or
+                ``item_id``.
+            select (str | None, optional):
+                Comma-separated list of fields to select.
+
+        Returns:
+            dict | None:
+                The driveItem resource data or None if the request fails.
+
+        Example:
+            {
+                'id': '01ABCDEF...',
+                'name': 'Report.pdf',
+                'size': 1048576,
+                'file': {'mimeType': 'application/pdf'},
+                'lastModifiedDateTime': '2024-03-15T10:30:00Z',
+                'webUrl': 'https://contoso.sharepoint.com/...',
+                'parentReference': {
+                    'driveId': '...',
+                    'id': '...',
+                    'path': '/drive/root:'
+                },
+                'createdBy': {'user': {'displayName': 'John Doe'}},
+                'lastModifiedBy': {'user': {'displayName': 'John Doe'}}
+            }
+
+        """
+
+        if not item_id and not item_path:
+            self.logger.error("Either item_id or item_path must be provided!")
+            return None
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id
+        if item_id:
+            request_url += "/items/" + item_id
+        else:
+            request_url += "/root:/" + quote(item_path, safe="/")
+
+        if select:
+            query = {"$select": select}
+            encoded_query = urllib.parse.urlencode(query, doseq=True)
+            request_url += "?" + encoded_query
+
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get drive item (id -> %s, path -> '%s') in drive -> %s; calling -> %s",
+            item_id or "N/A",
+            item_path or "N/A",
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get item (id -> {}, path -> '{}') in drive -> {}".format(
+                item_id or "N/A",
+                item_path or "N/A",
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_drive_folder(
+        self,
+        drive_id: str,
+        folder_name: str,
+        parent_item_id: str | None = None,
+        parent_path: str | None = None,
+        conflict_behavior: str = "rename",
+    ) -> dict | None:
+        """Create a new folder in a drive.
+
+        The folder is created either under a specific parent item (by ID)
+        or under a path relative to the drive root. If neither is provided,
+        the folder is created in the drive root.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            folder = m365.add_drive_folder(drive_id=drive_id, folder_name="Reports")
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            folder_name (str):
+                The name of the new folder.
+            parent_item_id (str | None, optional):
+                The ID of the parent folder. If not provided and
+                ``parent_path`` is also not provided, the folder is
+                created in the drive root.
+            parent_path (str | None, optional):
+                The path of the parent folder relative to the drive root
+                (e.g. "Documents/Archive"). Used if ``parent_item_id``
+                is not provided.
+            conflict_behavior (str, optional):
+                Behavior when a folder with the same name already exists.
+                Valid values: "rename" (default), "replace", "fail".
+
+        Returns:
+            dict | None:
+                The created driveItem (folder) data or None if the request
+                fails.
+
+        Example:
+            {
+                'id': '01GHIJKL...',
+                'name': 'Reports',
+                'folder': {'childCount': 0},
+                'createdDateTime': '2024-03-15T10:00:00Z',
+                'parentReference': {
+                    'driveId': '...',
+                    'id': '...',
+                    'path': '/drive/root:'
+                }
+            }
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id
+        if parent_item_id:
+            request_url += "/items/" + parent_item_id + "/children"
+        elif parent_path:
+            request_url += "/root:/" + quote(parent_path, safe="/") + ":/children"
+        else:
+            request_url += "/root/children"
+
+        request_header = self.request_header()
+
+        post_body = {
+            "name": folder_name,
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": conflict_behavior,
+        }
+
+        self.logger.debug(
+            "Create folder -> '%s' in drive -> %s (parent -> %s); calling -> %s",
+            folder_name,
+            drive_id,
+            parent_item_id or parent_path or "root",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create folder -> '{}' in drive -> {}".format(
+                folder_name,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def upload_drive_item(
+        self,
+        drive_id: str,
+        file_path: str,
+        target_filename: str | None = None,
+        parent_item_id: str | None = None,
+        parent_path: str | None = None,
+        conflict_behavior: str = "replace",
+    ) -> dict | None:
+        """Upload a small file (up to 4 MB) to a drive.
+
+        For files larger than 4 MB, use ``upload_drive_item_session()`` instead.
+
+        The file is uploaded to the drive root unless a parent folder is
+        specified via ``parent_item_id`` or ``parent_path``.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            result = m365.upload_drive_item(
+                drive_id=drive_id,
+                file_path="/local/path/report.pdf",
+            )
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            file_path (str):
+                The local file system path to the file to upload.
+            target_filename (str | None, optional):
+                The filename to use in the drive. If not provided, the
+                local filename is used.
+            parent_item_id (str | None, optional):
+                The ID of the parent folder. If not provided and
+                ``parent_path`` is also not provided, the file is
+                uploaded to the drive root.
+            parent_path (str | None, optional):
+                The path of the parent folder relative to the drive root
+                (e.g. "Documents/Reports").
+            conflict_behavior (str, optional):
+                Behavior when a file with the same name already exists.
+                Valid values: "replace" (default), "rename", "fail".
+
+        Returns:
+            dict | None:
+                The created/updated driveItem data or None if the request fails.
+
+        Example:
+            {
+                'id': '01ABCDEF...',
+                'name': 'report.pdf',
+                'size': 1048576,
+                'file': {'mimeType': 'application/pdf'},
+                'createdDateTime': '2024-03-15T10:30:00Z',
+                'webUrl': 'https://contoso.sharepoint.com/...'
+            }
+
+        """
+
+        if not os.path.exists(file_path):
+            self.logger.error("File -> %s does not exist!", file_path)
+            return None
+
+        file_size = os.path.getsize(file_path)
+        if file_size > 4 * 1024 * 1024:
+            self.logger.error(
+                "File -> %s is too large (%d bytes) for simple upload. Use upload_drive_item_session() for files > 4 MB!",
+                file_path,
+                file_size,
+            )
+            return None
+
+        filename = target_filename or os.path.basename(file_path)
+        encoded_filename = quote(filename, safe="")
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id
+        if parent_item_id:
+            request_url += "/items/" + parent_item_id + ":/" + encoded_filename + ":/content"
+        elif parent_path:
+            request_url += "/root:/" + quote(parent_path, safe="/") + "/" + encoded_filename + ":/content"
+        else:
+            request_url += "/root:/" + encoded_filename + ":/content"
+
+        request_url += "?@microsoft.graph.conflictBehavior=" + conflict_behavior
+
+        request_header = self.request_header(content_type="application/octet-stream")
+
+        with open(file_path, "rb") as f:
+            file_data = f.read()
+
+        self.logger.debug(
+            "Upload file -> '%s' (%d bytes) to drive -> %s; calling -> %s",
+            filename,
+            file_size,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PUT",
+            headers=request_header,
+            data=file_data,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to upload file -> '{}' to drive -> {}".format(
+                filename,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def upload_drive_item_session(
+        self,
+        drive_id: str,
+        file_path: str,
+        target_filename: str | None = None,
+        parent_item_id: str | None = None,
+        parent_path: str | None = None,
+        conflict_behavior: str = "replace",
+        chunk_size: int = 10 * 1024 * 1024,
+    ) -> dict | None:
+        """Upload a large file (> 4 MB) to a drive using an upload session.
+
+        This method handles the full upload session lifecycle: creates the
+        session, uploads the file in chunks, and returns the completed
+        driveItem. Suitable for files of any size.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            result = m365.upload_drive_item_session(
+                drive_id=drive_id,
+                file_path="/local/path/large-video.mp4",
+                parent_path="Media",
+            )
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            file_path (str):
+                The local file system path to the file to upload.
+            target_filename (str | None, optional):
+                The filename to use in the drive. If not provided, the
+                local filename is used.
+            parent_item_id (str | None, optional):
+                The ID of the parent folder. If not provided and
+                ``parent_path`` is also not provided, the file is
+                uploaded to the drive root.
+            parent_path (str | None, optional):
+                The path of the parent folder relative to the drive root.
+            conflict_behavior (str, optional):
+                Behavior when a file with the same name already exists.
+                Valid values: "replace" (default), "rename", "fail".
+            chunk_size (int, optional):
+                The size of each upload chunk in bytes. Must be a multiple
+                of 320 KiB. Defaults to 10 MiB.
+
+        Returns:
+            dict | None:
+                The created/updated driveItem data or None if the upload fails.
+
+        """
+
+        if not os.path.exists(file_path):
+            self.logger.error("File -> %s does not exist!", file_path)
+            return None
+
+        filename = target_filename or os.path.basename(file_path)
+        encoded_filename = quote(filename, safe="")
+        file_size = os.path.getsize(file_path)
+
+        # Step 1: Create the upload session
+        request_url = self.config()["drivesUrl"] + "/" + drive_id
+        if parent_item_id:
+            request_url += "/items/" + parent_item_id + ":/" + encoded_filename + ":/createUploadSession"
+        elif parent_path:
+            request_url += "/root:/" + quote(parent_path, safe="/") + "/" + encoded_filename + ":/createUploadSession"
+        else:
+            request_url += "/root:/" + encoded_filename + ":/createUploadSession"
+
+        request_header = self.request_header()
+
+        session_body = {
+            "item": {
+                "@microsoft.graph.conflictBehavior": conflict_behavior,
+                "name": filename,
+            },
+        }
+
+        self.logger.debug(
+            "Create upload session for file -> '%s' (%d bytes) in drive -> %s; calling -> %s",
+            filename,
+            file_size,
+            drive_id,
+            request_url,
+        )
+
+        session_response = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=session_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create upload session for file -> '{}' in drive -> {}".format(
+                filename,
+                drive_id,
+            ),
+        )
+
+        if not session_response or "uploadUrl" not in session_response:
+            self.logger.error("Failed to obtain upload URL for file -> '%s'!", filename)
+            return None
+
+        upload_url = session_response["uploadUrl"]
+
+        # Step 2: Upload file in chunks
+        self.logger.debug(
+            "Uploading file -> '%s' in chunks of %d bytes...",
+            filename,
+            chunk_size,
+        )
+
+        result = None
+        with open(file_path, "rb") as f:
+            offset = 0
+            while offset < file_size:
+                chunk_data = f.read(chunk_size)
+                chunk_end = offset + len(chunk_data) - 1
+
+                chunk_header = {
+                    "Content-Length": str(len(chunk_data)),
+                    "Content-Range": "bytes {}-{}/{}".format(offset, chunk_end, file_size),
+                }
+
+                try:
+                    response = self._request_session.put(
+                        url=upload_url,
+                        data=chunk_data,
+                        headers=chunk_header,
+                        timeout=REQUEST_TIMEOUT,
+                    )
+                except requests.exceptions.RequestException as e:
+                    self.logger.error(
+                        "Upload session request failed for file -> '%s'; error -> %s",
+                        filename,
+                        str(e),
+                    )
+                    return None
+
+                if response.status_code in [200, 201]:
+                    # Upload complete — final response contains the driveItem
+                    result = self.parse_request_response(response)
+                    break
+                if response.status_code == 202:
+                    # Chunk accepted, continue uploading
+                    offset += len(chunk_data)
+                    continue
+                self.logger.error(
+                    "Upload chunk failed for file -> '%s'; status -> %s; error -> %s",
+                    filename,
+                    response.status_code,
+                    response.text,
+                )
+                return None
+
+        if result:
+            self.logger.debug("Successfully uploaded file -> '%s' to drive -> %s.", filename, drive_id)
+
+        return result
+
+    # end method definition
+
+    def download_drive_item(
+        self,
+        drive_id: str,
+        target_path: str,
+        item_id: str | None = None,
+        item_path: str | None = None,
+    ) -> str | None:
+        """Download a file from a drive to the local file system.
+
+        You can identify the file either by its item ID or by its path
+        relative to the drive root. Exactly one of ``item_id`` or
+        ``item_path`` must be provided.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            local_file = m365.download_drive_item(
+                drive_id=drive_id,
+                item_path="Documents/Report.pdf",
+                target_path="/tmp/Report.pdf",
+            )
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            target_path (str):
+                The local file system path where the file should be saved.
+            item_id (str | None, optional):
+                The ID of the file item. Provide either this or ``item_path``.
+            item_path (str | None, optional):
+                The path to the file relative to the drive root.
+                Provide either this or ``item_id``.
+
+        Returns:
+            str | None:
+                The local file path where the file was saved, or None if
+                the download fails.
+
+        """
+
+        if not item_id and not item_path:
+            self.logger.error("Either item_id or item_path must be provided!")
+            return None
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id
+        if item_id:
+            request_url += "/items/" + item_id + "/content"
+        else:
+            request_url += "/root:/" + quote(item_path, safe="/") + ":/content"
+
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Download drive item (id -> %s, path -> '%s') from drive -> %s; calling -> %s",
+            item_id or "N/A",
+            item_path or "N/A",
+            drive_id,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to download item (id -> {}, path -> '{}') from drive -> {}".format(
+                item_id or "N/A",
+                item_path or "N/A",
+                drive_id,
+            ),
+            parse_request_response=False,
+            stream=True,
+        )
+
+        if not response or not response.ok:
+            return None
+
+        # Write the file content to disk
+        target_dir = os.path.dirname(target_path)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+
+        with open(target_path, "wb") as f:
+            f.writelines(response.iter_content(chunk_size=8192))
+
+        self.logger.debug(
+            "Downloaded file to -> '%s' (%d bytes).",
+            target_path,
+            os.path.getsize(target_path),
+        )
+
+        return target_path
+
+    # end method definition
+
+    def update_drive_item(
+        self,
+        drive_id: str,
+        item_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        parent_reference: dict | None = None,
+    ) -> dict | None:
+        """Update metadata of a drive item (file or folder).
+
+        This can be used to rename an item, update its description, or
+        move it to a different parent folder (by providing a new
+        ``parent_reference``).
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            item_id (str):
+                The ID of the item to update.
+            name (str | None, optional):
+                The new name for the item (rename).
+            description (str | None, optional):
+                The new description for the item.
+            parent_reference (dict | None, optional):
+                A new parent reference to move the item. Must include
+                "id" (the target folder ID). Example:
+                ``{"id": "01GHIJKL..."}``. Can also include "driveId"
+                to move across drives.
+
+        Returns:
+            dict | None:
+                The updated driveItem data or None if the request fails.
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id
+        request_header = self.request_header()
+
+        patch_body = {}
+        if name is not None:
+            patch_body["name"] = name
+        if description is not None:
+            patch_body["description"] = description
+        if parent_reference is not None:
+            patch_body["parentReference"] = parent_reference
+
+        self.logger.debug(
+            "Update drive item -> %s in drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_drive_item(self, drive_id: str, item_id: str) -> dict | None:
+        """Delete a drive item (file or folder).
+
+        Deleted items are moved to the recycle bin (if enabled for the
+        drive/container). Use ``get_container_recycle_bin_items()`` and
+        ``restore_container_recycle_bin_items()`` to manage recycled items
+        for SPE containers.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            m365.delete_drive_item(drive_id=drive_id, item_id="01ABCDEF...")
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            item_id (str):
+                The ID of the item to delete.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails.
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Delete drive item -> %s from drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete item -> {} from drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def copy_drive_item(
+        self,
+        drive_id: str,
+        item_id: str,
+        target_parent_id: str,
+        target_name: str | None = None,
+        target_drive_id: str | None = None,
+    ) -> dict | None:
+        """Copy a drive item (file or folder) to a new location.
+
+        The copy operation is asynchronous. The response includes a
+        ``Location`` header with a URL to monitor the copy progress.
+        This method returns the response from the initial copy request.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the source drive.
+            item_id (str):
+                The ID of the item to copy.
+            target_parent_id (str):
+                The ID of the target parent folder.
+            target_name (str | None, optional):
+                The new name for the copied item. If not provided,
+                the original name is used.
+            target_drive_id (str | None, optional):
+                The ID of the target drive. If not provided, the item
+                is copied within the same drive.
+
+        Returns:
+            dict | None:
+                The response or None if the request fails. For successful
+                copy requests the Graph API returns 202 Accepted.
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/copy"
+        request_header = self.request_header()
+
+        post_body = {
+            "parentReference": {
+                "id": target_parent_id,
+            },
+        }
+        if target_drive_id:
+            post_body["parentReference"]["driveId"] = target_drive_id
+        if target_name:
+            post_body["name"] = target_name
+
+        self.logger.debug(
+            "Copy drive item -> %s to parent -> %s (drive -> %s); calling -> %s",
+            item_id,
+            target_parent_id,
+            target_drive_id or drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to copy item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def move_drive_item(
+        self,
+        drive_id: str,
+        item_id: str,
+        target_parent_id: str,
+        new_name: str | None = None,
+        target_drive_id: str | None = None,
+    ) -> dict | None:
+        """Move a drive item (file or folder) to a new location.
+
+        Moving is done by updating the ``parentReference`` of the item.
+        You can optionally rename the item at the same time.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+            m365.move_drive_item(
+                drive_id=drive_id,
+                item_id="01ABCDEF...",
+                target_parent_id="01GHIJKL...",
+            )
+
+        Args:
+            drive_id (str):
+                The ID of the drive.
+            item_id (str):
+                The ID of the item to move.
+            target_parent_id (str):
+                The ID of the target parent folder.
+            new_name (str | None, optional):
+                A new name for the item (combine move and rename).
+            target_drive_id (str | None, optional):
+                The ID of the target drive. If not provided, the item
+                is moved within the same drive.
+
+        Returns:
+            dict | None:
+                The updated driveItem data or None if the request fails.
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id
+        request_header = self.request_header()
+
+        patch_body = {
+            "parentReference": {
+                "id": target_parent_id,
+            },
+        }
+        if target_drive_id:
+            patch_body["parentReference"]["driveId"] = target_drive_id
+        if new_name:
+            patch_body["name"] = new_name
+
+        self.logger.debug(
+            "Move drive item -> %s to parent -> %s (drive -> %s); calling -> %s",
+            item_id,
+            target_parent_id,
+            target_drive_id or drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to move item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_drive_item_fields(
+        self,
+        drive_id: str,
+        item_id: str,
+    ) -> dict | None:
+        """Get the custom column (field) values of a drive item.
+
+        Each drive item in an SPE container has a ``listItem`` facet that
+        stores custom metadata defined by the container's columns. This
+        method retrieves those field values.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item.
+
+        Returns:
+            dict | None:
+                A dictionary of field name/value pairs or None if the
+                request fails.
+
+        Example:
+            {
+                'Color': 'Fuchsia',
+                'Quantity': 934,
+                'Status': 'Active',
+                '@odata.etag': '"abc123"'
+            }
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/listItem/fields"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get fields for drive item -> %s in drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get fields for item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def add_drive_item_permission(
+        self,
+        drive_id: str,
+        item_id: str,
+        recipient_emails: list[str],
+        role: Literal["read", "write"] = "write",
+        require_user_token: bool = True,
+    ) -> dict | None:
+        """Grant an additive permission on a drive item.
+
+        Uses ``POST /drives/{drive-id}/items/{item-id}/invite`` with
+        ``sendInvitation`` forced to ``False`` as required for SharePoint
+        Embedded additive permissions.
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item (file or folder).
+            recipient_emails (list[str]):
+                Recipient e-mail addresses to grant access to.
+            role (Literal["read", "write"], optional):
+                The role to grant. Defaults to "write".
+            require_user_token (bool, optional):
+                If True (default), uses delegated user token via
+                ``request_header_user()``. App-only token calls are not
+                supported for this operation in SharePoint Embedded.
+
+        Returns:
+            dict | None:
+                Invite operation response or None if the request fails.
+
+        """
+
+        if not recipient_emails:
+            self.logger.error("recipient_emails is required to grant drive item permission.")
+            return None
+
+        if item_id == "root":
+            self.logger.error(
+                "Cannot grant additive permissions on drive root. Use container role permissions instead."
+            )
+            return None
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/invite"
+        request_header = self.request_header_user() if require_user_token else self.request_header()
+
+        post_body = {
+            "recipients": [{"email": email} for email in recipient_emails],
+            "roles": [role],
+            "sendInvitation": False,
+            "requireSignIn": True,
+        }
+
+        self.logger.debug(
+            "Grant additive permission '%s' on item -> %s in drive -> %s for %d recipient(s); calling -> %s",
+            role,
+            item_id,
+            drive_id,
+            len(recipient_emails),
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to grant additive permission on item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_drive_item_permissions(
+        self,
+        drive_id: str,
+        item_id: str,
+        require_user_token: bool = True,
+    ) -> dict | None:
+        """List permissions on a drive item.
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item.
+            require_user_token (bool, optional):
+                If True (default), uses delegated user token via
+                ``request_header_user()``.
+
+        Returns:
+            dict | None:
+                Permission collection response or None if the request fails.
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/permissions"
+        request_header = self.request_header_user() if require_user_token else self.request_header()
+
+        self.logger.debug(
+            "Get permissions for item -> %s in drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get permissions for item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_drive_item_permission(
+        self,
+        drive_id: str,
+        item_id: str,
+        permission_id: str,
+        require_user_token: bool = True,
+    ) -> dict | None:
+        """Get a specific permission on a drive item.
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item.
+            permission_id (str):
+                The ID of the permission.
+            require_user_token (bool, optional):
+                If True (default), uses delegated user token via
+                ``request_header_user()``.
+
+        Returns:
+            dict | None:
+                Permission response or None if the request fails.
+
+        """
+
+        request_url = (
+            self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/permissions/" + permission_id
+        )
+        request_header = self.request_header_user() if require_user_token else self.request_header()
+
+        self.logger.debug(
+            "Get permission -> %s for item -> %s in drive -> %s; calling -> %s",
+            permission_id,
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get permission -> {} for item -> {} in drive -> {}".format(
+                permission_id,
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def delete_drive_item_permission(
+        self,
+        drive_id: str,
+        item_id: str,
+        permission_id: str,
+        require_user_token: bool = True,
+    ) -> dict | None:
+        """Delete an additive permission from a drive item.
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item.
+            permission_id (str):
+                The ID of the permission to delete.
+            require_user_token (bool, optional):
+                If True (default), uses delegated user token via
+                ``request_header_user()``.
+
+        Returns:
+            dict | None:
+                Delete response or None if the request fails.
+
+        """
+
+        request_url = (
+            self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/permissions/" + permission_id
+        )
+        request_header = self.request_header_user() if require_user_token else self.request_header()
+
+        self.logger.debug(
+            "Delete permission -> %s from item -> %s in drive -> %s; calling -> %s",
+            permission_id,
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete permission -> {} from item -> {} in drive -> {}".format(
+                permission_id,
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def update_drive_item_fields(
+        self,
+        drive_id: str,
+        item_id: str,
+        fields: dict,
+    ) -> dict | None:
+        """Update the custom column (field) values of a drive item.
+
+        Use this method to set or update custom metadata on a file or
+        folder within an SPE container. The field names must correspond
+        to columns defined on the container (see ``add_container_column()``).
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item.
+            fields (dict):
+                A dictionary of field name/value pairs to set. Keys must
+                match column names defined on the container. To clear a
+                field, set its value to None.
+
+        Returns:
+            dict | None:
+                The updated field values or None if the request fails.
+
+        Example:
+            ::
+
+                m365.update_drive_item_fields(
+                    drive_id="b!abc123",
+                    item_id="01ABCDEF",
+                    fields={
+                        "Status": "Approved",
+                        "ReviewDate": "2025-06-01",
+                        "Priority": 1,
+                    },
+                )
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/items/" + item_id + "/listItem/fields"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Update fields for drive item -> %s in drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=fields,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to update fields for item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def search_drive_items(
+        self,
+        drive_id: str,
+        query: str,
+    ) -> dict | None:
+        """Search for drive items within a drive.
+
+        Searches the full text of items (file names, content, and metadata)
+        in the specified drive. The search uses the Microsoft Search index
+        and results may be slightly delayed for newly uploaded content.
+
+        To get the drive ID for an SPE container, use ``get_container_drive()``:
+
+            response = m365.get_container_drive(container_id="...")
+            drive_id = response["id"]
+
+        Args:
+            drive_id (str):
+                The ID of the drive to search.
+            query (str):
+                The search query string. Supports KQL (Keyword Query
+                Language) syntax for advanced queries.
+
+        Returns:
+            dict | None:
+                Search results containing matching drive items or None
+                if the request fails.
+
+        Example:
+            {
+                'value': [
+                    {
+                        'hitsContainers': [
+                            {
+                                'hits': [
+                                    {
+                                        'hitId': '01ABCDEF',
+                                        'resource': {
+                                            'id': '01ABCDEF',
+                                            'name': 'Report.docx',
+                                            ...
+                                        }
+                                    }
+                                ],
+                                'total': 1,
+                                'moreResultsAvailable': False
+                            }
+                        ]
+                    }
+                ]
+            }
+
+        """
+
+        request_url = self.config()["drivesUrl"] + "/" + drive_id + "/root/search(q='" + query + "')"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Search drive items in drive -> %s with query -> '%s'; calling -> %s",
+            drive_id,
+            query,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to search items in drive -> {} with query -> '{}'".format(
+                drive_id,
+                query,
+            ),
+        )
+
+    # end method definition
+
+    def search_containers(
+        self,
+        container_type_id: str,
+        title: str | None = None,
+        description: str | None = None,
+        custom_property_name: str | None = None,
+        custom_property_value: str | None = None,
+        include_hidden_content: bool = True,
+    ) -> dict | None:
+        """Search SharePoint Embedded containers with Microsoft Search.
+
+        This method uses the Graph Search API endpoint ``/beta/search/query``
+        and scopes searches to a specific container type via ``ContainerTypeId``.
+
+        The Graph Search API for SharePoint Embedded is in preview and supports
+        delegated permissions only.
+
+        Args:
+            container_type_id (str):
+                The SPE container type ID to scope the search.
+            title (str | None, optional):
+                Optional container title filter. Mapped to ``Title:'...'``.
+            description (str | None, optional):
+                Optional container description filter. Mapped to
+                ``Description:'...'``.
+            custom_property_name (str | None, optional):
+                Optional custom property name for search.
+                Per Microsoft documentation this is queried as
+                ``<PropertyName>OWSTEXT:<value>``.
+            custom_property_value (str | None, optional):
+                Optional value for ``custom_property_name``.
+            include_hidden_content (bool, optional):
+                Sets ``sharePointOneDriveOptions.includeHiddenContent``.
+                Required when the app opted out of M365 discoverability.
+
+        Returns:
+            dict | None:
+                Graph Search response or None if the request fails.
+
+        """
+
+        if not container_type_id:
+            self.logger.error("container_type_id is required to search SPE containers.")
+            return None
+
+        def _escape_value(value: str) -> str:
+            return value.replace("'", "''")
+
+        query_clauses = ["ContainerTypeId:{}".format(container_type_id)]
+
+        if title:
+            query_clauses.append("Title:'{}'".format(_escape_value(title)))
+
+        if description:
+            query_clauses.append("Description:'{}'".format(_escape_value(description)))
+
+        if custom_property_name and custom_property_value is not None:
+            property_name = custom_property_name
+            if not property_name.endswith("OWSTEXT"):
+                property_name += "OWSTEXT"
+            query_clauses.append("{}:{}".format(property_name, _escape_value(custom_property_value)))
+
+        query_string = " AND ".join(query_clauses)
+
+        request_url = self.config()["searchQueryUrl"]
+        request_header = self.request_header()
+        post_body = {
+            "requests": [
+                {
+                    "entityTypes": ["drive"],
+                    "query": {"queryString": query_string},
+                    "sharePointOneDriveOptions": {
+                        "includeHiddenContent": include_hidden_content,
+                    },
+                }
+            ]
+        }
+
+        self.logger.debug(
+            "Search SPE containers for type -> %s with query -> '%s'; calling -> %s",
+            container_type_id,
+            query_string,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to search SPE containers for container type -> {}".format(container_type_id),
+        )
+
+    # end method definition
+
+    def search_container_content(
+        self,
+        query_text: str,
+        container_type_id: str | None = None,
+        container_id: str | None = None,
+        include_hidden_content: bool = True,
+        fields: list[str] | None = None,
+        sort_properties: list[dict] | None = None,
+    ) -> dict | None:
+        """Search content in SharePoint Embedded containers.
+
+        This method uses ``/beta/search/query`` with ``entityTypes=['driveItem']``.
+        Scope the query with ``container_type_id`` and/or ``container_id``.
+
+        Args:
+            query_text (str):
+                Full-text query string to search in content.
+            container_type_id (str | None, optional):
+                Optional container type scope. Recommended to avoid
+                cross-container-type leakage.
+            container_id (str | None, optional):
+                Optional single-container scope.
+            include_hidden_content (bool, optional):
+                Sets ``sharePointOneDriveOptions.includeHiddenContent``.
+            fields (list[str] | None, optional):
+                Optional list of fields to include in the response.
+            sort_properties (list[dict] | None, optional):
+                Optional Graph search sort properties, e.g.
+                ``[{"name": "Created", "isDescending": False}]``.
+
+        Returns:
+            dict | None:
+                Graph Search response or None if the request fails.
+
+        """
+
+        if not query_text:
+            self.logger.error("query_text is required to search container content.")
+            return None
+
+        query_clauses = [query_text]
+        if container_type_id:
+            query_clauses.append("ContainerTypeId:{}".format(container_type_id))
+        if container_id:
+            query_clauses.append("ContainerId:{}".format(container_id))
+
+        query_string = " AND ".join(query_clauses)
+
+        request_url = self.config()["searchQueryUrl"]
+        request_header = self.request_header()
+
+        request_item = {
+            "entityTypes": ["driveItem"],
+            "query": {"queryString": query_string},
+            "sharePointOneDriveOptions": {
+                "includeHiddenContent": include_hidden_content,
+            },
+        }
+        if fields:
+            request_item["fields"] = fields
+        if sort_properties:
+            request_item["sortProperties"] = sort_properties
+
+        post_body = {"requests": [request_item]}
+
+        self.logger.debug(
+            "Search container content with query -> '%s'; calling -> %s",
+            query_string,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to search container content with query -> '{}'".format(query_string),
+        )
+
+    # end method definition
+
+    def update_container_sensitivity_label(
+        self,
+        container_id: str,
+        sensitivity_label_id: str,
+    ) -> dict | None:
+        """Assign or update the sensitivity label on a file storage container.
+
+        Sensitivity labels (from Microsoft Purview Information Protection)
+        allow you to classify containers for data governance and compliance.
+        Once assigned, the label's policies (encryption, access restrictions,
+        visual markings) apply to the container.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            sensitivity_label_id (str):
+                The GUID of the sensitivity label to assign.
+                Use Microsoft Purview or the Graph Security API to
+                retrieve available label IDs.
+
+        Returns:
+            dict | None:
+                The updated container data or None if the request fails.
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id
+        request_header = self.request_header()
+
+        patch_body = {
+            "assignedSensitivityLabel": {
+                "labelId": sensitivity_label_id,
+                "assignmentMethod": "standard",
+            },
+        }
+
+        self.logger.debug(
+            "Assign sensitivity label -> %s to container -> %s; calling -> %s",
+            sensitivity_label_id,
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to assign sensitivity label -> {} to container -> {}".format(
+                sensitivity_label_id,
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_deleted_containers(
+        self,
+        container_type_id: str,
+    ) -> dict | None:
+        """List deleted (soft-deleted) file storage containers.
+
+        Returns containers that have been deleted but not yet permanently
+        removed. Deleted containers are retained for a limited period and
+        can be restored using ``restore_container()``.
+
+        This is an admin-level method that requires
+        ``FileStorageContainer.Selected`` or
+        ``FileStorageContainer.Manage.All`` permissions.
+
+        Args:
+            container_type_id (str):
+                The GUID of the container type to filter by. Required
+                by the Graph API — you can only list deleted containers
+                for a specific container type.
+
+        Returns:
+            dict | None:
+                A collection of deleted container objects or None if the
+                request fails.
+
+        Example:
+            {
+                'value': [
+                    {
+                        'id': 'b!ISJs1WRro0y0...',
+                        'displayName': 'My Container',
+                        'createdDateTime': '2021-11-24T15:41:52.347Z'
+                    }
+                ]
+            }
+
+        """
+
+        request_url = self.config()["deletedContainersUrl"] + "?$filter=containerTypeId eq " + container_type_id
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "List deleted containers for type -> %s; calling -> %s",
+            container_type_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to list deleted containers for type -> {}".format(
+                container_type_id,
+            ),
+        )
+
+    # end method definition
+
+    def upsert_container_permissions(
+        self,
+        container_id: str,
+        permissions: list[dict],
+        conflict_behavior: str = "fail",
+    ) -> dict | None:
+        """Upsert (create or update) multiple permissions on a container in one request.
+
+        This delta-patch operation allows you to create new permissions and
+        update existing ones in a single API call (up to 40 permissions).
+
+        - To **create** a permission: omit ``id``, provide ``roles`` and
+          ``grantedToV2``.
+        - To **update** a permission: include the existing ``id`` and new
+          ``roles``. Do not include ``grantedToV2`` for updates.
+
+        Args:
+            container_id (str):
+                The ID of the container.
+            permissions (list[dict]):
+                A list of permission objects (up to 40). Each dict should
+                contain:
+
+                - ``roles`` (list[str]): Required. One of ``reader``,
+                  ``writer``, ``manager``, ``owner``.
+                - ``grantedToV2`` (dict): Required for creates. Contains
+                  a ``user`` dict with ``userPrincipalName``.
+                - ``id`` (str): Required for updates. The ID of an existing
+                  permission to modify.
+            conflict_behavior (str, optional):
+                Controls behavior when a create target already has a
+                different role. ``"fail"`` (default) returns a 409 error
+                for that item. ``"replace"`` overwrites the existing role.
+
+        Returns:
+            dict | None:
+                A collection of processed permission results (including
+                per-item errors for failed entries) or None if the
+                entire request fails.
+
+        Example:
+            ::
+
+                m365.upsert_container_permissions(
+                    container_id="b!abc123",
+                    permissions=[
+                        {
+                            "roles": ["reader"],
+                            "grantedToV2": {
+                                "user": {"userPrincipalName": "alex@contoso.com"}
+                            },
+                        },
+                        {
+                            "id": "existing-permission-id",
+                            "roles": ["manager"],
+                        },
+                    ],
+                    conflict_behavior="replace",
+                )
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/permissions"
+        request_header = self.request_header()
+
+        # Apply conflict_behavior annotation to create items (those without id)
+        value_items = []
+        for perm in permissions:
+            item = dict(perm)
+            if "id" not in item and conflict_behavior != "fail":
+                item["@microsoft.graph.conflictBehavior"] = conflict_behavior
+            value_items.append(item)
+
+        patch_body = {
+            "@context": "#$delta",
+            "value": value_items,
+        }
+
+        self.logger.debug(
+            "Upsert %d permissions on container -> %s; calling -> %s",
+            len(permissions),
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="PATCH",
+            headers=request_header,
+            json_data=patch_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to upsert permissions on container -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def provision_migration_containers(
+        self,
+        container_id: str,
+    ) -> dict | None:
+        """Provision temporary Azure blob containers for content migration.
+
+        This provisions SharePoint-managed Azure blob containers that serve
+        as temporary staging storage for migration content and metadata.
+        The returned URIs (with SAS tokens) can be used to upload content
+        and metadata packages before triggering a migration job.
+
+        Args:
+            container_id (str):
+                The ID of the target SPE container that will receive
+                the migrated content.
+
+        Returns:
+            dict | None:
+                The provisioned migration container info or None if
+                the request fails.
+
+        Example:
+            {
+                'dataContainerUri': 'https://spoxxx.blob.core.windows.net/data?sp=rw&sig=...',
+                'metadataContainerUri': 'https://spoxxx.blob.core.windows.net/metadata?sp=rw&sig=...',
+                'encryptionKey': 'AES-256-CBC encryption key'
+            }
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/provisionMigrationContainers"
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Provision migration containers for SPE container -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to provision migration containers for -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    def create_container_migration_job(
+        self,
+        container_id: str,
+        data_container_uri: str,
+        metadata_container_uri: str,
+        encryption_key: str,
+    ) -> dict | None:
+        """Create a migration job to import content into an SPE container.
+
+        Schedules a migration job that imports content from temporary Azure
+        blob storage (previously provisioned via
+        ``provision_migration_containers()``) into the target container.
+
+        The migration process:
+            1. Call ``provision_migration_containers()`` to get staging URIs.
+            2. Upload content packages to ``dataContainerUri`` and metadata
+               to ``metadataContainerUri`` using the Azure Blob API.
+            3. Call this method to trigger the actual migration.
+
+        Args:
+            container_id (str):
+                The ID of the target SPE container.
+            data_container_uri (str):
+                The Azure blob container URI (with SAS token) where the
+                migration content data is staged.
+            metadata_container_uri (str):
+                The Azure blob container URI (with SAS token) where the
+                migration metadata is staged.
+            encryption_key (str):
+                The base64-encoded AES-256-CBC encryption key used to
+                encrypt the migration packages.
+
+        Returns:
+            dict | None:
+                The created migration job object (containing the job ID)
+                or None if the request fails.
+
+        Example:
+            {
+                'id': '31090ce2-3b99-fa40-7ec5-46ebeeb5900b'
+            }
+
+        """
+
+        request_url = self.config()["fileStorageContainersUrl"] + "/" + container_id + "/migrationJobs"
+        request_header = self.request_header()
+
+        post_body = {
+            "containerInfo": {
+                "dataContainerUri": data_container_uri,
+                "metadataContainerUri": metadata_container_uri,
+                "encryptionKey": encryption_key,
+            },
+        }
+
+        self.logger.debug(
+            "Create migration job for SPE container -> %s; calling -> %s",
+            container_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            headers=request_header,
+            json_data=post_body,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to create migration job for container -> {}".format(
+                container_id,
+            ),
+        )
+
+    # end method definition
+
+    #####################################################################
+    # SharePoint Embedded (SPE) - Audit Trail Methods
+    #####################################################################
+
+    def get_drive_item_activities(
+        self,
+        drive_id: str,
+        item_id: str,
+        limit: int | None = None,
+    ) -> dict | None:
+        """Get the activity history (audit trail) of a single drive item.
+
+        Returns the recent actions performed on a drive item (file or
+        folder) such as create, edit, delete, rename, move, comment and
+        access. This works with any drive, including SPE container drives.
+        To get the drive ID for an SPE container, use ``get_container_drive()``.
+
+        Note: This uses the Microsoft Graph beta drive activities endpoint
+        and provides per-item, short-retention activity. For a complete,
+        compliance-grade record of every access event across all users and
+        containers, use ``get_audit_events()`` (Office 365 unified audit
+        log) instead. Requires the Sites.Read.All application permission.
+
+        Args:
+            drive_id (str):
+                The ID of the drive containing the item.
+            item_id (str):
+                The ID of the drive item.
+            limit (int | None, optional):
+                Maximum number of activity entries to return ($top).
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of
+                item activities, or None if the request fails.
+
+        Example:
+            {
+                'value': [
+                    {
+                        'id': 'ZjU4MjA2...',
+                        'action': {'edit': {}},
+                        'actor': {
+                            'user': {
+                                'displayName': 'John Doe',
+                                'email': 'jdoe@contoso.com'
+                            }
+                        },
+                        'times': {
+                            'recordedDateTime': '2024-03-15T10:30:00Z'
+                        }
+                    }
+                ]
+            }
+
+        """
+
+        request_url = self.config()["drivesUrlBeta"] + "/" + drive_id + "/items/" + item_id + "/activities"
+
+        if limit:
+            request_url += "?$top=" + str(limit)
+
+        request_header = self.request_header()
+
+        self.logger.debug(
+            "Get activities for drive item -> %s in drive -> %s; calling -> %s",
+            item_id,
+            drive_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get activities for drive item -> {} in drive -> {}".format(
+                item_id,
+                drive_id,
+            ),
+        )
+
+    # end method definition
+
+    def get_audit_events(
+        self,
+        content_type: str = "Audit.SharePoint",
+        start_time: str | None = None,
+        end_time: str | None = None,
+        access_token: str | None = None,
+    ) -> dict | None:
+        """Get tenant-wide audit events from the Office 365 unified audit log.
+
+        This is the authoritative "who accessed which file in which way"
+        record. SharePoint Embedded containers emit standard SharePoint
+        file-operation events (FileAccessed, FileModified, FileDeleted,
+        FileMoved, FileRenamed, ...) into the unified audit log, queryable
+        via the Office 365 Management Activity API.
+
+        This API runs on a separate host (manage.office.com) and requires
+        its own ActivityFeed.Read application permission and an access token
+        whose scope is the Management Activity API resource. Pass that token
+        via ``access_token``; the default Graph token does not work here.
+        A subscription for the given content type must already exist
+        (created once via the subscriptions/start endpoint).
+
+        Args:
+            content_type (str, optional):
+                The audit content type to query. For SPE/SharePoint use
+                "Audit.SharePoint". Other values: "Audit.General",
+                "Audit.AzureActiveDirectory", "Audit.Exchange",
+                "DLP.All". Defaults to "Audit.SharePoint".
+            start_time (str | None, optional):
+                ISO8601 start of the time window (e.g. "2026-06-28T00:00:00").
+                Window cannot exceed 24 hours. Defaults to None.
+            end_time (str | None, optional):
+                ISO8601 end of the time window. Defaults to None.
+            access_token (str | None, optional):
+                A bearer token scoped to the Management Activity API. If not
+                provided the standard Graph token is used (which will fail
+                for this host) — provide a dedicated token.
+
+        Returns:
+            dict | None:
+                A dictionary with a "value" key containing the list of
+                available content blobs, or None if the request fails. Each
+                blob URI must be fetched separately to read the actual events.
+
+        Example:
+            {
+                'value': [
+                    {
+                        'contentType': 'Audit.SharePoint',
+                        'contentId': '20260629...',
+                        'contentUri': 'https://manage.office.com/api/v1.0/.../content/20260629...',
+                        'contentCreated': '2026-06-29T10:00:00Z',
+                        'contentExpiration': '2026-07-06T10:00:00Z'
+                    }
+                ]
+            }
+
+        """
+
+        query = {"contentType": content_type}
+        if start_time:
+            query["startTime"] = start_time
+        if end_time:
+            query["endTime"] = end_time
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+        request_url = self.config()["managementActivityUrl"] + "/subscriptions/content?" + encoded_query
+
+        request_header = self.request_header()
+        if access_token:
+            request_header["Authorization"] = "Bearer " + access_token
+
+        self.logger.debug(
+            "Get audit events for content type -> '%s'; calling -> %s",
+            content_type,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get audit events for content type -> {}".format(
+                content_type,
+            ),
+        )
 
     # end method definition

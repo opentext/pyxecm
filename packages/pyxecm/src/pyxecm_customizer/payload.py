@@ -13486,31 +13486,30 @@ class Payload:
                 continue
 
             self._log_header_callback(
-                text="Process ontology '{}'".format(ontology_name),
+                text="Process ontology for domain -> '{}'".format(ontology_name),
                 char="-",
             )
 
             entities = ontology.get("entities", [])
             if not entities:
                 self.logger.warning(
-                    "Ontology -> '%s' has no entities defined in payload! Skipping to next ontology...",
+                    "Ontology for domain -> '%s' has no entities defined in payload! Skipping to next ontology...",
                     ontology_name,
                 )
                 continue
             relationships = ontology.get("relationships", [])
             if not relationships:
                 self.logger.warning(
-                    "Ontology -> '%s' has no relationships defined in payload! Skipping to next ontology...",
+                    "Ontology for domain -> '%s' has no relationships defined in payload! Skipping to next ontology...",
                     ontology_name,
                 )
                 continue
 
             for entity in entities:
                 workspace_type_name = entity.get("name")
-                workspace_type_description = entity.get("description", "")
                 if not workspace_type_name:
                     self.logger.error(
-                        "Ontology -> '%s' has an entity -> %s without a name! Skipping to next entity...",
+                        "Ontology for domain -> '%s' has an entity -> %s without a name! Skipping to next entity...",
                         ontology_name,
                         str(entity),
                     )
@@ -13521,7 +13520,7 @@ class Payload:
                 )
                 if not workspace_type:
                     self.logger.error(
-                        "Ontology -> '%s' references workspace type -> '%s' that doesn't exist! Skipping to next entity...",
+                        "Ontology for domain -> '%s' references workspace type -> '%s' that doesn't exist! Skipping to next entity...",
                         ontology_name,
                         workspace_type_name,
                     )
@@ -13531,50 +13530,56 @@ class Payload:
                 workspace_type_id = self._otcs.get_result_value(response=workspace_type, key="wksp_type_id")
                 workspace_type_node_id = self._otcs.get_result_value(response=workspace_type, key="config_node_id")
 
-                self.logger.info("Processing ontology entity -> '%s' (%s)...", workspace_type_name, workspace_type_id)
+                self.logger.info(
+                    "Processing ontology entity -> '%s' (%s) in domain -> '%s'...",
+                    workspace_type_name,
+                    workspace_type_id,
+                    ontology_name,
+                )
 
-                synonyms = set(entity.get("synonyms", []))
-                if synonyms:
-                    # As we don't have a datastructure in OTCM for Workspace Type synonyms we just write them
-                    # into the description field (appended to the regular description):
-                    workspace_type_description += "\n" + "Synonyms: " + ", ".join(synonyms)
-                # end if synonyms
-
-                key_aspects = set(entity.get("key_aspects", []))
-                if key_aspects:
-                    # As we don't have a datastructure in OTCM for Workspace Type key aspects we just write them
-                    # into the description field (appended to the regular description):
-                    workspace_type_description += "\n" + "Key Aspects: " + ", ".join(key_aspects)
-                # end if key_aspects
-
-                if synonyms or key_aspects:
-                    response = self._otcs.update_item(
-                        node_id=workspace_type_node_id,
-                        item_description=workspace_type_description,
-                    )
-                    if not response:
-                        self.logger.error(
-                            "Failed to update synonyms and key aspects (stored in description) for entity type -> '%s'!",
-                            workspace_type_name,
-                        )
-                        success = False
-
-                # Build the merged entity structure:
-                if workspace_type_name not in merged_entities:
-                    merged_entities[workspace_type_name] = {
+                # The same entity type can be defined in multiple ontologies. We accumulate the
+                # domains, synonyms and key aspects across all ontologies of this run so the last
+                # write carries the complete set (payload is master, so each run starts fresh):
+                entity_data = merged_entities.setdefault(
+                    workspace_type_name,
+                    {
                         "name": workspace_type_name,
-                        "description": workspace_type_description,
-                        "synonyms": synonyms,
-                        "key_aspects": key_aspects,
-                        "ontologies": {ontology_name},
-                    }
-                else:
-                    # as the same entity type can be defined in multiple ontologies we need to:
-                    # 1. merge the synonyms and
-                    # 2. keep track in which ontologies this entity type is defined:
-                    merged_entities[workspace_type_name]["synonyms"].update(synonyms)
-                    merged_entities[workspace_type_name]["key_aspects"].update(key_aspects)
-                    merged_entities[workspace_type_name]["ontologies"].add(ontology_name)
+                        "free_text": entity.get("description", ""),
+                        "synonyms": set(),
+                        "key_aspects": set(),
+                        "ontologies": set(),
+                    },
+                )
+                entity_data["ontologies"].add(ontology_name)
+                entity_data["synonyms"].update(entity.get("synonyms", []))
+                entity_data["key_aspects"].update(entity.get("key_aspects", []))
+
+                # As OTCM has no datastructure for synonyms, key aspects and domains we store them
+                # in the description field. We keep the payload free text first and append the
+                # managed sections (alphabetically sorted) with the accumulated values:
+                managed_sections = {
+                    "Domains": entity_data["ontologies"],
+                    "Synonyms": entity_data["synonyms"],
+                    "Key Aspects": entity_data["key_aspects"],
+                }
+                managed_lines = [
+                    "{}: {}".format(label, ", ".join(sorted(values)))
+                    for label, values in managed_sections.items()
+                    if values
+                ]
+                workspace_type_description = "\n".join([entity_data["free_text"], *managed_lines]).strip()
+                entity_data["description"] = workspace_type_description
+
+                response = self._otcs.update_item(
+                    node_id=workspace_type_node_id,
+                    item_description=workspace_type_description,
+                )
+                if not response:
+                    self.logger.error(
+                        "Failed to update domains, synonyms and key aspects (stored in description) for entity type -> '%s'!",
+                        workspace_type_name,
+                    )
+                    success = False
 
                 # Build the data structure required for updating the workspace type
                 # with the ontology information. As we can have multiple ontologies
@@ -13698,6 +13703,7 @@ class Payload:
         # Convert sets back to sorted lists for JSON serializability
         final_entities = []
         for e in merged_entities.values():
+            e.pop("free_text", None)
             e["synonyms"] = sorted(e["synonyms"])
             e["key_aspects"] = sorted(e["key_aspects"])
             e["ontologies"] = sorted(e["ontologies"])

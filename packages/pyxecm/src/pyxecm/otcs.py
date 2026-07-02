@@ -2692,6 +2692,55 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_system_default_metadata_language")
+    def get_system_default_metadata_language(self) -> str | None:
+        """Get the Content Server system default metadata language as a 2-letter ISO 639-1 code.
+
+        Derives the language from the server's ``metadata_languages`` list by finding
+        the entry with ``'default': True`` (e.g. ``{'default': True, 'language_code': 'en'}`` → ``'en'``).
+
+        This is the language in which ``wksp_type_name`` and other default metadata fields are stored.
+
+        The result is cached because the system language does not change at runtime.
+
+        Returns:
+            str | None:
+                Two-letter language code (e.g. 'en', 'de', 'fr'),
+                or None if the server info cannot be retrieved.
+
+        """
+
+        language = self.__get_system_default_metadata_language_cached()
+        if language is None:
+            self.__get_system_default_metadata_language_cached.cache_clear()
+
+        return language
+
+    @cache
+    def __get_system_default_metadata_language_cached(self) -> str | None:
+        response = self.get_server_info()
+        if not response:
+            return None
+
+        server_info = response.get("server")
+        if not server_info:
+            return None
+
+        # metadata_languages is a list of dicts, e.g.:
+        # [{'default': True, 'display_name': 'English', 'language_code': 'en'}, ...]
+        # The entry with 'default': True defines the system's metadata language.
+        metadata_languages = server_info.get("metadata_languages")
+        if not metadata_languages:
+            return None
+
+        for lang in metadata_languages:
+            if lang.get("default"):
+                return lang.get("language_code")
+
+        return None
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="apply_config")
     def apply_config(self, xml_file_path: str) -> dict | None:
         """Apply Content Server administration settings from XML file.
@@ -11167,11 +11216,24 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_business_object_types")
-    def get_business_object_types(self) -> dict | None:
+    def get_business_object_types(
+        self,
+        where_is_default_search: bool | None = None,
+        where_workspace_type_id: int | None = None,
+        drop_empty: bool = True,
+    ) -> dict | None:
         """Get information for all configured business object types.
 
         Args:
-            None
+            where_is_default_search (bool | None, optional):
+                If True, only return business object types that are marked as default search.
+            where_workspace_type_id (int | None, optional):
+                If provided, only return business object types that are associated with the given workspace type ID.
+            drop_empty (bool, optional):
+                If True, drop any business object types that have empty properties. Default is True.
+                It seems OTCM is returning some business object types with all properties empty
+                except for the workspace type ID. These are likely the workspace types that
+                don't have any business object types associated with them. We drop them by default.
 
         Returns:
             dict | None:
@@ -11210,21 +11272,54 @@ class OTCS:
 
         """
 
-        request_url = self.config()["businessObjectTypesUrl"]
+        query = {}
+        if where_is_default_search is not None:
+            query["where_is_default_search"] = where_is_default_search
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["businessObjectTypesUrl"] + "?{}".format(encoded_query)
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get all business object types; calling -> %s",
+            "Get all business object types%s%s%s; calling -> %s",
+            " where is default search = {}".format(where_is_default_search)
+            if where_is_default_search is not None
+            else "",
+            " and" if where_is_default_search is not None and where_workspace_type_id is not None else "",
+            " where workspace type ID = {}".format(where_workspace_type_id)
+            if where_workspace_type_id is not None
+            else "",
             request_url,
         )
 
-        return self.do_request(
+        response = self.do_request(
             url=request_url,
             method="GET",
             headers=request_header,
             timeout=None,
             failure_message="Failed to get business object types",
         )
+
+        # Filter for workspace type ID - the REST API above does not provide such option
+        # so we need to do it manually:
+        if where_workspace_type_id is not None and response and "results" in response:
+            response["results"] = [
+                item
+                for item in response["results"]
+                if "data" in item
+                and "properties" in item["data"]
+                and item["data"]["properties"]["workspace_type_id"] == where_workspace_type_id
+            ]
+        # Drop empty business object types if requested:
+        elif drop_empty and response and "results" in response:
+            response["results"] = [
+                item
+                for item in response["results"]
+                if "data" in item and "properties" in item["data"] and item["data"]["properties"]["bo_type"] is not None
+            ]
+
+        return response
 
     # end method definition
 
@@ -11663,7 +11758,7 @@ class OTCS:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_business_objects_search")
     def get_business_objects_search(
         self,
-        external_system_id: str,
+        external_system_id: str | None = None,
         type_name: str | None = None,
         type_id: int | None = None,
     ) -> dict | None:
@@ -11673,18 +11768,24 @@ class OTCS:
         get_business_objects method.
 
         Args:
-            external_system_id (str):
-                The External system ID (such as "TM6").
+            external_system_id (str | None):
+                The External system ID (such as "TM6"). Optional parameter but
+                needed if type_id is NOT provided ot type_name. If type_id is provided,
+                the external_system_id parameter will be ignored.
             type_name (str | None):
                 Type name of the business object (such as "SAP Customer").
             type_id (int | None):
-                The business object type ID. This is an alternative to the type_name parameter.
-                Either type_name or type_id needs to be provided.
-                If both are provided, type_id will be used and type_name will be ignored.
+                The business object type ID. This is an alternative to the
+                type_name + external_system_id parameters.
+                Either external_system_id + type_name or type_id needs to be provided.
+                If both are provided, type_id will be used and type_name and external_system_id
+                will be ignored.
 
         Returns:
             dict | None:
                 Business Object Search Form or None if the request fails.
+                The first element in results contains the business object type information
+                and the second element contains the search form information.
 
         Example:
         {
@@ -11848,14 +11949,16 @@ class OTCS:
             )
             return None
 
-        if not external_system_id:
-            self.logger.error("External system ID needs to be provided. Cannot get business object search form.")
+        if type_name and not external_system_id:
+            self.logger.error(
+                "External system ID needs to be provided when type name is used. Cannot get business object search form."
+            )
             return None
 
-        query = {
-            "ext_system_id": external_system_id,
-        }
+        query = {}
 
+        if external_system_id:
+            query["ext_system_id"] = external_system_id
         if type_id:
             query["bo_type_id"] = type_id
         else:
@@ -11869,10 +11972,10 @@ class OTCS:
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get search form for business object type%s -> '%s' and external system -> %s; calling -> %s",
+            "Get search form for business object type%s -> '%s'%s; calling -> %s",
             " ID" if type_id else "",
             type_id or type_name,
-            external_system_id,
+            " and external system -> {}".format(external_system_id) if external_system_id else "",
             request_url,
         )
 
@@ -11881,10 +11984,10 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get search form for business object type{} -> '{}' and external system -> {}".format(
+            failure_message="Failed to get search form for business object type{} -> '{}'{}".format(
                 " ID" if type_id else "",
                 type_id or type_name,
-                external_system_id,
+                " and external system -> {}".format(external_system_id) if external_system_id else "",
             ),
         )
 
@@ -13150,6 +13253,8 @@ class OTCS:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_types")
     def get_workspace_types(
         self,
+        ext_system_id: int | None = None,
+        bo_type: str | None = None,
         expand_workspace_info: bool = True,
         expand_templates: bool = True,
         show_error: bool = True,
@@ -13162,6 +13267,16 @@ class OTCS:
         This endpoint may throw an HTTP 500 error if no workspace types are in OTCS.
 
         Args:
+            ext_system_id (int | None, optional):
+                External system ID to filter workspace types by. Needs to be provided
+                together with bo_type. If ext_system_id is provided but bo_type is not,
+                the REST API will fail.
+            bo_type (str | None, optional):
+                Business Object type name to filter workspace types by. The is the
+                technical name of the business object type - NOT the ID! E.g. "KNA1"
+                for customers in SAP S/4HANA. Needs to be provided together with ext_system_id.
+                If bo_type is provided but ext_system_id is not, the REST API will fail.
+                It is OK to omit both parameters to get all workspace types in OTCS.
             expand_workspace_info (bool, optional):
                 Controls if the workspace info is returned as well
             expand_templates (bool, optional):
@@ -13181,26 +13296,73 @@ class OTCS:
             ```json
             {
                 'links': {
-                    'data': {...}
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspacetypes?bo_type=KNA1&expand_templates=true&expand_wksp_info=true&ext_system_id=TE1',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
                 },
                 'results': [
                     {
                         'data': {
                             'properties': {
-                                'rm_enabled': False,
-                                'templates': [
-                                    {
-                                        'id': 14471,
-                                        'name': 'Campaign',
-                                        'subtype': 848
-                                    },
-                                    ...
-                                ],
-                                'wksp_type_id': 35,
-                                'wksp_type_name': 'Campaign'
+                                'add_creator_to_lead_role': True,
+                                'aviator_enabled': True,
+                                'classification': {
+                                    'location': 'StaticNodeId',
+                                    'location_value': '30020'
+                                },
+                                'config_node_id': 39309,
+                                'external_document_storage': {
+                                    'rm_classification': {...},
+                                    'sub_location_path': {...}
+                                },
+                                'indexing': {
+                                    'enabled': True,
+                                    'sub_types': [...]
+                                },
+                                'relations': [{...}, {...}, {...}],
+                                'rm_enabled': True,
+                                'search': {
+                                    'follow_related_wksp': 'AlwaysEnabled',
+                                    'max_number_of_followed_wksp': 50
+                                },
+                                'simplify_business_workspace_creation': False,
+                                'templates': [{...}],
+                                'widget_icon': {
+                                    'url': '/appimg/ot_bws/icons/39309.svg?v=162061_17502'
+                                },
+                                'wksp_copy_enabled': True,
+                                'wksp_creation': {
+                                    'create_wksp_with_fast_bulk_method': False,
+                                    'directly_open_created_wksp': True,
+                                    'location': 'StaticNodeId',
+                                    'location_value': '34962',
+                                    'sub_location_path': {...},
+                                    'use_also_for_manual_creation': True
+                                },
+                                'wksp_creation_enabled': True,
+                                'wksp_descriptions': {'ar': '', 'de': '', 'en': '', 'es': '', 'fr': '', 'it': '', 'iw': '', 'ja': '', 'nl': ''},
+                                'wksp_icon': 'otsapxecm/wksp_customer.png',
+                                'wksp_name_generation': {
+                                    'use_also_for_wksp_without_bo': False,
+                                    'wksp_names': {...}
+                                },
+                                'wksp_policies_enabled': False,
+                                'wksp_type_id': 16,
+                                'wksp_type_name': 'Customer',
+                                'wksp_type_names': {'ar': '', 'de': 'Kunde', 'en': 'Customer', 'es': '', 'fr': 'Client', 'it': 'Cliente', 'iw': '', 'ja': 'お客様', 'nl': ''}
                             },
                             'wksp_info': {
-                                'wksp_type_icon': '/appimg/ot_bws/icons/13147%2Esvg?v=161108_84584'
+                                'in_use': True,
+                                'indexing_status': 'UpToDate',
+                                'modified': '2026-06-30T01:32:24',
+                                'perspective_folder_id': 39316,
+                                'wksp_type_icon': '/appimg/ot_bws/icons/39309.svg?v=162061_17502'
                             }
                         }
                     }
@@ -13211,6 +13373,15 @@ class OTCS:
         """
 
         query = {"expand_templates": expand_templates, "expand_wksp_info": expand_workspace_info}
+
+        if (ext_system_id is not None and bo_type is None) or (ext_system_id is None and bo_type is not None):
+            self.logger.error("Both ext_system_id and bo_type must be provided together.")
+            return None
+
+        if ext_system_id is not None:
+            query["ext_system_id"] = ext_system_id
+        if bo_type is not None:
+            query["bo_type"] = bo_type
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
 
@@ -14564,7 +14735,7 @@ class OTCS:
         self,
         node_id: int,
     ) -> list | None:
-        """Get a workspace references to business objects in external systems.
+        """Get the workspace references to business objects in external systems.
 
         Args:
             node_id (int):
@@ -14572,7 +14743,7 @@ class OTCS:
 
         Returns:
             list | None:
-                A List of references to business objects in external systems.
+                A list of references to business objects in external systems.
 
         Example:
         [

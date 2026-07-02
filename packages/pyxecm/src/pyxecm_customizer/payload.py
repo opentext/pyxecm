@@ -9010,11 +9010,12 @@ class Payload:
             # that is used for display purposes in the SmartView if given.
             # It can be either a string or a dict with language keys (e.g. "en", "de", ...)
             # and text values for multilingual support.
-            # If it is a string we convert it to the dict format with "en"
-            # as default language key:
+            # If it is a string we convert it to the dict format with the
+            # system default metadata language key:
             description = external_system.get("description")
             if description and isinstance(description, str):
-                description = {"en": description}
+                default_locale = self._otcs.get_system_default_metadata_language() or "en"
+                description = {default_locale: description}
 
             self._log_header_callback(
                 text="Process External System -> '{}' ({})".format(system_name, system_type),
@@ -13447,7 +13448,7 @@ class Payload:
 
         """
 
-        if not self._workspaces:
+        if not self._ontologies:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -13504,6 +13505,8 @@ class Payload:
                     ontology_name,
                 )
                 continue
+
+            default_locale = ontology.get("locale", self._otcs.get_system_default_metadata_language() or "en")
 
             for entity in entities:
                 workspace_type_name = entity.get("name")
@@ -13624,12 +13627,13 @@ class Payload:
                         for r in entity_relations
                     ):
                         self.logger.debug(
-                            "Relationship from entity type -> '%s' (%s) to -> '%s' (%s) of relationship type -> '%s' already exists. Skipping duplicate...",
+                            "Relationship from entity type -> '%s' (%s) to -> '%s' (%s) of relationship type -> '%s' already exists (existing relationships -> %s). Skipping duplicate...",
                             workspace_type_name,
                             workspace_type_id,
                             target_wksp_type_name,
                             target_wksp_type_id,
                             rel_type,
+                            str(entity_relations),
                         )
                         continue
 
@@ -13638,7 +13642,7 @@ class Payload:
                             "target_wksp_type_id": int(target_wksp_type_id),
                             "rel_type": rel_type,  # the REST API requires Child and Parent capitalized
                             "predicates": [
-                                predicate if isinstance(predicate, dict) else {"en": predicate}
+                                predicate if isinstance(predicate, dict) else {default_locale: predicate}
                                 for predicate in rel.get("predicates", [])
                             ],  # the REST API supports multi-lingual. If the payload has plain strings as elements we interpret this as english only
                         }

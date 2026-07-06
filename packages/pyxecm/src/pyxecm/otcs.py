@@ -542,6 +542,8 @@ class OTCS:
         otcs_config["businessObjectTypesUrl"] = otcs_rest_url + "/v2/businessobjecttypes"
         otcs_config["businessObjectsSearchUrl"] = otcs_rest_url + "/v2/forms/businessobjects/search"
         otcs_config["businessWorkspaceTypesUrl"] = otcs_rest_url + "/v1/businessworkspacetypes"
+        otcs_config["businessWorkspaceReportsUrl"] = otcs_rest_url + "/v2/businessworkspace"
+        otcs_config["businessWorkspaceMyTeamTodoUrl"] = otcs_rest_url + "/v2/businessworkspace/myteamtodo"
         otcs_config["businessWorkspaceTypesUrlv2"] = otcs_rest_url + "/v2/businessworkspacetypes"
         otcs_config["businessworkspacecreateform"] = otcs_rest_url + "/v2/forms/businessworkspaces/create"
         otcs_config["businessWorkspacesUrl"] = otcs_rest_url + "/v2/businessworkspaces"
@@ -607,6 +609,12 @@ class OTCS:
         self._workspace_ontology = workspace_ontology
         self._soap_docman_client: Client | None = None
         self._soap_transport: Transport | None = None
+
+        # Memoized full reminder client/type list (client_id=None). Reminder client
+        # and type configuration is effectively static for the lifetime of an OTCS
+        # object, so caching it avoids repeated 1+N REST round-trips when a single
+        # add/update operation resolves and validates a reminder type multiple times.
+        self._reminder_clients_cache: list[dict] | None = None
 
         # Handle concurrent HTTP requests that may run into 401 errors and
         # re-authentication at the same time:
@@ -14931,7 +14939,7 @@ class OTCS:
     def create_workspace(
         self,
         workspace_template_id: int,
-        workspace_name: str,
+        workspace_name: str | None,
         workspace_description: str,
         workspace_type: int,
         category_data: dict | None = None,
@@ -14951,12 +14959,13 @@ class OTCS:
         template and type, with optional category data and business object details.
         It also supports linking to external systems and specifying metadata such as
         creation and modification dates.
+        If the name is not specified it will be derived from workspace metadata.
 
         Args:
             workspace_template_id (int):
                 The ID of the workspace template to be used.
-            workspace_name (str):
-                The name of the new workspace.
+            workspace_name (str | None):
+                The name of the new workspace. If not specified, it will be derived from workspace metadata.
             workspace_description (str):
                 A description of the new workspace.
             workspace_type (int):
@@ -15024,12 +15033,15 @@ class OTCS:
 
         create_workspace_post_data = {
             "template_id": str(workspace_template_id),
-            "name": workspace_name,
             "description": workspace_description,
             "wksp_type_id": str(workspace_type),
             "type": str(self.ITEM_TYPE_BUSINESS_WORKSPACE),
             "roles": {},  # category_data,
         }
+
+        # Yes, workspace name is optional. If not specified, it will be derived from workspace metadata.
+        if workspace_name:
+            create_workspace_post_data["name"] = workspace_name
 
         if category_data:
             create_workspace_post_data["roles"]["categories"] = category_data
@@ -15062,7 +15074,7 @@ class OTCS:
         if parent_id is not None:
             create_workspace_post_data["parent_id"] = parent_id
             self.logger.debug(
-                "Use specified location with node ID -> %d for workspace -> '%s'",
+                "Use specified location with node ID -> %d for creation of workspace -> '%s'",
                 parent_id,
                 workspace_name,
             )
@@ -15211,7 +15223,7 @@ class OTCS:
         self,
         workspace_id: int,
         related_workspace_id: int,
-        relationship_type: str = "child",
+        relationship_type: str | None = "child",
         show_error: bool = True,
     ) -> dict | None:
         """Create a relationship between two workspaces.
@@ -15231,7 +15243,7 @@ class OTCS:
         and the other of type 'child', but this is a less common use case.
 
         Adding a relationship R1: A --> Child --> B makes A to the parent of B _AND_ also
-        B to the child of A. Requesting the childs of A will include edge R1. Requesting the
+        B to the child of A. Requesting the childs of A will include relationship R1. Requesting the
         parents of B will include R1 as well. But it is still possible to add a relationship
         R2: A --> Parent --> B. This will be a separate relationship.
 
@@ -15240,8 +15252,10 @@ class OTCS:
                 The ID of the workspace.
             related_workspace_id (int):
                 The ID of the related workspace.
-            relationship_type (str, optional):
-                Can be "parent" or "child" - "child" is default if not provided.
+            relationship_type (str | None, optional):
+                Can be "parent" or "child" - "child" is the default. If None (or empty)
+                is provided, it falls back to "child" instead of sending an invalid
+                relationship type to the REST API.
             show_error (bool, optional):
                 If True, log an error if relationship cration fails.
                 Otherwise log a warning.
@@ -15251,6 +15265,17 @@ class OTCS:
                 Workspace Relationship data (json) or None if the request fails.
 
         """
+
+        # Normalize the relationship type so that callers passing None explicitly
+        # (which overrides the default) still get the intended "child" behavior:
+        if not relationship_type:
+            relationship_type = "child"
+        elif relationship_type not in ("parent", "child"):
+            self.logger.error(
+                "Illegal relationship type -> '%s'! Must be either 'parent' or 'child'.",
+                relationship_type,
+            )
+            return None
 
         create_workspace_relationship_post_data = {
             "rel_bw_id": str(related_workspace_id),
@@ -26113,6 +26138,14 @@ class OTCS:
 
         # end method definition of _extract_field_mappings()
 
+        # Serve the memoized full client/type list when no specific client filter
+        # is requested (the common case for type resolution and validation). The
+        # local `client_id` is reassigned inside the loop below, so capture the
+        # original intent up front for both the cache read and the cache write:
+        is_full_list = client_id is None
+        if is_full_list and self._reminder_clients_cache is not None:
+            return self._reminder_clients_cache
+
         response = self.get_reminder_types(client_id=client_id)
         if not response:
             return None
@@ -26153,6 +26186,10 @@ class OTCS:
             len(clients),
             str(clients),
         )
+
+        # Memoize the full client/type list for subsequent lookups in this session:
+        if is_full_list:
+            self._reminder_clients_cache = clients
 
         return clients
 
@@ -27501,7 +27538,13 @@ class OTCS:
             dict | None:
                 Response from the server, or None if the request fails.
 
-        Example:
+        Note:
+            On OTCM 26.2 and newer the `results` payload contains the ID of the
+            newly created reminder (extractable via `get_result_value(response, key="id")`).
+            On older releases `results` was empty even on success, so callers that
+            need the reminder ID on those releases must fall back to `get_reminders()`.
+
+        Example (OTCM 26.2 and newer):
         {
             'links': {
                 'data': {
@@ -27514,7 +27557,7 @@ class OTCS:
                     }
                 }
             },
-            'results': {} # seems to be always empty - also on success
+            'results': {'id': 66}  # ID of the newly created reminder (empty {} on releases before 26.2)
         }
 
         """
@@ -27887,6 +27930,173 @@ class OTCS:
                 reminder_id,
                 node_id,
             ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_report_detail")
+    def get_workspace_report_detail(
+        self,
+        workspace_id: int,
+        report_type: str,
+    ) -> dict | None:
+        """Get the full document list for a single workspace report type.
+
+        REST operation: GET /v2/businessworkspace/{workspace_id}/reports?type={report_type}
+
+        Args:
+            workspace_id (int):
+                Business workspace node ID.
+            report_type (str):
+                Report type key. One of ``"documentsAdded"``, ``"outdatedDocuments"``,
+                or ``"recentDocuments"``.
+
+        Returns:
+            dict | None:
+                Report detail response containing a ``results.data`` list and
+                ``results.total_count``, or None on error.
+
+        """
+
+        request_url = "{}/{}/reports?type={}".format(
+            self.config()["businessWorkspaceReportsUrl"],
+            workspace_id,
+            report_type,
+        )
+        request_header = self.request_json_header()
+
+        self.logger.debug(
+            "Get workspace report detail for workspace with ID -> %d, type -> %s; calling -> %s",
+            workspace_id,
+            report_type,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get '{}' report detail for workspace with ID -> {}".format(
+                report_type, workspace_id
+            ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_documents")
+    def get_workspace_documents(
+        self,
+        workspace_id: int,
+        document_type: Literal["missing", "inprocess"] = "missing",
+    ) -> dict | None:
+        """Get the list of missing or in-process documents for a Business Workspace.
+
+        REST operation: GET /v2/businessworkspaces/{workspace_id}/missingdocuments
+        REST operation: GET /v2/businessworkspaces/{workspace_id}/inprocessdocuments
+
+        Missing documents are required document types that are absent from the workspace.
+        In-process documents are currently being processed within the workspace
+        (e.g. pending classification, approval, or ingestion workflows).
+
+        Args:
+            workspace_id (int):
+                Business workspace node ID.
+            document_type (Literal["missing", "inprocess"], optional):
+                Which document category to retrieve:
+                * ``"missing"`` — required documents absent from the workspace
+                  (``/missingdocuments``).
+                * ``"inprocess"`` — documents currently being processed
+                  (``/inprocessdocuments``).
+                Defaults to ``"missing"``.
+
+        Returns:
+            dict | None:
+                Response containing a ``results.data`` list and ``results.total_count``,
+                or None on error.
+
+        """
+
+        endpoint = "inprocessdocuments" if document_type == "inprocess" else "missingdocuments"
+        request_url = "{}/{}/{}".format(
+            self.config()["businessWorkspacesUrl"],
+            workspace_id,
+            endpoint,
+        )
+        request_header = self.request_json_header()
+
+        self.logger.debug(
+            "Get %s for workspace with ID -> %d; calling -> %s",
+            endpoint,
+            workspace_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get {} for workspace with ID -> {}".format(endpoint, workspace_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_myteamtodo")
+    def get_workspace_myteamtodo(self) -> dict | None:
+        """Get the My Team Todo data for the currently authenticated user.
+
+        Returns the employee-file completeness status (missing and outdated document types)
+        for all direct reports of the currently authenticated user.
+
+        REST operation: GET /v2/businessworkspace/myteamtodo
+
+        Returns:
+            dict | None:
+                Response containing a ``results`` list where each element holds a
+                ``data.members`` list of direct reportees with their completeness status,
+                or None on error.
+
+        Example:
+                {
+                    'results': [
+                        {
+                            'data': {
+                                'members': [
+                                    {
+                                        'id': 1234,
+                                        'display_name': 'Ian Grant',
+                                        'first_name': 'Ian',
+                                        'last_name': 'Grant',
+                                        'business_email': 'ian.grant@example.com',
+                                        'employee_file_todos': {
+                                            'missing': [{'doc_type_name': 'Contract'}],
+                                            'outdated': [{'doc_type_name': 'Accident'}],
+                                        },
+                                    }
+                                ]
+                            },
+                            'properties': None,
+                        }
+                    ]
+                }
+
+        """
+
+        request_url = self.config()["businessWorkspaceMyTeamTodoUrl"]
+        request_header = self.request_json_header()
+
+        self.logger.debug(
+            "Get My Team Todo data for current user; calling -> %s",
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get My Team Todo data.",
         )
 
     # end method definition

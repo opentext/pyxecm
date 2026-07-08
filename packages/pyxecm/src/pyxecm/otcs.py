@@ -8528,6 +8528,9 @@ class OTCS:
                     str(volume_type),
                 )
 
+        if not mime_type:
+            mime_type = "application/octet-stream"  # Default to binary stream if mime type cannot be determined
+
         upload_post_files = [("file", (f"{file_name}", file_content, mime_type))]
 
         request_url = self.config()["nodesUrlv2"]
@@ -8818,6 +8821,9 @@ class OTCS:
                     file_name,
                     parent_id,
                 )
+
+        if not mime_type:
+            mime_type = "application/octet-stream"  # Default to binary stream if mime type cannot be determined
 
         upload_post_files = [("file", (f"{file_name}", file_content, mime_type))]
 
@@ -9186,6 +9192,9 @@ class OTCS:
                     file_name,
                     node_id,
                 )
+
+        if not mime_type:
+            mime_type = "application/octet-stream"  # Default to binary stream if mime type cannot be determined
 
         upload_post_files = [("file", (f"{file_name}", file_content, mime_type))]
 
@@ -13538,16 +13547,22 @@ class OTCS:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_name")
-    def get_workspace_type_name(self, type_id: int) -> str | None:
+    def get_workspace_type_name(self, type_id: int, renew: bool = False) -> str | None:
         """Get the name of a workspace type based on the provided workspace type ID.
 
         The name is taken from a OTCS object variable self._workspace_type_lookup if recorded there.
-        If not yet derived it is determined via the REST API and then stored
-        in self._workspace_type_lookup (as a lookup cache).
+        If not yet derived - or if renew is requested - it is determined via the REST API and
+        then stored in self._workspace_type_lookup (as a lookup cache).
 
         Args:
             type_id (int):
                 The workspace type ID.
+            renew (bool, optional):
+                Whether to bypass the cache and force a fresh lookup via the REST API,
+                updating the cache entry. Useful for callers that cannot tolerate a
+                workspace type having been renamed/reconfigured since it was last cached
+                (self._workspace_type_lookup has no expiry and is shared across calls
+                for the lifetime of this OTCS instance).
 
         Returns:
             str | None:
@@ -13561,7 +13576,7 @@ class OTCS:
         """
 
         workspace_type = self._workspace_type_lookup.get(type_id)
-        if workspace_type:
+        if workspace_type and not renew:
             return workspace_type.get("name")
 
         workspace_type = self.get_workspace_type(type_id=type_id)
@@ -23986,6 +24001,12 @@ class OTCS:
         for workspace_type in workspace_types:
             wksp_type_id = self.get_result_value(response=workspace_type, key="wksp_type_id")
             wksp_type_name = self.get_result_value(response=workspace_type, key="wksp_type_name")
+            # Refresh the shared lookup cache with the current name (see the equivalent
+            # refresh in traverse_workspaces_parallel's init_traversal_queue for why this
+            # must overwrite rather than only fill in missing entries): this keeps
+            # get_workspace_type_name() calls made later in this traversal (e.g. from
+            # traverse_workspace()) from resolving a stale, previously-cached name.
+            self._workspace_type_lookup[wksp_type_id] = {"location": None, "name": wksp_type_name}
             if not self._check_filter(
                 workspace_type_name=wksp_type_name,
                 workspace_type_id=wksp_type_id,
@@ -24335,8 +24356,14 @@ class OTCS:
             for workspace_type in workspace_types:
                 wksp_type_id = self.get_result_value(response=workspace_type, key="wksp_type_id")
                 wksp_type_name = self.get_result_value(response=workspace_type, key="wksp_type_name")
-                if wksp_type_id not in self._workspace_type_lookup:
-                    self._workspace_type_lookup[wksp_type_id] = {"location": None, "name": wksp_type_name}
+                # Refresh (not just fill-if-missing): this is a fresh, current listing of
+                # workspace types, fetched on every traversal run. self._workspace_type_lookup
+                # is a long-lived cache on this OTCS instance (spans many traversal runs over the
+                # life of the process), so if we only filled in missing entries, a renamed
+                # workspace type would keep resolving to its stale old name here - and via
+                # get_workspace_type_name() - forever. Overwriting is free since we already have
+                # the current name from this iteration; no extra API call is needed.
+                self._workspace_type_lookup[wksp_type_id] = {"location": None, "name": wksp_type_name}
                 if not self._check_filter(
                     workspace_type_name=wksp_type_name,
                     workspace_type_id=wksp_type_id,

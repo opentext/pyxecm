@@ -14669,6 +14669,71 @@ class OTCS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_by_child_node")
+    def get_workspace_by_child_node(
+        self,
+        node_id: int,
+        timeout: float = REQUEST_TIMEOUT,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get the business workspace a given node is located in.
+
+        The node can be a direct or indirect child of the workspace.
+        If the given node is a business workspace itself, then this
+        workspace is returned.
+
+        The REST API endpoint of this method is /v1/nodes/{id}/businessworkspace
+
+        Args:
+            node_id (int):
+                The ID of the node to determine the enclosing workspace for.
+            timeout (float, optional):
+                Specific timeout for the request in seconds. The default is the standard
+                timeout value REQUEST_TIMEOUT used by the OTCS module.
+            show_error (bool, optional):
+                Treat it as an error if no enclosing workspace is found.
+                Default is False (just a warning is logged).
+
+        Returns:
+            dict | None:
+                Workspace information or None if the node is not inside a workspace.
+
+        Example:
+        {
+            'id': 346184,
+            'isLinked': False,
+            'type': 848,
+            'workspace_type_id': 5
+        }
+
+        """
+
+        request_url = self.config()["nodesUrl"] + "/" + str(node_id) + "/businessworkspace"
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get business workspace for node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=timeout,
+            warning_message="Cannot get business workspace for node with ID -> {}. The node may not be inside a workspace.".format(
+                node_id,
+            ),
+            failure_message="Failed to get business workspace for node with ID -> {}".format(
+                node_id,
+            ),
+            show_error=show_error,
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_workspace")
     def lookup_workspaces(
         self,

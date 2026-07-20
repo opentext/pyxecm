@@ -1892,7 +1892,13 @@ class OTCS:
 
         # First do some sanity checks:
         if not response:
-            self.logger.debug("Empty response - no results found!")
+            self.logger.debug("Empty REST response. Cannot get result value! Returning None.")
+            return None
+        if "error" in response:
+            self.logger.error(
+                "REST response contains an error -> %s. Cannot get result value! Returning None.",
+                str(response["error"]),
+            )
             return None
 
         # To support also iterators that yield from results,
@@ -1903,7 +1909,7 @@ class OTCS:
 
         if "results" not in response:
             if show_error:
-                self.logger.error("No 'results' key in REST response - returning None")
+                self.logger.error("No 'results' key in REST response. Cannot get result value! Returning None.")
             return None
 
         results = response["results"]
@@ -2034,10 +2040,16 @@ class OTCS:
 
         # First do some sanity checks:
         if not response:
-            self.logger.debug("Empty REST response - returning None")
+            self.logger.debug("Empty REST response. Cannot get result values! Returning None.")
+            return None
+        if "error" in response:
+            self.logger.error(
+                "REST response contains an error -> %s. Cannot get result values! Returning None.",
+                str(response["error"]),
+            )
             return None
         if "results" not in response:
-            self.logger.error("No 'results' key in REST response - returning None")
+            self.logger.error("No 'results' key in REST response. Cannot get result values! Returning None.")
             return None
 
         results = response["results"]
@@ -15032,6 +15044,7 @@ class OTCS:
         external_modify_date: str | None = None,
         external_create_date: str | None = None,
         show_error: bool = True,
+        parse_error_response: bool = False,
     ) -> dict | None:
         """Create a new business workspace.
 
@@ -15076,6 +15089,8 @@ class OTCS:
                 If True, log an error if workspace creation fails.
                 If False, log a warning instead.
                 True is the default.
+            parse_error_response (bool, optional):
+                Whether to parse the request response or not. Defaults to False.
 
         Returns:
             dict | None:
@@ -15202,7 +15217,11 @@ class OTCS:
             ),
             show_error=show_error,
             show_warning=(not show_error),
+            parse_error_response=parse_error_response,
         )
+
+        if "error" in response:
+            return response
 
         node_id = self.get_result_value(response=response, key="id")
         if node_id:

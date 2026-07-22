@@ -957,6 +957,100 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="authenticate_user_token")
+    def authenticate_user_token(
+        self,
+        username: str,
+        password: str,
+        scope: str = "otds:roles",
+    ) -> str | None:
+        """Authenticate a user via the OAuth2 password grant and return a JWT access token.
+
+        Unlike :meth:`authenticate` with ``grant_type="password"`` (which hits the
+        legacy credential endpoint and returns an OTDS SSO ticket), this method posts
+        ``grant_type=password`` together with the configured OAuth client credentials to
+        the OAuth2 token endpoint (``/otdsws/oauth2/token``).  This produces a signed
+        JWT access token that can be used as a standard ``Authorization: Bearer`` token.
+
+        The ``client_id`` and ``client_secret`` must be configured on the OTDS object
+        (passed to the constructor) before calling this method.
+
+        Args:
+            username (str):
+                The OTDS login name of the user to authenticate.
+            password (str):
+                The password for the OTDS user.
+            scope (str, optional):
+                OAuth2 scope string to request.  Defaults to ``"otds:roles"``.
+
+        Returns:
+            str | None:
+                The JWT access token, or ``None`` if authentication fails.
+                The token is also stored in ``self._token``.
+
+        Example:
+                'eyJraWQiOiJvdGRzLXNpZ25pbmcta2V5IiwiYWxnIjoiUlMyNTYifQ...'
+
+        """
+
+        request_url = self.token_url()
+
+        request_data = {
+            "grant_type": "password",
+            "client_id": self.config()["clientId"],
+            "client_secret": self.config()["clientSecret"],
+            "username": username,
+            "password": password,
+            "scope": scope,
+        }
+
+        self.logger.debug(
+            "Requesting OTDS user access token for -> '%s'; calling -> %s",
+            username,
+            request_url,
+        )
+
+        try:
+            response = requests.post(
+                url=request_url,
+                headers=REQUEST_FORM_HEADERS,
+                data=request_data,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.RequestException as exception:
+            self.logger.warning(
+                "Unable to connect to OTDS token endpoint -> %s; error -> %s",
+                request_url,
+                str(exception),
+            )
+            return None
+
+        if not response.ok:
+            self.logger.error(
+                "Failed to request user access token for -> '%s'; error -> %s",
+                username,
+                response.text,
+            )
+            return None
+
+        token_dict = self.parse_request_response(response)
+        if not token_dict:
+            return None
+
+        access_token = token_dict.get("access_token")
+        if not access_token:
+            self.logger.error(
+                "OTDS token response for user -> '%s' did not contain an access_token",
+                username,
+            )
+            return None
+
+        self._token = access_token
+        self._cookie = None
+        return self._token
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="impersonate_user")
     def impersonate_user(
         self,

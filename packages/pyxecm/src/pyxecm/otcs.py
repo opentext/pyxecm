@@ -15762,7 +15762,9 @@ class OTCS:
             if isinstance(related_workspace_type_id, int):
                 query["where_workspace_type_id"] = related_workspace_type_id
             elif isinstance(related_workspace_type_id, list):
-                query["where_workspace_type_ids"] = related_workspace_type_id
+                query["where_workspace_type_ids"] = (
+                    "{" + ",".join(str(type_id) for type_id in related_workspace_type_id) + "}"
+                )
             else:
                 self.logger.error("Illegal data type for related workspace type!")
                 return None

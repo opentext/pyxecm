@@ -998,7 +998,7 @@ class OTCS:
         if not self._workspace_type_lookup or workspace_type_id not in self._workspace_type_lookup:
             return None
 
-        return self._workspace_type_lookup.get(workspace_type_id)["name"]
+        return self._workspace_type_lookup.get(workspace_type_id)
 
     # end method definition
 
@@ -7185,13 +7185,21 @@ class OTCS:
                                 # if the set row does not exist we can break:
                                 break
                             attribute_value = cat_data.get(key)
+                            # Skip empty set cells (None / empty string) so they don't
+                            # accidentally match (e.g. str(None) == "None" under substring).
+                            # We keep checking the remaining set rows.
+                            if attribute_value is None or attribute_value == "":
+                                continue
+                            # Compare as strings to be type-tolerant: the lookup value is
+                            # always a string (e.g. from bulk payload placeholders) while the
+                            # stored attribute value can be an int/float for numeric attributes.
                             # Is it a multi-value attribute (i.e. a list of values)?
                             if isinstance(attribute_value, list):
-                                if value in attribute_value:
+                                if any(str(value) == str(item) for item in attribute_value):
                                     node_matched = True
                                     break
-                            elif (substring and value in attribute_value) or (
-                                not substring and value == attribute_value
+                            elif (substring and str(value) in str(attribute_value)) or (
+                                not substring and str(value) == str(attribute_value)
                             ):
                                 node_matched = True
                                 break
@@ -7199,14 +7207,19 @@ class OTCS:
                     else:
                         key = prefix + attribute_id
                         attribute_value = cat_data.get(key)
-                        if not attribute_value:
+                        # Note: we intentionally do not use "if not attribute_value" here as
+                        # that would also skip a legitimate numeric value of 0.
+                        if attribute_value is None or attribute_value == "":
                             continue
+                        # Compare as strings to be type-tolerant (see comment above).
                         # Is it a multi-value attribute (i.e. a list of values)?
                         if isinstance(attribute_value, list):
-                            if value in attribute_value:
+                            if any(str(value) == str(item) for item in attribute_value):
                                 node_matched = True
                         # If not a multi-value attribute, check for equality:
-                        elif (substring and value in attribute_value) or (not substring and value == attribute_value):
+                        elif (substring and str(value) in str(attribute_value)) or (
+                            not substring and str(value) == str(attribute_value)
+                        ):
                             node_matched = True
                     if node_matched:
                         break
@@ -13587,15 +13600,15 @@ class OTCS:
 
         """
 
-        workspace_type = self._workspace_type_lookup.get(type_id)
-        if workspace_type and not renew:
-            return workspace_type.get("name")
+        type_name = self._workspace_type_lookup.get(type_id)
+        if type_name and not renew:
+            return type_name
 
         workspace_type = self.get_workspace_type(type_id=type_id)
         type_name = workspace_type.get("workspace_type")
         if type_name:
             # Update the lookup cache:
-            self._workspace_type_lookup[type_id] = {"location": None, "name": type_name}
+            self._workspace_type_lookup[type_id] = type_name
             return type_name
 
         return None
@@ -13636,6 +13649,165 @@ class OTCS:
         self._workspace_type_names = workspace_type_names
 
         return workspace_type_names
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_lookup")
+    def get_workspace_type_lookup(self, renew: bool = False) -> dict:
+        """Get the lookup dictionary that maps workspace type IDs to their names.
+
+        The lookup maps each workspace type ID to its name,
+        e.g. {848: 'Sales Contract'}.
+        It is cached in the OTCS object variable self._workspace_type_lookup and
+        also populated on demand by get_workspace_type_name().
+
+        Args:
+            renew (bool):
+                Whether to refresh the cached lookup via the REST API. If the
+                cache is empty it is always populated regardless of this flag.
+                Passing True re-fetches the current workspace types and overwrites
+                existing entries. This is important because self._workspace_type_lookup
+                has no expiry and is shared for the lifetime of this OTCS instance,
+                so without a refresh a renamed workspace type would keep resolving
+                to its stale old name here and via get_workspace_type_name().
+
+        Returns:
+            dict:
+                The workspace type lookup dictionary
+                (type_id -> type_name).
+
+        Side effects:
+            Caches the workspace type lookup in self._workspace_type_lookup
+            for future calls.
+
+        """
+
+        if self._workspace_type_lookup and not renew:
+            return self._workspace_type_lookup
+
+        workspace_types = self.get_workspace_types_iterator(expand_workspace_info=False, expand_templates=False)
+        for workspace_type in workspace_types:
+            wksp_type_id = self.get_result_value(response=workspace_type, key="wksp_type_id")
+            wksp_type_name = self.get_result_value(response=workspace_type, key="wksp_type_name")
+            # Overwrite (not just fill-if-missing) so a renamed workspace type does
+            # not keep resolving to its stale old name here or via get_workspace_type_name():
+            self._workspace_type_lookup[wksp_type_id] = wksp_type_name
+
+        return self._workspace_type_lookup
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="resolve_workspace_type_ids")
+    def resolve_workspace_type_ids(self, workspace_types: str | int | list | None) -> set[int]:
+        """Resolve workspace type names and/or IDs into a set of workspace type IDs.
+
+        Items may be workspace type IDs (int) or workspace type names (str). Names are
+        resolved via the workspace type lookup (self._workspace_type_lookup, populated
+        on demand via get_workspace_type_lookup()). Unresolvable names are silently
+        skipped.
+
+        Args:
+            workspace_types (str | int | list | None):
+                A single workspace type name or ID, or a list of them.
+                None or empty yields an empty set.
+
+        Returns:
+            set[int]:
+                The set of resolved workspace type IDs.
+
+        """
+
+        if not workspace_types:
+            return set()
+        if isinstance(workspace_types, (str, int)):
+            workspace_types = [workspace_types]
+
+        name_to_id = {name: type_id for type_id, name in self.get_workspace_type_lookup().items()}
+
+        type_ids = set()
+        for item in workspace_types:
+            if isinstance(item, int):
+                type_ids.add(item)
+            elif item in name_to_id:
+                type_ids.add(name_to_id[item])
+
+        return type_ids
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="resolve_workspace_type_filter")
+    def resolve_workspace_type_filter(
+        self,
+        workspace_type_inclusions: str | int | list | None = None,
+        workspace_type_exclusions: str | int | list | None = None,
+    ) -> list[int] | None:
+        """Resolve inclusion/exclusion workspace type filters into a list of allowed type IDs.
+
+        This is intended for server-side pre-filtering (e.g. the related_workspace_type_id
+        parameter of get_workspace_relationships_iterator()). Inclusions define the base set
+        (all workspace types if no inclusions are given), exclusions are then removed from it.
+
+        If an inclusion name cannot be resolved to a workspace type ID we cannot safely narrow
+        server-side (we would risk dropping matching workspaces), so we return None so the
+        caller can fall back to client-side filtering (see _check_filter()).
+
+        Args:
+            workspace_type_inclusions (str | int | list | None):
+                Workspace type names and/or IDs to include. None/empty = include all types.
+            workspace_type_exclusions (str | int | list | None):
+                Workspace type names and/or IDs to exclude.
+
+        Returns:
+            list[int] | None:
+                The list of allowed workspace type IDs, or None if the filter cannot be
+                resolved to a safe server-side filter (caller should not narrow server-side).
+
+        """
+
+        name_to_id = {name: type_id for type_id, name in self.get_workspace_type_lookup().items()}
+
+        # Normalize scalars to lists so we can inspect the inclusion names below:
+        if isinstance(workspace_type_inclusions, (str, int)):
+            workspace_type_inclusions = [workspace_type_inclusions]
+        if isinstance(workspace_type_exclusions, (str, int)):
+            workspace_type_exclusions = [workspace_type_exclusions]
+
+        # Inclusions define the base set (all types if no inclusions are given),
+        # exclusions are then removed from it:
+        included_ids = (
+            self.resolve_workspace_type_ids(workspace_type_inclusions)
+            if workspace_type_inclusions
+            else set(name_to_id.values())
+        )
+        excluded_ids = self.resolve_workspace_type_ids(workspace_type_exclusions)
+        allowed_ids = included_ids - excluded_ids
+
+        # If an inclusion name could not be resolved to a type ID we cannot safely
+        # narrow server-side (we would risk dropping matching workspaces):
+        unresolved_names = (
+            [item for item in workspace_type_inclusions if isinstance(item, str) and item not in name_to_id]
+            if workspace_type_inclusions
+            else []
+        )
+        if unresolved_names:
+            self.logger.warning(
+                "Cannot resolve workspace type name(s) -> %s to a workspace type ID "
+                "(available types -> %s). Falling back to client-side filtering.",
+                unresolved_names,
+                sorted(name_to_id.keys()),
+            )
+            return None
+
+        if not allowed_ids:
+            self.logger.debug(
+                "Workspace type filter (inclusions -> %s, exclusions -> %s) resolved to an empty set of allowed "
+                "types. Falling back to client-side filtering.",
+                workspace_type_inclusions,
+                workspace_type_exclusions,
+            )
+            return None
+
+        return list(allowed_ids)
 
     # end method definition
 
@@ -15220,7 +15392,7 @@ class OTCS:
             parse_error_response=parse_error_response,
         )
 
-        if "error" in response:
+        if response and "error" in response:
             return response
 
         node_id = self.get_result_value(response=response, key="id")
@@ -24416,6 +24588,31 @@ class OTCS:
         if isinstance(workspace_type_inclusions, str):
             workspace_type_inclusions = [workspace_type_inclusions]
 
+        # Precompute the full workspace type lookup (type_id -> name) up-front
+        # (renew=True to pick up any renamed types on every traversal run). This lets us:
+        #   1. Resolve the server-side related workspace type filter deterministically
+        #      before any worker starts (no race with the queue initializer thread).
+        #   2. Have get_workspace_type_name() calls during traversal hit the cache.
+        #   3. Iterate the workspace types for queue initialization without an
+        #      extra REST round-trip.
+        self.get_workspace_type_lookup(renew=True)
+
+        # Resolve the server-side related workspace type filter once, now that the
+        # full workspace type lookup is available. When filter_at_traversal is False
+        # we keep this None so the relationship iterator is not narrowed server-side:
+        # passing the full list of all workspace type IDs would only slow down the
+        # server-side query without excluding anything (the REST API then returns all
+        # related workspaces - the previous behavior). When it is True we resolve the
+        # inclusion/exclusion filters (which may contain type names or type IDs) into a
+        # concrete list of allowed workspace type IDs so the server pre-filters. The
+        # client-side _check_filter() still runs as a safety net.
+        related_type_id_filter: list[int] | None = None
+        if filter_at_traversal:
+            related_type_id_filter = self.resolve_workspace_type_filter(
+                workspace_type_inclusions=workspace_type_inclusions,
+                workspace_type_exclusions=workspace_type_exclusions,
+            )
+
         lock = threading.Lock()
         if strategy == "BFS":
             task_queue = Queue()
@@ -24435,19 +24632,11 @@ class OTCS:
 
             self.logger.debug("Initialize traversal queue...")
 
-            # Enqueue initial nodes at depth 0:
-            workspace_types = self.get_workspace_types_iterator(expand_workspace_info=False, expand_templates=False)
-            for workspace_type in workspace_types:
-                wksp_type_id = self.get_result_value(response=workspace_type, key="wksp_type_id")
-                wksp_type_name = self.get_result_value(response=workspace_type, key="wksp_type_name")
-                # Refresh (not just fill-if-missing): this is a fresh, current listing of
-                # workspace types, fetched on every traversal run. self._workspace_type_lookup
-                # is a long-lived cache on this OTCS instance (spans many traversal runs over the
-                # life of the process), so if we only filled in missing entries, a renamed
-                # workspace type would keep resolving to its stale old name here - and via
-                # get_workspace_type_name() - forever. Overwriting is free since we already have
-                # the current name from this iteration; no extra API call is needed.
-                self._workspace_type_lookup[wksp_type_id] = {"location": None, "name": wksp_type_name}
+            # Enqueue initial nodes at depth 0. We reuse the workspace type lookup
+            # (self._workspace_type_lookup) that was fully populated before the
+            # workers started, so we neither re-query the REST API nor need to
+            # repopulate the lookup here:
+            for wksp_type_id, wksp_type_name in self._workspace_type_lookup.items():
                 if not self._check_filter(
                     workspace_type_name=wksp_type_name,
                     workspace_type_id=wksp_type_id,
@@ -24589,7 +24778,11 @@ class OTCS:
                         for rel_type in relationship_types:
                             # Get related workspaces of the current workspace and the current relationship type:
                             workspace_relationships = self.get_workspace_relationships_iterator(
-                                workspace_id=workspace_id, relationship_type=rel_type, fields=fields, metadata=metadata
+                                workspace_id=workspace_id,
+                                relationship_type=rel_type,
+                                related_workspace_type_id=related_type_id_filter,
+                                fields=fields,
+                                metadata=metadata,
                             )
 
                             # Traverse all related workspaces:

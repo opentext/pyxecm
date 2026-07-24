@@ -28177,7 +28177,9 @@ class Payload:
                                 attribute_name=att_name,
                                 set_name=set_name,
                             )
-                            if key == conflicting_key:
+                            # Compare as strings to be type-tolerant: 'key' is always a string
+                            # while a numeric category attribute value is returned as an int/float.
+                            if str(key) == str(conflicting_key):
                                 # We have a race condition as the two documents don't really clash but are identical.
                                 # Just skip uploading the same document once more.
                                 self.logger.warning(

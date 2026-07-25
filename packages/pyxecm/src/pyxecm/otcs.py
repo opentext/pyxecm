@@ -13990,6 +13990,8 @@ class OTCS:
     ) -> dict | None:
         """Get a workspace based on the node ID.
 
+        REST endpoint: /v2/businessworkspaces
+
         Args:
             node_id (int):
                 The node ID of the workspace to retrieve.
@@ -14193,7 +14195,7 @@ class OTCS:
         sort: str | None = None,
         page: int | None = None,
         limit: int | None = None,
-        fields: str | list = "properties",  # per default we just get the most important information
+        fields: str = "properties",  # per default we just get the most important information
         metadata: bool = False,
     ) -> dict | None:
         """Get all workspace instances of a given type.
@@ -14239,17 +14241,21 @@ class OTCS:
                 in one page.
                 The default is None, in this case the internal OTCS limit
                 seems to be 500.
-            fields (str | list, optional):
-                Which fields to retrieve. This can have a significant
-                impact on performance.
-                NOTE: For this REST API only "properties" is possible. But it can be further restricted
-                by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
-                This parameter can be a string to select one field group or a list of
-                strings to select multiple field groups.
+            fields (str, optional):
+                Which workspace properties to retrieve. For this REST API only
+                "properties" is valid (not "categories", "versions", ...); it can be
+                narrowed to specific sub-fields, e.g. "properties{id,name,parent_id,description}".
+                Restricting the sub-fields can significantly improve performance.
+                If you need full categories, versions, permissions or other field
+                groups, use the get_workspace() method instead, which accepts a list
+                of fields.
                 Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
-                about the data.
+                about the data. This is the field/column SCHEMA (like column
+                definitions for the SmartView widget) - it does NOT return the
+                workspace's categories or attribute values. To retrieve categories
+                and attributes use the get_workspace() method with "categories" in fields.
                 Metadata will be returned under `response.meta_data.properties` and `response.meta_data_order`.
                 NOTE: this metadata is not compatible with the metadata returned by the get_workspace() method!
                 The format is optimized for the expanded workspace widget on landing pages in SmartView.
@@ -14294,7 +14300,7 @@ class OTCS:
         sort: str | None = None,
         page_size: int = 100,
         limit: int | None = None,
-        fields: str | list = "properties",  # per default we just get the most important information
+        fields: str = "properties",  # per default we just get the most important information
         metadata: bool = False,
     ) -> iter:
         """Get an iterator object to traverse all workspace instances of a workspace type.
@@ -14342,23 +14348,21 @@ class OTCS:
                 The maximum number of workspaces to return in total.
                 If None (default) all workspaces are returned.
                 If a number is provided only up to this number of results is returned.
-            fields (str | list, optional):
-                Which fields to retrieve. This can have a significant
-                impact on performance.
-                Possible fields include:
-                - "properties" (can be further restricted by specifying sub-fields,
-                  e.g., "properties{id,name,parent_id,description}")
-                - "categories"
-                - "versions" (can be further restricted by specifying ".element(0)" to
-                  retrieve only the latest version)
-                - "permissions" (can be further restricted by specifying ".limit(5)" to
-                  retrieve only the first 5 permissions)
-                This parameter can be a string to select one field group or a list of
-                strings to select multiple field groups.
+            fields (str, optional):
+                Which workspace properties to retrieve. For this REST API only
+                "properties" is valid (not "categories", "versions", ...); it can be
+                narrowed to specific sub-fields, e.g. "properties{id,name,parent_id,description}".
+                Restricting the sub-fields can significantly improve performance.
+                If you need full categories, versions, permissions or other field
+                groups, use the get_workspace() method instead, which accepts a list
+                of fields.
                 Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
-                about the data.
+                about the data. This is the field/column SCHEMA (like column
+                definitions for the SmartView widget) - it does NOT return the
+                workspace's categories or attribute values. To retrieve categories
+                and attributes use the get_workspace() method with "categories" in fields.
                 Metadata will be returned under `results.metadata`, `metadata_map`,
                 or `metadata_order`.
 
@@ -14425,7 +14429,7 @@ class OTCS:
         sort: str | None = None,
         limit: int | None = None,
         page: int | None = None,
-        fields: str | list = "properties",  # per default we just get the most important information
+        fields: str = "properties",  # per default we just get the most important information
         metadata: bool = False,
         timeout: float = REQUEST_TIMEOUT,
     ) -> dict | None:
@@ -14470,13 +14474,14 @@ class OTCS:
             page (int | None, optional):
                 The page to be returned (if more workspace instances exist than given by the page limit).
                 The default is None.
-            fields (str | list, optional):
-                Which fields to retrieve. This can have a significant
-                impact on performance.
-                NOTE: For this REST API only "properties" is possible. But it can be further restricted
-                by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
-                This parameter can be a string to select one field group or a list of
-                strings to select multiple field groups.
+            fields (str, optional):
+                Which workspace properties to retrieve. For this REST API only
+                "properties" is valid (not "categories", "versions", ...); it can be
+                narrowed to specific sub-fields, e.g. "properties{id,name,parent_id,description}".
+                Restricting the sub-fields can significantly improve performance.
+                If you need full categories, versions, permissions or other field
+                groups, use the get_workspace() method instead, which accepts a list
+                of fields.
                 Defaults to "properties".
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
@@ -14492,6 +14497,10 @@ class OTCS:
                     'sort': True,
                     'type': -1, 'width_weight': 100
                 }
+                NOTE: this is the field/column SCHEMA (like column definitions for the
+                SmartView widget) - it does NOT return the workspace's categories or
+                attribute values. To retrieve categories and attributes use the
+                get_workspace() method with "categories" in fields.
             timeout (float, optional):
                 Specific timeout for the request in seconds. The default is the standard
                 timeout value REQUEST_TIMEOUT used by the OTCS module.
@@ -15594,7 +15603,7 @@ class OTCS:
         related_workspace_type_id: int | list | None = None,
         limit: int | None = None,
         page: int | None = None,
-        fields: str | list = "properties",  # per default we just get the most important information
+        fields: str = "properties",  # NOTE: for this REST endpoint, it can only be a string - not a list!
         metadata: bool = False,
     ) -> dict | None:
         """Get the Workspace relationships to other workspaces.
@@ -15602,6 +15611,8 @@ class OTCS:
         Optionally, filter criterias can be provided
         such as the related workspace name (starts with) or
         the related workspace TYPE IDs (one or multiple)
+
+        REST API endpoint of this method is /v2/businessworkspaces/{id}/relateditems
 
         Args:
             workspace_id (int):
@@ -15626,14 +15637,12 @@ class OTCS:
                 The page to be returned (if more relationships exist than given
                 by the page limit).
                 The default is None.
-            fields (str | list, optional):
+            fields (str, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
                 NOTE: For this REST API only "properties" is possible. But it can be further restricted
                 by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
-                This parameter can be a string to select one field group or a list of
-                strings to select multiple field groups.
-                Defaults to "properties".
+                Defaults to "properties" which delivers all properties of the workspace.
             metadata (bool, optional):
                 Whether to return metadata (data type, field length, min/max values,...)
                 about the data. Defaults to False.
@@ -15648,6 +15657,10 @@ class OTCS:
                     'sort': True,
                     'type': -1, 'width_weight': 100
                 }
+                NOTE: this is the field/column SCHEMA (like column definitions for the
+                SmartView widget) - it does NOT return the related workspace's categories
+                or attribute values. To retrieve categories and attributes use the
+                get_workspace() method with "categories" in fields.
 
         Returns:
             dict | None:
@@ -15734,6 +15747,14 @@ class OTCS:
 
         """
 
+        # Sanity check as /v2/businessworkspaces/{bw_id}/relateditems REST API endpoint
+        # only accepts a string for the fields parameter.
+        if fields is not None and not isinstance(fields, str):
+            self.logger.error(
+                "Illegal data type for fields parameter! Must be a string for this REST API endpoint.",
+            )
+            return None
+
         request_url = self.config()["businessWorkspacesUrl"] + "/" + str(workspace_id) + "/relateditems"
 
         query = {}
@@ -15807,7 +15828,7 @@ class OTCS:
         relationship_type: str | list = "child",
         related_workspace_name: str | None = None,
         related_workspace_type_id: int | list | None = None,
-        fields: str | list = "properties",  # per default we just get the most important information
+        fields: str = "properties",  # NOTE: for this REST endpoint, it can only be a string - not a list!
         page_size: int = 100,
         limit: int | None = None,
         metadata: bool = False,
@@ -15838,14 +15859,12 @@ class OTCS:
                 Filter for a certain workspace name in the related items.
             related_workspace_type_id (int | list | None, optional):
                 ID of related workspace type (or list of IDs)
-            fields (str | list, optional):
+            fields (str, optional):
                 Which fields to retrieve. This can have a significant
                 impact on performance.
                 NOTE: For this REST API only "properties" is possible. But it can be further restricted
                 by specifying sub-fields, e.g., "properties{id,name,parent_id,description}")
-                This parameter can be a string to select one field group or a list of
-                strings to select multiple field groups.
-                Defaults to "properties".
+                Defaults to "properties" which delivers all properties of the workspace.
             page_size (int, optional):
                 The maximum number of related workspaces that should be delivered
                 in one page.
@@ -15857,8 +15876,11 @@ class OTCS:
                 If None (default) all workspaces are returned.
                 If a number is provided only up to this number of results is returned.
             metadata (bool, optional):
-                Whether or not workspace metadata should be returned. These are
-                the system level metadata - not the categories of the workspace!
+                Whether or not workspace metadata should be returned. This is the
+                field/column SCHEMA (like column definitions for the SmartView widget)
+                - it does NOT return the related workspace's categories or attribute
+                values. To retrieve categories and attributes use the get_workspace()
+                method with "categories" in fields.
                 Default is False.
 
         Returns:
@@ -24515,7 +24537,7 @@ class OTCS:
         strategy: str = "BFS",
         max_depth: int | None = None,
         timeout: float = 60.0,
-        fields: str | list = "properties",
+        fields: str = "properties",
         metadata: bool = False,
         business_objects: bool = False,
         **kwargs: dict,
@@ -24557,8 +24579,11 @@ class OTCS:
                 Wait time for the queue to have items. This is also the time it
                 takes at the end to detect the workers are done. So expect delay
                 if you raise it high!
-            fields (str | list, optional):
+            fields (str, optional):
                 The fields to retrieve for each workspace. Default is "properties".
+                Then all workspace properties are retrieved. If you want to retrieve only a subset of
+                properties, you can pass a list of property names. For example:
+                fields="properties{id, name, description, wnf_wksp_type_id}"
             metadata (bool, optional):
                 Whether to include metadata in the traversal results. Default is False.
             business_objects (bool, optional):
@@ -24574,7 +24599,13 @@ class OTCS:
 
         results = {"processed": 0, "traversed": 0}
 
-        processed_workspaces = {}
+        # De-duplicate at *enqueue* time (guarded by "lock"). This keeps the queue -
+        # and therefore peak memory - proportional to the number of *unique* workspaces
+        # instead of the number of *relationships*: with the default ["child", "parent"]
+        # every edge would otherwise be queued twice (once from each endpoint) and a
+        # workspace with N parents N times. The set stores only integer IDs, so it stays
+        # small even for millions of nodes.
+        enqueued_workspace_ids: set[int] = set()
 
         # Establish the default for relationship types which is just "parent" and "child"":
         if relationship_types is None:
@@ -24621,6 +24652,13 @@ class OTCS:
         elif strategy == "DFS":
             task_queue = LifoQueue()
 
+        # The initializer self-throttles against this high-water mark so it cannot flood
+        # the queue with roots faster than the (much slower) workers drain them. We do
+        # NOT bound the queue itself (Queue(maxsize=...)): the workers also put() onto it,
+        # so a bounded queue could deadlock. Only the initializer blocks on this; the
+        # workers never block on put().
+        queue_high_water = max(1000, workers * 500)
+
         initialization_done = False
 
         @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="init_traversal_queue")
@@ -24655,24 +24693,39 @@ class OTCS:
                 # We set metadata to false as get_workspace_by_type_and_name()
                 # which is called by get_workspace_instances_iterator() delivers
                 # only metadata for landing page workspace widget which is useless
-                # for traversal and would just slow down the initialization of the queue:
+                # for traversal and would just slow down the initialization of the queue.
                 workspace_instances = self.get_workspace_instances_iterator(
-                    type_id=wksp_type_id, fields=fields, metadata=False
+                    type_id=wksp_type_id,
+                    fields=fields,
+                    metadata=False,  # this is NOT categories but field schema information
                 )
                 for workspace_instance in workspace_instances:
-                    # Add the workspace and the current depth to the queue. Depth is 0 for the initial workspaces:
+                    # Add the workspace at depth 0 (roots are always depth 0):
                     workspace_id = self.get_result_value(response=workspace_instance, key="id")
-                    workspace_name = self.get_result_value(response=workspace_instance, key="name")
+
+                    # Backpressure: wait for the workers to drain the queue below the
+                    # high-water mark before adding more roots. Only the initializer
+                    # blocks here; workers use the full timeout while init is running, so
+                    # they stay alive draining and this cannot deadlock:
+                    while task_queue.qsize() > queue_high_water:
+                        time.sleep(0.1)
+
+                    with lock:
+                        if workspace_id in enqueued_workspace_ids:
+                            continue
+                        enqueued_workspace_ids.add(workspace_id)
+
                     self.logger.debug(
-                        "Add workspace -> '%s' (%d), type -> '%s' (%d) to worker queue for traversal...",
-                        workspace_name,
+                        "Add workspace (%s), type -> '%s' (%d) to worker queue for traversal...",
                         workspace_id,
                         wksp_type_name,
                         wksp_type_id,
                     )
+                    # Drop the large, unused "actions" sub-dictionary before queuing:
+                    workspace_instance.pop("actions", None)
                     task_queue.put((workspace_instance, 0))
                     counter += 1
-                # end for workspace_instances...
+                # end for workspace_instance in workspace_instances
             # end for workspace_type ...
 
             self.logger.debug(
@@ -24720,25 +24773,17 @@ class OTCS:
 
                     # Fetch node dictionary if just an ID was passed as parameter:
                     if isinstance(workspace_node, int):
-                        workspace_node = self.get_workspace(node_id=workspace_node, fields=fields, metadata=metadata)
+                        workspace_node = self.get_workspace(node_id=workspace_node, fields=fields, metadata=False)
 
                     workspace_id = self.get_result_value(response=workspace_node, key="id")
                     workspace_name = self.get_result_value(response=workspace_node, key="name")
                     workspace_type_id = self.get_result_value(response=workspace_node, key="wnf_wksp_type_id")
                     workspace_type_name = self.get_workspace_type_name(type_id=workspace_type_id)  # this can be None!
 
-                    with lock:
-                        if workspace_id in processed_workspaces:
-                            self.logger.debug(
-                                "Stop at workspace -> '%s' (%d) of type %s as it has been processed before.",
-                                workspace_name,
-                                workspace_id,
-                                "-> '{}' ({})".format(workspace_type_name, workspace_type_id)
-                                if workspace_type_name
-                                else "ID -> {}".format(workspace_type_id),
-                            )
-                            continue  # will jump to finally, declare task done and only then continue while loop
-                        processed_workspaces[workspace_id] = workspace_name
+                    # No pop-time de-duplication is needed: enqueued_workspace_ids already
+                    # guarantees every ID is put on the queue (and therefore popped) at most
+                    # once, so a "processed before" set here would be redundant and would
+                    # needlessly retain a name string per node.
 
                     self.logger.debug(
                         "Processing workspace -> '%s' (%d) of type -> '%s' (%d) in depth -> %d",
@@ -24784,7 +24829,7 @@ class OTCS:
                                 relationship_type=rel_type,
                                 related_workspace_type_id=related_type_id_filter,
                                 fields=fields,
-                                metadata=metadata,
+                                metadata=False,  # this is not categories but field schema information
                             )
 
                             # Traverse all related workspaces:
@@ -24848,11 +24893,40 @@ class OTCS:
                                         )
                                 # end executable in relationship_executables or []
 
-                                # Put related workspace into the queue for traversal:
-                                task_queue.put((related_workspace, current_depth + 1))
-
+                                # Count the edge as traversed regardless of whether we
+                                # (re-)queue its target below:
                                 with lock:
                                     results["traversed"] += 1
+
+                                # If the related workspace is itself of a traversal root
+                                # type, the initializer already enqueues every instance of
+                                # that type at depth 0. Skip queuing it here so its depth
+                                # stays a deterministic 0 (instead of racing between the
+                                # initializer's depth-0 copy and this depth-N copy) and so
+                                # we don't re-queue what the initializer already owns:
+                                if self._check_filter(
+                                    workspace_type_name=related_workspace_type_name,
+                                    workspace_type_id=related_workspace_type_id,
+                                    workspace_type_exclusions=workspace_type_exclusions,
+                                    workspace_type_inclusions=workspace_type_inclusions,
+                                ):
+                                    continue
+
+                                # De-duplicate and enforce max_depth *before* the put so
+                                # duplicate or too-deep nodes never occupy the queue (and
+                                # thus memory):
+                                next_depth = current_depth + 1
+                                if max_depth is not None and next_depth > max_depth:
+                                    continue
+                                with lock:
+                                    if related_workspace_id in enqueued_workspace_ids:
+                                        continue
+                                    enqueued_workspace_ids.add(related_workspace_id)
+
+                                # Drop the large, unused "actions" sub-dictionary before queuing:
+                                related_workspace.pop("actions", None)
+                                # Put related workspace into the queue for traversal:
+                                task_queue.put((related_workspace, next_depth))
                             # end for related_workspace in workspace_relationships
                         # end for rel_type in relationship_types:
                     # end if traverse and "child" in relationship_types:

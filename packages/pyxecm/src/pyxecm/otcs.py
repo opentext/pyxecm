@@ -23937,6 +23937,8 @@ class OTCS:
                 "workspace_description": None,
                 "current_depth": 0,
             }
+            # Drop the large, unused "actions" sub-dictionary before queuing:
+            subnode.pop("actions", None)
             task_queue.put((subnode, 0, traversal_data))
 
         def traverse_node_worker() -> None:
@@ -24023,6 +24025,8 @@ class OTCS:
                                 "folder_path": traversal_data["folder_path"] + [node_name],
                                 "current_depth": current_depth + 1,
                             }
+                            # Drop the large, unused "actions" sub-dictionary before queuing:
+                            subnode.pop("actions", None)
                             # Put all subnodes into the queue for further processing:
                             task_queue.put((subnode, current_depth + 1, sub_traversal_data))
 
@@ -24286,7 +24290,7 @@ class OTCS:
             # must overwrite rather than only fill in missing entries): this keeps
             # get_workspace_type_name() calls made later in this traversal (e.g. from
             # traverse_workspace()) from resolving a stale, previously-cached name.
-            self._workspace_type_lookup[wksp_type_id] = {"location": None, "name": wksp_type_name}
+            self._workspace_type_lookup[wksp_type_id] = wksp_type_name
             if not self._check_filter(
                 workspace_type_name=wksp_type_name,
                 workspace_type_id=wksp_type_id,

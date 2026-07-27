@@ -24720,7 +24720,7 @@ class OTCS:
                     # blocks here; workers use the full timeout while init is running, so
                     # they stay alive draining and this cannot deadlock:
                     while task_queue.qsize() > queue_high_water:
-                        self.logger.debug(
+                        self.logger.info(
                             "Queue size %d exceeds high-water mark %d, waiting for workers to drain...",
                             task_queue.qsize(),
                             queue_high_water,
@@ -24745,7 +24745,7 @@ class OTCS:
                 # end for workspace_instance in workspace_instances
             # end for workspace_type ...
 
-            self.logger.debug(
+            self.logger.info(
                 "Initialization of traversal queue completed. Added %s workspaces in total to queue. Workers don't have to wait any more if queue is empty.",
                 f"{counter:,}",
             )

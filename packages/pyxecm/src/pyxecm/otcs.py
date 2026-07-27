@@ -24665,6 +24665,14 @@ class OTCS:
 
         initialization_done = False
 
+        # Progress-monitor state (see monitor_traversal below). "active_workers" is a
+        # gauge of how many workers are currently processing an item (as opposed to
+        # blocked on an empty queue). Together with the queue size it distinguishes
+        # producer starvation (queue near empty while workers idle) from server-side
+        # saturation (queue full, all workers busy). "monitor_stop" ends the monitor.
+        active_workers = 0
+        monitor_stop = threading.Event()
+
         @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="init_traversal_queue")
         def init_traversal_queue() -> None:
             """Initialize the queue with all workspace instances of all workspace types (filtered)."""
@@ -24712,6 +24720,11 @@ class OTCS:
                     # blocks here; workers use the full timeout while init is running, so
                     # they stay alive draining and this cannot deadlock:
                     while task_queue.qsize() > queue_high_water:
+                        self.logger.debug(
+                            "Queue size %d exceeds high-water mark %d, waiting for workers to drain...",
+                            task_queue.qsize(),
+                            queue_high_water,
+                        )
                         time.sleep(0.1)
 
                     with lock:
@@ -24749,7 +24762,7 @@ class OTCS:
 
             """
 
-            nonlocal initialization_done
+            nonlocal initialization_done, active_workers
 
             while True:
                 # Initialze the traverse flag. If True, container
@@ -24760,7 +24773,7 @@ class OTCS:
 
                 try:
                     self.logger.debug(
-                        "Try to retrieve a new workspace from the queue. Wait max %f seconds...",
+                        "Try to retrieve a new workspace from the queue. Wait max %.2f seconds...",
                         timeout,
                     )
                     # We ony wait for a timeout if initializazion of queue by initialization thread is not yet completed.
@@ -24769,6 +24782,11 @@ class OTCS:
                 except Empty:
                     self.logger.debug("No (more) workspaces to process - finishing...")
                     return  # Queue is empty - worker is done
+
+                # Mark this worker as busy while it processes the item (the matching
+                # decrement is in the finally below). Read by monitor_traversal:
+                with lock:
+                    active_workers += 1
 
                 try:
                     if max_depth is not None and current_depth > max_depth:
@@ -24939,6 +24957,9 @@ class OTCS:
                     self.logger.error("Worker thread crashed unexpectedly; error -> %s", str(worker_error))
 
                 finally:
+                    # This worker is going back to waiting on the queue:
+                    with lock:
+                        active_workers -= 1
                     # Guarantee task_done() is called even if exceptions occur.
                     # Also continue statements in the try-block will first jump
                     # to here before continuing the while loop!
@@ -24947,9 +24968,46 @@ class OTCS:
 
         # end method traverse_node_worker()
 
+        @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="monitor_traversal")
+        def monitor_traversal() -> None:
+            """Log a queue/worker snapshot every 15 seconds while the traversal runs.
+
+            A queue size near 0 while workers sit idle indicates the traversal is
+            producer-starved (the single initializer cannot feed the workers fast
+            enough) rather than saturated on the server side. Note qsize() is
+            approximate under concurrency - it is used for trend logging only.
+            """
+
+            # Event.wait(15) returns True immediately once the traversal signals stop,
+            # so this both throttles to a 15s cadence and exits promptly at the end:
+            while not monitor_stop.wait(15):
+                with lock:
+                    active = active_workers
+                    processed = results["processed"]
+                    traversed = results["traversed"]
+                    enqueued = len(enqueued_workspace_ids)
+                self.logger.info(
+                    "Traversal monitor: queue size -> %d, active workers -> %d/%d (idle -> %d), "
+                    "processed -> %d, traversed -> %d, unique enqueued -> %d, initialization -> %s",
+                    task_queue.qsize(),
+                    active,
+                    workers,
+                    workers - active,
+                    processed,
+                    traversed,
+                    enqueued,
+                    "done" if initialization_done else "running",
+                )
+
+        # end sub-method definition
+
         # Start thread that populates the task queue
         init_thread = threading.Thread(target=init_traversal_queue, name="TraversalQueueInitializer")
         init_thread.start()
+
+        # Start the lightweight progress monitor (logs a snapshot every 15 seconds):
+        monitor_thread = threading.Thread(target=monitor_traversal, name="TraversalMonitor")
+        monitor_thread.start()
 
         # Start thread pool with limited concurrency
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
@@ -24961,6 +25019,10 @@ class OTCS:
             self.logger.debug("Waiting for workers to complete...")
             task_queue.join()
         self.logger.debug("All workers have completed their tasks!")
+
+        # Stop the progress monitor now that the workers are done:
+        monitor_stop.set()
+        monitor_thread.join()
 
         # Ensure initializer is finished before we return
         self.logger.debug("Waiting for the initializer thread to finish...")

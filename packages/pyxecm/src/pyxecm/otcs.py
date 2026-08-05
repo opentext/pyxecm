@@ -577,6 +577,10 @@ class OTCS:
         otcs_config["aiChatUrl"] = otcs_config["aiUrl"] + "/chat"
         otcs_config["aiContextUrl"] = otcs_config["aiUrl"] + "/context"
         otcs_config["recycleBinUrl"] = otcs_rest_url + "/v2/volumes/recyclebin"
+        otcs_config["scheduledBots"] = otcs_rest_url + "/v2/scheduledbots"
+        otcs_config["scheduledBot"] = otcs_rest_url + "/v2/scheduledbots/{}"
+        otcs_config["scheduledBotError"] = otcs_rest_url + "/v2/scheduledbots/{}/error"
+        otcs_config["scheduledBotHistory"] = otcs_rest_url + "/v2/scheduledbots/{}/history"
         otcs_config["processUrl"] = otcs_rest_url + "/v2/processes"
         otcs_config["workflowUrl"] = otcs_rest_url + "/v2/workflows"
         otcs_config["docWorkflowUrl"] = otcs_rest_url + "/v2/docworkflows"
@@ -19532,7 +19536,7 @@ class OTCS:
 
         """
 
-        def set_category_values_sub(show_error: bool = False) -> None | dict:
+        def set_category_values_sub(show_error: bool = False) -> dict | None:
             return self.do_request(
                 url=request_url,
                 method="PUT",

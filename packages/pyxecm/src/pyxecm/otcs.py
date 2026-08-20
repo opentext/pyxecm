@@ -36,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from functools import cache
 from http import HTTPStatus
+from http.cookiejar import DefaultCookiePolicy
 from importlib.metadata import version
 from queue import Empty, LifoQueue, Queue
 from typing import Literal
@@ -87,6 +88,10 @@ REQUEST_DOWNLOAD_HEADERS = {
 
 REQUEST_TIMEOUT = 60.0
 REQUEST_RETRY_DELAY = 30.0
+# Initial delay for exponential backoff on transient errors (garbled response, timeout).
+# It doubles per retry but is capped at REQUEST_RETRY_DELAY, so a transient blip costs a
+# few seconds instead of a flat 30s (previously a 60s timeout + 30s delay == ~90s stalls).
+REQUEST_RETRY_BACKOFF = 1.0
 REQUEST_MAX_RETRIES = 4
 
 
@@ -605,9 +610,7 @@ class OTCS:
         self._thread_number = thread_number
         self._download_dir = download_dir
         self._semaphore = threading.BoundedSemaphore(value=thread_number)
-        self._last_session_renewal = 0
         self._use_numeric_category_identifier: bool = use_numeric_category_identifier
-        self._executor = ThreadPoolExecutor(max_workers=thread_number)
         self._workspace_type_lookup: dict = {}
         self._workspace_type_names = []
         self._workspace_ontology = workspace_ontology
@@ -628,6 +631,11 @@ class OTCS:
             1,
         )  # only 1 thread should handle the re-authentication
         self._session_lock = threading.Lock()
+
+        # Per-thread requests.Session for HTTP connection reuse (keepalive). Each thread
+        # gets its own Session so there is no cross-thread shared mutable state (Sessions
+        # are not guaranteed thread-safe); the shared connection pool inside urllib3 is.
+        self._thread_local = threading.local()
 
     # end method definition
 
@@ -1257,6 +1265,32 @@ class OTCS:
 
     # end method definition
 
+    def request_session(self) -> requests.Session:
+        """Return the calling thread's requests.Session, creating it on first use.
+
+        Using a per-thread Session enables HTTP keepalive/connection reuse (avoiding a
+        new TCP+TLS handshake per call) without sharing a Session across threads. Cookie
+        persistence is disabled so every call uses exactly the cookies passed to it -
+        behaving identically to the previous module-level requests.request() (stateless),
+        just with connection reuse.
+
+        Returns:
+            requests.Session:
+                A Session bound to the current thread.
+
+        """
+
+        session = getattr(self._thread_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            # Never store response cookies -> identical to a fresh requests.request():
+            session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+            self._thread_local.session = session
+
+        return session
+
+    # end method definition
+
     def do_request(
         self,
         url: str,
@@ -1347,7 +1381,7 @@ class OTCS:
                     # if the cookie has been renewed already or not:
                     request_cookie = self.cookie().copy()
                     headers.update(request_cookie)
-                response = requests.request(
+                response = self.request_session().request(
                     method=method,
                     url=url,
                     data=data,
@@ -1372,7 +1406,8 @@ class OTCS:
                             retries += 1
                             if retries > max_retries and not retry_forever:
                                 return None
-                            time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                            backoff_delay = min(REQUEST_RETRY_BACKOFF * 2 ** (retries - 1), REQUEST_RETRY_DELAY)
+                            time.sleep(backoff_delay)  # exponential backoff before retrying
                             continue
                         return parsed_response
                     else:
@@ -1470,12 +1505,13 @@ class OTCS:
                 requests.exceptions.ReadTimeout,
             ):
                 if retries <= max_retries:
+                    retries += 1
+                    backoff_delay = min(REQUEST_RETRY_BACKOFF * 2 ** (retries - 1), REQUEST_RETRY_DELAY)
                     self.logger.warning(
                         "Request timed out. Retrying in %s seconds...",
-                        str(REQUEST_RETRY_DELAY),
+                        str(backoff_delay),
                     )
-                    retries += 1
-                    time.sleep(REQUEST_RETRY_DELAY)  # Add a delay before retrying
+                    time.sleep(backoff_delay)  # exponential backoff before retrying
                 else:
                     self.logger.error(
                         "%s; timeout error.",
@@ -8883,12 +8919,12 @@ class OTCS:
             timeout=None,
             warning_message="Cannot upload file -> '{}'{} to parent with ID -> {}".format(
                 file_name,
-                " from -> '{}' ".format(file_url) if file_url is not None else "",
+                " from -> '{}'".format(file_url) if file_url is not None else "",
                 parent_id,
             ),
             failure_message="Failed to upload file -> '{}'{}to parent with ID -> {}".format(
                 file_name,
-                " from -> '{}' ".format(file_url) if file_url is not None else "",
+                " from -> '{}'".format(file_url) if file_url is not None else "",
                 parent_id,
             ),
             show_error=show_error,
@@ -14347,7 +14383,8 @@ class OTCS:
                 Default is None.
             page_size (int | None, optional):
                 The maximum number of workspace instances that should be delivered in one page.
-                The default is 100. If None is given then the internal OTCS limit seems to be 500.
+                The default is 100. The OTCS REST API returns at most 500 instances per page;
+                values above 500 are clamped server-side to 500.
             limit (int | None, optional):
                 The maximum number of workspaces to return in total.
                 If None (default) all workspaces are returned.
@@ -14379,6 +14416,7 @@ class OTCS:
 
         page = 1
         remaining = limit
+        retrieved = 0
 
         while True:
             effective_limit = min(page_size, remaining) if remaining is not None else page_size
@@ -14396,6 +14434,20 @@ class OTCS:
                 metadata=metadata,
             )
 
+            # A None response means the underlying request failed (do_request
+            # returned None); the enumeration is truncated and the caller would
+            # otherwise silently receive only a partial result set. Make that loud.
+            # An empty results list on a present response is a genuine end-of-data
+            # and stays quiet (normal iterator termination).
+            if response is None:
+                self.logger.warning(
+                    "Workspace instance enumeration truncated for type name -> '%s' / type ID -> %s "
+                    "on page -> %d (request failed); returning partial results only.",
+                    type_name,
+                    type_id,
+                    page,
+                )
+
             total_pages = response.get("paging", {}).get("page_total") if response else None
 
             results = response.get("results") if response else None
@@ -14403,20 +14455,64 @@ class OTCS:
                 return  # natural iterator termination
 
             yield from results
+            retrieved += len(results)
 
             if remaining is not None:
                 remaining -= len(results)
                 if remaining <= 0:
                     return
 
-            # Fewer results than requested means this was the last page
-            if len(results) < effective_limit:
+            # Trust the server's echoed page limit: if it clamped our requested limit
+            # (e.g. below 500), compare against the limit the server actually applied so
+            # the short-page fallback below does not mistake a clamped full page for the
+            # last page and terminate the enumeration after a single page.
+            server_limit = response.get("paging", {}).get("limit")
+            if isinstance(server_limit, int) and 0 < server_limit < effective_limit:
+                effective_limit = server_limit
+
+            # The server's HATEOAS `next` action is the authoritative end-of-data signal:
+            # present -> another page exists; absent -> the server will serve no further
+            # page. This is more reliable than page_total, which on /v2/businessworkspaces
+            # is self-contradictory near the deep-offset result-window cap (~100k rows):
+            # it advertises more pages than the server will actually serve.
+            paging = response.get("paging", {})
+            actions = paging.get("actions")
+            if isinstance(actions, dict):
+                # Careful: "next" may be absent, explicitly null, or (defensively) not a
+                # dict at all - a plain .get("next", {}) would only cover the absent case
+                # and raise AttributeError on the others:
+                next_action = actions.get("next")
+                next_href = next_action.get("href") if isinstance(next_action, dict) else None
+                if next_href is None:
+                    # No further page. If we retrieved fewer rows than the advertised total
+                    # the result set is truncated by the server-side result-window cap -
+                    # warn so the caller does not mistake a partial enumeration for a
+                    # complete one.
+                    total_count = paging.get("total_count")
+                    if isinstance(total_count, int) and retrieved < total_count:
+                        self.logger.warning(
+                            "Workspace instance enumeration for type name -> '%s' / type ID -> %s "
+                            "stopped after page -> %d with %d of %d instances; the server offered "
+                            "no further page (deep-offset result-window cap) - results are incomplete.",
+                            type_name,
+                            type_id,
+                            page,
+                            retrieved,
+                            total_count,
+                        )
+                    return
+            # When the server provides no `next` action, its page total is the authority.
+            # Only when that is absent too do we fall back to the short-page heuristic. The
+            # short-page test alone is unsafe: if the server returns fewer rows than
+            # requested for any reason (e.g. a lower server-side cap) it would end
+            # enumeration prematurely.
+            elif total_pages:
+                if page >= total_pages:
+                    return
+            elif len(results) < effective_limit:
+                # Fewer results than the (server-adjusted) page limit means the last page.
                 return
 
-            # This is required as the REST API has a bug to deliver results
-            # for pages out of range instead an empty result. In this case we just stop the iteration.
-            if total_pages and page >= total_pages:
-                return
             page += 1
         # end while True
 
@@ -14474,7 +14570,8 @@ class OTCS:
                 Default is None.
             limit (int | None, optional):
                 The maximum number of workspace instances that should be delivered in one page.
-                The default is None, in this case the internal OTCS limit seems to be 500.
+                The default is None. The OTCS REST API returns at most 500 instances per page;
+                values above 500 are clamped server-side to 500.
             page (int | None, optional):
                 The page to be returned (if more workspace instances exist than given by the page limit).
                 The default is None.
@@ -15609,6 +15706,7 @@ class OTCS:
         page: int | None = None,
         fields: str = "properties",  # NOTE: for this REST endpoint, it can only be a string - not a list!
         metadata: bool = False,
+        timeout: float | None = None,
     ) -> dict | None:
         """Get the Workspace relationships to other workspaces.
 
@@ -15665,6 +15763,10 @@ class OTCS:
                 SmartView widget) - it does NOT return the related workspace's categories
                 or attribute values. To retrieve categories and attributes use the
                 get_workspace() method with "categories" in fields.
+            timeout (float | None, optional):
+                Timeout for the request in seconds. Defaults to None which means the
+                request waits indefinitely (the historical behavior). Pass a value
+                (e.g. REQUEST_TIMEOUT) to bound a potentially slow/hung request.
 
         Returns:
             dict | None:
@@ -15818,7 +15920,7 @@ class OTCS:
             url=request_url,
             method="GET",
             headers=request_header,
-            timeout=None,
+            timeout=timeout,
             failure_message="Failed to get related workspaces of workspace with ID -> {}".format(
                 workspace_id,
             ),
@@ -15836,6 +15938,7 @@ class OTCS:
         page_size: int = 100,
         limit: int | None = None,
         metadata: bool = False,
+        timeout: float | None = None,
     ) -> iter:
         """Get an iterator object to traverse all related workspaces for a workspace.
 
@@ -15886,6 +15989,10 @@ class OTCS:
                 values. To retrieve categories and attributes use the get_workspace()
                 method with "categories" in fields.
                 Default is False.
+            timeout (float | None, optional):
+                Timeout for each page request in seconds. Defaults to None which means
+                the request waits indefinitely (the historical behavior). Pass a value
+                (e.g. REQUEST_TIMEOUT) to bound a potentially slow/hung request.
 
         Returns:
             iter:
@@ -15896,6 +16003,7 @@ class OTCS:
 
         page = 1
         remaining = limit
+        retrieved = 0
 
         while True:
             effective_limit = min(page_size, remaining) if remaining is not None else page_size
@@ -15909,7 +16017,21 @@ class OTCS:
                 page=page,
                 fields=fields,
                 metadata=metadata,
+                timeout=timeout,
             )
+
+            # A None response means the underlying request failed (do_request
+            # returned None); the relationship enumeration is truncated and the
+            # caller would otherwise silently receive only a partial result set.
+            # An empty results list on a present response is a genuine end-of-data
+            # and stays quiet (normal iterator termination).
+            if response is None:
+                self.logger.warning(
+                    "Workspace relationship enumeration truncated for workspace ID -> %s "
+                    "on page -> %d (request failed); returning partial results only.",
+                    workspace_id,
+                    page,
+                )
 
             total_pages = response.get("paging", {}).get("page_total") if response else None
 
@@ -15918,20 +16040,63 @@ class OTCS:
                 return  # natural iterator termination
 
             yield from results
+            retrieved += len(results)
 
             if remaining is not None:
                 remaining -= len(results)
                 if remaining <= 0:
                     return
 
-            # Fewer results than requested means this was the last page
-            if len(results) < effective_limit:
+            # Trust the server's echoed page limit: if it clamped our requested limit
+            # (e.g. below 500), compare against the limit the server actually applied so
+            # the short-page fallback below does not mistake a clamped full page for the
+            # last page and terminate the enumeration after a single page.
+            server_limit = response.get("paging", {}).get("limit")
+            if isinstance(server_limit, int) and 0 < server_limit < effective_limit:
+                effective_limit = server_limit
+
+            # The server's `next` action is the authoritative end-of-data signal:
+            # present -> another page exists; absent -> the server will serve no further
+            # page. This is more reliable than page_total, which on the search-backed
+            # workspace endpoints is self-contradictory near the deep-offset result-window
+            # cap (~100k rows): it advertises more pages than the server will actually serve.
+            paging = response.get("paging", {})
+            actions = paging.get("actions")
+            if isinstance(actions, dict):
+                # Careful: "next" may be absent, explicitly null, or (defensively) not a
+                # dict at all - a plain .get("next", {}) would only cover the absent case
+                # and raise AttributeError on the others:
+                next_action = actions.get("next")
+                next_href = next_action.get("href") if isinstance(next_action, dict) else None
+                if next_href is None:
+                    # No further page. If we retrieved fewer rows than the advertised total
+                    # the result set is truncated by the server-side result-window cap -
+                    # warn so the caller does not mistake a partial enumeration for a
+                    # complete one.
+                    total_count = paging.get("total_count")
+                    if isinstance(total_count, int) and retrieved < total_count:
+                        self.logger.warning(
+                            "Workspace relationship enumeration for workspace ID -> %s stopped "
+                            "after page -> %d with %d of %d related items; the server offered no "
+                            "further page (deep-offset result-window cap) - results are incomplete.",
+                            workspace_id,
+                            page,
+                            retrieved,
+                            total_count,
+                        )
+                    return
+            # When the server provides no `next` action, its page total is the authority.
+            # Only when that is absent too do we fall back to the short-page heuristic. The
+            # short-page test alone is unsafe: if the server returns fewer rows than
+            # requested for any reason (e.g. a lower server-side cap) it would end
+            # enumeration prematurely.
+            elif total_pages:
+                if page >= total_pages:
+                    return
+            elif len(results) < effective_limit:
+                # Fewer results than the (server-adjusted) page limit means the last page.
                 return
 
-            # This is required as the REST API has a bug to deliver results
-            # for pages out of range instead an empty result. In this case we just stop the iteration.
-            if total_pages and page >= total_pages:
-                return
             page += 1
         # end while True
 
@@ -21930,8 +22095,6 @@ class OTCS:
 
         """
 
-        #        on_off = "on" if enable else "off"
-
         request_url = self.config()["fdaUsersUrl"] + "/{}/signingauthorityadmin/{}".format(
             user_id,
             enable,
@@ -23706,7 +23869,6 @@ class OTCS:
 
         chat_data["context"] = context
         chat_data["messages"] = messages
-        # "synonyms": self.config()["synonyms"],
         chat_data["inlineCitation"] = inline_citation
 
         return self.do_request(
@@ -23823,9 +23985,9 @@ class OTCS:
         processed = 0
         traversed = 0
 
-        # Initialze the traverse flag. If True, container
+        # Initialize the traverse flag. If True, container
         # subnodes will be processed. If executables exist
-        # than at least one executable has to indicate that
+        # then at least one executable has to indicate that
         # further traversal is required:
         traverse = not (executables)
 
@@ -23923,10 +24085,17 @@ class OTCS:
 
         results = {"processed": 0, "traversed": 0}
         lock = threading.Lock()
+        # The strategy also decides how large the queued frontier can grow (a BFS frontier
+        # is the tree's breadth, a DFS frontier roughly its depth), so an unrecognized
+        # value must not pass silently - without this guard task_queue would stay unbound
+        # and surface as a confusing UnboundLocalError further down:
         if strategy == "BFS":
             task_queue = Queue()
         elif strategy == "DFS":
             task_queue = LifoQueue()
+        else:
+            message = "Illegal traversal strategy -> '{}'! Must be either 'BFS' or 'DFS'.".format(strategy)
+            raise ValueError(message)
 
         # Enqueue initial nodes at depth 0:
         node_id = self.get_result_value(response=node, key="id") if isinstance(node, dict) else node
@@ -23962,9 +24131,9 @@ class OTCS:
             thread_name = threading.current_thread().name
 
             while True:
-                # Initialze the traverse flag. If True, container
+                # Initialize the traverse flag. If True, container
                 # subnodes will be processed. If executables exist
-                # than at least one executable has to return that
+                # then at least one executable has to return that
                 # further traversal is required:
                 traverse = not (executables)
 
@@ -24223,7 +24392,7 @@ class OTCS:
 
         return include
 
-    # endsub-method definition
+    # end sub-method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="traverse_workspaces")
     def traverse_workspaces(
@@ -24256,12 +24425,13 @@ class OTCS:
                 If True the inclusion and exclusion filters are also tested
                 during the traversal of workspace relationships.
             node_executables (list[callable]):
-                A list of methods to call for each traversed workspace. The node
-                and a optional dictionary of keyword arguments (kwargs)
-                are passed. The executables are called BEFORE the subnodes
-                are traversed. The executables should return a boolean result.
-                If the result is False, then the execution of the executables
-                list is stopped.
+                A list of methods to call for each traversed workspace. Each is
+                called as executable(workspace_node=..., **kwargs) - the same
+                keyword traverse_workspaces_parallel() uses, so an executable can
+                be shared between both traversals. The executables are called
+                BEFORE the subnodes are traversed. The executables should return a
+                boolean result. If the result is False, then the execution of the
+                executables list is stopped.
             relationship_executables (list[callable]):
                 Callables to execute per workspace relationship.
             relationship_types (list | None, optional):
@@ -24275,11 +24445,19 @@ class OTCS:
             kwargs:
                 Additional keyword arguments for the executables.
 
+        Returns:
+            dict:
+                Stats with processed and traversed counters. "processed" counts the
+                workspaces for which all node executables ran successfully. "traversed"
+                counts the relationship links that were followed - note that with the
+                default relationship_types of ["child", "parent"] a relationship is seen
+                from both of its endpoints and therefore counted twice.
+
         """
 
         results = {"processed": 0, "traversed": 0}
 
-        # Establish the default for relationship types which is just "child":
+        # Establish the default for relationship types which is both "child" and "parent":
         if relationship_types is None:
             relationship_types = ["child", "parent"]
 
@@ -24378,12 +24556,13 @@ class OTCS:
                 If True the inclusion and exclusion filters are also tested
                 during the traversal of workspace relationships.
             node_executables (list[callable]):
-                A list of methods to call for each traversed workspace. The node
-                and a optional dictionary of keyword arguments (kwargs)
-                are passed. The executables are called BEFORE the subnodes
-                are traversed. The executables should return a boolean result.
-                If the result is False, then the execution of the executables
-                list is stopped.
+                A list of methods to call for each traversed workspace. Each is
+                called as executable(workspace_node=..., **kwargs) - the same
+                keyword traverse_workspaces_parallel() uses, so an executable can
+                be shared between both traversals. The executables are called
+                BEFORE the subnodes are traversed. The executables should return a
+                boolean result. If the result is False, then the execution of the
+                executables list is stopped.
             relationship_executables (list[callable]):
                 Callables to execute per workspace relationship.
             relationship_types (list | None, optional):
@@ -24404,13 +24583,17 @@ class OTCS:
                 "processed": int,
                 "traversed": int,
             }
+            "processed" counts the workspaces for which all node executables ran
+            successfully. "traversed" counts the relationship links that were followed -
+            note that with the default relationship_types of ["child", "parent"] a
+            relationship is seen from both of its endpoints and therefore counted twice.
 
         """
 
         processed = 0
         traversed = 0
 
-        # Initialze the traverse flag. If True, container
+        # Initialize the traverse flag. If True, container
         # subnodes will be processed. If executables exist
         # then at least one executable has to indicate that
         # further traversal is required:
@@ -24459,7 +24642,11 @@ class OTCS:
         )
         # Run executables:
         for executable in node_executables or []:
-            result_success, result_traverse = executable(node=workspace_node, **kwargs)
+            # Pass the workspace as "workspace_node", matching what
+            # traverse_workspaces_parallel() passes to the same executables. This used
+            # to be "node", so a workspace node executable could not be shared between
+            # the sequential and the parallel traversal - it raised TypeError here:
+            result_success, result_traverse = executable(workspace_node=workspace_node, **kwargs)
             if result_traverse:
                 traverse = True
             if not result_success:
@@ -24509,13 +24696,39 @@ class OTCS:
                         if related_workspace_type_name
                         else "ID -> {}".format(related_workspace_type_id),
                     )
+                    # Count the relationship link we are about to follow. This "+= 1" is
+                    # what makes "traversed" a count of relationship links at all: the
+                    # recursive call below only reports what it found *beyond* the related
+                    # workspace, so without counting the current link here every link
+                    # would go unrecorded and "traversed" would stay 0 for a graph of any
+                    # depth. It is counted regardless of what the recursion does with the
+                    # target - the target may have been processed before and return
+                    # immediately, but the link from here to it was still traversed.
+                    # This mirrors traverse_workspaces_parallel(), which counts one per
+                    # related workspace as well, so both methods report the same metric.
+                    # Note the increment must stay INSIDE this loop: sitting outside it
+                    # (after "end for related_workspace") it ran once per relationship
+                    # type per node, so it counted nodes x relationship types instead of
+                    # links, and could not be compared to the parallel implementation.
+                    traversed += 1
+
                     # Recursive call for related workspace:
                     result = self.traverse_workspace(
                         workspace_node=related_workspace,
-                        current_depth=current_depth + 1,
                         processed_workspaces=processed_workspaces,
+                        current_depth=current_depth + 1,
+                        # The filter settings and the relationship types must be
+                        # forwarded on each recursion: without them the filters
+                        # silently stop applying below depth 1 and relationship_types
+                        # falls back to its ["child", "parent"] default, so a caller
+                        # asking for a filtered or child-only walk would get an
+                        # unfiltered bidirectional one from the first level down:
+                        workspace_type_exclusions=workspace_type_exclusions,
+                        workspace_type_inclusions=workspace_type_inclusions,
+                        filter_at_traversal=filter_at_traversal,
                         node_executables=node_executables,
                         relationship_executables=relationship_executables,
+                        relationship_types=relationship_types,
                         max_depth=max_depth,
                         fields=fields,
                         metadata=metadata,
@@ -24523,7 +24736,7 @@ class OTCS:
                     )
                     processed += result.get("processed", 0)
                     traversed += result.get("traversed", 0)
-                traversed += 1
+                # end for related_workspace in workspace_relationships
             # end for rel_type...
         # end if traversal
 
@@ -24548,6 +24761,7 @@ class OTCS:
         fields: str = "properties",
         metadata: bool = False,
         business_objects: bool = False,
+        page_size: int = 500,
         **kwargs: dict,
     ) -> dict:
         """Traverse nodes using a queue and thread pool (BFS-style).
@@ -24569,9 +24783,19 @@ class OTCS:
                 If True the inclusion and exclusion filters are also tested
                 during the traversal of workspace relationships.
             node_executables (list[callable]):
-                Callables to execute per node.
+                Callables to execute per node. Each is called as
+                executable(workspace_node=..., metadata=..., business_objects=..., **kwargs)
+                and must return a (success, traverse) tuple. The executables are
+                called BEFORE the related workspaces are traversed. If success is
+                False the remaining executables are skipped and the workspace does
+                not count as processed; the related workspaces are only traversed
+                if at least one executable returned traverse as True. An executable
+                that raises is treated like one returning success as False - the
+                error is logged and the traversal continues with the next workspace.
             relationship_executables (list[callable]):
-                Callables to execute per workspace relationship.
+                Callables to execute per workspace relationship. Each is called as
+                executable(workspace_node_from=..., workspace_node_to=..., rel_type=..., **kwargs)
+                and must return a (success, traverse) tuple.
             relationship_types (list | None, optional):
                 The default that will be established if None is provided is ["child", "parent"].
             workers (int, optional):
@@ -24582,26 +24806,67 @@ class OTCS:
                 Either "DFS" for Depth First Search, or "BFS" for Breadth First Search.
                 "BFS" is the default.
             max_depth (int | None):
-                The maximum depth for the recursive traversal.
+                The maximum traversal depth, counted as the number of hops away from a
+                traversal root. A workspace is a traversal root whenever its type passes
+                the inclusion/exclusion filter - such a workspace is always recorded at
+                depth 0, no matter which worker discovers it first, because the queue
+                initializer enqueues every instance of a matching type at depth 0 anyway.
+                Only workspaces of a NON-matching type accumulate depth.
+                As a consequence max_depth has NO effect in two configurations, and a
+                warning is logged if you pass it there:
+                  * no inclusions and no exclusions are given - then every type matches,
+                    so every workspace is a root at depth 0;
+                  * filter_at_traversal=True - then non-matching types are not followed
+                    at all, so everything that is traversed is a root at depth 0.
+                To actually bound the traversal, pass workspace type inclusions or
+                exclusions together with filter_at_traversal=False: max_depth then limits
+                how far the traversal follows chains of non-matching workspace types away
+                from the matching ones.
+                Note the bound is measured along the path on which a workspace is first
+                discovered, which under parallel traversal is not necessarily its
+                shortest path from a root.
             timeout (float, optional):
-                Wait time for the queue to have items. This is also the time it
-                takes at the end to detect the workers are done. So expect delay
-                if you raise it high!
+                Wait time for the queue to have items, while the queue initializer
+                is still enumerating the root workspaces. It only sets how long an
+                idle worker blocks per attempt in that phase - a worker that times
+                out just retries, so raising it costs nothing and does not risk
+                workers giving up on a slow initializer. It does NOT influence how
+                long it takes to detect that the workers are done: once the
+                initializer has finished, the workers poll with a fixed short
+                interval instead of this value.
             fields (str, optional):
                 The fields to retrieve for each workspace. Default is "properties".
                 Then all workspace properties are retrieved. If you want to retrieve only a subset of
                 properties, you can pass a list of property names. For example:
                 fields="properties{id, name, description, wnf_wksp_type_id}"
+                A narrowed field list MUST keep "id" and "wnf_wksp_type_id" (as in the
+                example above): the traversal itself reads them. "id" identifies the
+                workspace to follow relationships from and to de-duplicate on, and
+                "wnf_wksp_type_id" resolves the workspace type that the inclusion and
+                exclusion filters are evaluated against. Dropping the type ID makes the
+                type resolve to None, which no type name can match - so with a non-empty
+                inclusion list every related workspace is filtered out and, when
+                filter_at_traversal is True, the traversal stops after the root
+                workspaces while still reporting them as successfully processed.
             metadata (bool, optional):
                 Whether to include metadata in the traversal results. Default is False.
             business_objects (bool, optional):
                 Whether to include business objects information in the traversal results. Default is False.
+            page_size (int, optional):
+                Number of workspace instances to retrieve per REST call when the queue
+                initializer enumerates the root workspaces. Default is 500, which is the
+                maximum the OTCS REST API returns per page (values above 500 are clamped
+                server-side). Larger pages mean fewer round-trips during initialization.
             kwargs (dict):
                 Additional arguments for executables.
 
         Returns:
             dict:
-                Stats with processed and traversed counters.
+                Stats with processed and traversed counters. "processed" counts the
+                workspaces for which all node executables ran successfully. "traversed"
+                counts the relationship links that were followed - note that with the
+                default relationship_types of ["child", "parent"] a relationship is seen
+                from both of its endpoints and therefore counted twice.
 
         """
 
@@ -24615,7 +24880,7 @@ class OTCS:
         # small even for millions of nodes.
         enqueued_workspace_ids: set[int] = set()
 
-        # Establish the default for relationship types which is just "parent" and "child"":
+        # Establish the default for relationship types which is both "child" and "parent":
         if relationship_types is None:
             relationship_types = ["child", "parent"]
 
@@ -24628,6 +24893,28 @@ class OTCS:
             workspace_type_exclusions = [workspace_type_exclusions]
         if isinstance(workspace_type_inclusions, str):
             workspace_type_inclusions = [workspace_type_inclusions]
+
+        # "max_depth" counts hops away from a *traversal root*, and a workspace is a
+        # traversal root whenever its type passes the inclusion/exclusion filter (it is
+        # then recorded at depth 0 - see the "next_depth" computation further below).
+        # In two configurations every followed workspace is a root, so nothing ever
+        # accumulates depth and "max_depth" cannot trim anything:
+        #   * no inclusion and no exclusion list -> _check_filter() accepts every type;
+        #   * filter_at_traversal=True -> non-matching types are skipped entirely,
+        #     so everything that is followed is a matching (root) type.
+        # That is self-consistent - the queue initializer really does enqueue all of
+        # these at depth 0 - but a caller who passes max_depth expecting a hop limit
+        # would otherwise silently traverse the whole connected graph, so say so:
+        if max_depth is not None and (
+            filter_at_traversal or not (workspace_type_inclusions or workspace_type_exclusions)
+        ):
+            self.logger.warning(
+                "max_depth -> %d has no effect in this configuration (%s): every traversed workspace is a traversal root and is recorded at depth 0. Pass workspace type inclusions or exclusions with filter_at_traversal=False to bound the traversal.",
+                max_depth,
+                "filter_at_traversal is True"
+                if filter_at_traversal
+                else "no workspace type inclusions or exclusions given",
+            )
 
         # Precompute the full workspace type lookup (type_id -> name) up-front
         # (renew=True to pick up any renamed types on every traversal run). This lets us:
@@ -24655,16 +24942,33 @@ class OTCS:
             )
 
         lock = threading.Lock()
+        # The strategy is not just a traversal-order preference, it is the main lever on
+        # peak memory (see queue_high_water below), so an unrecognized value must not pass
+        # silently - without this guard task_queue would stay unbound and surface as a
+        # confusing UnboundLocalError inside the initializer thread:
         if strategy == "BFS":
             task_queue = Queue()
         elif strategy == "DFS":
             task_queue = LifoQueue()
+        else:
+            message = "Illegal traversal strategy -> '{}'! Must be either 'BFS' or 'DFS'.".format(strategy)
+            raise ValueError(message)
 
-        # The initializer self-throttles against this high-water mark so it cannot flood
-        # the queue with roots faster than the (much slower) workers drain them. We do
-        # NOT bound the queue itself (Queue(maxsize=...)): the workers also put() onto it,
-        # so a bounded queue could deadlock. Only the initializer blocks on this; the
-        # workers never block on put().
+        # High-water mark for the *initializer* only: it busy-waits above this mark so it
+        # cannot flood the queue with roots faster than the workers drain them. We do NOT
+        # bound the queue itself (Queue(maxsize=...)): the workers also put() onto it, so
+        # a bounded queue could deadlock (every worker blocked in put() means nobody is
+        # left to drain).
+        #
+        # CAREFUL: this mark does NOT bound the queue overall. Workers never block on
+        # put() and they enqueue every related workspace they discover, so the queue is
+        # bounded by the number of *unique* workspaces - the enqueue-time de-duplication
+        # keeps it at O(nodes) rather than O(relationships), but that is still far above
+        # this mark.
+        # Peak memory is therefore (frontier size x per-item size), and both are in the
+        # caller's hands: narrow "fields" to shrink each item, and use strategy="DFS" to
+        # shrink the frontier itself (a BFS frontier is the graph's breadth, a DFS
+        # frontier is roughly depth x branching factor).
         queue_high_water = max(1000, workers * 500)
 
         initialization_done = False
@@ -24677,14 +24981,20 @@ class OTCS:
         active_workers = 0
         monitor_stop = threading.Event()
 
+        # Ends the workers. They must NOT decide on their own when the traversal is
+        # over: every worker is also a producer (it enqueues the related workspaces it
+        # discovers), so an empty queue only means nothing is waiting *right now* - a
+        # peer may be inside a relationship REST call that is about to enqueue hundreds
+        # of nodes. Only the main thread sees the global state (task_queue.join() waits
+        # on "queued or in flight"), so it alone signals termination here:
+        workers_stop = threading.Event()
+
         @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="init_traversal_queue")
         def init_traversal_queue() -> None:
             """Initialize the queue with all workspace instances of all workspace types (filtered)."""
 
             nonlocal initialization_done
             counter = 0
-
-            # thread_name = threading.current_thread().name
 
             self.logger.debug("Initialize traversal queue...")
 
@@ -24713,6 +25023,7 @@ class OTCS:
                 workspace_instances = self.get_workspace_instances_iterator(
                     type_id=wksp_type_id,
                     fields=fields,
+                    page_size=page_size,
                     metadata=False,  # this is NOT categories but field schema information
                 )
                 for workspace_instance in workspace_instances:
@@ -24724,7 +25035,7 @@ class OTCS:
                     # blocks here; workers use the full timeout while init is running, so
                     # they stay alive draining and this cannot deadlock:
                     while task_queue.qsize() > queue_high_water:
-                        self.logger.info(
+                        self.logger.debug(
                             "Queue size %d exceeds high-water mark %d, waiting for workers to drain...",
                             task_queue.qsize(),
                             queue_high_water,
@@ -24757,6 +25068,33 @@ class OTCS:
 
         # end sub-method definition
 
+        def init_traversal_queue_guarded() -> None:
+            """Run the queue initializer, guaranteeing the completion flag is set.
+
+            The workers treat "initialization_done" as the signal that no further
+            root workspaces can arrive, and they keep retrying an empty queue while
+            it is False. If the initializer dies without setting it - a REST error,
+            or an exception raised by the tracing decorator - every worker would
+            loop on the empty queue forever and the pool would never shut down, so
+            the caller would hang with no error reported. Setting the flag in a
+            "finally" turns that silent deadlock into a completed (if incomplete)
+            traversal plus a logged error.
+            """
+
+            nonlocal initialization_done
+
+            try:
+                init_traversal_queue()
+            except Exception as init_error:
+                self.logger.error(
+                    "Initialization of traversal queue failed; traversal continues with the workspaces enqueued so far; error -> %s",
+                    str(init_error),
+                )
+            finally:
+                initialization_done = True
+
+        # end sub-method definition
+
         @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="traverse_workspace_worker")
         def traverse_workspace_worker() -> None:
             """Work on queue.
@@ -24768,10 +25106,10 @@ class OTCS:
 
             nonlocal initialization_done, active_workers
 
-            while True:
-                # Initialze the traverse flag. If True, container
+            while not workers_stop.is_set():
+                # Initialize the traverse flag. If True, container
                 # subnodes will be processed. If executables exist
-                # than at least one executable has to return that
+                # then at least one executable has to return that
                 # further traversal is required:
                 traverse = not (node_executables)
 
@@ -24780,19 +25118,29 @@ class OTCS:
                         "Try to retrieve a new workspace from the queue. Wait max %.2f seconds...",
                         timeout,
                     )
-                    # We ony wait for a timeout if initializazion of queue by initialization thread is not yet completed.
+                    # We only wait for a timeout if initialization of queue by initialization thread is not yet completed.
                     workspace_node, current_depth = task_queue.get(timeout=timeout if not initialization_done else 0.1)
                     self.logger.debug("Retrieved a new workspace from the queue.")
                 except Empty:
-                    self.logger.debug("No (more) workspaces to process - finishing...")
-                    return  # Queue is empty - worker is done
-
-                # Mark this worker as busy while it processes the item (the matching
-                # decrement is in the finally below). Read by monitor_traversal:
-                with lock:
-                    active_workers += 1
+                    # An empty queue is never a termination condition, not even once the
+                    # initializer is done: the other workers are producers too, so the
+                    # queue can refill at any moment. Exiting here used to retire the
+                    # worker permanently (nothing re-submits it), which made the pool
+                    # erode monotonically down to a single thread. Just retry - the main
+                    # thread ends this loop via "workers_stop" once the queue is truly
+                    # quiescent:
+                    continue
 
                 try:
+                    # Mark this worker as busy while it processes the item (the matching
+                    # decrement is in the finally below). Read by monitor_traversal.
+                    # This MUST be the first statement inside the try: the item is
+                    # already checked out of the queue at this point, so anything running
+                    # before the try could fail with the item held and no task_done() to
+                    # balance it - which would stall task_queue.join() forever:
+                    with lock:
+                        active_workers += 1
+
                     if max_depth is not None and current_depth > max_depth:
                         self.logger.debug("Reached maximum traversal depth of %d. Don't go deeper here...", max_depth)
                         continue  # will jump to finally, declare task done and only then continue while loop
@@ -24840,13 +25188,22 @@ class OTCS:
                                 workspace_id,
                                 str(e),
                             )
+                            # Treat a raised exception exactly like an executable that
+                            # returned success = False: stop the executable chain and
+                            # skip the "else" branch below, so the workspace is not
+                            # counted as processed. Without this break the node would be
+                            # reported as successfully processed even though its
+                            # executable failed - and since a raising executable never
+                            # sets "traverse", its relationships are skipped too, so the
+                            # traversal would silently report success while doing nothing:
+                            break
                     else:
                         with lock:
                             results["processed"] += 1
 
-                    # We only traverse the workspaces connected via child relationships
-                    # if at least one executables (if they any) indicate to require further traversal.
-                    # Additional we check that "child" relationships re requested to follow:
+                    # We only traverse the related workspaces if at least one executable
+                    # indicated that further traversal is required. All configured
+                    # relationship types are followed:
                     if traverse:
                         for rel_type in relationship_types:
                             # Get related workspaces of the current workspace and the current relationship type:
@@ -24856,6 +25213,9 @@ class OTCS:
                                 related_workspace_type_id=related_type_id_filter,
                                 fields=fields,
                                 metadata=False,  # this is not categories but field schema information
+                                # Bound each relationship request so one slow/hung node cannot
+                                # block a worker forever (which would starve the whole pool):
+                                timeout=REQUEST_TIMEOUT,
                             )
 
                             # Traverse all related workspaces:
@@ -24870,12 +25230,20 @@ class OTCS:
                                 related_workspace_type_name = self.get_workspace_type_name(
                                     type_id=related_workspace_type_id
                                 )
-                                if filter_at_traversal and not self._check_filter(
+                                # Does the related workspace's type pass the inclusion/exclusion
+                                # filter? This answers two questions at once and the filter is
+                                # pure, so we evaluate it once per relationship: it decides
+                                # whether we follow the relationship at all (only when
+                                # filter_at_traversal is set) and, further below, whether the
+                                # related workspace is a traversal root (which fixes its depth):
+                                is_root_type = self._check_filter(
                                     workspace_type_name=related_workspace_type_name,
                                     workspace_type_id=related_workspace_type_id,
                                     workspace_type_exclusions=workspace_type_exclusions,
                                     workspace_type_inclusions=workspace_type_inclusions,
-                                ):
+                                )
+
+                                if filter_at_traversal and not is_root_type:
                                     self.logger.debug(
                                         "Skipping traversal of related %s workspace as its type %s does not match filter.",
                                         rel_type,
@@ -24924,24 +25292,19 @@ class OTCS:
                                 with lock:
                                     results["traversed"] += 1
 
-                                # If the related workspace is itself of a traversal root
-                                # type, the initializer already enqueues every instance of
-                                # that type at depth 0. Skip queuing it here so its depth
-                                # stays a deterministic 0 (instead of racing between the
-                                # initializer's depth-0 copy and this depth-N copy) and so
-                                # we don't re-queue what the initializer already owns:
-                                if self._check_filter(
-                                    workspace_type_name=related_workspace_type_name,
-                                    workspace_type_id=related_workspace_type_id,
-                                    workspace_type_exclusions=workspace_type_exclusions,
-                                    workspace_type_inclusions=workspace_type_inclusions,
-                                ):
-                                    continue
-
-                                # De-duplicate and enforce max_depth *before* the put so
-                                # duplicate or too-deep nodes never occupy the queue (and
-                                # thus memory):
-                                next_depth = current_depth + 1
+                                # A related workspace whose type passes the filter (is_root_type,
+                                # computed above) is itself a traversal root: the initializer
+                                # enqueues every instance of that type at depth 0. Record it at
+                                # depth 0 here too - its depth is then deterministic no matter who
+                                # reaches it first, and coverage no longer depends on the
+                                # initializer's offset pagination getting there (the REST API stops
+                                # serving pages past its deep-offset result window, so a worker may
+                                # be holding a root the initializer can never enumerate).
+                                #
+                                # De-duplicate and enforce max_depth *before* putting the related
+                                # workspace in the queue so duplicate or too-deep nodes never occupy
+                                # the queue (and thus memory):
+                                next_depth = 0 if is_root_type else current_depth + 1
                                 if max_depth is not None and next_depth > max_depth:
                                     continue
                                 with lock:
@@ -24955,7 +25318,7 @@ class OTCS:
                                 task_queue.put((related_workspace, next_depth))
                             # end for related_workspace in workspace_relationships
                         # end for rel_type in relationship_types:
-                    # end if traverse and "child" in relationship_types:
+                    # end if traverse:
 
                 except Exception as worker_error:
                     self.logger.error("Worker thread crashed unexpectedly; error -> %s", str(worker_error))
@@ -24970,7 +25333,7 @@ class OTCS:
                     task_queue.task_done()
             # end while True
 
-        # end method traverse_node_worker()
+        # end sub-method traverse_workspace_worker()
 
         @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="monitor_traversal")
         def monitor_traversal() -> None:
@@ -25005,8 +25368,12 @@ class OTCS:
 
         # end sub-method definition
 
+        #
+        # Start of the main method traverse_workspaces_parallel() - initialize threads and thread pool:
+        #
+
         # Start thread that populates the task queue
-        init_thread = threading.Thread(target=init_traversal_queue, name="TraversalQueueInitializer")
+        init_thread = threading.Thread(target=init_traversal_queue_guarded, name="TraversalQueueInitializer")
         init_thread.start()
 
         # Start the lightweight progress monitor (logs a snapshot every 15 seconds):
@@ -25019,18 +25386,32 @@ class OTCS:
                 self.logger.debug("Starting workspace traversal worker -> %d...", i)
                 executor.submit(traverse_workspace_worker)
 
-            # Wait for all tasks to complete
+            # Wait for the initializer BEFORE waiting on the queue: task_queue.join()
+            # returns as soon as the unfinished task count is 0, which is trivially the
+            # case before the initializer has put its first root workspace on the queue.
+            # Joining it here guarantees every root is enqueued, so the join() below
+            # cannot fire on a queue that is merely not filled yet.
+            # This must stay AFTER the executor.submit() calls above: the initializer
+            # blocks on the high-water mark until the workers drain the queue, so joining
+            # it before the workers exist would deadlock.
+            self.logger.debug("Waiting for the initializer thread to finish...")
+            init_thread.join()
+
+            # Now the queue is the single source of truth. Its unfinished task count
+            # covers items that are queued AND items currently being processed (each
+            # worker calls task_done() only in its finally, after it has enqueued
+            # everything it discovered), so this returns exactly at global quiescence:
             self.logger.debug("Waiting for workers to complete...")
             task_queue.join()
+
+            # Quiescence reached. The workers never exit on their own any more, so
+            # release them explicitly - they notice within one queue poll interval:
+            workers_stop.set()
         self.logger.debug("All workers have completed their tasks!")
 
         # Stop the progress monitor now that the workers are done:
         monitor_stop.set()
         monitor_thread.join()
-
-        # Ensure initializer is finished before we return
-        self.logger.debug("Waiting for the initializer thread to finish...")
-        init_thread.join()
 
         return results
 

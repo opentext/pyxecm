@@ -1619,9 +1619,13 @@ class OTDS:
                 If None, no filtering based on state applies.
             limit (int, optional):
                 The maximum number of users to return. None = unlimited.
+                NOTE: OTDS has no 'limit' query parameter (it is silently ignored
+                by the REST API), so this is implemented via the page size. If
+                'page_size' is given as well, the smaller of the two wins.
             page_size (int, optional):
                 The chunk size for the number of users returned by one
                 REST API call. If None, then a default of 250 is used.
+                This is the only page control OTDS really honours - see 'limit'.
             attributes_as_keys (bool, optional):
                 If True, it creates a much simpler to parse result structure
                 per user that includes the user attributes in a "attributes"
@@ -1720,10 +1724,14 @@ class OTDS:
             query["where_location"] = where_location
         if where_state:
             query["where_state"] = where_state
-        if limit:
-            query["limit"] = limit
-        if page_size:
-            query["page_size"] = page_size
+        # OTDS has no 'limit' query parameter - it is silently ignored by the
+        # REST API. The page size is the only way to cap the number of returned
+        # users, so we derive it from 'limit'. Deriving it (instead of trimming
+        # the response) keeps the returned 'nextPageCookie' consistent with the
+        # delivered users:
+        effective_page_size = min(limit, page_size) if limit and page_size else (limit or page_size)
+        if effective_page_size:
+            query["page_size"] = effective_page_size
         if attributes_as_keys:
             query["attrsAsKeys"] = attributes_as_keys
         if next_page_cookie:
@@ -2110,9 +2118,13 @@ class OTDS:
                 Filter based on the DN of the Organizational Unit.
             limit (int, optional):
                 The maximum number of groups to return. None = unlimited.
+                NOTE: OTDS has no 'limit' query parameter (it is silently ignored
+                by the REST API), so this is implemented via the page size. If
+                'page_size' is given as well, the smaller of the two wins.
             page_size (int, optional):
                 The chunk size for the number of groups returned by one
                 REST API call. If None, then a default of 250 is used.
+                This is the only page control OTDS really honours - see 'limit'.
             attributes_as_keys (bool, optional):
                 If True, it creates a much simpler to parse result structure
                 per group that includes the group attributes in a "attributes"
@@ -2223,10 +2235,14 @@ class OTDS:
             query["where_filter"] = where_filter
         if where_location:
             query["where_location"] = where_location
-        if limit:
-            query["limit"] = limit
-        if page_size:
-            query["page_size"] = page_size
+        # OTDS has no 'limit' query parameter - it is silently ignored by the
+        # REST API. The page size is the only way to cap the number of returned
+        # groups, so we derive it from 'limit'. Deriving it (instead of trimming
+        # the response) keeps the returned 'nextPageCookie' consistent with the
+        # delivered groups:
+        effective_page_size = min(limit, page_size) if limit and page_size else (limit or page_size)
+        if effective_page_size:
+            query["page_size"] = effective_page_size
         if attributes_as_keys:
             query["attrsAsKeys"] = attributes_as_keys
         if next_page_cookie:

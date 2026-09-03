@@ -460,7 +460,11 @@ class M365:
                     )
                     return None
                 # Check if Session has expired - then re-authenticate and try once more
-                elif response.status_code == 401 and retries == 0:
+                # Never re-authenticate when this request IS the authentication call:
+                # a 401 from the token endpoint means the credentials themselves are bad,
+                # and calling authenticate() again would recurse until the recursion limit
+                # (each nested call starts with a fresh retries = 0):
+                elif response.status_code == 401 and retries == 0 and url != self.config()["authenticationUrl"]:
                     self.logger.debug("Session has expired - try to re-authenticate...")
                     new_token = self.authenticate(revalidate=True)
                     if not new_token:
@@ -803,40 +807,26 @@ class M365:
             return self._access_token
 
         request_url = self.config()["authenticationUrl"]
-        request_header = REQUEST_LOGIN_HEADER
 
         self.logger.debug("Requesting M365 Access Token from -> %s", request_url)
 
-        authenticate_post_body = self.credentials()
-        authenticate_response = None
-
-        try:
-            authenticate_response = requests.post(
-                request_url,
-                data=authenticate_post_body,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-        except requests.exceptions.ConnectionError as exception:
-            self.logger.warning(
-                "Unable to connect to -> %s : %s",
-                self.config()["authenticationUrl"],
-                str(exception),
-            )
+        # Route through do_request() so transient failures (timeouts, connection
+        # errors, 502/504) are retried with backoff. do_request() recognizes the
+        # authentication URL and will not try to re-authenticate on a 401 here.
+        # Credential rejections (400/401/403) fail fast and are never retried:
+        authenticate_dict = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=REQUEST_LOGIN_HEADER,
+            data=self.credentials(),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to request an M365 Access Token",
+        )
+        if not authenticate_dict or "access_token" not in authenticate_dict:
             return None
 
-        if authenticate_response.ok:
-            authenticate_dict = self.parse_request_response(authenticate_response)
-            if not authenticate_dict:
-                return None
-            access_token = authenticate_dict["access_token"]
-            self.logger.debug("Access Token -> %s", access_token)
-        else:
-            self.logger.error(
-                "Failed to request an M365 Access Token; error -> %s",
-                authenticate_response.text,
-            )
-            return None
+        access_token = authenticate_dict["access_token"]
+        self.logger.debug("Access Token -> %s", access_token)
 
         # Store authentication access_token:
         self._access_token = access_token
@@ -865,7 +855,6 @@ class M365:
         """
 
         request_url = self.config()["authenticationUrl"]
-        request_header = REQUEST_LOGIN_HEADER
 
         if not username:
             self.logger.error("Missing user name - cannot authenticate at M365!")
@@ -884,38 +873,25 @@ class M365:
             " with scope -> '{}'".format(scope) if scope else "",
         )
 
-        authenticate_post_body = self.credentials_user(username=username, password=password, scope=scope)
-        authenticate_response = None
-
-        try:
-            authenticate_response = requests.post(
-                request_url,
-                data=authenticate_post_body,
-                headers=request_header,
-                timeout=REQUEST_TIMEOUT,
-            )
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exception:
-            self.logger.warning(
-                "Unable to connect to -> %s with username -> %s: %s",
-                self.config()["authenticationUrl"],
-                username,
-                str(exception),
-            )
+        # Route through do_request() so transient failures (timeouts, connection
+        # errors, 502/504) are retried with backoff instead of failing the caller on
+        # the first hiccup. do_request() recognizes the authentication URL and will not
+        # try to re-authenticate on a 401 here. Credential rejections (400/401/403)
+        # fail fast and are never retried, so we do not burn attempts against
+        # Entra ID smart lockout on a wrong password:
+        authenticate_dict = self.do_request(
+            url=request_url,
+            method="POST",
+            headers=REQUEST_LOGIN_HEADER,
+            data=self.credentials_user(username=username, password=password, scope=scope),
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to request an M365 Access Token for user -> '{}'".format(username),
+        )
+        if not authenticate_dict or "access_token" not in authenticate_dict:
             return None
 
-        if authenticate_response.ok:
-            authenticate_dict = self.parse_request_response(authenticate_response)
-            if not authenticate_dict:
-                return None
-            access_token = authenticate_dict["access_token"]
-            self.logger.debug("User Access Token -> %s", access_token)
-        else:
-            self.logger.error(
-                "Failed to request an M365 Access Token for user -> '%s'; error -> %s",
-                username,
-                authenticate_response.text,
-            )
-            return None
+        access_token = authenticate_dict["access_token"]
+        self.logger.debug("User Access Token -> %s", access_token)
 
         # Store authentication access_token:
         self._user_access_token = access_token
@@ -1512,7 +1488,7 @@ class M365:
 
     # end method definition
 
-    def get_user_drive(self, user_id: str, me: bool = False) -> dict | None:
+    def get_user_drive(self, user_id: str, me: bool = False, show_error: bool = True) -> dict | None:
         """Get the mysite (OneDrive) of the user.
 
         It may be required to do this before certain other operations
@@ -1525,6 +1501,10 @@ class M365:
                 The M365 GUID of the user (can also be the M365 email of the user).
             me (bool, optional):
                 Should be True if the user itself is accessing the drive.
+            show_error (bool, optional):
+                Log a failed request as an error. Set this to False while polling for a
+                mySite that is still being provisioned - a 404 is expected there and
+                should not be reported as an error. Defaults to True.
 
         Returns:
             dict:
@@ -1575,6 +1555,7 @@ class M365:
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
+            show_error=show_error,
             failure_message="Failed to get mySite (drive) of M365 user -> {}".format(user_id),
         )
 

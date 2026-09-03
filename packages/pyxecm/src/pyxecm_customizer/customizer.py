@@ -885,7 +885,11 @@ class Customizer:
             self.logger.info("Waiting 30 seconds for OTCS -> '%s' to become ready...", otcs_object.hostname())
             time.sleep(30)
             otcs_cookie = otcs_object.authenticate()
-        self.logger.info("OTCS -> '%s' is ready now.", otcs_object.hostname())
+        self.logger.info(
+            "OTCS -> '%s' is ready now (version -> %s).",
+            otcs_object.hostname(),
+            otcs_object.get_server_version(),
+        )
 
         # Now we should be able to get the OTCS resource ID from OTDS:
         otcs_resource = self.otds_object.get_resource(

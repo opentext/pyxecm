@@ -94,6 +94,19 @@ REQUEST_RETRY_DELAY = 30.0
 REQUEST_RETRY_BACKOFF = 1.0
 REQUEST_MAX_RETRIES = 4
 
+# Gateway-style status codes produced by the ingress while an OTCS pod restarts or scales:
+REQUEST_RETRY_STATUS_CODES = [502, 503, 504]
+
+# OTCS answers with a generic HTML error page (status 500) if a request could not be
+# processed at all - exhausted thread pool, temporary database or search issues, service
+# restart. Real application errors are returned as JSON, so these markers only ever appear
+# on responses that are worth retrying:
+REQUEST_RETRY_HTML_MARKERS = [
+    "Please try again",
+    "Error Processing Request",
+    "Content Server Client Error",
+]
+
 
 default_logger = logging.getLogger(MODULE_NAME)
 
@@ -1455,12 +1468,33 @@ class OTCS:
                         return self.parse_request_response(response_object=response)
                     else:
                         return response
-                else:
-                    # Handle plain HTML responses to not pollute the logs
-                    content_type = response.headers.get("content-type", None)
-                    response_text = (
-                        "HTML content (only printed in debug log)" if content_type == "text/html" else response.text
+                elif (retries < max_retries or retry_forever) and (
+                    response.status_code in REQUEST_RETRY_STATUS_CODES
+                    or any(marker in response.text for marker in REQUEST_RETRY_HTML_MARKERS)
+                ):
+                    # OTCS could not process the request at all (it did not even produce a
+                    # JSON error). This is transient - typically a restarting or overloaded
+                    # pod - so we back off and try the very same call again:
+                    retries += 1
+                    backoff_delay = min(REQUEST_RETRY_BACKOFF * 2 ** (retries - 1), REQUEST_RETRY_DELAY)
+                    self.logger.warning(
+                        "%s; status -> %s/%s. This is a transient error. Retrying in %s seconds... %d/%d",
+                        failure_message or "Request failed",
+                        response.status_code,
+                        HTTPStatus(response.status_code).phrase,
+                        str(backoff_delay),
+                        retries,
+                        max_retries,
                     )
+                    time.sleep(backoff_delay)  # exponential backoff before retrying
+                    continue
+                else:
+                    # Handle plain HTML responses to not pollute the logs. The content type
+                    # can carry parameters (e.g. "text/html; charset=UTF-8"), so we must not
+                    # compare it literally:
+                    content_type = response.headers.get("content-type", "") or ""
+                    is_html = "html" in content_type.lower()
+                    response_text = "HTML content (only printed in debug log)" if is_html else response.text
 
                     if show_error:
                         self.logger.error(
@@ -1486,7 +1520,7 @@ class OTCS:
                             response_text,
                         )
 
-                    if content_type == "text/html":
+                    if is_html:
                         self.logger.debug(
                             "%s; status -> %s/%s; debug output -> %s",
                             failure_message,
@@ -2865,8 +2899,10 @@ class OTCS:
         where_first_name: str | None = None,
         where_last_name: str | None = None,
         where_business_email: str | None = None,
+        where_title: str | None = None,
         query_string: str | None = None,
         sort: str | None = None,
+        fields: str | None = None,
         limit: int = 20,
         page: int = 1,
         show_error: bool = False,
@@ -2874,6 +2910,12 @@ class OTCS:
         """Get a Content Server users based on different criterias.
 
         The criterias can be combined.
+
+        REST API: GET /api/v2/members
+
+        All criterias except 'where_title' are evaluated by Content Server.
+        'where_title' is evaluated on the client side and is VERY INEFFICIENT -
+        its use is NOT RECOMMENDED (see the parameter description below).
 
         Args:
             where_type (int, optional):
@@ -2889,6 +2931,23 @@ class OTCS:
                 Last name of the user.
             where_business_email (str | None, optional):
                 Business email address of the user.
+            where_title (str | None, optional):
+                Title of the user (e.g. "Sales Director").
+                WARNING: this criteria is VERY INEFFICIENT and its use is NOT
+                RECOMMENDED. The REST API cannot filter on the 'title' property,
+                so this method has to traverse all users matching the other
+                criterias and filter on the client side. As OTCS caps the page
+                size at 20, this costs one REST call per 20 users: a title lookup
+                on a system with 1.453 users took 74 REST calls and about 10
+                seconds - roughly 100 times slower than a server-side lookup.
+                Every call repeats the full traversal, so paging through the
+                result with 'page' is particularly expensive. Always combine
+                'where_title' with at least one server-side criteria.
+                The comparison is case-insensitive and matches the complete title.
+                NOTE: 'limit' and 'page' are applied to the filtered result on the
+                client side. As no REST call is constrained by them in this case,
+                'limit' is NOT capped at 20 here - use a large 'limit' to collect
+                all matches with a single traversal.
             query_string (str | None, optional):
                 Filters the results, returning the users with the specified query string
                 in any of the following fields: log-in name, first name, last name, email address,
@@ -2905,7 +2964,15 @@ class OTCS:
                 Format can be sort = id, sort = name, sort = first_name, sort = last_name,
                 sort = group_id, sort = mailaddress. If the prefix of asc or desc is not used
                 then asc will be assumed.
+                NOTE: sorting by 'title' is not supported. OTCS silently falls back
+                to 'asc_id' in that case.
                 Default is None.
+            fields (str | None, optional):
+                Which properties should be included in the response. This can be used
+                to significantly reduce the size of the payload as Content Server
+                delivers all user properties by default. Format is
+                fields = "properties" or fields = "properties{id,name,title}".
+                Default is None which delivers all properties.
             limit (int, optional):
                 The maximum number of results per page (internal default is 10). OTCS does
                 not allow values > 20 so this method adjusts values > 20 to 20.
@@ -3005,6 +3072,53 @@ class OTCS:
 
         """
 
+        if where_title:
+            # The REST API cannot filter on the title, so we traverse all users
+            # matching the remaining (server-side) criterias and filter on the
+            # client side. get_users_iterator() does NOT pass 'where_title' back
+            # into this method, so this does not recurse:
+            self.logger.debug(
+                "Filtering users by title -> '%s' is not supported by the REST API. Traversing all users...",
+                where_title,
+            )
+            users = list(
+                self.get_users_iterator(
+                    where_type=where_type,
+                    where_name=where_name,
+                    where_first_name=where_first_name,
+                    where_last_name=where_last_name,
+                    where_business_email=where_business_email,
+                    where_title=where_title,
+                    query_string=query_string,
+                    sort=sort,
+                    fields=fields,
+                ),
+            )
+
+            # Apply 'limit' and 'page' to the filtered result. This happens on
+            # the client side, so the REST API page size limit of 20 does not
+            # apply here:
+            page_size = limit or len(users)
+            first = (page - 1) * page_size if page else 0
+            results = users[first : first + page_size] if page_size else users
+
+            # Mimic the collection structure the REST API would deliver
+            # (including a page_total of 1 and an empty range for no matches):
+            return {
+                "collection": {
+                    "paging": {
+                        "limit": page_size,
+                        "page": page,
+                        "page_total": max(1, -(-len(users) // page_size)) if page_size else 1,
+                        "range_min": first + 1,
+                        "range_max": first + len(results),
+                        "total_count": len(users),
+                    },
+                    "sorting": {"sort": [{"key": "sort", "value": sort or "asc_id"}]},
+                },
+                "results": results,
+            }
+
         # Add query parameters (embedded in the URL)
         # Using type = 0 for OTCS groups or type = 17 for service user:
         query = {}
@@ -3024,9 +3138,11 @@ class OTCS:
             filter_string += " business email -> '{}'".format(where_business_email) if where_business_email else ""
         if query_string:
             query["query"] = query_string
-            filter_string += " query -> '{}'".format(query_string) if where_business_email else ""
+            filter_string += " query -> '{}'".format(query_string) if query_string else ""
         if sort:
             query["sort"] = sort
+        if fields:
+            query["fields"] = fields
         if limit:
             if limit > 20:
                 self.logger.warning(
@@ -3066,13 +3182,19 @@ class OTCS:
         where_first_name: str | None = None,
         where_last_name: str | None = None,
         where_business_email: str | None = None,
+        where_title: str | None = None,
         query_string: str | None = None,
         sort: str | None = None,
+        fields: str | None = None,
         limit: int = 20,
     ) -> iter:
         """Get an iterator object that can be used to traverse OTCS users.
 
         Filters can be applied that are given by the "where" and "query" parameters.
+
+        All filters except 'where_title' are evaluated by Content Server.
+        'where_title' is implemented on the client side and is VERY INEFFICIENT -
+        its use is NOT RECOMMENDED (see the parameter description below).
 
         Using a generator avoids loading a large users into memory at once.
         Instead you can iterate over the potential large list of users.
@@ -3102,6 +3224,23 @@ class OTCS:
                 Last name of the user.
             where_business_email (str | None, optional):
                 Business email address of the user.
+            where_title (str | None, optional):
+                Title of the user (e.g. "Sales Director").
+                WARNING: this filter is VERY INEFFICIENT and its use is NOT
+                RECOMMENDED. The REST API cannot filter on the 'title' property,
+                so the filter is applied on the client side and the complete
+                result set has to be paged through. As OTCS caps the page size
+                at 20, this costs one REST call per 20 users: looking up a title
+                on a system with 1.453 users took 74 REST calls and about 10
+                seconds - roughly 100 times slower than a server-side lookup.
+                The cost is dominated by the number of round-trips, so 'fields'
+                barely helps (it cut the payload by 10x but the runtime only
+                by 1.2x). Only the server-side criterias really help: adding
+                'where_last_name' reduced the same lookup to 2 REST calls and
+                0.15 seconds. So always combine 'where_title' with at least one
+                server-side criteria, and avoid it entirely in loops or in code
+                that runs against large user bases.
+                The comparison is case-insensitive and matches the complete title.
             query_string (str | None, optional):
                 Filters the results, returning the users with the specified query string
                 in any of the following fields: log-in name, first name, last name, email address,
@@ -3118,7 +3257,17 @@ class OTCS:
                 Format can be sort = id, sort = name, sort = first_name, sort = last_name,
                 sort = group_id, sort = mailaddress. If the prefix of asc or desc is not used
                 then asc will be assumed.
+                NOTE: sorting by 'title' is not supported. OTCS silently falls back
+                to 'asc_id' in that case.
                 Default is None.
+            fields (str | None, optional):
+                Which properties should be included in the response. This can be used
+                to significantly reduce the size of the payload as Content Server
+                delivers all user properties by default. Format is
+                fields = "properties" or fields = "properties{id,name,title}".
+                NOTE: if 'where_title' is used, 'title' must be part of the requested
+                properties - otherwise the client-side filter cannot match anything.
+                Default is None which delivers all properties.
             limit (int, optional):
                 The maximum number of results per page (internal default is 10). OTCS does
                 not allow values > 20 so this method adjusts values > 20 to 20.
@@ -3163,6 +3312,9 @@ class OTCS:
         # giving the desired number of pages:
         total_pages = (number_of_users + limit - 1) // limit
 
+        # The REST API cannot filter on the title, so we do it ourselves below:
+        title_filter = where_title.lower() if where_title else None
+
         for page in range(1, total_pages + 1):
             # Get the next page of sub node items:
             response = self.get_users(
@@ -3173,6 +3325,7 @@ class OTCS:
                 where_business_email=where_business_email,
                 query_string=query_string,
                 sort=sort,
+                fields=fields,
                 limit=limit,
                 page=page,
             )
@@ -3183,8 +3336,16 @@ class OTCS:
                 )
                 return
 
-            # Yield nodes one at a time:
-            yield from response["results"]
+            if title_filter is None:
+                # Yield nodes one at a time:
+                yield from response["results"]
+                continue
+
+            # Client-side filtering on the title property:
+            for user in response["results"]:
+                title = user.get("data", {}).get("properties", {}).get("title")
+                if title and title.lower() == title_filter:
+                    yield user
 
         # end for page in range(1, total_pages + 1)
 
@@ -3193,9 +3354,30 @@ class OTCS:
     @cache
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user")
     def get_user(
-        self, name: str | None = None, user_id: int | None = None, user_type: int = 0, show_error: bool = False
+        self,
+        name: str | None = None,
+        user_id: int | None = None,
+        user_type: int = 0,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        business_email: str | None = None,
+        title: str | None = None,
+        fields: str | None = None,
+        show_error: bool = False,
     ) -> dict | None:
         """Get a Content Server user based on the login name and type.
+
+        REST API: GET /api/v2/members
+
+        The criterias 'name', 'first_name', 'last_name' and 'business_email' are
+        the only user properties /v2/members can filter on. They can be combined.
+
+        'title' is special: the REST API neither filters nor sorts by the 'title'
+        property (an unsupported 'where_...' parameter is silently ignored by
+        Content Server and would return the complete, unfiltered list of users).
+        It is therefore implemented as a client-side filter which needs to
+        traverse all users - see get_users_iterator(). This is VERY INEFFICIENT
+        and NOT RECOMMENDED - see the 'title' parameter below.
 
         Args:
             name (str | None, optional):
@@ -3203,13 +3385,42 @@ class OTCS:
                 the 'user_id' parameter is used to retrieve the user.
             user_id (int | None, optional):
                 ID of the user to retrieve. If provided, this parameter takes precedence
-                over the 'name' parameter.
+                over the 'name' parameter (and over all other filter criterias).
             user_type (int, optional):
                 Type ID of user:
                 0 - Regular User
                 17 - Service User
                 Defaults to 0 -> (Regular User)
-
+            first_name (str | None, optional):
+                First name of the user.
+            last_name (str | None, optional):
+                Last name of the user.
+            business_email (str | None, optional):
+                Business email address of the user.
+            title (str | None, optional):
+                Title of the user (e.g. "Sales Director").
+                WARNING: this criteria is VERY INEFFICIENT and its use is NOT
+                RECOMMENDED. The REST API cannot filter on the 'title' property,
+                so it is evaluated on the client side and this method has to
+                traverse all users matching the other criterias. As OTCS caps the
+                page size at 20, this costs one REST call per 20 users: looking up
+                a title on a system with 1.453 users took 74 REST calls and about
+                10 seconds - roughly 100 times slower than a server-side lookup.
+                'fields' barely helps here as the cost is dominated by the number
+                of round-trips. Always combine 'title' with at least one
+                server-side criteria (this reduced the same lookup to 2 REST calls
+                and 0.15 seconds), and avoid it entirely in loops or in code that
+                runs against large user bases.
+                The comparison is case-insensitive and matches the complete title.
+            fields (str | None, optional):
+                Which properties should be included in the response. This can be used
+                to significantly reduce the size of the payload as Content Server
+                delivers all user properties by default. Format is
+                fields = "properties" or fields = "properties{id,name,title}".
+                This is also supported if the user is retrieved via 'user_id'.
+                NOTE: if 'title' is used, "title" must be part of the requested
+                properties - otherwise the client-side filter cannot match anything.
+                Default is None which delivers all properties.
             show_error (bool, optional):
                 If True, treat as an error if the user is not found. Defaults to False.
 
@@ -3304,25 +3515,74 @@ class OTCS:
 
         """
 
-        if user_id is None and name is None:
-            self.logger.error("No user name or ID provided. Cannot find user!")
+        if user_id is None and not any([name, first_name, last_name, business_email, title]):
+            self.logger.error(
+                "No user name, first name, last name, business email, title, or ID provided. Cannot find user!",
+            )
             return None
 
-        if user_id is None:
+        if user_id is None and title:
+            # The REST API cannot filter on the title. get_users() applies the
+            # remaining criterias server-side and filters the title on the client
+            # side. Be aware that this traverses the complete result set.
+            # limit = 0 disables the client-side paging so that we get all matches:
+            response = self.get_users(
+                where_type=user_type,
+                where_name=name,
+                where_first_name=first_name,
+                where_last_name=last_name,
+                where_business_email=business_email,
+                where_title=title,
+                fields=fields,
+                limit=0,
+                show_error=show_error,
+            )
+            if not response or not response.get("results"):
+                message = "Couldn't find user with title -> '{}'".format(title)
+                if show_error:
+                    self.logger.error(message)
+                else:
+                    self.logger.warning(message)
+                return None
+
+            return response
+
+        if user_id is not None:
+            # The user ID uniquely identifies the user so we can address the
+            # user resource directly. 'fields' is the only query parameter
+            # that is supported on this REST API path:
+            request_url = self.config()["membersUrlv2"] + "/" + str(user_id)
+            if fields:
+                encoded_query = urllib.parse.urlencode(query={"fields": fields}, doseq=True)
+                request_url += "?{}".format(encoded_query)
+            filter_string = " user ID -> '{}'".format(user_id)
+        else:
             # Add query parameters (embedded in the URL)
             # Using type = 0 for OTCS groups or type = 17 for service user:
-            query = {"where_type": user_type, "where_name": name}
+            query = {"where_type": user_type}
+            filter_string = " type -> 'service user'" if user_type == 17 else ""
+            if name:
+                query["where_name"] = name
+                filter_string += " login name -> '{}'".format(name)
+            if first_name:
+                query["where_first_name"] = first_name
+                filter_string += " first name -> '{}'".format(first_name)
+            if last_name:
+                query["where_last_name"] = last_name
+                filter_string += " last name -> '{}'".format(last_name)
+            if business_email:
+                query["where_business_email"] = business_email
+                filter_string += " business email -> '{}'".format(business_email)
+            if fields:
+                query["fields"] = fields
             encoded_query = urllib.parse.urlencode(query=query, doseq=True)
             request_url = self.config()["membersUrlv2"] + "?{}".format(encoded_query)
-        else:
-            request_url = self.config()["membersUrlv2"] + "/" + str(user_id)
 
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Get user with %s%s; calling -> %s",
-            "login name -> '{}'".format(name) if name is not None else "user ID -> '{}'".format(user_id),
-            ", type -> 'service user'" if user_type == 17 else "",
+            "Get user with%s; calling -> %s",
+            filter_string,
             request_url,
         )
 
@@ -3331,14 +3591,8 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get user with {} and type -> {}".format(
-                "login name -> '{}'".format(name) if name is not None else "user ID -> {}".format(user_id),
-                user_type,
-            ),
-            warning_message="Couldn't find user with {} and type -> {}".format(
-                "login name -> '{}'".format(name) if name is not None else "user ID -> {}".format(user_id),
-                user_type,
-            ),
+            failure_message="Failed to get user with{}".format(filter_string),
+            warning_message="Couldn't find user with{}".format(filter_string),
             show_error=show_error,
         )
 
@@ -13851,23 +14105,25 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_workspace_type_relations")
-    def update_workspace_type_relations(
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_workspace_type_ontology")
+    def update_workspace_type_ontology(
         self,
         type_id: int,
-        relations: list[dict],
+        relations: list[dict] | None = None,
+        synonyms: dict[str, list[str]] | None = None,
+        key_aspects: dict[str, list[str]] | None = None,
     ) -> dict | None:
-        """Update workspace type configured in OTCS.
+        """Update workspace type ontology information.
 
-        Currently its main purpose is to update the ontology relations
-        for a given workspace type.
+        Currently its main purpose is to update the ontology relations,
+        synonyms and key aspects for a given workspace type.
 
         NOTE: This method can only be used with OTCM 26.2 or newer!
 
         Args:
             type_id (int):
                 The workspace type ID.
-            relations (list[dict]):
+            relations (list[dict] | None, optional):
                 List of ontology relations to set for the workspace type.
                 This is a list of dictionaries with the following structure:
                 {
@@ -13875,6 +14131,12 @@ class OTCS:
                     "rel_type": either "child" or "parent"
                     "predicates": list of predicate strings,
                 }
+            synonyms (dict[str, list[str]] | None, optional):
+                Dictionary of synonyms to set for the workspace type. Keys are language codes and values are lists of synonyms. Synonyms are important for entity extraction
+                of user queries in Content Aviator.
+            key_aspects (dict[str, list[str]] | None, optional):
+                Dictionary of key aspects to set for the workspace type. Keys are language codes and values are lists of key aspects. Key aspects can be used by Content Aviator
+                for tailored workspace summaries.
 
         Returns:
             dict | None:
@@ -13885,7 +14147,25 @@ class OTCS:
         request_url = self.config()["businessWorkspaceTypesUrlv2"] + "/" + str(type_id)
         request_header = self.request_form_header()
 
-        workspace_type_put_body = {"relations": relations}
+        otcs_version = float(self.get_server_version())
+
+        if otcs_version < 26.2:
+            self.logger.warning("Workspace type ontology updates are not supported in OTCM versions below 26.2.")
+            return None
+
+        workspace_type_put_body = {}
+        if relations:
+            workspace_type_put_body["relations"] = relations
+        if synonyms:
+            if otcs_version >= 26.4:
+                workspace_type_put_body["wksp_type_alias_names"] = synonyms
+            else:
+                self.logger.warning("Synonyms for workspace types are not supported in OTCM versions below 26.4.")
+        if key_aspects:
+            if otcs_version >= 26.4:
+                workspace_type_put_body["wksp_type_key_aspects"] = key_aspects
+            else:
+                self.logger.warning("Key aspects for workspace types are not supported in OTCM versions below 26.4.")
 
         self.logger.debug("Update workspace type with ID -> %d; calling -> %s", type_id, request_url)
 

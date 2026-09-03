@@ -7725,14 +7725,45 @@ class Payload:
                             if not response:
                                 self.logger.error(
                                     "Couldn't authenticate as M365 user -> '%s' to provision user's drive!",
-                                    username=user["email"],
+                                    user["email"],
                                 )
                                 success = False
                                 continue
                             # Retrieve the drive endpoint to trigger the drive provisioning. It is important
                             # to use the 'me=True' to make sure the request is done with the user credentials,
                             # not the app credentials (using purely client_id / client_secret):
-                            response = self._m365.get_user_drive(user_id=user["email"], me=True)
+                            #
+                            # Provisioning a mySite is asynchronous: this first GET is what triggers it,
+                            # and Graph answers 404 ("User's mysite not found") until the drive exists.
+                            # That 404 is "not ready yet", not a failure - which is why this cannot live
+                            # in do_request(): it fails fast on 404 by design (correct for every other
+                            # caller), and a transport retry would fire within milliseconds against
+                            # something that takes tens of seconds. So we poll here, using the same
+                            # escalating backoff as M365.email_verification() for the equivalent
+                            # "wait for M365 to catch up" problem.
+                            # Errors are muted while polling and shown only on the final attempt, so a
+                            # real fault (e.g. a missing Files.ReadWrite scope) still surfaces in the
+                            # log instead of being swallowed on every attempt:
+                            retries = 0
+                            max_retries = 6
+                            response = None
+                            while retries < max_retries:
+                                last_attempt = retries == max_retries - 1
+                                response = self._m365.get_user_drive(
+                                    user_id=user["email"],
+                                    me=True,
+                                    show_error=last_attempt,
+                                )
+                                if response or last_attempt:
+                                    break
+                                self.logger.info(
+                                    "Drive (mySite) of user -> '%s' not yet provisioned. Waiting %s seconds...",
+                                    user["email"],
+                                    10 * (retries + 1),
+                                )
+                                time.sleep(10 * (retries + 1))
+                                retries += 1
+                            # end while
                             if not response:
                                 self.logger.error("Couldn't get M365 drive of user -> '%s'!", user["email"])
                                 success = False
@@ -13430,6 +13461,59 @@ class Payload:
 
     # end method definition
 
+    @staticmethod
+    def _merge_multilingual_values(
+        accumulator: dict[str, set],
+        values: list | dict | None,
+        default_locale: str,
+    ) -> None:
+        """Merge payload synonyms/key aspects into a language-keyed accumulator.
+
+        Payload values may be a flat list of strings (assigned to the default locale) or a
+        dict mapping language codes to lists of strings. This mirrors how predicates already
+        support multi-lingual values.
+
+        Args:
+            accumulator (dict[str, set]):
+                The language-keyed accumulator (locale -> set of values) to merge into.
+            values (list | dict | None):
+                The payload values, either a flat list or a dict keyed by language code.
+            default_locale (str):
+                The locale to assign flat-list values to.
+
+        """
+
+        if not values:
+            return
+        if isinstance(values, dict):
+            for locale, locale_values in values.items():
+                accumulator.setdefault(locale, set()).update(locale_values or [])
+        else:
+            accumulator.setdefault(default_locale, set()).update(values)
+
+    # end method definition
+
+    @staticmethod
+    def _flatten_multilingual_values(accumulator: dict[str, set]) -> list[str]:
+        """Flatten a language-keyed accumulator into a sorted list of unique values.
+
+        Used for the description field and the legacy merged ontology JSON file, which
+        both use a flat (language-agnostic) representation.
+
+        Args:
+            accumulator (dict[str, set]):
+                The language-keyed accumulator (locale -> set of values).
+
+        Returns:
+            list[str]:
+                The sorted list of unique values across all locales.
+
+        """
+
+        return sorted({value for values in accumulator.values() for value in values})
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_ontologies")
     def process_ontologies(self, section_name: str = "ontologies") -> bool:
         """Process ontologies in payload and update the workspace types in Content Server.
@@ -13547,42 +13631,49 @@ class Payload:
                     workspace_type_name,
                     {
                         "name": workspace_type_name,
-                        "free_text": entity.get("description", ""),
-                        "synonyms": set(),
-                        "key_aspects": set(),
+                        "free_text": entity.get(
+                            "description", ""
+                        ),  # free_text is the original description of the workspace type
+                        # synonyms and key aspects are accumulated per language code (locale -> set):
+                        "synonyms": {},
+                        "key_aspects": {},
                         "ontologies": set(),
                     },
                 )
                 entity_data["ontologies"].add(ontology_name)
-                entity_data["synonyms"].update(entity.get("synonyms", []))
-                entity_data["key_aspects"].update(entity.get("key_aspects", []))
+                # Payload values may be a flat list (default locale) or a dict keyed by language code:
+                self._merge_multilingual_values(entity_data["synonyms"], entity.get("synonyms"), default_locale)
+                self._merge_multilingual_values(entity_data["key_aspects"], entity.get("key_aspects"), default_locale)
 
                 # As OTCM has no datastructure for synonyms, key aspects and domains we store them
                 # in the description field. We keep the payload free text first and append the
                 # managed sections (alphabetically sorted) with the accumulated values:
                 managed_sections = {
-                    "Domains": entity_data["ontologies"],
-                    "Synonyms": entity_data["synonyms"],
-                    "Key Aspects": entity_data["key_aspects"],
+                    "Domains": sorted(entity_data["ontologies"]),
+                    "Synonyms": self._flatten_multilingual_values(entity_data["synonyms"]),
+                    "Key Aspects": self._flatten_multilingual_values(entity_data["key_aspects"]),
                 }
                 managed_lines = [
-                    "{}: {}".format(label, ", ".join(sorted(values)))
-                    for label, values in managed_sections.items()
-                    if values
+                    "{}: {}".format(label, ", ".join(values)) for label, values in managed_sections.items() if values
                 ]
                 workspace_type_description = "\n".join([entity_data["free_text"], *managed_lines]).strip()
                 entity_data["description"] = workspace_type_description
 
-                response = self._otcs.update_item(
-                    node_id=workspace_type_node_id,
-                    item_description=workspace_type_description,
-                )
-                if not response:
-                    self.logger.error(
-                        "Failed to update domains, synonyms and key aspects (stored in description) for entity type -> '%s'!",
-                        workspace_type_name,
+                # TODO: updating properties of workspace types is currently not
+                # working as expected. 26.4 has native support for synonyms, key aspects,
+                # but NOT for domains. So domains would still need to be managed manually
+                # in the description field which is not working with 26.4:
+                if otcs_version < 26.4:
+                    response = self._otcs.update_item(
+                        node_id=workspace_type_node_id,
+                        item_description=workspace_type_description,
                     )
-                    success = False
+                    if not response:
+                        self.logger.error(
+                            "Failed to update domains, synonyms and key aspects (stored in description) for entity type -> '%s'!",
+                            workspace_type_name,
+                        )
+                        success = False
 
                 # Build the data structure required for updating the workspace type
                 # with the ontology information. As we can have multiple ontologies
@@ -13651,26 +13742,48 @@ class Payload:
 
                     # Build the merged relationships structure:
                     rel_key = (workspace_type_name, target_wksp_type_name, rel_type)
+                    # Flatten multi-lingual predicates (dicts) to their values so they can be
+                    # stored (and hashed in a set) in the legacy merged ontology JSON file:
+                    predicate_values = [
+                        value
+                        for predicate in rel.get("predicates", [])
+                        for value in (predicate.values() if isinstance(predicate, dict) else [predicate])
+                    ]
                     if rel_key not in merged_relationships:
                         merged_relationships[rel_key] = {
                             "source_type": workspace_type_name,
                             "target_type": target_wksp_type_name,
                             "rel_type": rel_type,
-                            "predicates": set(rel.get("predicates", [])),
+                            "predicates": set(predicate_values),
                             "ontologies": {ontology_name},
                         }
                     else:
                         # as the same relationship can be defined in multiple ontologies we need to:
                         # 1. merge the predicates and
                         # 2. keep track in which ontologies this relationship is defined:
-                        merged_relationships[rel_key]["predicates"].update(rel.get("predicates", []))
+                        merged_relationships[rel_key]["predicates"].update(predicate_values)
                         merged_relationships[rel_key]["ontologies"].add(ontology_name)
                 # end for rel in relationships
 
-                if not entity_relations or added == 0:
-                    # We don't want to overwrite with empty or unchanged relationships
+                if otcs_version >= 26.4:
+                    # The REST API supports multi-lingual synonyms/key aspects keyed by language code:
+                    synonyms = {locale: sorted(values) for locale, values in entity_data["synonyms"].items()} or None
+                    key_aspects = {
+                        locale: sorted(values) for locale, values in entity_data["key_aspects"].items()
+                    } or None
+                else:
+                    synonyms = None
+                    key_aspects = None
+
+                # Only send relations if we actually added new ones - we don't want to
+                # overwrite existing relationships with empty or unchanged data:
+                relations_to_update = entity_relations if (entity_relations and added > 0) else None
+
+                # Nothing to update for this entity (no new relations, synonyms or key aspects):
+                if not relations_to_update and not synonyms and not key_aspects:
                     self.logger.info(
-                        "No new relationships to add for entity type -> '%s'. Skipping...", workspace_type_name
+                        "No new relationships, synonyms or key aspects to add for entity type -> '%s'. Skipping...",
+                        workspace_type_name,
                     )
                     continue
 
@@ -13679,21 +13792,37 @@ class Payload:
                 # with the ontology information to a folder in Content Server and the Knowledge Graph
                 # class will read it from there (via the method load_workspace_ontology() in the OTCS class):
                 if otcs_version >= 26.2:
-                    # Update the workspace type with the relationships:
-                    response = self._otcs.update_workspace_type_relations(
-                        type_id=workspace_type_id, relations=entity_relations
+                    # Update the workspace type with the ontology information:
+                    response = self._otcs.update_workspace_type_ontology(
+                        type_id=workspace_type_id,
+                        relations=relations_to_update,
+                        synonyms=synonyms,
+                        key_aspects=key_aspects,
                     )
                     if not response:
                         self.logger.error(
-                            "Failed to update ontology relations for workspace type -> '%s'!",
+                            "Failed to update ontology information for workspace type -> '%s'!",
                             workspace_type_name,
                         )
                         success = False
                         continue
+                    # Build the log message only from the values that are actually present:
+                    details = []
+                    if relations_to_update:
+                        details.append(
+                            "{} new relationship{}".format(
+                                len(relations_to_update),
+                                "" if len(relations_to_update) == 1 else "s",
+                            )
+                        )
+                    if synonyms:
+                        details.append("synonyms -> {}".format(synonyms))
+                    if key_aspects:
+                        details.append("key aspects -> {}".format(key_aspects))
                     self.logger.info(
-                        "Successfully updated entity type -> '%s' with %d relations.",
+                        "Successfully updated entity type -> '%s' with %s.",
                         workspace_type_name,
-                        len(entity_relations),
+                        ", ".join(details),
                     )
                 # end if otcs_version >= 26.2
                 else:
@@ -13708,8 +13837,9 @@ class Payload:
         final_entities = []
         for e in merged_entities.values():
             e.pop("free_text", None)
-            e["synonyms"] = sorted(e["synonyms"])
-            e["key_aspects"] = sorted(e["key_aspects"])
+            # The legacy merged ontology JSON file uses a flat (language-agnostic) list:
+            e["synonyms"] = self._flatten_multilingual_values(e["synonyms"])
+            e["key_aspects"] = self._flatten_multilingual_values(e["key_aspects"])
             e["ontologies"] = sorted(e["ontologies"])
             final_entities.append(e)
 
@@ -19090,7 +19220,7 @@ class Payload:
             # TODO: Add support for sql file
 
             db_connection = None  # Predefine for safe access in except
-            allowed_verbs = {"SELECT", "INSERT", "UPDATE", "CREATE"}
+            allowed_verbs = {"SELECT", "INSERT", "UPDATE", "CREATE", "WITH"}
 
             try:
                 # Using a context managers (with ...) for automatic resource management:

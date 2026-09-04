@@ -90,5 +90,5 @@ customizer = [
 
 [project.scripts]
 pyxecm-api = "pyxecm_api:run_api"
-pyxecm-customizer = "pyxecm_customizer:main"
+pyxecm-customizer = "pyxecm_customizer:__main__.main"
 pyxecm-maintenance-page = "pyxecm_maintenance_page:run_api"

@@ -2525,14 +2525,22 @@ class Payload:
                         self.process_group_placeholders(groups=groups)
                         if self._core_share and isinstance(self._core_share, CoreShare):
                             self._log_header_callback(text=f"Process Core Share Groups{post_label}", char="-")
-                            self.process_groups_core_share(groups=groups, section_name=payload_section["name"])
+                            # The section name must differ from the OTCS "groups" section, otherwise the
+                            # status file written by process_groups() would suppress this processing:
+                            self.process_groups_core_share(
+                                groups=groups,
+                                section_name="groupsCoreSharePost" if is_post else "groupsCoreShare",
+                            )
                         if self._m365 and isinstance(self._m365, M365):
                             self._log_header_callback(text=f"Cleanup existing M365 Teams{post_label}", char="-")
                             if not is_post:
                                 # We don't want to do this cleanup for the groupsPost section!
                                 self.cleanup_all_teams_m365()
                             self._log_header_callback(text=f"Process M365 Groups{post_label}", char="-")
-                            self.process_groups_m365(groups=groups, section_name=payload_section["name"])
+                            self.process_groups_m365(
+                                groups=groups,
+                                section_name="groupsM365Post" if is_post else "groupsM365",
+                            )
                     case "users" | "usersPost":
                         is_post = payload_section["name"] == "usersPost"
                         post_label = " (post)" if is_post else ""
@@ -2551,32 +2559,43 @@ class Payload:
                             text=f"Assign OTCS licenses to users{post_label}",
                             char="-",
                         )
+                        # Each sub-section needs its own status file name for the post pass,
+                        # otherwise the file written during the first pass suppresses it:
+                        post_suffix = "Post" if is_post else ""
                         self.process_user_licenses(
                             resource_name=self._otcs.config()["resource"],
                             license_feature=self._otcs.config()["license"],
                             user_specific_payload_field="licenses",
                             users=users,
+                            section_name="userLicenses" + post_suffix,
                         )
                         self._log_header_callback(
                             text=f"Process OTDS user settings{post_label}",
                             char="-",
                         )
-                        self.process_user_settings(users=users)
+                        self.process_user_settings(users=users, section_name="userSettings" + post_suffix)
                         if self._core_share and isinstance(self._core_share, CoreShare):
                             self._log_header_callback(text=f"Process Core Share users{post_label}", char="-")
-                            self.process_users_core_share(users=users)
+                            self.process_users_core_share(users=users, section_name="usersCoreShare" + post_suffix)
                         if self._m365 and isinstance(self._m365, M365):
                             self._log_header_callback(text=f"Process M365 users{post_label}", char="-")
-                            self.process_users_m365(users=users)
+                            self.process_users_m365(users=users, section_name="usersM365" + post_suffix)
                             # We need to do the MS Teams creation after the creation of
                             # the M365 users as we require Group Owners to create teams.
                             # Note: this is just for the teams of the top-level OTCS groups
                             # (departments), not the MS Teams for the Workspaces. These
                             # are created via the scheduled bots!
-                            self._log_header_callback(
-                                text=f"Process M365 Teams for departmental groups{post_label}", char="-"
-                            )
-                            self.process_teams_m365()
+                            # The "users" pass covers the "groups" section, the "usersPost"
+                            # pass covers the "groupsPost" section:
+                            team_groups = self._groups_post if is_post else self._groups
+                            if team_groups:
+                                self._log_header_callback(
+                                    text=f"Process M365 Teams for departmental groups{post_label}", char="-"
+                                )
+                                self.process_teams_m365(
+                                    groups=team_groups,
+                                    section_name="teamsM365" + post_suffix,
+                                )
                     case "adminSettings":
                         self._log_header_callback(
                             text="Process OTCS administration settings",
@@ -2949,24 +2968,40 @@ class Payload:
                         frontend=self._otcs_frontend,
                     )
 
+        # A "groupsPost" section without a matching "usersPost" section would otherwise never
+        # get its M365 teams. This is a no-op if the "usersPost" pass has already created them:
+        if self._groups_post and self._m365 and isinstance(self._m365, M365):
+            self._log_header_callback(text="Process M365 Teams for departmental groups (post)", char="-")
+            self.process_teams_m365(groups=self._groups_post, section_name="teamsM365Post")
+
         with tracer.start_as_current_span("process_payload_users"):
-            for users_label, users_list in [("", self._users), (" (post)", self._users_post)]:
+            # The suffix keeps the status file names of the post pass distinct from the first pass:
+            for users_label, users_suffix, users_list in [
+                ("", "", self._users),
+                (" (post)", "Post", self._users_post),
+            ]:
                 if users_list and self._user_customization:
                     self._log_header_callback(f"Process User Profile Photos{users_label}")
-                    self.process_user_photos(users=users_list)
+                    self.process_user_photos(users=users_list, section_name="userPhotos" + users_suffix)
                     if self._m365 and isinstance(self._m365, M365):
                         self._log_header_callback(f"Process M365 User Profile Photos{users_label}")
-                        self.process_user_photos_m365(users=users_list)
+                        self.process_user_photos_m365(users=users_list, section_name="userPhotosM365" + users_suffix)
                     if self._salesforce and isinstance(self._salesforce, Salesforce):
                         self._log_header_callback(f"Process Salesforce User Profile Photos{users_label}")
-                        self.process_user_photos_salesforce(users=users_list)
+                        self.process_user_photos_salesforce(
+                            users=users_list, section_name="userPhotosSalesforce" + users_suffix
+                        )
                     if self._core_share and isinstance(self._core_share, CoreShare):
                         self._log_header_callback(f"Process Core Share User Profile Photos{users_label}")
-                        self.process_user_photos_core_share(users=users_list)
+                        self.process_user_photos_core_share(
+                            users=users_list, section_name="userPhotosCoreShare" + users_suffix
+                        )
                     self._log_header_callback(f"Process User Favorites and Profiles{users_label}")
-                    self.process_user_favorites_and_profiles(users=users_list)
+                    self.process_user_favorites_and_profiles(
+                        users=users_list, section_name="userFavoritesAndProfiles" + users_suffix
+                    )
                     self._log_header_callback(f"Process User Security{users_label}")
-                    self.process_user_security(users=users_list)
+                    self.process_user_security(users=users_list, section_name="userSecurity" + users_suffix)
 
     # end method definition
 
@@ -7081,6 +7116,7 @@ class Payload:
                     self.logger.error(
                         "Failed to cleanup user files for user -> '%s' (%s)!", user_name, core_share_user_id
                     )
+            # end cleanup existing file shares for the user
 
             # Save result for status file content
             user["core_share_user_id"] = core_share_user_id
@@ -7798,7 +7834,7 @@ class Payload:
     # end method definition
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_teams_m365")
-    def process_teams_m365(self, section_name: str = "teamsM365") -> bool:
+    def process_teams_m365(self, groups: list | None = None, section_name: str = "teamsM365") -> bool:
         """Process groups in payload and create matching Teams in Microsoft 365.
 
         We need to do this after the creation of the M365 users as we require
@@ -7811,6 +7847,8 @@ class Payload:
             * enable_o365 (bool, mandatory check) - must verify O365 is enabled for teams
 
         Args:
+            groups (list | None, optional):
+                The list of groups to process. If None, defaults to self._groups.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -7831,7 +7869,10 @@ class Payload:
             )
             return False
 
-        if not self._groups:
+        if not groups:
+            groups = self._groups
+
+        if not groups:
             self.logger.info(
                 "Payload section -> '%s' is empty. Skipping...",
                 section_name,
@@ -7845,7 +7886,7 @@ class Payload:
 
         success: bool = True
 
-        for group in self._groups:
+        for group in groups:
             if "name" not in group:
                 self.logger.error("Team needs a name. Skipping...")
                 success = False
@@ -7903,7 +7944,7 @@ class Payload:
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
-            payload_section=self._groups,
+            payload_section=groups,
         )
 
         return success

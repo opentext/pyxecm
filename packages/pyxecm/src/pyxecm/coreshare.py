@@ -2247,8 +2247,46 @@ class CoreShare:
 
     # end method definition
 
+    def empty_trash(self, user_id: str) -> dict | None:
+        """Permanently delete all items in a Core Share user's trash.
+
+        Args:
+            user_id (str):
+                The Core Share user ID.
+
+        Returns:
+            dict | None:
+                Response from the Core Share API or None if the request fails.
+
+        """
+
+        if not self._access_token_user:
+            self.authenticate_user()
+
+        request_header = self.request_header_user()
+        request_url = self.config()["usersUrlv3"] + "/{}".format(user_id) + "/emptyAllTrash"
+
+        self.logger.debug(
+            "Delete all trash items for Core Share user with ID -> %s; calling -> %s",
+            user_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="DELETE",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to delete trash for Core Share user with ID -> {}".format(
+                user_id,
+            ),
+            user_credentials=True,
+        )
+
+    # end method definition
+
     def get_folders(self, parent_id: str) -> list | None:
-        """Get Core Share folders under a given parent ID.
+        """Get Core Share children (e.g. folders) under a given parent ID.
 
         This runs under user credentials (not admin!)
 
@@ -2566,7 +2604,7 @@ class CoreShare:
            * Local resources - not shared
            * Resources shared by the user
            * Resources shared by other users or groups
-           This method inpersonate as the user. Only the user can delete its folders.
+           This method impersonate as the user. Only the user can delete its folders.
            The Core Share admin is not entitled to do this.
 
         Args:
@@ -2610,7 +2648,7 @@ class CoreShare:
 
         success = True
 
-        # Get all folders of the user:
+        # Get all children (folders or documents) in the root folder of the user:
         response = self.get_folders(parent_id=user_root_folder_id)
         if not response or not response["results"]:
             self.logger.info("User -> %s (%s) has no items to cleanup!", user_login, user_id)
@@ -2633,7 +2671,8 @@ class CoreShare:
                         if not response:
                             success = False
                         self.logger.info(
-                            "User -> %s deletes unshared item -> %s (%s)...",
+                            "User -> %s (%s) deletes unshared item -> %s (%s)...",
+                            user_login,
                             user_id,
                             item["name"],
                             item["id"],
@@ -2641,10 +2680,13 @@ class CoreShare:
                         response = self.delete_folder(item["id"])
                         if not response:
                             success = False
+                    # end processing owned shared items for the user
                     else:
                         self.logger.info(
-                            "User -> %s leaves shared folder -> '%s' (%s)...",
+                            "User -> %s (%s) leaves shared %s -> '%s' (%s)...",
+                            user_login,
                             user_id,
+                            item["resourceType"],
                             item["name"],
                             item["id"],
                         )
@@ -2654,13 +2696,16 @@ class CoreShare:
                         )
                         if not response:
                             success = False
+                    # end processing non-owned shared items for the user
+                # end processing shared items for the user
                 else:
                     self.logger.info(
-                        "User -> %s deletes local item -> '%s' (%s) of type -> '%s'...",
+                        "User -> %s (%s) deletes local %s -> '%s' (%s)...",
+                        user_login,
                         user_id,
+                        item["resourceType"],
                         item["name"],
                         item["id"],
-                        item["resourceType"],
                     )
                     if item["resourceType"] == "folder":
                         response = self.delete_folder(item["id"])
@@ -2668,15 +2713,27 @@ class CoreShare:
                         response = self.delete_document(item["id"])
                     else:
                         self.logger.error(
-                            "Unsupport resource type -> '%s'!",
+                            "Unsupport resource type -> '%s'! Cannot remove this item from Core Share.",
                             item["resourceType"],
                         )
                         response = None
                     if not response:
                         success = False
+                # end processing local items for the user
+            # end processing local items for the user
+
+            # Now empty the trash of the user:
+            self.logger.info(
+                "Emptying trash of Core Share user -> %s (%s)...",
+                user_login,
+                user_id,
+            )
+            response = self.empty_trash(user_id=user_id)
+            if not response:
+                success = False
 
         self.logger.info(
-            "End inpersonation and switch back to admin account -> %s...",
+            "End impersonation and switch back to admin account -> %s...",
             admin_credentials["username"],
         )
 
@@ -2794,7 +2851,7 @@ class CoreShare:
         response = self.get_group_shares(group_id=group_id)
 
         if not response or not response["shares"]:
-            self.logger.info("Group -> %s has no shares to revoke.", group_id)
+            self.logger.info("Core Share group -> %s has no shares to revoke.", group_id)
             return True
 
         success = True
@@ -2802,7 +2859,8 @@ class CoreShare:
         items = response["shares"]
         for item in items:
             self.logger.info(
-                "Revoke sharing of folder -> '%s' (%s) with group -> %s...",
+                "Revoke sharing of Core Share %s -> '%s' (%s) with Core Share group -> %s...",
+                item.get("resourceType", "folder"),
                 item["name"],
                 item["id"],
                 group_id,

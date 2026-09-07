@@ -15965,7 +15965,7 @@ class OTCS:
                 related_workspace_id,
                 relationship_type,
             ),
-            failure_message="Failed to create workspace relationship between -> {} and -> {} or type -> '{}'".format(
+            failure_message="Failed to create workspace relationship between -> {} and -> {} of type -> '{}'".format(
                 workspace_id,
                 related_workspace_id,
                 relationship_type,

@@ -3352,6 +3352,110 @@ class OTCS:
     # end method definition
 
     @cache
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_member")
+    def get_member(
+        self,
+        member_id: int,
+        fields: str | None = None,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get a Content Server member (user, group, or business workspace role) by its ID.
+
+        REST API: GET /api/v2/members/{member_id}
+
+        This is a thin wrapper around the type-agnostic member resource. Users,
+        groups, and business workspace roles all share one member ID space (KUAF),
+        so this method resolves any of them - check 'type' / 'type_name' in the
+        response to find out which kind of member was returned. See the docstring
+        of get_group() for the complete table of member types.
+
+        The set of returned properties depends on the member type:
+
+        | Property                                               | User | Group | Workspace Role |
+        |--------------------------------------------------------|:----:|:-----:|:--------------:|
+        | id, name, name_formatted, initials, deleted            |  X   |   X   |       X        |
+        | type, type_name                                        |  X   |   X   |       X        |
+        | leader_id                                              |      |   X   |       X        |
+        | node_id (workspace/template the role belongs to)       |      |       |       X        |
+        | group_id (base group of the user)                      |  X   |       |                |
+        | first_name, last_name, middle_name                     |  X   |       |                |
+        | business_email, business_phone, business_fax           |  X   |       |                |
+        | home_address_1, home_address_2, home_phone, home_fax   |  X   |       |                |
+        | cell_phone, pager, personal_email                      |  X   |       |                |
+        | birth_date, gender, title, office_location             |  X   |       |                |
+        | photo_id, photo_url                                    |  X   |       |                |
+        | display_language, time_zone                            |  X   |       |                |
+        | privilege_* (8 privilege flags)                        |  X   |       |                |
+
+        Args:
+            member_id (int):
+                The ID of the member (user, group, or business workspace role) to retrieve.
+            fields (str | None, optional):
+                Which properties should be included in the response, e.g.
+                fields = "properties" or fields = "properties{id,name,type,type_name}".
+                Defaults to None which delivers all properties.
+            show_error (bool, optional):
+                If True, treat as an error if the member is not found. Defaults to False.
+
+        Returns:
+            dict | None:
+                Member information as a dictionary, or None if the member could not be found.
+
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/8123',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': {
+                        'properties': {
+                            'id': 8123,
+                            'name': 'pramos',
+                            'type': 0,
+                            'type_name': 'User'
+                        }
+                    }
+                }
+            }
+            ```
+
+        """
+
+        request_url = self.config()["membersUrlv2"] + "/" + str(member_id)
+        if fields:
+            encoded_query = urllib.parse.urlencode(query={"fields": fields}, doseq=True)
+            request_url += "?{}".format(encoded_query)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get member with ID -> %d; calling -> %s",
+            member_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get member with ID -> {}".format(member_id),
+            warning_message="Member with ID -> {} does not exist".format(member_id),
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    @cache
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user")
     def get_user(
         self,
@@ -3367,10 +3471,20 @@ class OTCS:
     ) -> dict | None:
         """Get a Content Server user based on the login name and type.
 
-        REST API: GET /api/v2/members
+        REST API: GET /api/v2/members             (lookup by name or other criterias)
+                  GET /api/v2/members/{user_id}   (lookup by ID)
 
         The criterias 'name', 'first_name', 'last_name' and 'business_email' are
         the only user properties /v2/members can filter on. They can be combined.
+
+        IMPORTANT: the lookup by 'user_id' addresses the member resource directly.
+        Content Server does NOT validate the member type on that path: users, groups
+        and business workspace roles share one member ID space (KUAF), so this method
+        also returns groups (type 1 / 101) and workspace roles (type 848) if the given
+        ID belongs to one of those. Check 'type' / 'type_name' in the response whenever
+        the caller cannot guarantee that the ID really belongs to a user. See the
+        docstring of get_group() for the complete table of member types - determining
+        what a "naked" member ID is costs exactly one call to this REST API path.
 
         'title' is special: the REST API neither filters nor sorts by the 'title'
         property (an unsupported 'where_...' parameter is silently ignored by
@@ -3386,6 +3500,8 @@ class OTCS:
             user_id (int | None, optional):
                 ID of the user to retrieve. If provided, this parameter takes precedence
                 over the 'name' parameter (and over all other filter criterias).
+                'user_type' is then ignored and the lookup also resolves groups and
+                business workspace roles - see the note above.
             user_type (int, optional):
                 Type ID of user:
                 0 - Regular User
@@ -3513,6 +3629,12 @@ class OTCS:
             `["results"][0]["data"]["properties"]["name"]`.
             Alternatively, use the method `get_result_value(response, "name", 0)`.
 
+            NOTE: the example above is the response shape of the criteria-based lookup,
+            which delivers a LIST of results. The lookup by 'user_id' delivers a SINGLE
+            result dictionary instead (no list, no paging) - see get_group() for an
+            example. `get_result_value()` handles both shapes, so
+            `get_result_value(response, key="type_name")` works for either lookup.
+
         """
 
         if user_id is None and not any([name, first_name, last_name, business_email, title]):
@@ -3550,7 +3672,10 @@ class OTCS:
         if user_id is not None:
             # The user ID uniquely identifies the user so we can address the
             # user resource directly. 'fields' is the only query parameter
-            # that is supported on this REST API path:
+            # that is supported on this REST API path. Be aware that this
+            # member resource is type-agnostic: it also resolves groups
+            # (type 1/101) and business workspace roles (type 848), and it
+            # returns 'results' as a dict instead of a list - see docstring:
             request_url = self.config()["membersUrlv2"] + "/" + str(user_id)
             if fields:
                 encoded_query = urllib.parse.urlencode(query={"fields": fields}, doseq=True)
@@ -4673,15 +4798,19 @@ class OTCS:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_favorites")
     def get_user_memberof(
         self,
+        user_id: int | None = None,
         expand: str | None = None,
         fields: str | list = "properties",  # per default we just get the most important information
         metadata: bool = False,
         limit: int = 20,
         page: int = 1,
     ) -> dict | None:
-        """Get the groups the current (authenticated) user is a member of.
+        """Get the groups a user is a member of.
 
         Args:
+            user_id (int | None, optional):
+                The ID of the user to get the group memberships for.
+                If None (default), the current (authenticated) user is used.
             expand (str | None = None):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
@@ -4763,13 +4892,21 @@ class OTCS:
 
         encoded_query = urllib.parse.urlencode(query=query, doseq=True)
 
-        request_url = self.config()["memberofUrl"] + "?" + encoded_query
+        # Without a user_id we keep the original endpoint for the current user
+        # (memberofUrl); with a user_id we address that user's resource directly:
+        base_url = (
+            self.config()["membersUrlv2"] + "/" + str(user_id) + "/memberof"
+            if user_id is not None
+            else self.config()["memberofUrl"]
+        )
+        request_url = base_url + "?" + encoded_query
         if metadata:
             request_url += "&metadata"
         request_header = self.request_form_header()
 
         self.logger.debug(
-            "Getting groups the current user is a member of; calling -> %s",
+            "Getting groups%s is a member of; calling -> %s",
+            " user with ID -> {}".format(user_id) if user_id is not None else " the current user",
             request_url,
         )
 
@@ -4778,7 +4915,9 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get groups the current user is a member of",
+            failure_message="Failed to get groups{} is a member of".format(
+                " user with ID -> {}".format(user_id) if user_id is not None else " the current user"
+            ),
         )
 
     # end method definition
@@ -5020,18 +5159,44 @@ class OTCS:
     def get_group(
         self, name: str | None = None, group_id: int | None = None, group_type: int = 1, show_error: bool = False
     ) -> dict | None:
-        """Get the Content Server group with a given name.
+        """Get the Content Server group with a given name or ID.
+
+        REST API: GET /api/v2/members?where_type=...&where_name=...  (lookup by name)
+                  GET /api/v2/members/{group_id}                     (lookup by ID)
+
+        IMPORTANT: the two lookups do NOT behave the same way. The lookup by 'name'
+        filters on 'group_type' and can therefore only ever return groups. The lookup
+        by 'group_id' addresses the member resource directly and Content Server does
+        NOT validate the member type: users, groups and business workspace roles all
+        share one member ID space (KUAF), so this method returns any of them. Check
+        'type' / 'type_name' in the response whenever the caller cannot guarantee that
+        the ID really belongs to a group. The known member types are:
+
+        | type | type_name               | remark                                    |
+        |------|-------------------------|-------------------------------------------|
+        |    0 | User                    | regular user                              |
+        |   17 | User                    | service user                              |
+        |    1 | Group                   | regular OTCS group                        |
+        |  101 | Group                   | signing group (esign)                     |
+        |    4 | Privilege               | usage or object privilege                 |
+        |  848 | Business Workspace Role | role of a workspace or workspace template |
+
+        This is also the cheapest way to find out what a "naked" member ID actually is:
+        a single REST call. See the second example below for a workspace role.
 
         Args:
             name (str | None, optiopnal):
                 The name of the group to look up.
             group_id (int | None, optional):
                 The ID of the group to look up. If provided, this will be used to find
-                the group instead of the name.
+                the group instead of the name. Be aware that the ID lookup also resolves
+                users and business workspace roles - see the note above.
                 Defaults to None.
             group_type (int, optional):
                 The type of the group to look up. Defaults to 1 (OTCS groups).
                 Other potential value: 101 for Signing Groups (esign)
+                This is only evaluated for the lookup by 'name' - the REST API path used
+                for the lookup by 'group_id' does not support a type filter.
             show_error (bool, optional):
                 If True, treats the absence of the group as an error. Defaults to False.
 
@@ -5093,6 +5258,53 @@ class OTCS:
             To access the ID of the first group found, use ["results"][0]["data"]["properties"]["id"].
             Or use the method get_result_value(response, key="id")
 
+            NOTE: the response structure differs between the two lookups! The lookup by
+            'name' delivers a LIST of results (see above), while the lookup by 'group_id'
+            delivers a SINGLE result dictionary (no list, no paging, no sorting). This is
+            an actual response for the business workspace role "Sales Representative":
+
+            ```json
+                {
+                    'links': {
+                        'data': {
+                            'self': {
+                                'body': '',
+                                'content_type': '',
+                                'href': '/api/v2/members/60069',
+                                'method': 'GET',
+                                'name': ''
+                            }
+                        }
+                    },
+                    'results': {
+                        'data': {
+                            'properties': {
+                                'deleted': False,
+                                'id': 60069,
+                                'initials': 'S',
+                                'leader_id': 60069,
+                                'name': 'Sales Representative',
+                                'name_formatted': 'Sales Representative',
+                                'node_id': 60057,
+                                'type': 848,
+                                'type_name': 'Business Workspace Role'
+                            }
+                        }
+                    }
+                }
+            ```
+
+            Workspace roles additionally deliver 'node_id' - the node ID of the business
+            workspace (or workspace template) the role belongs to. Users and groups do not
+            have this property. It is the only way to get from a bare role ID back to its
+            workspace without calling get_workspace_roles() for every candidate workspace.
+            'leader_id' exists for groups as well (None for regular groups); for the role
+            above it is the role's own ID. Use get_workspace_roles() if you need reliable
+            leader information - it delivers explicit 'leader' and 'inherited_from_id' flags.
+
+            get_result_value() handles both response shapes (dict and list), so
+            get_result_value(response, key="type_name") works for either lookup.
+
         """
 
         if group_id is None and name is None:
@@ -5107,7 +5319,10 @@ class OTCS:
             encoded_query = urllib.parse.urlencode(query=query, doseq=True)
             request_url = self.config()["membersUrlv2"] + "?{}".format(encoded_query)
         else:
-            # If a group ID is provided, we use the direct URL to that group:
+            # If a group ID is provided, we use the direct URL to that group.
+            # Note that this member resource is type-agnostic: it also resolves
+            # users (type 0/17) and business workspace roles (type 848), and it
+            # returns 'results' as a dict instead of a list - see the docstring:
             request_url = self.config()["membersUrlv2"] + "/" + str(group_id)
 
         request_header = self.request_form_header()
@@ -5560,6 +5775,123 @@ class OTCS:
             yield from response["results"]
 
         # end for page in range(1, total_pages + 1)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_group_memberof")
+    def get_group_memberof(
+        self,
+        group_id: int,
+        expand: str | None = None,
+        fields: str | list = "properties",  # per default we just get the most important information
+        metadata: bool = False,
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict | None:
+        """Get the (parent) groups a given group is a member of.
+
+        Args:
+            group_id (int):
+                The ID of the group to get the parent group memberships for.
+            expand (str | None = None):
+                Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
+                or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
+            fields (str | list, optional):
+                Which fields to retrieve. This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)"
+                  to retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)"
+                  to retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            limit (int, optional):
+                The maximum number of results per page.
+            page (int, optional):
+                The page number to retrieve.
+
+        Returns:
+            dict | None:
+                Request response or None if the request has failed.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/members/17649/memberof?fields=properties&limit=20&page=1',
+                        'method': 'GET',
+                        'name': ''
+                    }
+                }
+            },
+            'results': [
+                {
+                    'data': {
+                        'properties': {
+                            'deleted': False,
+                            'id': 19935,
+                            'initials': 'I',
+                            'leader_id': None,
+                            'name': 'Innovate',
+                            'name_formatted': 'Innovate',
+                            'type': 1,
+                            'type_name': 'Group'
+                        }
+                    }
+                },
+                ...
+            ]
+        }
+
+        """
+
+        # Add query parameters (embedded in the URL)
+        query = {}
+        if expand:
+            query["expand"] = expand
+        if fields:
+            query["fields"] = fields
+        if metadata:
+            query["expand"] = expand
+        if limit:
+            query["limit"] = limit
+        if page:
+            query["page"] = page
+
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["membersUrlv2"] + "/" + str(group_id) + "/memberof?" + encoded_query
+        if metadata:
+            request_url += "&metadata"
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Getting groups the group with ID -> %d is a member of; calling -> %s",
+            group_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get groups the group with ID -> {} is a member of".format(group_id),
+        )
 
     # end method definition
 
@@ -12877,6 +13209,11 @@ class OTCS:
         # Fetch all workspace roles for the template and index them by ID.
         # This allows us to distinguish role IDs (type 848) from group IDs (type 1)
         # since both can appear in the same member_ids list.
+        # NOTE: the member type alone could also be determined with a single call to
+        # GET /api/v2/members/{id} (see get_group() / get_user()), but we need more
+        # than the type here: the membersData structure requires the leader role of
+        # the template, which only get_workspace_roles() delivers (it has explicit
+        # 'leader' and 'inherited_from_id' flags).
         workspace_roles = self.get_workspace_roles(workspace_id=template_id)
         roles_by_id = {}
         leader_role = None
@@ -27582,6 +27919,12 @@ class OTCS:
 
         REST API endpoint: GET /v2/nodes/{node_id}/followups
 
+        Note:
+            Each assignee in every reminder's "assignees" list is expanded with
+            "type", "type_name", and (for workspace roles) "node_id" via one
+            get_member() call per assignee - regardless of the escalation,
+            activation, and schedule flags below.
+
         Args:
             node_id (int):
                 The ID of the node to get reminders for.
@@ -27676,7 +28019,7 @@ class OTCS:
             ),
         )
 
-        if not response or (not escalation and not activation and not schedule):
+        if not response:
             return response
 
         reminders = response.get("results", {}).get("followups", [])
@@ -27689,6 +28032,30 @@ class OTCS:
 
             followup = reminder.get("data", {}).get("followup", {})
             if not isinstance(followup, dict):
+                continue
+
+            # Assignees only carry "id" and "name" out of the box. Look up each member
+            # to add "type" / "type_name" - and, for workspace roles, "node_id" (the
+            # workspace or template the role belongs to). This is done regardless of
+            # the escalation/activation/schedule flags below.
+            assignees = followup.get("assignees")
+            if isinstance(assignees, list):
+                for assignee in assignees:
+                    if not isinstance(assignee, dict) or assignee.get("id") is None:
+                        continue
+                    assignee_member = self.get_member(
+                        member_id=assignee["id"], fields="properties{type,type_name,node_id}"
+                    )
+                    if not assignee_member:
+                        continue
+                    for assignee_field in ("type", "type_name", "node_id"):
+                        assignee_value = self.get_result_value(
+                            response=assignee_member, key=assignee_field, show_error=False
+                        )
+                        if assignee_value is not None:
+                            assignee[assignee_field] = assignee_value
+
+            if not escalation and not activation and not schedule:
                 continue
 
             reminder_id = followup.get("followup_id")
@@ -27722,7 +28089,23 @@ class OTCS:
                 if isinstance(send_in, dict) and "escalation_when" in send_in:
                     followup["escalation_when"] = send_in.get("escalation_when")
                 if isinstance(send_to, list) and send_to:
-                    followup["escalation_recipient_list"] = send_to
+                    # send_to is a plain list of member IDs; expand each one to the same
+                    # {id, name, type, type_name, [node_id]} shape as the assignees list:
+                    escalation_recipients = []
+                    for recipient_id in send_to:
+                        recipient_entry = {"id": recipient_id}
+                        recipient_member = self.get_member(
+                            member_id=recipient_id, fields="properties{name,type,type_name,node_id}"
+                        )
+                        if recipient_member:
+                            for recipient_field in ("name", "type", "type_name", "node_id"):
+                                recipient_value = self.get_result_value(
+                                    response=recipient_member, key=recipient_field, show_error=False
+                                )
+                                if recipient_value is not None:
+                                    recipient_entry[recipient_field] = recipient_value
+                        escalation_recipients.append(recipient_entry)
+                    followup["escalation_recipient_list"] = escalation_recipients
 
             if activation:
                 activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
@@ -27818,6 +28201,13 @@ class OTCS:
             dict | None:
                 Reminder detail information as a dictionary, or None if the request fails.
 
+        Note:
+            One additional request to the reminder view form is made whenever any of
+            `escalation`, `activation` or `schedule` is set (a single request
+            covers all of them). Additionally, each assignee (and, if `escalation` is
+            set, each escalation recipient) triggers one request to get_member() to
+            expand its `type`, `type_name`, and (for workspace roles) `node_id`.
+
         Example:
         {
             'links': {
@@ -27836,6 +28226,7 @@ class OTCS:
                     'followup': {
                         'activation_by_day': 1,
                         'activation_date': '2026-05-28T00:00:00Z',
+                        'assignees': [{'id': 25574, 'name': 'Nick Wheeler', 'type': 0, 'type_name': 'User'}],
                         'create_date': '2026-05-30T10:51:56Z',
                         'create_user_id': 1000,
                         'data_id': 54882,
@@ -27858,6 +28249,7 @@ class OTCS:
                         'escalation_when': -1,      # this field is only included if escalation=True
                         'activation_period': 6,     # this field is only included if activation=True
                         'activation_when': -1,      # this field is only included if activation=True
+                        'escalation_recipient_list': [{'id': 25587, 'name': 'Liz White', 'type': 0, 'type_name': 'User'}],
                     }
                 }
             }
@@ -27894,13 +28286,43 @@ class OTCS:
             ),
         )
 
-        if not response or (not escalation and not activation and not schedule):
+        if not response:
             return response
 
         followup = response.get("results", {}).get("data", {}).get("followup", {})
 
-        # If escalation information is requested, we need to get the reminder view form to extract
-        # escalation fields, as they are not included in the reminder details response:
+        # Assignees only carry "id" and "name" out of the box. Look up each member
+        # (GET /api/v2/members/{id}) to add "type" / "type_name" - and, for workspace
+        # roles, "node_id" (the workspace or template the role belongs to):
+        assignees = followup.get("assignees") if isinstance(followup, dict) else None
+        if isinstance(assignees, list):
+            for assignee in assignees:
+                if not isinstance(assignee, dict) or assignee.get("id") is None:
+                    continue
+                member = self.get_member(member_id=assignee["id"], fields="properties{type,type_name,node_id}")
+                if not member:
+                    self.logger.warning(
+                        "Failed to get member with ID -> %s for assignee -> %s",
+                        assignee["id"],
+                        assignee,
+                    )
+                    continue
+                member_type = self.get_result_value(response=member, key="type", show_error=False)
+                member_type_name = self.get_result_value(response=member, key="type_name", show_error=False)
+                member_node_id = self.get_result_value(response=member, key="node_id", show_error=False)
+                if member_type is not None:
+                    assignee["type"] = member_type
+                if member_type_name is not None:
+                    assignee["type_name"] = member_type_name
+                if member_node_id is not None:
+                    assignee["node_id"] = member_node_id
+
+        if not escalation and not activation and not schedule:
+            return response
+
+        # All of the requested extras (recipients, escalation, activation, schedule) are missing
+        # from the reminder details response and live in the reminder view form, so a single
+        # additional request covers them all:
         view_form = self.get_reminder_view_form(
             node_id=node_id,
             reminder_id=reminder_id,
@@ -27926,7 +28348,25 @@ class OTCS:
             if isinstance(send_in, dict) and "escalation_when" in send_in:
                 followup["escalation_when"] = send_in.get("escalation_when")
             if isinstance(send_to, list) and send_to:
-                followup["escalation_recipient_list"] = send_to
+                # send_to is a plain list of member IDs; expand each one to the same
+                # {id, name, type, type_name, [node_id]} shape as the assignees list:
+                escalation_recipients = []
+                for escalation_recipient_id in send_to:
+                    escalation_recipient_entry = {"id": escalation_recipient_id}
+                    escalation_recipient_member = self.get_member(
+                        member_id=escalation_recipient_id, fields="properties{name_formatted,type,type_name,node_id}"
+                    )
+                    if escalation_recipient_member:
+                        for escalation_recipient_field in ("name_formatted", "type", "type_name", "node_id"):
+                            escalation_recipient_value = self.get_result_value(
+                                response=escalation_recipient_member, key=escalation_recipient_field, show_error=False
+                            )
+                            if escalation_recipient_value is not None:
+                                if escalation_recipient_field == "name_formatted":
+                                    escalation_recipient_field = "name"
+                                escalation_recipient_entry[escalation_recipient_field] = escalation_recipient_value
+                    escalation_recipients.append(escalation_recipient_entry)
+                followup["escalation_recipient_list"] = escalation_recipients
         if activation:
             activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
             send_in = activation_data.get("send_in", {}) if isinstance(activation_data, dict) else {}
@@ -28310,8 +28750,8 @@ class OTCS:
             "yearly": "Y1 0 0 1 1 * 1 1",
         }
         escalation_when_map = {
-            "before": -1,
-            "after": 1,
+            "before": 1,
+            "after": -1,
         }
         reminder_priority_map = {
             "low": 0,
@@ -28668,7 +29108,11 @@ class OTCS:
                     }
                 }
             },
-            'results': {'id': 66}  # ID of the newly created reminder (empty {} on releases before 26.2)
+            'results': {
+                'data': {
+                    'id': 3
+                }
+            }  # ID of the newly created reminder (empty {} on releases before 26.2)
         }
 
         """

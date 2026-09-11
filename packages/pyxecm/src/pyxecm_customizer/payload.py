@@ -10633,7 +10633,7 @@ class Payload:
         self,
         section_name: str = "businessObjectTypes",
     ) -> list:
-        """Create a data structure for all business object types in the Extended ECM system.
+        """Create a data structure for all business object types in the OTCS system.
 
         Payload item keys:
             * None - Retrieves all BOs from OTCS API; no individual payload item iteration

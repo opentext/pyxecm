@@ -229,6 +229,34 @@ class OTCS:
         "Workflow Status": ITEM_TYPE_WORKFLOW_STATUS,
     }
 
+    # Users, groups and business workspace roles share one member ID space (KUAF) and are
+    # told apart by the numeric `type` field of the members REST API:
+    MEMBER_TYPE_USER = 0
+    MEMBER_TYPE_GROUP = 1
+    MEMBER_TYPE_PRIVILEGE = 4
+    MEMBER_TYPE_SERVICE_USER = 17
+    MEMBER_TYPE_SIGNING_GROUP = 101
+    MEMBER_TYPE_BUSINESS_WORKSPACE_ROLE = 848
+
+    # The `type_name` OTCS reports for each member type. Each type has a name of its own,
+    # so the mapping is one-to-one and the numeric type and the name carry the same
+    # information - the number is just the stabler key:
+    MEMBER_TYPE_NAMES = {
+        MEMBER_TYPE_USER: "User",
+        MEMBER_TYPE_SERVICE_USER: "Service User",
+        MEMBER_TYPE_GROUP: "Group",
+        MEMBER_TYPE_SIGNING_GROUP: "Signing Group",
+        MEMBER_TYPE_PRIVILEGE: "Privilege",
+        MEMBER_TYPE_BUSINESS_WORKSPACE_ROLE: "Business Workspace Role",
+    }
+
+    # The member types that are a group in OTCS and can therefore hold members.
+    GROUP_MEMBER_TYPES = [
+        MEMBER_TYPE_GROUP,
+        MEMBER_TYPE_SIGNING_GROUP,
+        MEMBER_TYPE_BUSINESS_WORKSPACE_ROLE,
+    ]
+
     PERMISSION_TYPES = [
         "see",
         "see_contents",
@@ -247,6 +275,63 @@ class OTCS:
         "public",
         "custom",
     ]
+
+    # Mappings between the readable reminder values the pyxecm reminder methods take and
+    # return, and the numeric values the OTCS REST API expects (write side) respectively
+    # reports (read side). These maps are the single source of truth for both directions:
+    # the REMINDER_*_NAMES maps further down are derived by inversion, so the write side
+    # (_build_reminder_payload) and the read side (extract_reminder_payload) cannot drift.
+    REMINDER_STATUS_MAP = {
+        "open": 1,
+        "active": -1,
+        "in progress": -2,
+        "completed": 2,
+    }
+    REMINDER_UNIT_MAP = {
+        "day": 1,
+        "week": 2,
+        "month": 3,
+        "year": 4,
+    }
+    REMINDER_PRIORITY_MAP = {
+        "low": 0,
+        "medium": 50,
+        "high": 100,
+    }
+    REMINDER_ESCALATION_WHEN_MAP = {
+        "before": 1,
+        "after": -1,
+    }
+    # How the due date of a reminder is determined (the RSRULE payload field):
+    REMINDER_RULE_MAP = {
+        "due date": 0,  # a fixed date (RSDATE)
+        "due in": 1,  # relative to the creation date (RSRULEUNIT / RSRULEVALUE)
+        "recurring": 2,  # a repeating sequence (RSSEQUENCECODE)
+    }
+    REMINDER_SEQUENCE_MAP = {
+        "daily": "DY 0 0 * * *",
+        "weekly": "WE 0 0 * * 1 1 1",
+        "bi-weekly": "WE 0 0 * * 1 2 1",
+        "monthly": "M1 0 0 1 * * 1 1",
+        "every 2 months": "M1 0 0 1 * * 2 1",
+        "quarterly": "M1 0 0 1 * * 3 1",
+        "semi-annually": "M1 0 0 1 * * 6 1",
+        "yearly": "Y1 0 0 1 1 * 1 1",
+    }
+    # Which target status values can be reached from a given current status. A status that
+    # is not a key here (such as "completed") is final and cannot be changed any more:
+    REMINDER_STATUS_TRANSITIONS = {
+        "open": ("open", "active", "in progress", "completed"),
+        "active": ("active", "in progress", "completed"),
+        "in progress": ("in progress", "completed"),
+    }
+
+    # Reverse lookups for the numeric values OTCS reports on the reminder read endpoints:
+    REMINDER_STATUS_NAMES = {value: name for name, value in REMINDER_STATUS_MAP.items()}
+    REMINDER_UNIT_NAMES = {value: name for name, value in REMINDER_UNIT_MAP.items()}
+    REMINDER_PRIORITY_NAMES = {value: name for name, value in REMINDER_PRIORITY_MAP.items()}
+    REMINDER_ESCALATION_WHEN_NAMES = {value: name for name, value in REMINDER_ESCALATION_WHEN_MAP.items()}
+    REMINDER_RULE_NAMES = {value: name for name, value in REMINDER_RULE_MAP.items()}
 
     # The maximum length of an item name in OTCS:
     MAX_ITEM_NAME_LENGTH = 248
@@ -2062,10 +2147,12 @@ class OTCS:
                 )
                 return None
             if not properties:
-                self.logger.error(
-                    "No properties found in data -> %s",
-                    str(data),
-                )
+                if show_error:
+                    self.logger.error(
+                        "No '%s' found in data -> %s",
+                        property_name,
+                        str(data),
+                    )
                 return None
             if key not in properties:
                 if show_error:
@@ -4927,6 +5014,7 @@ class OTCS:
         self,
         where_name: str | None = None,
         where_type: int | None = 1,
+        query_string: str | None = None,
         sort: str | None = None,
         limit: int = 20,
         page: int = 1,
@@ -4940,6 +5028,10 @@ class OTCS:
             where_type (int | None, optional):
                 The type of the group to look up. For OTCS groups, use type = 1.
                 Default is 1. Use type = 101 for eSign signing groups.
+            query_string (str | None, optional):
+                Filters the results, returning the groups with the specified query string
+                contained in the group name.
+                NOTE: query cannot be used together with 'where_name'.
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = id, sort = name, sort = group_id.
@@ -5016,8 +5108,13 @@ class OTCS:
         # Add query parameters (embedded in the URL)
         # Using type = 1 for OTCS groups:
         query = {"where_type": where_type}
+        filter_string = ""
         if where_name:
             query["where_name"] = where_name
+            filter_string += " with name -> '{}'".format(where_name)
+        if query_string:
+            query["query"] = query_string
+            filter_string += " with query -> '{}'".format(query_string)
         if sort:
             query["sort"] = sort
         if limit:
@@ -5036,7 +5133,7 @@ class OTCS:
 
         self.logger.debug(
             "Get groups%s; calling -> %s",
-            " with name -> '{}'".format(where_name) if where_name else "",
+            filter_string,
             request_url,
         )
 
@@ -5045,12 +5142,8 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=None,
-            failure_message="Failed to get groups{}".format(
-                " with name -> '{}'".format(where_name) if where_name else ""
-            ),
-            warning_message="Groups{} do not yet exist!".format(
-                " with name -> '{}'".format(where_name) if where_name else ""
-            ),
+            failure_message="Failed to get groups{}".format(filter_string),
+            warning_message="Groups{} do not yet exist!".format(filter_string),
             show_error=show_error,
         )
 
@@ -5060,6 +5153,7 @@ class OTCS:
         self,
         where_name: str | None = None,
         where_type: int | None = 1,
+        query_string: str | None = None,
         sort: str | None = None,
         limit: int = 20,
     ) -> iter:
@@ -5087,6 +5181,10 @@ class OTCS:
             where_type (int | None, optional):
                 The type of the group to look up. For OTCS groups, use type = 1.
                 Default is 1. Use type = 101 for eSign signing groups.
+            query_string (str | None, optional):
+                Filters the results, returning the groups with the specified query string
+                contained in the group name.
+                NOTE: query cannot be used together with 'where_name'.
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name ).
                 Format can be sort = id, sort = name, sort = group_id.
@@ -5107,6 +5205,7 @@ class OTCS:
         response = self.get_groups(
             where_name=where_name,
             where_type=where_type,
+            query_string=query_string,
             limit=1,
             page=1,
         )
@@ -5137,6 +5236,7 @@ class OTCS:
             response = self.get_groups(
                 where_name=where_name,
                 where_type=where_type,
+                query_string=query_string,
                 sort=sort,
                 limit=limit,
                 page=page,
@@ -5175,18 +5275,23 @@ class OTCS:
         | type | type_name               | remark                                    |
         |------|-------------------------|-------------------------------------------|
         |    0 | User                    | regular user                              |
-        |   17 | User                    | service user                              |
+        |   17 | Service User            | service user (technical user)                              |
         |    1 | Group                   | regular OTCS group                        |
-        |  101 | Group                   | signing group (esign)                     |
+        |  101 | Signing Group           | signing group (esign)                     |
         |    4 | Privilege               | usage or object privilege                 |
         |  848 | Business Workspace Role | role of a workspace or workspace template |
 
         This is also the cheapest way to find out what a "naked" member ID actually is:
         a single REST call. See the second example below for a workspace role.
 
+        NOTE: if the 'group_id' is provided, the 'name' and 'group_type' parameters are ignored.
+        In this case results is a dict - not a list, containing the 'data' information directly.
+
         Args:
             name (str | None, optiopnal):
-                The name of the group to look up.
+                The name of the group to look up. If name is not provided, the lookup will
+                rely on the group_id instead. This is an EXACT match. where_name="Sale" will
+                not match group named "Sales".
             group_id (int | None, optional):
                 The ID of the group to look up. If provided, this will be used to find
                 the group instead of the name. Be aware that the ID lookup also resolves
@@ -13257,17 +13362,19 @@ class OTCS:
                 }
                 members_data.append(member_entry)
             else:
-                # Member ID was not found among workspace roles, so it is
-                # likely a group ID (type 1). Look it up via get_group().
-                # The group entry has a different structure than roles: it
-                # wraps the properties in a nested "data.properties" object
-                # AND duplicates some fields at the top level. This matches
-                # the payload structure the UI sends for group members.
+                # Member ID was not found among workspace roles, so it is a group ID -
+                # a regular group (type 1) or a signing group (type 101). Look it up via
+                # get_group(). The group entry has a different structure than roles: it
+                # wraps the properties in a nested "data.properties" object AND duplicates
+                # some fields at the top level. This matches the payload structure the UI
+                # sends for group members.
                 group_response = self.get_group(group_id=member_id)
                 if group_response:
                     group_results = group_response.get("results", [])
                     if group_results:
                         group_props = group_results[0].get("data", {}).get("properties", {})
+                        # The lookup already delivers the real member type, so take it from
+                        # the response instead of assuming a regular group:
                         member_entry = {
                             "data": {"properties": group_props},
                             "deleted": False,
@@ -13276,8 +13383,8 @@ class OTCS:
                             "leader_id": group_props.get("leader_id"),
                             "name": group_props.get("name", ""),
                             "name_formatted": group_props.get("name_formatted", ""),
-                            "type": 1,
-                            "type_name": "Group",
+                            "type": group_props.get("type", self.MEMBER_TYPE_GROUP),
+                            "type_name": group_props.get("type_name", self.MEMBER_TYPE_NAMES[self.MEMBER_TYPE_GROUP]),
                             "display_name": group_props.get("name", ""),
                         }
                         members_data.append(member_entry)
@@ -27919,11 +28026,17 @@ class OTCS:
 
         REST API endpoint: GET /v2/nodes/{node_id}/followups
 
-        Note:
-            Each assignee in every reminder's "assignees" list is expanded with
-            "type", "type_name", and (for workspace roles) "node_id" via one
-            get_member() call per assignee - regardless of the escalation,
-            activation, and schedule flags below.
+        NOTE: Each assignee in every reminder's "assignees" list is expanded with
+        "type", "type_name", and (for workspace roles) "node_id" via one
+        get_member() call per assignee - regardless of the escalation,
+        activation, and schedule flags below.
+
+        NOTE: The example below shows the response as the REST API delivers it. Before it is
+        returned, the numerically encoded values are normalized to the readable values
+        the reminder methods accept (see _extract_reminder_payload()), so the example
+        values "status": 1, "priority": 100, "rule": 0, "escalation_when": -1 and
+        "activation_unit": 1 are returned as "open", "high", "due date", "after" and
+        "day". Callers therefore never need to know the numeric encoding.
 
         Args:
             node_id (int):
@@ -28036,13 +28149,13 @@ class OTCS:
 
             # Assignees only carry "id" and "name" out of the box. Look up each member
             # to add "type" / "type_name" - and, for workspace roles, "node_id" (the
-            # workspace or template the role belongs to). This is done regardless of
-            # the escalation/activation/schedule flags below.
+            # workspace or template the role belongs to).
             assignees = followup.get("assignees")
             if isinstance(assignees, list):
                 for assignee in assignees:
                     if not isinstance(assignee, dict) or assignee.get("id") is None:
                         continue
+                    # Get the additional member details from OTCS:
                     assignee_member = self.get_member(
                         member_id=assignee["id"], fields="properties{type,type_name,node_id}"
                     )
@@ -28054,6 +28167,7 @@ class OTCS:
                         )
                         if assignee_value is not None:
                             assignee[assignee_field] = assignee_value
+            # end if isinstance(assignees, list):
 
             if not escalation and not activation and not schedule:
                 continue
@@ -28062,6 +28176,8 @@ class OTCS:
             if reminder_id is None:
                 continue
 
+            # we need to retrieve the view form for the reminder to get additional details
+            # such as priority and escalation settings:
             view_form = self.get_reminder_view_form(
                 node_id=node_id,
                 reminder_id=reminder_id,
@@ -28073,6 +28189,8 @@ class OTCS:
             if not forms or not isinstance(forms[0], dict):
                 continue
 
+            # we take the priority form the form data if
+            # the baseline follow-up does not have a priority set.
             form_data = forms[0].get("data", {})
             if "priority" not in followup and "priority" in form_data:
                 followup["priority"] = form_data.get("priority")
@@ -28106,6 +28224,7 @@ class OTCS:
                                     recipient_entry[recipient_field] = recipient_value
                         escalation_recipients.append(recipient_entry)
                     followup["escalation_recipient_list"] = escalation_recipients
+            # end if escalation:
 
             if activation:
                 activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
@@ -28120,6 +28239,12 @@ class OTCS:
                 if schedule_data:
                     followup["schedule"] = schedule_data
         # end for loop to enrich reminders with view form information
+
+        # Normalize the numeric values of the REST API response to their readable form.
+        # This is done in a separate loop, as the loop above leaves early for reminders
+        # that do not need any view form information:
+        for reminder in reminders:
+            self._extract_reminder_payload(reminder=reminder)
 
         return response
 
@@ -28201,12 +28326,18 @@ class OTCS:
             dict | None:
                 Reminder detail information as a dictionary, or None if the request fails.
 
-        Note:
-            One additional request to the reminder view form is made whenever any of
-            `escalation`, `activation` or `schedule` is set (a single request
-            covers all of them). Additionally, each assignee (and, if `escalation` is
-            set, each escalation recipient) triggers one request to get_member() to
-            expand its `type`, `type_name`, and (for workspace roles) `node_id`.
+        NOTE: One additional request to the reminder view form is made whenever any of
+        `escalation`, `activation` or `schedule` is set (a single request
+        covers all of them). Additionally, each assignee (and, if `escalation` is
+        set, each escalation recipient) triggers one request to get_member() to
+        expand its `type`, `type_name`, and (for workspace roles) `node_id`.
+
+        NOTE: The example below shows the response as the REST API delivers it. Before it is
+        returned, the numerically encoded values are normalized to the readable values
+        the reminder methods accept (see _extract_reminder_payload()), so the example
+        values "status": 2, "priority": 100, "rule": 0, "escalation_when": -1 and
+        "activation_unit": 1 are returned as "completed", "high", "due date", "after"
+        and "day". Callers therefore never need to know the numeric encoding.
 
         Example:
         {
@@ -28318,7 +28449,7 @@ class OTCS:
                     assignee["node_id"] = member_node_id
 
         if not escalation and not activation and not schedule:
-            return response
+            return self._extract_reminder_payload(reminder=response)
 
         # All of the requested extras (recipients, escalation, activation, schedule) are missing
         # from the reminder details response and live in the reminder view form, so a single
@@ -28328,25 +28459,34 @@ class OTCS:
             reminder_id=reminder_id,
         )
         if not view_form:
-            return response
+            return self._extract_reminder_payload(reminder=response)
 
         forms = view_form.get("forms", [])
         if not forms or not isinstance(forms[0], dict):
-            return response
+            return self._extract_reminder_payload(reminder=response)
 
         form_data = forms[0].get("data", {})
+
+        # we take the priority from the form data if
+        # the baseline follow-up does not have a priority set.
+        if "priority" not in followup and "priority" in form_data:
+            followup["priority"] = form_data.get("priority")
 
         if escalation:
             escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
             send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
             send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
 
+            # The fields 'escalation_enabled', 'escalation_period', and 'escalation_when' may only be aviable
+            # if the reminder is in 'open' state. If it is already in 'active' or 'completed' state, these
+            # fields may not be available.
             if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
                 followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
             if isinstance(send_in, dict) and "escalation_period" in send_in:
                 followup["escalation_period"] = send_in.get("escalation_period")
             if isinstance(send_in, dict) and "escalation_when" in send_in:
                 followup["escalation_when"] = send_in.get("escalation_when")
+
             if isinstance(send_to, list) and send_to:
                 # send_to is a plain list of member IDs; expand each one to the same
                 # {id, name, type, type_name, [node_id]} shape as the assignees list:
@@ -28379,7 +28519,9 @@ class OTCS:
             if schedule_data:
                 followup["schedule"] = schedule_data
 
-        return response
+        # Normalize the numeric values of the REST API response to their readable form.
+        # This happens last, so that the values added from the view form above are covered as well:
+        return self._extract_reminder_payload(reminder=response)
 
     # end method definition
 
@@ -28388,11 +28530,13 @@ class OTCS:
         self,
         node_id: int,
         reminder_id: int,
-    ) -> int | None:
+    ) -> Literal["open", "active", "in progress", "completed"] | None:
         """Get the current status of a reminder.
 
-        This method uses ``get_reminder_view_form()`` to retrieve the reminder
-        view form and extracts the status from the form options.
+        This method uses ``get_reminder()`` to retrieve the reminder details. As
+        ``get_reminder()`` already normalizes the numeric status the REST API delivers
+        (1 = Open, -1 = Active, -2 = In Progress, 2 = Completed), the status is returned
+        as the readable value the reminder methods accept.
 
         Args:
             node_id (int):
@@ -28401,9 +28545,8 @@ class OTCS:
                 The ID of the reminder.
 
         Returns:
-            int | None:
-                The current status value (1 = Open, -2 = In Progress, 2 = Completed),
-                or None if the status cannot be determined.
+            Literal["open", "active", "in progress", "completed"] | None:
+                The current status, or None if the status cannot be determined.
 
         """
 
@@ -28415,13 +28558,14 @@ class OTCS:
             return None
 
         status = reminder.get("results", {}).get("data", {}).get("followup", {}).get("status")
-        if status is not None:
+        if status in self.REMINDER_STATUS_MAP:
             return status
 
         self.logger.debug(
-            "Cannot determine status for reminder with ID -> %d and node with ID -> %d from view form.",
+            "Cannot determine status for reminder with ID -> %d and node with ID -> %d. Status -> %s",
             reminder_id,
             node_id,
+            str(status),
         )
 
         return None
@@ -28656,7 +28800,7 @@ class OTCS:
         escalation_value: int | None = None,
         escalation_unit: Literal["day", "week", "month", "year"] | None = None,
         escalation_business_day: bool | None = None,
-        reminder_status: int | str | None = None,
+        reminder_status: Literal["open", "active", "in progress", "completed"] | None = None,
         node_id: int | None = None,
         reminder_id: int | None = None,
     ) -> dict | None:
@@ -28712,11 +28856,9 @@ class OTCS:
                 Escalation unit. Defaults to None.
             escalation_business_day (bool | None, optional):
                 Whether escalation uses business days. Defaults to None.
-            reminder_status (int | str | None, optional):
-                Reminder status (RSSTATUS).
-                Possible int values: -2 (In Progress), 1 (Open), 2 (Completed).
-                Possible str values: "open", "in_progress", "completed".
-                String values are normalized case-insensitively.
+            reminder_status (Literal["open", "active", "in progress", "completed"] | None, optional):
+                Reminder status (RSSTATUS). Values are normalized case-insensitively
+                and accept separators as underscore, hyphen, or space.
                 Defaults to None (no status in payload).
             node_id (int | None, optional):
                 The node ID. Required together with ``reminder_id`` to validate
@@ -28732,32 +28874,6 @@ class OTCS:
                 The constructed payload dictionary, or None if validation fails.
 
         """
-
-        reminder_unit_map = {
-            "day": 1,
-            "week": 2,
-            "month": 3,
-            "year": 4,
-        }
-        recurring_pattern_map = {
-            "daily": "DY 0 0 * * *",
-            "weekly": "WE 0 0 * * 1 1 1",
-            "bi-weekly": "WE 0 0 * * 1 2 1",
-            "monthly": "M1 0 0 1 * * 1 1",
-            "every 2 months": "M1 0 0 1 * * 2 1",
-            "quarterly": "M1 0 0 1 * * 3 1",
-            "semi-annually": "M1 0 0 1 * * 6 1",
-            "yearly": "Y1 0 0 1 1 * 1 1",
-        }
-        escalation_when_map = {
-            "before": 1,
-            "after": -1,
-        }
-        reminder_priority_map = {
-            "low": 0,
-            "medium": 50,
-            "high": 100,
-        }
 
         if reminder_id is not None and node_id is not None:
             # What updates are allowed depend on the current status of the reminder, so we need to get it:
@@ -28777,7 +28893,7 @@ class OTCS:
 
         # Determine if we are in an initial state where all reminder details can be edited
         # (either creating a new reminder or editing an existing reminder that is still open):
-        initial_status = current_status == 1 or current_status is None
+        initial_status = current_status == "open" or current_status is None
 
         # Validate reminder type:
         valid_reminder_type_ids = self.get_valid_reminder_type_ids()
@@ -28795,48 +28911,47 @@ class OTCS:
             return None
 
         # Validate units:
-        valid_units = list(reminder_unit_map.keys())
-        if activation_unit is not None and activation_unit not in reminder_unit_map:
+        valid_units = list(self.REMINDER_UNIT_MAP)
+        if activation_unit is not None and activation_unit not in self.REMINDER_UNIT_MAP:
             self.logger.error(
                 "Invalid activation unit -> '%s'. Valid units -> %s",
                 activation_unit,
                 str(valid_units),
             )
             return None
-        if due_in_unit is not None and due_in_unit not in reminder_unit_map:
+        if due_in_unit is not None and due_in_unit not in self.REMINDER_UNIT_MAP:
             self.logger.error(
                 "Invalid due in unit -> '%s'. Valid units -> %s",
                 due_in_unit,
                 str(valid_units),
             )
             return None
-        if escalation and escalation_unit is not None and escalation_unit not in reminder_unit_map:
+        if escalation and escalation_unit is not None and escalation_unit not in self.REMINDER_UNIT_MAP:
             self.logger.error(
                 "Invalid escalation unit -> '%s'. Valid units -> %s",
                 escalation_unit,
                 str(valid_units),
             )
             return None
-        valid_escalation_when = list(escalation_when_map.keys())
-        if escalation and escalation_when is not None and escalation_when not in escalation_when_map:
+        if escalation and escalation_when is not None and escalation_when not in self.REMINDER_ESCALATION_WHEN_MAP:
             self.logger.error(
                 "Invalid escalation_when -> %s. Valid values -> %s",
                 str(escalation_when),
-                str(valid_escalation_when),
+                str(list(self.REMINDER_ESCALATION_WHEN_MAP)),
             )
             return None
 
         # Validate and map priority:
         priority_value = None
         if priority is not None:
-            if priority not in reminder_priority_map:
+            if priority not in self.REMINDER_PRIORITY_MAP:
                 self.logger.error(
                     "Invalid reminder priority -> '%s'. Valid priorities -> %s",
                     priority,
-                    str(list(reminder_priority_map.keys())),
+                    str(list(self.REMINDER_PRIORITY_MAP)),
                 )
                 return None
-            priority_value = reminder_priority_map[priority]
+            priority_value = self.REMINDER_PRIORITY_MAP[priority]
 
         # Format due date:
         if due_date is not None:
@@ -28853,14 +28968,14 @@ class OTCS:
 
         # Determine reminder rule:
         if recurring:
-            reminder_rule = 2
+            reminder_rule = self.REMINDER_RULE_MAP["recurring"]
             if not recurring_start_date:
                 self.logger.error("A start date is required for configuration of recurring reminders!")
                 return None
         elif due_date_formatted is not None:
-            reminder_rule = 0
+            reminder_rule = self.REMINDER_RULE_MAP["due date"]
         else:
-            reminder_rule = 1
+            reminder_rule = self.REMINDER_RULE_MAP["due in"]
             # if we are "in progress" state due in is not required:
             if due_in_unit is None and initial_status:
                 self.logger.error(
@@ -28894,25 +29009,25 @@ class OTCS:
             if activation_business_day is not None:
                 payload["RSACTIVATIONBDAY"] = str(1 if activation_business_day else 0)
             if activation_unit is not None:
-                payload["RSACTIVATIONUNIT"] = str(reminder_unit_map[activation_unit])
+                payload["RSACTIVATIONUNIT"] = str(self.REMINDER_UNIT_MAP[activation_unit])
             if activation_value is not None:
                 payload["RSACTIVATION"] = activation_value
 
         # Schedule / recurring parameters:
         if initial_status:
-            if reminder_rule == 2:
+            if reminder_rule == self.REMINDER_RULE_MAP["recurring"]:
                 if recurring_start_date:
                     payload["RSSEQSTARTDATE"] = self._format_reminder_date(recurring_start_date)
                 if recurring_end_date:
                     payload["RSSEQENDDATE"] = self._format_reminder_date(recurring_end_date)
                 if recurring_pattern:
-                    payload["RSSEQUENCECODE"] = recurring_pattern_map[recurring_pattern]
+                    payload["RSSEQUENCECODE"] = self.REMINDER_SEQUENCE_MAP[recurring_pattern]
                 if recurring_business_day is not None:
                     payload["MOVEPREV"] = str(1 if recurring_business_day else 0)
-            elif reminder_rule == 1:
-                payload["RSRULEUNIT"] = reminder_unit_map[due_in_unit]
+            elif reminder_rule == self.REMINDER_RULE_MAP["due in"]:
+                payload["RSRULEUNIT"] = self.REMINDER_UNIT_MAP[due_in_unit]
                 payload["RSRULEVALUE"] = str(due_in_value)
-            elif reminder_rule == 0:
+            elif reminder_rule == self.REMINDER_RULE_MAP["due date"]:
                 payload["RSDATE"] = due_date_formatted
 
         # Escalation parameters:
@@ -28920,69 +29035,137 @@ class OTCS:
             if escalation_recipients is not None:
                 payload["escalationrecipient_list"] = escalation_recipients
             if escalation_when is not None:
-                payload["escalationWhen"] = str(escalation_when_map[escalation_when])
+                payload["escalationWhen"] = str(self.REMINDER_ESCALATION_WHEN_MAP[escalation_when])
             if escalation_value is not None:
                 payload["escalation"] = str(escalation_value)
             if escalation_unit is not None:
-                payload["EscalationUnit"] = str(reminder_unit_map[escalation_unit])
+                payload["EscalationUnit"] = str(self.REMINDER_UNIT_MAP[escalation_unit])
             if escalation_business_day is not None:
                 payload["escalationOnBusinessDay"] = 1 if escalation_business_day else 0
 
         # Validate and set reminder status:
-        reminder_status_value: int | None = None
         if reminder_status is not None:
-            if isinstance(reminder_status, str):
-                status_map = {
-                    "open": 1,
-                    "in_progress": -2,
-                    "completed": 2,
-                }
-                if reminder_status not in status_map:
-                    self.logger.error(
-                        "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
-                        str(reminder_status),
-                    )
-                    return None
-                reminder_status_value = status_map[reminder_status]
-            elif isinstance(reminder_status, int):
-                if reminder_status not in (-2, 1, 2):
-                    self.logger.error(
-                        "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
-                        str(reminder_status),
-                    )
-                    return None
-                reminder_status_value = reminder_status
-            else:
+            normalized_reminder_status = reminder_status.strip().lower().replace("-", " ").replace("_", " ")
+            if normalized_reminder_status not in self.REMINDER_STATUS_MAP:
                 self.logger.error(
-                    "Invalid reminder status type -> %s. Expected int (-2, 1, 2) or str ('open', 'in_progress', 'completed').",
-                    type(reminder_status).__name__,
+                    "Invalid reminder status -> %s. Expected one of -> %s",
+                    str(reminder_status),
+                    str(list(self.REMINDER_STATUS_MAP)),
                 )
                 return None
-        if reminder_status_value is not None:
+
             # Validate status transition if current_status is set:
             if current_status is not None:
-                allowed_transitions = {
-                    1: (1, -2, 2),  # Open -> Open, In Progress or Completed
-                    -2: (-2, 2),  # In Progress -> In Progress or Completed
-                }
-                allowed = allowed_transitions.get(current_status, ())
-                if reminder_status_value not in allowed:
-                    status_names = {1: "Open", -2: "In Progress", 2: "Completed"}
+                allowed = self.REMINDER_STATUS_TRANSITIONS.get(current_status, ())
+                if normalized_reminder_status not in allowed:
                     self.logger.error(
-                        "Invalid status transition for reminder with ID -> %d: %s (%d) -> %s (%d). Allowed targets from %s: %s",
+                        "Invalid status transition for reminder with ID -> %d: '%s' -> '%s'. Allowed targets from '%s' -> %s",
                         reminder_id,
-                        status_names.get(current_status, "Unknown"),
                         current_status,
-                        status_names.get(reminder_status_value, "Unknown"),
-                        reminder_status_value,
-                        status_names.get(current_status, "Unknown"),
-                        ", ".join(status_names.get(s, "Unknown") for s in allowed) if allowed else "none",
+                        normalized_reminder_status,
+                        current_status,
+                        ", ".join(allowed) if allowed else "none",
                     )
                     return None
 
-            payload["RSSTATUS"] = str(reminder_status_value)
+            payload["RSSTATUS"] = str(self.REMINDER_STATUS_MAP[normalized_reminder_status])
 
         return payload
+
+    # end method definition
+
+    def _extract_reminder_payload(self, reminder: dict | None) -> dict | None:
+        """Normalize the numerically encoded values of a reminder to their readable form.
+
+        This is the counterpart to ``_build_reminder_payload()``: where the payload builder
+        translates the readable values the reminder methods accept into the numbers the OTCS
+        REST API expects, this method translates the numbers the REST API reports back into
+        the very same readable values. It is called by ``get_reminder()`` and
+        ``get_reminders()``, so that callers of the reminder methods only ever see the
+        readable values and never need to know the numeric encoding of OTCS.
+
+        The values are replaced in place, which means a reminder read from OTCS can be fed
+        straight back into ``update_reminder()`` without any translation::
+
+            status           1 -> "open"
+            priority       100 -> "high"
+            rule             0 -> "due date"
+            escalation_when -1 -> "after"
+            activation_unit  1 -> "day"
+
+        NOTE: Values that are only delivered by the reminder view form (priority, escalation,
+        activation and the relative due date) are only present if ``get_reminder()`` or
+        ``get_reminders()`` were called with ``escalation=True``, ``activation=True`` or
+        ``schedule=True``. Missing values are left out, and a value that is not a known
+        encoding is kept as it is and reported with a warning - this method never
+        guesses and never removes information.
+
+        Args:
+            reminder (dict | None):
+                A reminder as returned by ``get_reminder()``, a single entry as yielded by
+                ``get_reminders_iterator()``, or the bare "followup" dictionary itself.
+                None is also handled.
+
+        Returns:
+            dict | None:
+                The given reminder with its numeric values replaced by the readable ones.
+                The reminder is modified in place - the return value is a convenience for
+                callers that want to return the result directly.
+
+        """
+
+        if not isinstance(reminder, dict):
+            return reminder
+
+        # Accept the response of get_reminder(), a single entry of get_reminders(),
+        # and the bare "followup" dictionary:
+        followup = self.get_result_value(response=reminder, key="followup", show_error=False)
+        if not isinstance(followup, dict):
+            followup = reminder.get("data", {}).get("followup") if isinstance(reminder.get("data"), dict) else None
+        if not isinstance(followup, dict) and "followup_id" in reminder:
+            followup = reminder
+        if not isinstance(followup, dict):
+            self.logger.debug("Cannot find reminder data in the given dictionary. Nothing to normalize.")
+            return reminder
+
+        def map_value(data: dict, field: str, names: dict) -> None:
+            """Replace the numeric value of a field with its readable equivalent."""
+
+            if field not in data:
+                return
+            value = data[field]
+            if value is None or value in names.values():
+                # not set at all, or already normalized:
+                return
+            if value not in names:
+                self.logger.warning(
+                    "Reminder with ID -> %s has an unknown value -> %s for -> '%s'. Known values -> %s",
+                    str(followup.get("followup_id")),
+                    str(value),
+                    field,
+                    str(list(names.values())),
+                )
+                return
+            data[field] = names[value]
+
+        map_value(followup, "status", self.REMINDER_STATUS_NAMES)
+        map_value(followup, "priority", self.REMINDER_PRIORITY_NAMES)
+        map_value(followup, "rule", self.REMINDER_RULE_NAMES)
+        map_value(followup, "escalation_when", self.REMINDER_ESCALATION_WHEN_NAMES)
+        map_value(followup, "activation_unit", self.REMINDER_UNIT_NAMES)
+
+        # The unit of a relative due date lives in the schedule delivered by the view form:
+        schedule = followup.get("schedule")
+        if isinstance(schedule, dict):
+            due_in = schedule.get("due_in")
+            if isinstance(due_in, dict):
+                map_value(due_in, "due_in_unit", self.REMINDER_UNIT_NAMES)
+
+        # OTCS reports this flag as 0 / 1 while the reminder methods take a boolean:
+        if isinstance(followup.get("activation_by_day"), int):
+            followup["activation_by_day"] = bool(followup["activation_by_day"])
+
+        return reminder
 
     # end method definition
 
@@ -29179,7 +29362,7 @@ class OTCS:
         self,
         node_id: int,
         reminder_id: int,
-        status: int | str,
+        status: Literal["open", "active", "in progress", "completed"],
     ) -> dict | None:
         """Update the status of a reminder for a given node.
 
@@ -29190,19 +29373,18 @@ class OTCS:
                 The ID of the node the reminder belongs to.
             reminder_id (int):
                 The ID of the reminder to update.
-            status (int | str):
-                The new status value.
-                Possible values for int parameter type:
-                -2 : In Progress
-                1: Open (this is the initial status after creation of the reminder - a reminder cannot be reset to this value after status update)
-                2 : Completed
-                Possible values for str parameter type:
-                "open"
-                "in_progress"
-                "completed"
-                String values are normalized case-insensitively and accept separators
+            status (Literal["open", "active", "in progress", "completed"]):
+                The new status value. "open" cannot be set after reminder creation
+                (see allowed status transitions below).
+                Values are normalized case-insensitively and accept separators
                 as underscore, hyphen, or space (for example: "in-progress", "In Progress").
                 Allowed status transitions:
+                1 -> -1 (Open -> Active)
+                1 -> -2 (Open -> In Progress)
+                1 -> 2 (Open -> Completed)
+                -1 -> -2 (Active -> In Progress)
+                -1 -> 2 (Active -> Completed)
+                -2 -> 2 (In Progress -> Completed)
                 1 -> -2 (Open -> In Progress)
                 1 -> 2 (Open -> Completed)
                 -2 -> 2 (In Progress -> Completed)
@@ -29229,40 +29411,23 @@ class OTCS:
 
         """
 
-        status_value: int
-
-        if isinstance(status, str):
-            normalized_status = status.strip().lower().replace("-", "_").replace(" ", "_")
-            status_map = {
-                "open": 1,
-                "in_progress": -2,
-                "completed": 2,
-            }
-            if normalized_status not in status_map:
-                self.logger.error(
-                    "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
-                    str(status),
-                )
-                return None
-            status_value = status_map[normalized_status]
-        elif isinstance(status, int):
-            if status not in (-2, 1, 2):
-                self.logger.error(
-                    "Invalid reminder status -> %s. Expected one of: -2 (In Progress), 1 (Open), 2 (Completed), or the string alternatives 'open', 'in_progress', 'completed'",
-                    str(status),
-                )
-                return None
-            status_value = status
-        else:
+        normalized_status = status.strip().lower().replace("-", " ").replace("_", " ")
+        if normalized_status not in self.REMINDER_STATUS_MAP:
             self.logger.error(
-                "Invalid reminder status type -> %s. Expected int (-2, 1, 2) or str ('open', 'in_progress', 'completed').",
-                type(status).__name__,
+                "Invalid reminder status -> %s. Expected one of -> %s",
+                str(status),
+                str(list(self.REMINDER_STATUS_MAP)),
             )
             return None
+        status_value = self.REMINDER_STATUS_MAP[normalized_status]
 
-        if status_value == 1:
+        if normalized_status == "open":
             self.logger.error(
-                "Invalid status transition to Open (1). Status can only be set to Open upon reminder creation. Allowed status transitions are: 1 -> -2 (Open -> In Progress), 1 -> 2 (Open -> Completed), -2 -> 2 (In Progress -> Completed)",
+                "Invalid status transition to 'open'. Status can only be set to 'open' upon reminder creation. Allowed status transitions are: %s",
+                "; ".join(
+                    "'{}' -> {}".format(current, ", ".join("'{}'".format(t) for t in targets if t != current))
+                    for current, targets in self.REMINDER_STATUS_TRANSITIONS.items()
+                ),
             )
             return None
 
@@ -29329,7 +29494,7 @@ class OTCS:
         escalation_value: int | None = None,
         escalation_unit: Literal["day", "week", "month", "year"] | None = None,
         escalation_business_day: bool | None = None,
-        reminder_status: int | str | None = None,
+        reminder_status: Literal["open", "active", "in progress", "completed"] | None = None,
     ) -> dict | None:
         """Update an existing reminder for a given node.
 
@@ -29398,19 +29563,10 @@ class OTCS:
                 Escalation unit. Defaults to None. (day=1, week=2, month=3, year=4)
             escalation_business_day (bool | None, optional):
                 Whether escalation uses business days. Defaults to None.
-            reminder_status (int | str | None, optional):
-                Reminder status (RSSTATUS).
-                Possible values for int parameter type:
-                -2 : In Progress
-                1 : Open
-                2 : Completed
-                Possible values for str parameter type:
-                "open"
-                "in_progress"
-                "completed"
-                String values are normalized case-insensitively and accept separators
-                as underscore, hyphen, or space (for example: "in-progress", "In Progress").
-                Defaults to None.
+            reminder_status (Literal["open", "active", "in progress", "completed"] | None, optional):
+                Reminder status (RSSTATUS). Values are normalized case-insensitively
+                and accept separators as underscore, hyphen, or space (for example:
+                "in-progress", "In Progress"). Defaults to None.
 
         Returns:
             dict | None:

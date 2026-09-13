@@ -7114,7 +7114,7 @@ class Payload:
                 )
                 if not response:
                     self.logger.error(
-                        "Failed to cleanup user files for user -> '%s' (%s)!", user_name, core_share_user_id
+                        "Failed to cleanup Core Share files for user -> '%s' (%s)!", user_name, core_share_user_id
                     )
             # end cleanup existing file shares for the user
 

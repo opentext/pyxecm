@@ -28189,55 +28189,25 @@ class OTCS:
             if not forms or not isinstance(forms[0], dict):
                 continue
 
+            form_data = forms[0].get("data", {})
+            if not isinstance(form_data, dict):
+                form_data = {}
+
             # we take the priority form the form data if
             # the baseline follow-up does not have a priority set.
-            form_data = forms[0].get("data", {})
             if "priority" not in followup and "priority" in form_data:
                 followup["priority"] = form_data.get("priority")
 
+            # The escalation, activation and schedule details are not part of the reminder
+            # itself - they only live in the view form. We just hang the raw sections the
+            # caller asked for into the followup dictionary. _extract_reminder_payload()
+            # unpacks them into the flat reminder fields further down:
             if escalation:
-                escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
-                send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
-                send_to = escalation_alert.get("send_to", []) if isinstance(escalation_alert, dict) else []
-
-                if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
-                    followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
-                if isinstance(send_in, dict) and "escalation_period" in send_in:
-                    followup["escalation_period"] = send_in.get("escalation_period")
-                if isinstance(send_in, dict) and "escalation_when" in send_in:
-                    followup["escalation_when"] = send_in.get("escalation_when")
-                if isinstance(send_to, list) and send_to:
-                    # send_to is a plain list of member IDs; expand each one to the same
-                    # {id, name, type, type_name, [node_id]} shape as the assignees list:
-                    escalation_recipients = []
-                    for recipient_id in send_to:
-                        recipient_entry = {"id": recipient_id}
-                        recipient_member = self.get_member(
-                            member_id=recipient_id, fields="properties{name,type,type_name,node_id}"
-                        )
-                        if recipient_member:
-                            for recipient_field in ("name", "type", "type_name", "node_id"):
-                                recipient_value = self.get_result_value(
-                                    response=recipient_member, key=recipient_field, show_error=False
-                                )
-                                if recipient_value is not None:
-                                    recipient_entry[recipient_field] = recipient_value
-                        escalation_recipients.append(recipient_entry)
-                    followup["escalation_recipient_list"] = escalation_recipients
-            # end if escalation:
-
+                followup["escalation_alert"] = form_data.get("escalation_alert", {})
             if activation:
-                activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
-                send_in = activation_data.get("send_in", {}) if isinstance(activation_data, dict) else {}
-                if isinstance(send_in, dict) and "activation_period" in send_in:
-                    followup["activation_period"] = send_in.get("activation_period")
-                if isinstance(send_in, dict) and "activation_unit" in send_in:
-                    followup["activation_unit"] = send_in.get("activation_unit")
-
-            if schedule:
-                schedule_data = form_data.get("schedule", {}) if isinstance(form_data, dict) else {}
-                if schedule_data:
-                    followup["schedule"] = schedule_data
+                followup["activation_alert"] = form_data.get("activation_alert", {})
+            if schedule and form_data.get("schedule"):
+                followup["schedule"] = form_data["schedule"]
         # end for loop to enrich reminders with view form information
 
         # Normalize the numeric values of the REST API response to their readable form.
@@ -28466,58 +28436,24 @@ class OTCS:
             return self._extract_reminder_payload(reminder=response)
 
         form_data = forms[0].get("data", {})
+        if not isinstance(form_data, dict):
+            form_data = {}
 
         # we take the priority from the form data if
         # the baseline follow-up does not have a priority set.
         if "priority" not in followup and "priority" in form_data:
             followup["priority"] = form_data.get("priority")
 
+        # The escalation, activation and schedule details are not part of the reminder itself -
+        # they only live in the view form. We just hang the raw sections the caller asked for
+        # into the followup dictionary. _extract_reminder_payload() below unpacks them into the
+        # flat reminder fields and normalizes their values:
         if escalation:
-            escalation_alert = form_data.get("escalation_alert", {}) if isinstance(form_data, dict) else {}
-            send_in = escalation_alert.get("send_in", {}) if isinstance(escalation_alert, dict) else {}
-            send_to = escalation_alert.get("send_to", {}) if isinstance(escalation_alert, dict) else []
-
-            # The fields 'escalation_enabled', 'escalation_period', and 'escalation_when' may only be aviable
-            # if the reminder is in 'open' state. If it is already in 'active' or 'completed' state, these
-            # fields may not be available.
-            if isinstance(escalation_alert, dict) and "escalation_enabled" in escalation_alert:
-                followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
-            if isinstance(send_in, dict) and "escalation_period" in send_in:
-                followup["escalation_period"] = send_in.get("escalation_period")
-            if isinstance(send_in, dict) and "escalation_when" in send_in:
-                followup["escalation_when"] = send_in.get("escalation_when")
-
-            if isinstance(send_to, list) and send_to:
-                # send_to is a plain list of member IDs; expand each one to the same
-                # {id, name, type, type_name, [node_id]} shape as the assignees list:
-                escalation_recipients = []
-                for escalation_recipient_id in send_to:
-                    escalation_recipient_entry = {"id": escalation_recipient_id}
-                    escalation_recipient_member = self.get_member(
-                        member_id=escalation_recipient_id, fields="properties{name_formatted,type,type_name,node_id}"
-                    )
-                    if escalation_recipient_member:
-                        for escalation_recipient_field in ("name_formatted", "type", "type_name", "node_id"):
-                            escalation_recipient_value = self.get_result_value(
-                                response=escalation_recipient_member, key=escalation_recipient_field, show_error=False
-                            )
-                            if escalation_recipient_value is not None:
-                                if escalation_recipient_field == "name_formatted":
-                                    escalation_recipient_field = "name"
-                                escalation_recipient_entry[escalation_recipient_field] = escalation_recipient_value
-                    escalation_recipients.append(escalation_recipient_entry)
-                followup["escalation_recipient_list"] = escalation_recipients
+            followup["escalation_alert"] = form_data.get("escalation_alert", {})
         if activation:
-            activation_data = form_data.get("activation_alert", {}) if isinstance(form_data, dict) else {}
-            send_in = activation_data.get("send_in", {}) if isinstance(activation_data, dict) else {}
-            if isinstance(send_in, dict) and "activation_period" in send_in:
-                followup["activation_period"] = send_in.get("activation_period")
-            if isinstance(send_in, dict) and "activation_unit" in send_in:
-                followup["activation_unit"] = send_in.get("activation_unit")
-        if schedule:
-            schedule_data = form_data.get("schedule", {}) if isinstance(form_data, dict) else {}
-            if schedule_data:
-                followup["schedule"] = schedule_data
+            followup["activation_alert"] = form_data.get("activation_alert", {})
+        if schedule and form_data.get("schedule"):
+            followup["schedule"] = form_data["schedule"]
 
         # Normalize the numeric values of the REST API response to their readable form.
         # This happens last, so that the values added from the view form above are covered as well:
@@ -29093,12 +29029,25 @@ class OTCS:
             escalation_when -1 -> "after"
             activation_unit  1 -> "day"
 
+        In addition, this method unpacks the raw sections of the reminder view form that
+        ``get_reminder()`` and ``get_reminders()`` hang into the reminder: "escalation_alert"
+        becomes ``escalation_enabled``, ``escalation_period``, ``escalation_when``,
+        ``escalation_unit`` and ``escalation_recipient_list`` (each recipient expanded via
+        ``get_member()``), and "activation_alert" becomes ``activation_period``,
+        ``activation_unit`` and ``activation_when``. The raw sections are removed afterwards.
+        Depending on the state of the reminder, OTCS delivers these settings either as
+        discrete fields (state "open") or as readable text in "activationAlert1" /
+        "activationAlert2" (states "active" and "in progress") - both forms are handled.
+
         NOTE: Values that are only delivered by the reminder view form (priority, escalation,
         activation and the relative due date) are only present if ``get_reminder()`` or
         ``get_reminders()`` were called with ``escalation=True``, ``activation=True`` or
         ``schedule=True``. Missing values are left out, and a value that is not a known
         encoding is kept as it is and reported with a warning - this method never
         guesses and never removes information.
+
+        NOTE: Expanding the escalation recipients issues one ``get_member()`` request per
+        recipient.
 
         Args:
             reminder (dict | None):
@@ -29148,10 +29097,99 @@ class OTCS:
                 return
             data[field] = names[value]
 
+        # get_reminder() and get_reminders() hang the raw "escalation_alert" and
+        # "activation_alert" sections of the reminder view form into the followup dictionary -
+        # but only if the caller asked for them. They are unpacked into the flat reminder
+        # fields here and dropped afterwards, so that callers only ever see the flat fields.
+        # The numeric values they carry are normalized by the map_value() calls below:
+        escalation_alert = followup.pop("escalation_alert", None)
+        if isinstance(escalation_alert, dict):
+            send_in = escalation_alert.get("send_in", {})
+            if not isinstance(send_in, dict):
+                send_in = {}
+            send_to = escalation_alert.get("send_to", [])
+
+            # The fields 'escalation_enabled', 'escalation_period', and 'escalation_when' may only
+            # be available if the reminder is in 'open' state. If it is already in 'active' or
+            # 'in progress' state, OTCS reports them as readable text in 'activationAlert1' and
+            # 'activationAlert2' instead:
+            if "escalation_enabled" in escalation_alert:
+                followup["escalation_enabled"] = escalation_alert.get("escalation_enabled")
+            else:
+                followup["escalation_enabled"] = "activationAlert1" in send_in
+
+            if "escalation_period" in send_in:
+                followup["escalation_period"] = send_in.get("escalation_period")
+            elif "activationAlert1" in send_in:
+                followup["escalation_period"] = int(send_in.get("activationAlert1", "0").split(" ", 1)[0])
+
+            if "escalation_when" in send_in:
+                followup["escalation_when"] = send_in.get("escalation_when")
+            elif "activationAlert2" in send_in:
+                followup["escalation_when"] = self.REMINDER_ESCALATION_WHEN_MAP.get(
+                    "after" if "after" in send_in.get("activationAlert2", "") else "before",
+                )
+
+            for unit in self.REMINDER_UNIT_MAP:
+                if unit in send_in.get("activationAlert1", ""):
+                    followup["escalation_unit"] = self.REMINDER_UNIT_MAP[unit]
+                    break
+
+            if isinstance(send_to, list) and send_to:
+                # send_to is a plain list of member IDs; expand each one to the same
+                # {id, name, type, type_name, [node_id]} shape as the assignees list:
+                escalation_recipients = []
+                for recipient_id in send_to:
+                    recipient_entry = {"id": recipient_id}
+                    recipient_member = self.get_member(
+                        member_id=recipient_id,
+                        fields="properties{name_formatted,type,type_name,node_id}",
+                    )
+                    if recipient_member:
+                        for recipient_field in ("name_formatted", "type", "type_name", "node_id"):
+                            recipient_value = self.get_result_value(
+                                response=recipient_member, key=recipient_field, show_error=False
+                            )
+                            if recipient_value is not None:
+                                # the members REST API calls the name "name_formatted":
+                                key = "name" if recipient_field == "name_formatted" else recipient_field
+                                recipient_entry[key] = recipient_value
+                    escalation_recipients.append(recipient_entry)
+                followup["escalation_recipient_list"] = escalation_recipients
+            # end if isinstance(send_to, list) and send_to
+        # end if isinstance(escalation_alert, dict)
+
+        activation_alert = followup.pop("activation_alert", None)
+        if isinstance(activation_alert, dict):
+            send_in = activation_alert.get("send_in", {})
+            if not isinstance(send_in, dict):
+                send_in = {}
+
+            if "activation_period" in send_in:
+                followup["activation_period"] = send_in.get("activation_period")
+            elif "activationAlert1" in send_in:
+                followup["activation_period"] = int(send_in.get("activationAlert1", "0").split(" ", 1)[0])
+
+            if "activation_unit" in send_in:
+                followup["activation_unit"] = send_in.get("activation_unit")
+            else:
+                for unit in self.REMINDER_UNIT_MAP:
+                    if unit in send_in.get("activationAlert1", ""):
+                        followup["activation_unit"] = self.REMINDER_UNIT_MAP[unit]
+                        break
+
+            if "activationAlert2" in send_in:
+                followup["activation_when"] = self.REMINDER_ESCALATION_WHEN_MAP.get(
+                    "after" if "after" in send_in.get("activationAlert2", "") else "before",
+                )
+        # end if isinstance(activation_alert, dict)
+
         map_value(followup, "status", self.REMINDER_STATUS_NAMES)
         map_value(followup, "priority", self.REMINDER_PRIORITY_NAMES)
         map_value(followup, "rule", self.REMINDER_RULE_NAMES)
         map_value(followup, "escalation_when", self.REMINDER_ESCALATION_WHEN_NAMES)
+        map_value(followup, "escalation_unit", self.REMINDER_UNIT_NAMES)
+        map_value(followup, "activation_when", self.REMINDER_ESCALATION_WHEN_NAMES)
         map_value(followup, "activation_unit", self.REMINDER_UNIT_NAMES)
 
         # The unit of a relative due date lives in the schedule delivered by the view form:
@@ -29160,6 +29198,12 @@ class OTCS:
             due_in = schedule.get("due_in")
             if isinstance(due_in, dict):
                 map_value(due_in, "due_in_unit", self.REMINDER_UNIT_NAMES)
+            seq_repeat = schedule.get("seq_repeat")
+            if "Every 2 weeks" in seq_repeat:
+                followup["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("bi-weekly")
+            elif "Every 2 months" in seq_repeat:
+                followup["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("every 2 months")
+            # TODO: Handle other repeat patterns such as "quarterly", "semi-annually", and "yearly"
 
         # OTCS reports this flag as 0 / 1 while the reminder methods take a boolean:
         if isinstance(followup.get("activation_by_day"), int):

@@ -608,6 +608,7 @@ class Payload:
         self._embeddings = self.get_payload_section("embeddings")
         self._nifi_flows = self.get_payload_section("nifi")
         self._aviator_mcp_servers = self.get_payload_section("aviatorMcpServers")
+        self._aviator_mcp_tools = self.get_payload_section("aviatorMcpTools")
 
         return self._payload
 
@@ -2950,6 +2951,14 @@ class Payload:
                         else:
                             self.logger.warning(
                                 "aviatorMcpServers in payload but Content Aviator (OTCA) is not configured! MCP servers will not be processed.",
+                            )
+                    case "aviatorMcpTools":
+                        if self._otca and isinstance(self._otca, OTCA):
+                            self._log_header_callback("Process Aviator MCP Tools")
+                            self.process_mcp_tools()
+                        else:
+                            self.logger.warning(
+                                "aviatorMcpTools in payload but Content Aviator (OTCA) is not configured! MCP tools will not be processed.",
                             )
                     case _:
                         self.logger.error(
@@ -32219,6 +32228,140 @@ class Payload:
             success=success,
             payload_section_name=section_name,
             payload_section=self._aviator_mcp_servers,
+        )
+
+        return success
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_mcp_tools")
+    def process_mcp_tools(self, section_name: str = "aviatorMcpTools") -> bool:
+        """Register Content Aviator agents as MCP tools.
+
+        Payload item keys:
+            - enabled (bool, optional, default=True)
+            - name (str, required)
+
+        Args:
+            section_name (str, optional):
+                The name of the payload section. It can be overridden
+                for cases where multiple sections of same type
+                are used (e.g. the "Post" sections).
+                This name is also used for the "success" status
+                files written to the Admin Personal Workspace.
+
+        Returns:
+            bool:
+                True, if payload has been processed without errors, False otherwise.
+
+        """
+
+        if not self._aviator_mcp_tools:
+            self.logger.info(
+                "Payload section -> '%s' is empty. Skipping...",
+                section_name,
+            )
+            return True
+
+        # If this payload section has been processed successfully before we
+        # can return True and skip processing it once more:
+        if self.check_status_file(payload_section_name=section_name):
+            return True
+
+        success: bool = True
+
+        # list_mcp_tools() returns a list of settings entries (e.g. key -> 'ALLOWED_MCP_TOOLS')
+        # whose "value" is the actual list of tool dictionaries with "name" and "description":
+        existing_mcp_tools = self._otca.list_registered_mcp_tools()
+        if existing_mcp_tools is None:
+            self.logger.warning(
+                "Failed to retrieve the list of available MCP tools from Content Aviator. Cannot check if tools are already registered."
+            )
+
+        existing_mcp_tool_names = [
+            tool.get("name")
+            for entry in existing_mcp_tools or []
+            for tool in entry.get("value") or []
+            if tool.get("name")
+        ]
+        if existing_mcp_tool_names:
+            self.logger.info(
+                "Already registered MCP tools in Content Aviator: %s",
+                ", ".join(existing_mcp_tool_names),
+            )
+
+        for mcp_tool in self._aviator_mcp_tools:
+            tool_name = mcp_tool.get("name")
+            if not tool_name:
+                self.logger.error("Content Aviator MCP tool needs a name in payload! Skipping...")
+                success = False
+                continue
+
+            # Check if element has been disabled in payload (enabled = false).
+            # In this case we skip the element:
+            if not mcp_tool.get("enabled", True):
+                self.logger.info(
+                    "Payload for Content Aviator MCP tool -> '%s' is disabled. Skipping...",
+                    tool_name,
+                )
+                continue
+
+            if tool_name in existing_mcp_tool_names:
+                self.logger.info(
+                    "Content Aviator MCP tool -> '%s' is already registered in Content Aviator. No need to register it again. Skipping...",
+                    tool_name,
+                )
+                continue
+
+            response = self._otca.register_mcp_tools(tools=[tool_name])
+            if response:
+                tool_id = response.get("id", "Unknown ID")
+                # The response value is the complete list of tools registered for the
+                # tenant - we need to pick the entry of the tool we just registered:
+                value = response.get("value") or []
+                tool_entry = next((entry for entry in value if entry.get("name") == tool_name), None)
+                if tool_entry is None:
+                    self.logger.warning(
+                        "Content Aviator MCP tool -> '%s' is not included in the registration response!",
+                        tool_name,
+                    )
+                tool_description = (
+                    tool_entry.get("description", "Unknown Description") if tool_entry else "Unknown Description"
+                )
+                self.logger.info(
+                    "Registered Content Aviator MCP tool -> '%s' (%s).",
+                    tool_name,
+                    tool_id,
+                )
+                mcp_tool["id"] = tool_id  # record the ID of the MCP tool settings record in the payload
+                mcp_tool["description"] = tool_description  # record the created tool description in the payload
+                mcp_tool["registered"] = True
+            else:
+                self.logger.error(
+                    "Failed to register Content Aviator MCP tool -> '%s'!",
+                    tool_name,
+                )
+                mcp_tool["registered"] = False
+                success = False
+        # end for mcp_tool in self._aviator_mcp_tools
+
+        registered_tools = [tool.get("name") for tool in self._aviator_mcp_tools if tool.get("registered") is True]
+        if registered_tools:
+            self.logger.info(
+                "Successfully registered the following additional MCP tools: %s",
+                registered_tools,
+            )
+        failed_tools = [tool.get("name") for tool in self._aviator_mcp_tools if tool.get("registered") is False]
+        if failed_tools:
+            self.logger.info(
+                "Failed to register the following MCP tools: %s",
+                failed_tools,
+            )
+
+        self.write_status_file(
+            success=success,
+            payload_section_name=section_name,
+            payload_section=self._aviator_mcp_tools,
         )
 
         return success

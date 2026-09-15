@@ -122,18 +122,22 @@ class OTCA:
         # Stats endpoint:
         otca_config["usageStatsUrl"] = base_url + "/v1/usage-stats"
 
+        # Tools Url
+        tools_url = base_url + "/v1/tools"
+        otca_config["toolsUrl"] = tools_url
+
         # MCP Client endpoints:
-        otca_config["mcpClientServersUrl"] = base_url + "/mcp-client/servers"
-        otca_config["mcpClientToolsUrl"] = base_url + "/mcp-client/tools"
-        otca_config["mcpClientToolsRefreshUrl"] = base_url + "/mcp-client/tools/refresh"
-        otca_config["mcpClientHealthUrl"] = base_url + "/mcp-client/health"
+        mcp_client_url = base_url + "/mcp-client"
+        otca_config["mcpClientServersUrl"] = mcp_client_url + "/servers"
+        otca_config["mcpClientToolsUrl"] = mcp_client_url + "/tools"
+        otca_config["mcpClientToolsRefreshUrl"] = otca_config["mcpClientToolsUrl"] + "/refresh"
+        otca_config["mcpClientToolsSyncUrl"] = otca_config["mcpClientToolsUrl"] + "/sync"
+        otca_config["mcpClientHealthUrl"] = mcp_client_url + "/health"
 
         # MCP Server endpoints:
-        otca_config["mcpServerAllToolsUrl"] = base_url + "/mcp-server/list/alltools"
-        otca_config["mcpServerRegisterToolsUrl"] = base_url + "/mcp-server/register/tools"
-        otca_config["mcpServerToolsUrl"] = base_url + "/mcp-server/list/tools"
-        otca_config["mcpServerDeleteToolsUrl"] = base_url + "/mcp-server/tools"
-        otca_config["mcpServerHealthUrl"] = base_url + "/mcp-server/health"
+        mcp_server_url = base_url + "/mcp-server"
+        otca_config["mcpServerToolsUrl"] = mcp_server_url + "/tools"
+        otca_config["mcpServerHealthUrl"] = mcp_server_url + "/health"
 
         otca_config["contentSystem"] = self.get_content_system()
         otca_config["clientId"] = client_id
@@ -1268,6 +1272,27 @@ class OTCA:
 
     # end method definition
 
+    def get_tools(self) -> list | None:
+        """List all tools available from remote MCP servers.
+
+        Returns:
+            list | None:
+                List of available MCP tools or None in case of an error.
+
+        """
+
+        request_url = self.config()["toolsUrl"]
+        request_header = self.request_header(service_type="user")
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            failure_message="Canbnot get list of tools",
+        )
+
+    # end method definition
+
     # --- MCP Client Methods ---
 
     def create_mcp_server(self, server_config: dict) -> dict | None:
@@ -1410,6 +1435,29 @@ class OTCA:
             list | None:
                 List of available MCP tools or None in case of an error.
 
+        Example:
+        [
+            {
+                'id': 2,
+                'key': 'ALLOWED_MCP_TOOLS',
+                'value': [
+                    {
+                        'name': 'current_time',
+                        'description': 'Use this to get the current date and time, return it as a string.'
+                    },
+                    {
+                        'name': 'otcm_recman_agent',
+                        'description': "Invoke Records Management agent and its related tools."
+                    },
+                    {
+                        'name': 'otcm_workspace_agent',
+                        'description': "Invoke the workspace operations agent for OpenText Content Management.'
+                    }
+                ],
+                'subscription_id': None
+            }
+        ]
+
         """
 
         request_url = self.config()["mcpClientToolsUrl"]
@@ -1476,7 +1524,7 @@ class OTCA:
 
         """
 
-        request_url = self.config()["mcpServerAllToolsUrl"]
+        request_url = self.config()["mcpServerToolsUrl"]
         request_header = self.request_header(service_type="user")
 
         return self.do_request(
@@ -1501,7 +1549,7 @@ class OTCA:
 
         """
 
-        request_url = self.config()["mcpServerRegisterToolsUrl"]
+        request_url = self.config()["mcpServerToolsUrl"]
         request_header = self.request_header(service_type="user")
 
         return self.do_request(
@@ -1548,7 +1596,7 @@ class OTCA:
 
         """
 
-        request_url = self.config()["mcpServerDeleteToolsUrl"]
+        request_url = self.config()["mcpServerToolsUrl"]
         request_header = self.request_header(service_type="user")
 
         return self.do_request(

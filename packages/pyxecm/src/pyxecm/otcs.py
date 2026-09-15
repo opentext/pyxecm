@@ -27519,7 +27519,13 @@ class OTCS:
                     workspace_id,
                 )
                 return None
-        template_names = [item.text for item in root.findall("startup/processing/templates/template")]
+        template_names = [
+            item.text for item in root.findall("startup/processing/templates/template") if item is not None
+        ]
+        # below for scenarios where they only configure one template for testing
+        if not template_names:
+            # A single template appears only in startup/processing/template instead
+            template_names = [item.text for item in root.findall("startup/processing/template") if item is not None]
 
         return template_names
 
@@ -29199,11 +29205,19 @@ class OTCS:
             if isinstance(due_in, dict):
                 map_value(due_in, "due_in_unit", self.REMINDER_UNIT_NAMES)
             seq_repeat = schedule.get("seq_repeat")
-            if "Every 2 weeks" in seq_repeat:
-                followup["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("bi-weekly")
-            elif "Every 2 months" in seq_repeat:
-                followup["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("every 2 months")
-            # TODO: Handle other repeat patterns such as "quarterly", "semi-annually", and "yearly"
+            if seq_repeat:
+                if "Every day" in seq_repeat:
+                    schedule["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("daily")
+                if "Every 2 weeks" in seq_repeat:
+                    schedule["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("bi-weekly")
+                elif "Every 2 months" in seq_repeat:
+                    schedule["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("every 2 months")
+                elif "every 3 months" in seq_repeat:
+                    schedule["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("quarterly")
+                elif "every 6 months" in seq_repeat:
+                    schedule["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("semi-annually")
+                elif "Every year" in seq_repeat:
+                    schedule["repeat_on"] = OTCS.REMINDER_SEQUENCE_MAP.get("yearly")
 
         # OTCS reports this flag as 0 / 1 while the reminder methods take a boolean:
         if isinstance(followup.get("activation_by_day"), int):

@@ -196,7 +196,6 @@ async def update_payload_item(
     Args:
         user (Optional[User]): User performing the update.
         payload_id (int): ID of the payload to update.
-        upload_file (UploadFile, optional): replace the file name
         name (Optional[str]): Updated name.
         dependencies (Optional[List[int]]): Updated list of dependencies.
         enabled (Optional[bool]): Updated enabled status.

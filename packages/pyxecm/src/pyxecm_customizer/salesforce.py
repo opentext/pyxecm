@@ -32,7 +32,7 @@ SALESFORCE_API_VERSION = "v60.0"
 
 
 class Salesforce:
-    """Class Salesforce is used to retrieve and automate stettings and objects in Salesforce."""
+    """Class Salesforce is used to retrieve and automate settings and objects in Salesforce."""
 
     logger: logging.Logger = default_logger
 
@@ -52,19 +52,17 @@ class Salesforce:
         Args:
             base_url (str):
                 Base URL of the Salesforce tenant.
-            authorization_url (str):
-                Authorization URL of the Salesforce tenant, typically ending with "/services/oauth2/token".
             client_id (str):
                 The Salesforce Client ID.
             client_secret (str):
                 The Salesforce Client Secret.
             username (str):
-                User name in Saleforce used by the REST API.
+                User name in Salesforce used by the REST API.
             password (str):
                 Password of the user used by the REST API.
             authorization_url (str, optional):
-                URL for Salesforce login. If not given it will be constructed with default values
-                using base_url.
+                URL for Salesforce login, typically ending with "/services/oauth2/token".
+                If not given it will be constructed with default values using base_url.
             security_token (str, optional):
                 Security token for Salesforce login.
             logger (logging.Logger, optional):
@@ -170,11 +168,11 @@ class Salesforce:
 
         Args:
             content_type (str, optional):
-                Content type for the request. Default is "pplication/json".
+                Content type for the request. Default is "application/json".
 
         Returns:
             dict:
-                The equest header values
+                The request header values.
 
         """
 
@@ -209,7 +207,7 @@ class Salesforce:
         stream: bool = False,
         verify: bool = True,
     ) -> dict | None:
-        """Call an Salesforce REST API in a safe way.
+        """Call a Salesforce REST API in a safe way.
 
         Args:
             url (str):
@@ -233,13 +231,13 @@ class Salesforce:
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, then a warning is logged only if show_warning is True. Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a failed REST call
+                (only used if show_error is False). Defaults to False.
             warning_message (str, optional):
                 Specific warning message. Defaults to "".
-                If not given the error_message will be used.
+                If not given the failure_message will be used.
             failure_message (str, optional):
                 Specific error message. Defaults to "".
             success_message (str, optional):
@@ -259,7 +257,7 @@ class Salesforce:
 
         Returns:
             dict | None:
-                Response of OTDS REST API or None in case of an error.
+                Response of Salesforce REST API or None in case of an error.
 
         """
 
@@ -404,13 +402,13 @@ class Salesforce:
         the response_object to a dict using the vars() built-in method.
 
         Args:
-            response_object (object):
-                This is reponse object delivered by the request call.
+            response_object (requests.Response):
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
-                Provide a a more specific error message that is logged in case of an error.
-            show_error (bool):
+                Provide a more specific error message that is logged in case of an error.
+            show_error (bool, optional):
                 If True, write an error to the log file.
-                If False, write a warning to the log file.
+                If False, write a warning to the log file. Defaults to True.
 
         Returns:
             dict | None: Parsed response information or None in case of an error.
@@ -447,7 +445,7 @@ class Salesforce:
 
         Args:
             response (dict):
-                REST response from an Salesforce API call.
+                REST response from a Salesforce API call.
             key (str):
                 The property name (key) of the item to lookup.
             value (str):
@@ -486,11 +484,11 @@ class Salesforce:
         key: str,
         index: int = 0,
     ) -> str | None:
-        """Get the value of a result property with a given key of an Salesforce API call.
+        """Get the value of a result property with a given key of a Salesforce API call.
 
         Args:
             response (dict):
-                REST response from an Salesforce REST Call.
+                REST response from a Salesforce REST Call.
             key (str):
                 The property name (key) of the item to lookup.
             index (int, optional):
@@ -528,7 +526,7 @@ class Salesforce:
 
         Args:
             revalidate (bool, optional):
-                Determins if a re-athentication is enforced
+                Determines if a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
 
         Returns:
@@ -662,7 +660,7 @@ class Salesforce:
                 The list of fields to return. If None, then all standard fields
                 of the object will be returned.
             limit (int, optional):
-                The maximum number of fields to return. Salesforce enforces 200 as upper limit.
+                The maximum number of records to return. Salesforce enforces 200 as upper limit.
 
         Returns:
             dict | None:
@@ -1051,7 +1049,9 @@ class Salesforce:
             dict | None:
                 Dictionary with the Salesforce membership data or None if the request fails.
 
-        Example response (id is the membership ID):
+        Example:
+            The `id` is the membership ID.
+
             {
                 'id': '011Dn000000ELhwIAG',
                 'success': True,
@@ -1097,7 +1097,7 @@ class Salesforce:
             dict | None:
                 Dictionary with Salesforce user profiles.
 
-        Example response:
+        Example:
             {
                 'totalSize': 15,
                 'done': True,
@@ -1164,10 +1164,12 @@ class Salesforce:
         """Get a user ID by user name.
 
         Args:
-            username (str): Name of the User.
+            username (str):
+                Name of the User.
 
         Returns:
-            Optional[str]: Technical ID of the user
+            str | None:
+                Technical ID of the user.
 
         """
 
@@ -1497,9 +1499,10 @@ class Salesforce:
                 The name of the new Salesforce account.
             account_number (str):
                 The number of the new Salesforce account (this is a logical number, not the technical ID).
-            account_type (str):
+            account_type (str, optional):
                 The type of the Salesforce account. Typical values are "Customer" or "Prospect".
-            description(str, optional):
+                Defaults to "Customer".
+            description (str, optional):
                 The description of the new Salesforce account.
             industry (str, optional):
                 The industry of the new Salesforce account. Defaults to None.
@@ -1627,7 +1630,7 @@ class Salesforce:
         description: str | None = None,
         **kwargs: dict[str, str],
     ) -> dict | None:
-        """Add a new Opportunity object to Salesfoce.
+        """Add a new Opportunity object to Salesforce.
 
         Args:
             name (str):
@@ -1642,7 +1645,7 @@ class Salesforce:
                 - "Closed Lost"
             close_date (str):
                 The close date of the Opportunity. Should be in format YYYY-MM-DD.
-            amount (Union[int, float]):
+            amount (float):
                 Amount (expected revenue) of the opportunity.
                 Can either be an integer or a float value.
             account_id (str):
@@ -1715,7 +1718,7 @@ class Salesforce:
             description (str):
                 The description of the case.
             status (str):
-                Status of the case. Typecal values: "New", "On Hold", "Escalated".
+                Status of the case. Typical values: "New", "On Hold", "Escalated".
             priority (str):
                 Priority of the case. Typical values: "High", "Medium", "Low".
             origin (str):
@@ -1869,7 +1872,7 @@ class Salesforce:
             contract_term (int):
                 Term of the contract in number of months, e.g. 48 for 4 years term.
                 The end date of the contract will be calculated from start date + term.
-            contract_type (str):
+            contract_type (str, optional):
                 Type of the Contract. Typical values are:
                 - "Subscription"
                 - "Maintenance"
@@ -1883,9 +1886,7 @@ class Salesforce:
                 - "In Approval Process"
             description (str, optional):
                 Description of the contract.
-            contract_type:
-                Type name of the contract.
-            kwargs:
+            kwargs (dict):
                 Additional keyword arguments.
 
         Returns:

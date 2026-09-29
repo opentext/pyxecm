@@ -23,7 +23,7 @@ logger = logging.getLogger("pyxecm_api")
 
 # Create a LOCK dict for singleton logs collection
 LOGS_LOCK = {}
-# Initialize the globel Payloadlist object
+# Initialize the global Payloadlist object
 PAYLOAD_LIST = PayloadList(logger=logger)
 
 

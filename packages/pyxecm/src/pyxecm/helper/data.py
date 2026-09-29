@@ -1,4 +1,4 @@
-"""Data Module leveraging Pandas to manipulte data sets read for bulk generation of Content Server items.
+"""Data Module leveraging Pandas to manipulate data sets read for bulk generation of Content Server items.
 
 See: https://pandas.pydata.org
 
@@ -51,10 +51,11 @@ class Data:
                 SQL query string or SQLAlchemy Table.
             con (any):
                 Database connection or engine.
-            columns (list[str] | None):
-                List of columns to load. Defaults to all.
-            dtypes (dict[str, type | str] | None):
-                Column dtype dictionary (NumPy/Pandas types or strings).
+            columns (list[str] | None, optional):
+                List of columns to load. Defaults to None. This is passed to `pd.read_sql`
+                which only uses it if `sql` is a table name.
+            dtypes (dict[str, type | str] | None, optional):
+                Column dtype dictionary (NumPy/Pandas types or strings). Defaults to None.
             index_columns (str | list[str] | None, optional):
                 The name of the column that should become the index
                 of the data frame. Defaults to None.
@@ -62,6 +63,10 @@ class Data:
                 a multi-index.
             **kwargs (dict):
                 Extra kwargs passed to pd.read_sql.
+
+        Returns:
+            Data:
+                A new Data object with the result of the SQL query.
 
         """
         df = pd.read_sql(sql, con=con, columns=columns, dtype=dtypes, **kwargs)
@@ -80,10 +85,10 @@ class Data:
         Args:
             init_data (pd.DataFrame | list, optional):
                 Data to initialize the data frame. Can either be
-                another data frame (that gets copied) or a list of dictionaries.
-                Defaults to None.
+                another data frame or Data object (that gets copied), a list of dictionaries
+                or a single dictionary (which becomes one row). Defaults to None.
             columns (list[str] | None, optional):
-                The list of column names to use if init_data is None.
+                The list of column names to use if init_data is None, a list or a dictionary.
                 Defaults to None.
             dtypes (dict[str, type] | None, optional):
                 A dictionary defining the data types for specific columns.
@@ -158,13 +163,13 @@ class Data:
     # end method definition
 
     def __len__(self) -> int:
-        """Return lenght of the embedded Pandas data frame object.
+        """Return length of the embedded Pandas data frame object.
 
         This is basically a convenience method.
 
         Returns:
             int:
-                Lenght of the data frame.
+                Length of the data frame.
 
         """
 
@@ -463,9 +468,9 @@ class Data:
         Note: This method is not thread-safe; locking must be handled by the caller.
 
         Args:
-            add_data:
+            add_data (pd.DataFrame | list | dict | Data):
                 Data to append (DataFrame, list of dicts, dict, or Data object).
-            enforce_schema (bool):
+            enforce_schema (bool, optional):
                 If True, aligns columns to self._schema and enforces dtypes.
                 Defaults to False to maintain backwards compatibility.
 
@@ -534,11 +539,12 @@ class Data:
         """Force the internal DataFrame to match the defined schema and index settings.
 
         Args:
-            apply_dtypes (bool):
+            apply_dtypes (bool, optional):
                 If True, reindexes columns and casts them to the dtypes
-                defined in self._schema.
-            apply_index (bool):
+                defined in self._schema. Defaults to True.
+            apply_index (bool, optional):
                 If True, re-establishes the index based on self._index_columns.
+                Defaults to True.
 
         """
 
@@ -601,7 +607,7 @@ class Data:
         Args:
             merge_data (pd.DataFrame | Data):
                 The DataFrame to merge with.
-            on (str | list[str]):
+            on (str | list[str] | None, optional):
                 Column(s) to merge on. Defaults to None.
             how (str, optional):
                 Type of merge ('inner', 'outer', 'left', 'right', 'cross'). Defaults to 'inner'.
@@ -609,25 +615,22 @@ class Data:
                 Column(s) from self._df to merge on. Defaults to None.
             right_on (str | list[str] | None, optional):
                 Column(s) from other DataFrame to merge on. Defaults to None.
-            left_index (str | list[str], optional):
-                 Whether to merge on the index of self._df. Defaults to False.
+            left_index (bool, optional):
+                Whether to merge on the index of self._df. Defaults to False.
             right_index (bool, optional):
                 Whether to merge on the index of other. Defaults to False.
-            suffixes (tuple[str, str]):
+            suffixes (tuple[str, str], optional):
                 Suffixes for overlapping column names. Defaults to ('_x', '_y').
             indicator (bool, optional):
                 If True, adds a column showing the merge source. Defaults to False.
-            validate ():
+            validate (str | None, optional):
                 If provided, checks merge integrity
                 ('one_to_one', 'one_to_many', 'many_to_one', 'many_to_many'). Defaults to None.
 
         Returns:
-            The merged DataFrame or None in case of an error.
-
-        Exceptions:
-            ValueError: If `other` is not a DataFrame.
-            KeyError: If required columns for merging are missing.
-            ValueError: If `validate` check fails.
+            pd.DataFrame | None:
+                The merged DataFrame or None in case of an error (missing columns for
+                merging or an invalid merge operation, e.g. if the `validate` check fails).
 
         """
 
@@ -663,14 +666,14 @@ class Data:
         """Strip leading and trailing spaces from specified columns in a data frame.
 
         Args:
-            columns (list | None):
+            columns (list | None, optional):
                 The list of column names to strip. If None, it strips
-                leading and trailing spaces from _all_ string columns.
+                leading and trailing spaces from _all_ string columns. Defaults to None.
             inplace (bool, optional):
                 If True, the data modification is done in place, i.e.
                 modifying the existing data frame of the object.
                 If False, the data frame is copied and the copy is modified
-                and returned.
+                and returned. Defaults to True.
 
         Returns:
             pd.DataFrame:
@@ -713,9 +716,9 @@ class Data:
                 The default is False = dates are NOT converted.
             index_column (str | None, optional):
                 The Name of the column (i.e. JSON data field) that should
-                become the index in the loaded data frame.
-            compression (str | None):
-                Remove a compression:
+                become the index in the loaded data frame. Defaults to None.
+            compression (str | None, optional):
+                The compression of the JSON file that is to be decompressed:
                 * gzip (.gz)
                 * bz2 (.bz2)
                 * zip (.zip)
@@ -724,7 +727,7 @@ class Data:
                 Default is None = no compression.
 
         Returns:
-            bool: False in case an error occured, True otherwise.
+            bool: False in case an error occurred, True otherwise.
 
         """
 
@@ -825,7 +828,8 @@ class Data:
         """Save JSON data from data frame to file.
 
         Args:
-            json_path (str): The path to where the JSON file should be safed.
+            json_path (str):
+                The path to where the JSON file should be saved.
             orient (str, optional):
                 The structure of the JSON. Possible values:
                 * "records" (this is the default)
@@ -837,18 +841,20 @@ class Data:
                 Defines if the index column of the data frame should be exported as well.
                 The default is False (index is not exported).
             index_column (str, optional):
-                The Name of the column (i.e. JSON data field) that should
-                become the index in the loaded data frame. The default is "index".
-            compression (str | None):
+                The name of the column that is created to preserve the index of the data frame.
+                This is only used if preserve_index is True and orient is not one of
+                "columns", "index", "table" or "split". The default is "index".
+            compression (str | None, optional):
                 Apply a compression:
                 * gzip (.gz)
                 * bz2 (.bz2)
                 * zip (.zip)
                 * xz (.xz)
+                Default is None = no compression.
 
         Returns:
             bool:
-                False in case an error occured, True otherwise.
+                False in case an error occurred, True otherwise.
 
         """
 
@@ -953,30 +959,33 @@ class Data:
         Args:
             xlsx_path (str):
                 The path to the Excel file to load.
-            sheet_names (list | str | int, optional):
+            sheet_names (str | list | int | None, optional):
                 Name or Index of the sheet in the Excel workbook to load.
                 If 'None' then all sheets will be loaded.
                 If 0 then first sheet in workbook will be loaded (this is the Default).
                 If string then this is interpreted as the name of the sheet to load.
                 If a list is passed, this can be a list of index values (int) or
                 a list of strings with the sheet names to load.
-            usecols (list | str, optional):
+                If multiple sheets are loaded they are concatenated into one data frame.
+            usecols (list | str | None, optional):
                 A list of columns to load, specified by general column names in Excel,
-                e.g. usecols='B:D', usecols=['A', 'C', 'F']
-            skip_rows (int, optional):
-                List of rows to skip on top of the sheet (e.g. to not read headlines)
+                e.g. usecols='B:D', usecols=['A', 'C', 'F']. Defaults to None (all columns).
+            skip_rows (int | None, optional):
+                Number of rows to skip on top of the sheet (e.g. to not read headlines).
+                Defaults to None.
             header (int | None, optional):
                 Excel Row (0-indexed) to use for the column labels of the parsed data frame.
                 If file contains no header row, then you should explicitly pass header=None.
                 Default is 0.
-            names (list, optional):
+            names (list | None, optional):
                 A list of column names to use. Default is None.
-            na_values (list, optional):
+            na_values (list | None, optional):
                 A list of values in the Excel that should become the Pandas NA value.
+                Defaults to None.
 
         Returns:
             bool:
-                False in case an error occured, True otherwise.
+                False in case an error occurred, True otherwise.
 
         """
 
@@ -1070,12 +1079,12 @@ class Data:
         Args:
             excel_path (str):
                 The file path to save the Excel file.
-            sheet_name (str):
-                The sheet name where data will be saved. Default is 'Sheet1'.
+            sheet_name (str, optional):
+                The sheet name where data will be saved. Default is 'Pandas Export'.
             index (bool, optional):
                 Whether to write the row names (index). Default is False.
             columns (list | None, optional):
-                A list of column names to write into the excel file.
+                A list of column names to write into the Excel file. Defaults to None (all columns).
 
         Returns:
             bool:
@@ -1146,7 +1155,7 @@ class Data:
 
         Args:
             csv_path (str):
-                The path to the CSV file.
+                The path to the CSV file or a URL (if the value starts with "http").
             delimiter (str, optional, length = 1):
                 The character used to delimit values. Default is "," (comma).
             names (list | None, optional):
@@ -1172,7 +1181,7 @@ class Data:
 
         Returns:
             bool:
-                False in case an error occured, True otherwise.
+                False in case an error occurred, True otherwise.
 
         """
 
@@ -1275,17 +1284,17 @@ class Data:
 
         Args:
             xml_path (str):
-                The path to the XML file to load.
-            xpath (str, optional):
-                An XPath to the elements we want to select.
-            xslt_path (str, optional):
-                An XSLT transformation file to convert the XML data.
+                The path to the XML file to load or a URL (if the value starts with "http").
+            xpath (str | None, optional):
+                An XPath to the elements we want to select. Defaults to None.
+            xslt_path (str | None, optional):
+                An XSLT transformation file to convert the XML data. Defaults to None.
             encoding (str, optional):
                 The encoding of the file. Default is UTF-8.
 
         Returns:
             bool:
-                False in case an error occured, True otherwise.
+                False in case an error occurred, True otherwise.
 
         """
 
@@ -1466,10 +1475,11 @@ class Data:
         Args:
             path_to_root (str):
                 Path to the root element of the directory structure.
-            xpath (str, optional):
-                XPath to the XML elements we want to select.
+            xpath (str | None, optional):
+                XPath to the XML elements we want to select. Defaults to None.
             xml_files (list | None, optional):
                 Names of the XML files to load from the directory.
+                If None or empty then ["docovw.xml"] is used.
 
         Returns:
             bool:
@@ -1554,7 +1564,9 @@ class Data:
 
         Returns:
             list | None:
-                List of links on the web page that are complying with the given regular expression.
+                List of dictionaries (one per link on the web page that complies with the given
+                regular expression). The list is empty if the page cannot be retrieved
+                or does not contain any links.
 
         """
 
@@ -1619,14 +1631,14 @@ class Data:
 
         Args:
             values (list):
-                List of values to travers over
+                List of values to traverse over.
             value_name (str):
                 Dictionary key to construct an item in combination with a value from values
             url_templates (list):
-                URLs to travers per value. The URLs should contain one {} that is
-                replace by the current value.
+                URLs to traverse per value. The URLs should contain one {} that is
+                replaced by the current value.
             special_values (list | None, optional):
-                List of vales (a subset of the other values list)
+                List of values (a subset of the other values list)
                 that we want to handle in a special way. Defaults to None.
             special_url_templates (dict | None, optional):
                 URLs for the special values. Defaults to None.
@@ -1643,7 +1655,7 @@ class Data:
 
         result_list = []
 
-        # We have two nested for loops below. The out traverses over all placeholder values.
+        # We have two nested for loops below. The outer one traverses over all placeholder values.
         # These could be the calendar years, e.g. [2003,...,2024]
         # The inner for loop traverses over the list of specified URLs. We can have multiple for
         # each value.
@@ -1803,7 +1815,7 @@ class Data:
     # end method definition
 
     def deduplicate(self, unique_fields: list, inplace: bool = True) -> pd.DataFrame:
-        """Remove dupclicate rows that have all fields in unique_fields in common.
+        """Remove duplicate rows that have all fields in unique_fields in common.
 
         Args:
             unique_fields (list):
@@ -1813,7 +1825,7 @@ class Data:
 
         Returns:
             pd.DataFrame:
-                If inplace is False than a new deduplicatd data frame is returned.
+                If inplace is False then a new deduplicated data frame is returned.
                 Otherwise the object is modified in place and self._df is returned.
 
         """
@@ -1880,22 +1892,23 @@ class Data:
     def flatten(self, parent_field: str, flatten_fields: list, concatenator: str = "_") -> None:
         """Flatten a sub-dictionary by copying selected fields to the parent dictionary.
 
-        This is e.g. useful for then de-duplicate a data frame.
+        This is e.g. useful to then de-duplicate a data frame.
         To flatten a data frame makes sense in situation when a column used
         to have a list of dictionaries and got "exploded" (see explode_and_flatten()
-        method below). In this case the column as dictionary values that then can
+        method below). In this case the column has dictionary values that then can
         be flattened.
 
         Args:
             parent_field (str):
-                Name prefix of the new column in the data frame. The flattened field
-                names are added with a leading underscore.
+                Name of the column that has the dictionary values. It is also used as name
+                prefix of the new columns in the data frame. The flattened field
+                names are appended using the concatenator.
             flatten_fields (list):
                 Fields in the dictionary of the source column that are copied
                 as new columns into the data frame.
             concatenator (str, optional):
                 Character or string used to concatenate the parent field with the flattened field
-                to create a unique name.
+                to create a unique name. Defaults to "_".
 
         """
 
@@ -1944,17 +1957,20 @@ class Data:
                 Field(s) to explode. Each field to explode should have a list structure.
                 Exploding multiple columns at once is possible. This delivers
                 a very different result compared to exploding one column after the other!
-            flatten_fields (list):
+            flatten_fields (list | None, optional):
                 Fields in the exploded substructure to include
-                in the main dictionaries for easier processing.
+                in the main dictionaries for easier processing. Defaults to None.
             make_unique (bool, optional):
-                If True, deduplicate the exploded data frame.
-            reset_index (bool, False):
-                If True, then the index is reset, False = Index is not reset.
+                If True, deduplicate the exploded data frame (only done if flatten_fields
+                are given). Defaults to False.
+            reset_index (bool, optional):
+                If True, then the index is reset, False = Index is not reset. Defaults to False.
             split_string_to_list (bool, optional):
-                If True flatten the exploded data frame.
+                If True, the string values in the columns to explode are split into lists
+                (using the separator) before the columns are exploded. Defaults to False.
             separator (str, optional):
                 Characters used to split the string values in the given column into a list.
+                Each character of the string is treated as a separate separator. Defaults to ";,".
 
         Returns:
             pd.DataFrame | None:
@@ -2174,6 +2190,7 @@ class Data:
         Returns:
             pd.DataFrame:
                 New data frame (if inplace = False) or self._df (if inplace = True).
+                None if inplace = False and none of the given column names exist in the data frame.
 
         """
 
@@ -2286,7 +2303,8 @@ class Data:
             column (pd.Series):
                 The pandas Series (column) to check. If not a Series, returns False and logs an error.
             threshold (float, optional):
-                0.0 < threshold <= 1.0. Float representation of the percentage. Default = 0.5 (50%). If out of bounds, returns False and logs an error.
+                0.0 < threshold <= 1.0. Float representation of the percentage.
+                Default = 0.5 (50%). If out of bounds, returns False and logs an error.
 
         Returns:
             bool:
@@ -2318,7 +2336,7 @@ class Data:
     # end method definition
 
     def is_string_column(self, column: pd.Series) -> bool:
-        """Determine if a Pandas series predominantly contains string values, ignoring NaN values.
+        """Determine if a Pandas series contains only string values, ignoring NaN values.
 
         Args:
             column (pd.Series):
@@ -2367,7 +2385,7 @@ class Data:
             title = cleansing.get("title", False)
             length = cleansing.get("length", 0)
 
-            # Handle dict columns - we expect the column name to seperate
+            # Handle dict columns - we expect the column name to separate
             # main field from sub field using a dot syntax (e.g., "column.subfield")
             if "." in column:
                 column, dict_key = column.split(".")
@@ -2678,15 +2696,15 @@ class Data:
             lower (bool):
                 If True, convert the string to lowercase.
             capitalize (bool):
-                If True, capitalize the first letter of the string and lowercase the rest. Default is False.
+                If True, capitalize the first letter of the string and lowercase the rest.
             title (bool):
-                If True, convert the string to title-case (first letter of each word is capitalized). Default is False.
+                If True, convert the string to title-case (first letter of each word is capitalized).
             length (int):
-                If greater than 0, truncate the string to this length. Default is 0 (no truncation).
+                If greater than 0, truncate the string to this length. 0 means no truncation.
 
         Returns:
             str | None:
-                The updated string with all the applied operations. None in case an error occured.
+                The updated string with all the applied operations. None if the value is not a string.
 
         Example:
             value = "hello world"
@@ -2760,10 +2778,10 @@ class Data:
 
         Args:
             conditions (list):
-                Conditions are a list of dictionaries with 3 items:
+                Conditions are a list of dictionaries with these items:
                 * field (str): The name of a column in the data frame
                 * value (str or list):
-                    Expected value (filter criterium).
+                    Expected value (filter criterium). Alternatively the key 'values' can be used.
                     If it is a list then one of the list elements must match the field value (OR)
                 * equal (bool):
                     Whether to test for equal or non-equal. If not specified equal is treated as True.
@@ -2772,14 +2790,16 @@ class Data:
                     regular expression. If there is no regex item in the
                     dictionary then the default is False (= values is NOT regex).
                 * enabled (bool):
-                    True or False. The filter is only applied if 'enabled = True'
+                    True or False. The filter is only applied if 'enabled = True'.
+                    If not specified the condition is treated as enabled.
                 If there are multiple conditions in the list each has to evaluate to True (AND)
             inplace (bool, optional):
                 Defines if the self._df is modified (inplace) or just
                 a new data frame is returned. Defaults to True.
             reset_index (bool, optional):
-                Filter removes rows. If filter_index = True then the numbering
-                of the index is newly calculated
+                Filter removes rows. If reset_index = True then the numbering
+                of the index is newly calculated (only done if inplace is True).
+                Defaults to True.
 
         Returns:
             pd.DataFrame | None:
@@ -3028,7 +3048,8 @@ class Data:
 
         Returns:
             pd.DataFrame:
-                The resulting data frame.
+                The resulting data frame. Note that pandas returns None from ffill()
+                if inplace is True.
 
         """
 
@@ -3055,7 +3076,7 @@ class Data:
                 The name of the column to search in.
             lookup_value (str):
                 The value to search for.
-            separator (str):
+            separator (str, optional):
                 The string list delimiter / separator. The pipe symbol | is the default
                 as it is unlikely to appear in a normal string (other than a plain comma).
                 The separator is NOT looked for in the lookup_value but in the column that
@@ -3150,7 +3171,7 @@ class Data:
                 The name of the column.
             value (Any):
                 The value to set for those rows that fulfill the condition.
-            condition (pd.Series, optional):
+            condition (pd.Series | None, optional):
                 This should be a boolean Series where each element is True or False,
                 representing rows in the data frame that meet a certain condition.
                 If None is provided then ALL rows get the 'value' in the given
@@ -3184,11 +3205,15 @@ class Data:
             new_column (str):
                 The name of the column to add.
             data_type (str, optional):
-                The data type of the new column.
+                The data type of the new column. This is only used if no source column
+                is given (i.e. an empty column is added). Defaults to "string".
             source_column (str, optional):
-                The name of the source column.
+                The name of the source column. If empty, an empty new column is added.
+                Defaults to "".
             reg_exp (str, optional):
-                A regular expression to apply on the content of the source column.
+                A regular expression to apply on the content of the source column
+                (using `str.extract`, so it must contain exactly one capture group).
+                Defaults to "".
             prefix (str, optional):
                 Prefix to add in front of the value. Defaults to "".
             suffix (str, optional):
@@ -3197,7 +3222,7 @@ class Data:
                 Length to reduce to. Defaults to None (= unlimited).
             group_chars (int | None, optional):
                 Group the resulting string in characters of group_chars. Defaults to None.
-                Usable e.g. for thousand seperator "."
+                Usable e.g. for thousand separator "."
             group_separator (str, optional):
                 Separator string for the grouping. Defaults to ".".
             group_remove_leading_zero (bool, optional):
@@ -3207,7 +3232,7 @@ class Data:
             bool:
                 True = Success, False = Failure
 
-        Side effects:
+        Note:
             self._df is modified in place.
 
         """
@@ -3314,7 +3339,7 @@ class Data:
                 delimiter (str): The single character that is used for splitting.
 
             Returns:
-                A list of splitted values.
+                A list of split values.
 
             """
 
@@ -3345,7 +3370,7 @@ class Data:
 
         Args:
             source_columns (list):
-                The column names the list values are taken from.
+                The names of the columns whose values are concatenated.
             new_column (str):
                 The name of the new column.
             concat_char (str, optional):
@@ -3363,7 +3388,7 @@ class Data:
             bool:
                 True = Success, False = Failure
 
-        Side effects:
+        Note:
             self._df is modified in place.
 
         """
@@ -3447,7 +3472,7 @@ class Data:
             bool:
                 True = Success, False = Failure
 
-        Side effects:
+        Note:
             self._df is modified in place.
 
         """
@@ -3548,7 +3573,7 @@ class Data:
             bool:
                 True = Success, False = Failure
 
-        Side effects:
+        Note:
             self._df is modified in place.
 
         """

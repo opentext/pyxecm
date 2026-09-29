@@ -22,10 +22,12 @@ class Assoc:
         """Determine if a string is unicode escaped.
 
         Args:
-            assoc_string (str): string with the Assoc data
+            assoc_string (str):
+                String with the Assoc data.
 
         Returns:
-            bool: True if string is in Unicode, False otherwise
+            bool:
+                True if the string contains unicode escape sequences, False otherwise.
 
         """
 
@@ -100,13 +102,15 @@ class Assoc:
 
     @classmethod
     def unescape_html(cls, assoc_string: str) -> str:
-        """HTML unescape a a string.
+        """HTML unescape a string.
 
         Args:
-            assoc_string (str): the string to unescape.
+            assoc_string (str):
+                The string to unescape.
 
         Returns:
-            str: unescaped string
+            str:
+                The unescaped string.
 
         """
 
@@ -218,13 +222,13 @@ class Assoc:
             input_string (str):
                 Input string to search the delimited substring in.
             start_sequence (str):
-                Start esequence of characters.
+                Start sequence of characters.
             stop_sequence (str):
-                Stop sequence of characters
+                Stop sequence of characters.
 
         Returns:
             str | None:
-                The deliminated substring or None if not found.
+                The delimited substring (including start and stop sequence) or None if not found.
 
         """
 
@@ -245,14 +249,14 @@ class Assoc:
     def extract_assoc_string(cls, input_string: str, is_escaped: bool = False) -> str:
         """Extract an Assoc from a string.
 
-        The assoc is deliminated by A< ... >.
+        The assoc is delimited by A< ... >.
 
         Args:
             input_string (str):
                 Input string that includes the Assoc as a substring.
             is_escaped (bool, optional):
                 Whether or not the input string includes the
-                assoc escaped or not.
+                assoc escaped or not. Defaults to False.
 
         Returns:
             str:

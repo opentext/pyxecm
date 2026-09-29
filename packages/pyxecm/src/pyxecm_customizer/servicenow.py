@@ -62,7 +62,7 @@ SN_TABLE_ATTACHMENTS = "sys_attachment"
 
 
 class ServiceNow:
-    """Class used to retrieve and automate stettings in ServiceNow."""
+    """Class used to retrieve and automate settings in ServiceNow."""
 
     logger: logging.Logger = default_logger
 
@@ -100,10 +100,10 @@ class ServiceNow:
             thread_number (int, optional):
                 The number of threads for parallel processing. Default is 3.
             download_dir (str, optional):
-                The path to stored downloaded files from ServiceNow.
+                The path where the files downloaded from ServiceNow are stored.
             product_exclusions (list | None, optional):
                 List of products that should NOT be loaded from ServiceNow.
-            logger:
+            logger (logging.Logger, optional):
                 The logging object used for all log messages. Default is default_logger.
 
         """
@@ -149,7 +149,7 @@ class ServiceNow:
     # end method definition
 
     def thread_wrapper(self, target: Callable, *args: tuple, **kwargs: dict[str, Any]) -> None:
-        """Wrap around threads to catch exceptions during exection.
+        """Wrap around threads to catch exceptions during execution.
 
         Args:
             target (Callable):
@@ -211,7 +211,8 @@ class ServiceNow:
                 * application/x-www-form-urlencoded - The default for HTML forms.
                   Data is sent as key-value pairs in the body of the request, similar to query parameters.
                 * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
-        Return:
+
+        Returns:
             dict:
                 The request header values.
 
@@ -245,8 +246,8 @@ class ServiceNow:
         the vars() built-in method.
 
         Args:
-            response_object (object):
-                This is reponse object delivered by the request call.
+            response_object (requests.Response):
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
                 If provided, use a more specific error message
                 in case of an error.
@@ -286,11 +287,11 @@ class ServiceNow:
     # end method definition
 
     def exist_result_item(self, response: dict, key: str, value: str) -> bool:
-        """Check existence of key / value pair in the response properties of an ServiceNow API call.
+        """Check existence of key / value pair in the response properties of a ServiceNow API call.
 
         Args:
             response (dict):
-                REST response from an ServiceNow API call.
+                REST response from a ServiceNow API call.
             key (str):
                 The property name (key) to check the value of.
             value (str):
@@ -329,11 +330,11 @@ class ServiceNow:
         key: str,
         index: int = 0,
     ) -> str | None:
-        """Get value of a result property with a given key of an ServiceNow API call.
+        """Get value of a result property with a given key of a ServiceNow API call.
 
         Args:
             response (dict):
-                REST response from an ServiceNow REST call.
+                REST response from a ServiceNow REST call.
             key (str):
                 The property name (key) to get the value of.
             index (int, optional):
@@ -341,7 +342,7 @@ class ServiceNow:
                 Defaults to 0.
 
         Returns:
-            str:
+            str | None:
                 The value for the key, None otherwise.
 
         """
@@ -376,7 +377,7 @@ class ServiceNow:
                 The Authorization type. This can be "basic" or "oauth".
 
         Returns:
-            str:
+            str | None:
                 The session token or None in case of an error.
 
         """
@@ -405,8 +406,8 @@ class ServiceNow:
         """Return the OAuth access token.
 
         Returns:
-            str:
-                The access token.
+            str | None:
+                The access token or None in case of an error.
 
         """
 
@@ -443,7 +444,7 @@ class ServiceNow:
 
     @cache
     def get_object(self, table_name: str, sys_id: str) -> dict | None:
-        """Get an ServiceNow object based on table name and ID.
+        """Get a ServiceNow object based on table name and ID.
 
         Args:
             table_name (str):
@@ -454,7 +455,7 @@ class ServiceNow:
         Returns:
             dict | None:
                 The dictionary of fields of resulting table row or None
-                in case an error occured.
+                in case an error occurred.
 
         """
 
@@ -534,19 +535,19 @@ class ServiceNow:
                 The name of the ServiceNow table to retrieve.
             query (str, optional):
                 Query to filter the table rows (e.g. articles).
-            fields (list, optional):
-                Just return the fileds in this list.
+            fields (list | None, optional):
+                Just return the fields in this list.
                 Defaults to None which means to deliver all fields.
-            limit (int, optional):
-                Number of results to return. None = unlimited.
+            limit (int | None, optional):
+                Number of results to return. None = unlimited. Defaults to 10.
             offset (int, optional):
-                First item to return (for chunking).
+                First item to return (for chunking). Defaults to 0.
             error_string (str, optional):
                 A custom error string can be provided by this parameter.
 
         Returns:
             list | None:
-                List or articles or None if the request fails.
+                List of articles or None if the request fails.
 
         """
 
@@ -612,11 +613,11 @@ class ServiceNow:
             table_name (str):
                 The name of the ServiceNow table.
             query (str, optional):
-                A query string to filter the results. Defaults to "".
+                A query string to filter the results. Defaults to None.
 
         Returns:
-            int:
-                Number of table rows.
+            int | None:
+                Number of table rows or None in case of an error.
 
         """
 
@@ -786,17 +787,17 @@ class ServiceNow:
                 The name of the ServiceNow table.
             query (str, optional):
                 Query to filter the articles.
-            fields (list, optional):
+            fields (list | None, optional):
                 Just return the fields in this list.
                 Defaults to None which means to deliver all fields.
-            limit (int, optional):
-                Number of results to return. None = unlimited.
+            limit (int | None, optional):
+                Number of results to return. None = unlimited. Defaults to 10.
             offset (int, optional):
-                The first item to return (for chunking).
+                The first item to return (for chunking). Defaults to 0.
 
         Returns:
             list | None:
-                List or articles or None if the request fails.
+                List of articles or None if the request fails.
 
         Example:
             [
@@ -1041,11 +1042,12 @@ class ServiceNow:
             article (dict):
                 The dictionary holding the ServiceNow article data.
             skip_existing (bool, optional):
-                If True, skip download if file has been downloaded before.
+                If True, skip download if file has been downloaded before. Defaults to True.
 
         Returns:
             bool:
-                True = success, False = failure.
+                True if the article has attachments and they have been processed. False if the article
+                has no attachments or if the download directory could not be created.
 
         """
 
@@ -1156,7 +1158,7 @@ class ServiceNow:
         query: str | None,
         skip_existing_downloads: bool = True,
     ) -> bool:
-        """Load ServiceNow articles in a data frame and download the attchments.
+        """Load ServiceNow articles in a data frame and download the attachments.
 
         Args:
             table_name (str):
@@ -1268,7 +1270,7 @@ class ServiceNow:
         # We cannot retrieve all KBAs in one go if the partition size is too big (> 100)
         # So we define "limit" as the maximum number of KBAs we want to retrieve for one REST call.
         # This should be a reasonable number to avoid timeouts. We also need to make sure
-        # the limit is not bigger than the the partition size:
+        # the limit is not bigger than the partition size:
         limit = min(partition_size, 100)
 
         for offset in range(partition_offset, partition_offset + partition_size, limit):
@@ -1308,14 +1310,14 @@ class ServiceNow:
 
         Args:
             article (dict):
-                Dictionary inclusing all fields of a single KBA.
+                Dictionary including all fields of a single KBA.
                 This is a mutable variable that gets modified by this method!
             skip_existing_downloads (bool, optional):
                 If True it tries to optimize the processing by reusing
                 existing downloads of attachments.
 
-        Side effect:
-            The article dict is modified with by adding additional key / value
+        Note:
+            The article dict is modified by adding additional key / value
             pairs (these can be used in the payload files!):
 
             * kb_category_name - the readable name of the ServiceNow category
@@ -1418,7 +1420,7 @@ class ServiceNow:
                     # Add the related item to the resulting set
                     # (duplicates will not be added as it is a set):
                     related_product_names.add(related_product_name)
-                    # Extended ECM can only handle a maxiumum of 50 line items:
+                    # Extended ECM can only handle a maximum of 50 line items:
                     if len(related_product_names) == 49:
                         self.logger.info(
                             "Reached maximum of 50 multi-value items for related products of article -> %s",
@@ -1466,7 +1468,7 @@ class ServiceNow:
                     # Add the related item to the resulting set
                     # (duplicates will not be added as it is a set):
                     product_line_names.add(product_line_name)
-                    # Extended ECM can only handle a maxiumum of 50 line items:
+                    # Extended ECM can only handle a maximum of 50 line items:
                     if len(product_line_names) == 49:
                         self.logger.info(
                             "Reached maximum of 50 multi-value items for related product lines of article -> %s",
@@ -1515,7 +1517,7 @@ class ServiceNow:
                     # Add the related item to the resulting set
                     # (duplicates will not be added as it is a set):
                     sub_product_line_names.add(sub_product_line_name)
-                    # Extended ECM can only handle a maxiumum of 50 line items:
+                    # Extended ECM can only handle a maximum of 50 line items:
                     if len(sub_product_line_names) == 49:
                         self.logger.info(
                             "Reached maximum of 50 multi-value items for related sub product lines of article -> %s",
@@ -1570,7 +1572,7 @@ class ServiceNow:
                     # Add the related item to the resulting set
                     # (duplicates will not be added as it is a set):
                     application_names.add(application_name)
-                    # Extended ECM can only handle a maxiumum of 50 line items:
+                    # Extended ECM can only handle a maximum of 50 line items:
                     if len(application_names) == 49:
                         self.logger.info(
                             "Reached maximum of 50 multi-value items for related applications of article -> %s",
@@ -1640,7 +1642,7 @@ class ServiceNow:
                         application_key = application_key.get("value")
 
                     if application_key:
-                        # Retrieve the application with the application key from ServiceNBow:
+                        # Retrieve the application with the application key from ServiceNow:
                         application = self.get_object(
                             table_name=SN_TABLE_PRODUCT_LINES,
                             sys_id=application_key,
@@ -1683,7 +1685,7 @@ class ServiceNow:
                             )
                     # end if application_key
 
-                    # Extended ECM can only handle a maxiumum of 50 line items:
+                    # Extended ECM can only handle a maximum of 50 line items:
                     if len(application_version_sets) == 49:
                         self.logger.info(
                             "Reached maximum of 50 multi-value items for related application versions of article -> %s",

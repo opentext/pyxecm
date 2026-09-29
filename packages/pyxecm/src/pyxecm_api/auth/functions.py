@@ -52,11 +52,11 @@ def get_groups(response: dict, token: str) -> list:
         response = json.loads(response.text)
         return [group["id"] for group in response.get("groups", [])]
 
-    # Retur empty list if request wasn't successful
+    # Return empty list if request wasn't successful
     return []
 
 
-async def get_current_user(
+def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], api_key: Annotated[str, Depends(apikey_header)]
 ) -> User:
     """Get the current user from OTDS and verify it."""
@@ -80,21 +80,21 @@ async def get_current_user(
         response = requests.request("GET", url, headers=headers, timeout=2)
 
         if response.ok:
-            response = json.loads(response.text)
+            user_data = json.loads(response.text)
 
             # Check if user is tenant admin
             tenant_admin = False
-            for attr in response["user"].get("values", []):
+            for attr in user_data["user"].get("values", []):
                 if attr.get("name") == "oTType" and "TenantAdminUser" in attr.get("values", []):
                     tenant_admin = True
                     break
 
             return User(
-                id=response["user"]["id"],
-                full_name=response["user"]["name"],
-                groups=get_groups(response, token),
-                is_admin=response["isAdmin"],
-                is_sysadmin=response["isSysAdmin"],
+                id=user_data["user"]["id"],
+                full_name=user_data["user"]["name"],
+                groups=get_groups(user_data, token),
+                is_admin=user_data["isAdmin"],
+                is_sysadmin=user_data["isSysAdmin"],
                 is_tenantadmin=tenant_admin,
             )
 

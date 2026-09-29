@@ -13,14 +13,17 @@ class PrefixLogAdapter(logging.LoggerAdapter):
     """Prefix all messages with a custom prefix."""
 
     def process(self, msg: str, kwargs: dict) -> tuple[str, dict]:
-        """TODO _summary_.
+        """Prefix the log message with the value of `extra["prefix"]` in square brackets.
 
         Args:
-            msg (_type_): TODO _description_
-            kwargs (_type_): TODO _description_
+            msg (str):
+                The log message.
+            kwargs (dict):
+                The keyword arguments of the logging call. Returned unchanged.
 
         Returns:
-            _type_: _description_
+            tuple[str, dict]:
+                The prefixed message and the unchanged keyword arguments.
 
         """
 

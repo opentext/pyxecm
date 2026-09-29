@@ -52,7 +52,7 @@ class CustomizerAPISettings(BaseSettings):
     )
     payload_dir: str = Field(
         default="/payload-external/",
-        description="Path to a directory of payload files. All files in this directory will be loaded in alphabetical order and dependencies will be added automatically on the previous object. So all payload in this folder will be processed sequentially in alphabetical oder.",
+        description="Path to a directory of payload files. All files in this directory will be loaded in alphabetical order and dependencies will be added automatically on the previous object. So all payload in this folder will be processed sequentially in alphabetical order.",
     )
     payload_dir_optional: str = Field(
         default="/payload-optional/",
@@ -107,15 +107,6 @@ class CustomizerAPISettings(BaseSettings):
     metrics: bool = Field(
         default=True,
         description="Enable or disable the /metrics endpoint for Prometheus",
-    )
-
-    victorialogs_host: str = Field(
-        default="",
-        description="Hostname of the VictoriaLogs Server",
-    )
-    victorialogs_port: int = Field(
-        default=9428,
-        description="Port of the VictoriaLogs Server",
     )
 
     upload_folder: str = Field(default=os.path.join(tempfile.gettempdir(), "upload"), description="Folder for uploads")

@@ -25,7 +25,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
 @router.post("/token", tags=["auth"])
-async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> JSONResponse:
+def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> JSONResponse:
     """Login using OTDS and return a token."""
 
     url = api_settings.otds_url + "/otdsws/rest/authentication/credentials"
@@ -53,15 +53,15 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> J
         ) from exc
 
     if response.ok:
-        response = json.loads(response.text)
+        response_data = json.loads(response.text)
     else:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
 
     return JSONResponse(
         {
-            "access_token": response["ticket"],
+            "access_token": response_data["ticket"],
             "token_type": "bearer",
-            "userId": response["userId"],
+            "userId": response_data["userId"],
         },
     )
 

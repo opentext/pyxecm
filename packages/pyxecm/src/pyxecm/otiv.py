@@ -17,7 +17,7 @@ default_logger = logging.getLogger(MODULE_NAME)
 
 
 class OTIV:
-    """Class OTIV is used to manage stettings for OpenText Intelligent Viewing."""
+    """Class OTIV is used to manage settings for OpenText Intelligent Viewing."""
 
     # Only class variables or class-wide constants should be defined here:
 

@@ -1,8 +1,9 @@
 # PYXECM
 
-A python library to interact with Opentext Content Mangement REST API.
-The product API documentation is available on [OpenText Developer](https://developer.opentext.com/ce/products/extendedecm)
-Detailed documentation of this package is available [here](https://opentext.github.io/pyxecm/).
+A Python library to interact with the OpenText Content Management REST APIs.
+
+- Product API documentation: [OpenText Developer](https://developer.opentext.com/ce/products/extendedecm)
+- Documentation of this package: [opentext.github.io/pyxecm](https://opentext.github.io/pyxecm/)
 
 ## Quick start - Library usage
 
@@ -14,7 +15,7 @@ pip install pyxecm
 
 ### Start using the package libraries
 
-example usage of the OTCS class, more details can be found in the docs:
+Example usage of the OTCS class. More details can be found in the [documentation](https://opentext.github.io/pyxecm/pyxecm/otcs/):
 
 ```python
 from pyxecm import OTCS
@@ -22,7 +23,7 @@ from pyxecm import OTCS
 otcs_object = OTCS(
     protocol="https",
     hostname="otcs.domain.tld",
-    port="443",
+    port=443,
     public_url="otcs.domain.tld",
     username="admin",
     password="********",
@@ -39,23 +40,23 @@ for node in nodes["results"]:
 
 ## Quick start - Customizer usage
 
-- Create an `.env` file as described here: [sample-environment-variables](pyxecm-customizer/settings/#sample-env)
-- Create an payload file to define what the customizer should do, as described here [payload-syntax](pyxecm-customizer/payload-syntax/)
+- Create an `.env` file as described in [Customizer Settings](https://opentext.github.io/pyxecm/pyxecm-customizer/settings/#sample-env).
+- Create a payload file that defines what the Customizer should do, as described in [Payload Syntax](https://opentext.github.io/pyxecm/pyxecm-customizer/payload-syntax/).
 
 ```bash
-pip install pyxecm[customizer]
+pip install "pyxecm[customizer]"
 
-pyxecm-customizer PAYLOAD.tfvars/PAYLOAD.yaml
+pyxecm-customizer PAYLOAD.yaml   # or PAYLOAD.tfvars
 ```
 
 ## Quick start - API
 
-- Install pyxecm with api and customizer dependencies
-- Launch the Rest API server
+- Install pyxecm with the `api` and `customizer` extras
+- Launch the REST API server
 - Access the Customizer API at [http://localhost:8000/api](http://localhost:8000/api)
 
 ```bash
-pip install pyxecm[api,customizer]
+pip install "pyxecm[api,customizer]"
 
 pyxecm-api
 ```
@@ -63,7 +64,7 @@ pyxecm-api
 ## Disclaimer
 
 !!! quote ""
-    Copyright © 2025 Open Text Corporation, All Rights Reserved.
+    Copyright © 2024-2026 Open Text Corporation, All Rights Reserved.
     The above copyright notice and this permission notice shall be included in all
     copies or substantial portions of the Software.
     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR

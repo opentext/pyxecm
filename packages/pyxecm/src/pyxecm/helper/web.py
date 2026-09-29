@@ -67,10 +67,10 @@ class HTTP:
         Args:
             hostname (str):
                 The endpoint hostname.
-            port (int):
-                The endpoint port.
+            port (int, optional):
+                The endpoint port. Defaults to 80.
 
-        Results:
+        Returns:
             bool:
                 True is reachable, False otherwise
 
@@ -133,7 +133,7 @@ class HTTP:
             retries (int, optional):
                 The number of retries. If -1 then unlimited retries.
                 Defaults to REQUEST_MAX_RETRIES.
-            wait_time (int, optional):
+            wait_time (float, optional):
                 The number of seconds to wait after each try.
                 Defaults to REQUEST_RETRY_DELAY.
             wait_on_status (list, optional):
@@ -142,8 +142,10 @@ class HTTP:
                 wait_time > 0.
             show_error (bool, optional):
                 Whether to show an error or a warning message in case of an error.
+                Defaults to True.
             stream (bool, optional):
                 Enable stream for response content (e.g. for downloading large files).
+                Defaults to False.
 
         Returns:
             dict | None:
@@ -270,19 +272,21 @@ class HTTP:
             filename (str):
                 The filename to save the content.
             timeout (float, optional):
-                The timeout in seconds.
-            retries (int, optional):
+                The timeout in seconds. Defaults to REQUEST_TIMEOUT.
+            retries (int | None, optional):
                 The number of retries. If -1 then unlimited retries.
+                Defaults to REQUEST_MAX_RETRIES.
             wait_time (float, optional):
                 The number of seconds to wait after each try.
+                Defaults to REQUEST_RETRY_DELAY.
             wait_on_status (list, optional):
                 The list of status codes we want to wait on.
                 If None or empty then we wait for all return codes if
                 wait_time > 0.
             chunk_size (int, optional):
-                Chunk size for reading file content. Default is 8192.
+                Chunk size in bytes for reading file content. Default is 8192.
             show_error (bool, optional):
-                Whether or not an error show logged if download fails.
+                Whether or not an error should be logged if the download fails.
                 Default is True.
 
         Returns:

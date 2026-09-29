@@ -2,7 +2,7 @@
 
 These are typically used as fallback options if no REST API or LLConfig can be used.
 
-This module uses playwright: https://playwright.dev for broweser-based automation
+This module uses playwright: https://playwright.dev for browser-based automation
 and testing.
 
 Core Playwright data types and their relationships:
@@ -29,7 +29,7 @@ Playwright
 | **ElementHandle**  | Static reference to a single DOM element. Useful for special interactions or JS execution.                     |
 | **JSHandle**       | Handle to any JavaScript object, not just DOM nodes. Returned by `evaluate_handle()`.                          |
 
-Here are few few examples of the most typical page matches with the different selector types:
+Here are a few examples of the most typical page matches with the different selector types:
 
 | **Element to Match**     | **CSS**                        | **XPath**                                         | **Playwright `get_by_*` Method**          |
 | ------------------------ | ------------------------------ | ------------------------------------------------- | ----------------------------------------- |
@@ -151,6 +151,7 @@ class BrowserAutomation:
                 * "networkidle" - waits until there are no network connections for at least 500 ms.
                 * "domcontentloaded" - waits for the DOMContentLoaded event (HTML is parsed,
                   but subresources may still load).
+                Defaults to None, which uses the default strategy "networkidle".
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
             browser (str | None, optional):
@@ -370,11 +371,16 @@ class BrowserAutomation:
         - Replaces spaces with underscores
         - Removes unsafe characters
         - Converts to lowercase
-        - Trims length and dots
+        - Removes trailing dots and surrounding whitespace
+        - Falls back to "untitled" if the result is empty
 
         Args:
             filename (str):
                 The filename to sanitize.
+
+        Returns:
+            str:
+                The sanitized filename.
 
         """
 
@@ -395,7 +401,7 @@ class BrowserAutomation:
 
         Args:
             suffix (str, optional):
-                Optional suffix to append to the screenshot filename.
+                Optional suffix to append to the screenshot filename. Defaults to "".
 
         Returns:
             bool:
@@ -423,8 +429,8 @@ class BrowserAutomation:
         """Load a page into the browser based on a given URL.
 
         Args:
-            url (str):
-                URL to load. If empty just the base URL will be used.
+            url (str, optional):
+                URL to load. If empty just the base URL will be used. Defaults to "".
             wait_until (str | None, optional):
                 Wait until a certain condition. Options are:
                 * "commit" - does not wait at all - commit the request and continue
@@ -505,6 +511,7 @@ class BrowserAutomation:
                   but subresources may still load).
             retry_attempts (int, optional):
                 The number of times to retry getting the page title in case of failure.
+                Defaults to REQUEST_MAX_RETRIES.
 
         Returns:
             str | None:
@@ -594,12 +601,12 @@ class BrowserAutomation:
                 ARIA role when using selector_type="role", e.g., "button", "textbox".
                 If irrelevant then None should be passed for role_type.
             exact_match (bool | None, optional):
-                 Controls whether the text or name must match exactly.
-                 Default is None (not set, i.e. using playwrights default).
-            iframe (str | None):
+                Controls whether the text or name must match exactly.
+                Default is None (not set, i.e. using Playwright's default).
+            iframe (str | None, optional):
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
             regex (bool, optional):
-                Should the name be interpreted as a regular expression?
+                Should the name be interpreted as a regular expression? Defaults to False.
             filter_has_text (str | None, optional):
                 Applies `locator.filter(has_text=...)` to narrow the selection based on text content.
             filter_has (Locator | None, optional):
@@ -608,6 +615,10 @@ class BrowserAutomation:
                 Applies `locator.filter(has_not_text=...)` to exclude elements with matching text content.
             filter_has_not (Locator | None, optional):
                 Applies `locator.filter(has_not=...)` to exclude elements containing a matching descendant.
+
+        Returns:
+            Locator | None:
+                The locator, or None if it could not be determined.
 
         """
 
@@ -705,20 +716,19 @@ class BrowserAutomation:
             occurrence (int, optional):
                 If multiple elements match the selector, this defines which one to return.
                 Default is 1 (the first one).
-            iframe (str | None):
+            iframe (str | None, optional):
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
-            repeat_reload (int | None):
+            repeat_reload (int | None, optional):
                 For pages that are not dynamically updated and require a reload to show an update
                 a number of page reloads can be configured.
-            repeat_reload_delay (float | None):
-                Number of seconds to wait.
+            repeat_reload_delay (int, optional):
+                Number of seconds to wait before each page reload. Defaults to 60.
             show_error (bool, optional):
                 Show an error if not found or not visible.
 
-
         Returns:
-            Locator:
-                The web element or None in case an error occured.
+            Locator | None:
+                The web element or None in case an error occurred.
 
         """
 
@@ -758,7 +768,7 @@ class BrowserAutomation:
                 return None
 
             # Wait for the element to be visible - don't use logic like
-            # locator.count() as this does not wait but fail immideately if elements
+            # locator.count() as this does not wait but fail immediately if elements
             # are not yet loaded:
 
             try:
@@ -911,11 +921,11 @@ class BrowserAutomation:
                 Key pressed together with the mouse click.
                 Possible values:'Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'.
                 Default is None = no key pressed.
-            repeat_reload (int | None):
+            repeat_reload (int | None, optional):
                 For pages that are not dynamically updated and require a reload to show an update
                 a number of page reloads can be configured.
-            repeat_reload_delay (float | None):
-                Number of seconds to wait.
+            repeat_reload_delay (float, optional):
+                Number of seconds to wait before each page reload. Defaults to 60.0.
             show_error (bool, optional):
                 Show an error if the element is not found or not clickable.
 
@@ -998,7 +1008,7 @@ class BrowserAutomation:
                     success = False
             # Handle non-checkboxes:
             else:
-                # Will this click trigger a naviagation?
+                # Will this click trigger a navigation?
                 if is_navigation_trigger:
                     self.logger.debug(
                         "Clicking on navigation-triggering element -> '%s' (%s%s) and wait until -> '%s'...",
@@ -1009,7 +1019,7 @@ class BrowserAutomation:
                     )
                     with self.page.expect_navigation(wait_until=wait_until):
                         elem.click(force=force, button=click_button, click_count=click_count, modifiers=click_modifiers)
-                # Will this click trigger a a new popup window?
+                # Will this click trigger a new popup window?
                 elif is_popup_trigger:
                     with self.page.expect_popup() as popup_info:
                         elem.click(force=force, button=click_button, click_count=click_count, modifiers=click_modifiers)
@@ -1087,7 +1097,7 @@ class BrowserAutomation:
         typing: bool = False,
         show_error: bool = True,
     ) -> bool:
-        """Find an page element and fill it with a new text.
+        """Find a page element and fill it with a new text.
 
         Args:
             selector (str):
@@ -1115,12 +1125,12 @@ class BrowserAutomation:
             is_sensitive (bool, optional):
                 True for suppressing sensitive information in logging.
             press_enter (bool, optional):
-                Whether or not to press "Enter" after entering
+                Whether or not to press "Enter" after entering the value.
             exact_match (bool | None, optional):
                 If an exact matching is required. Default is None (not set).
             regex (bool, optional):
                 Should the name be interpreted as a regular expression?
-            iframe (str | None):
+            iframe (str | None, optional):
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
             typing (bool, optional):
                 Not just set the value of the elem but simulate real typing.
@@ -1204,7 +1214,7 @@ class BrowserAutomation:
                         finally:
                             retry += 1
 
-                    success = retry < 5  # True is less than 5 retries were needed
+                    success = retry < 5  # True if less than 5 retries were needed
             else:
                 if typing:
                     elem.type(value, delay=50)
@@ -1255,10 +1265,10 @@ class BrowserAutomation:
                 If an exact matching is required. Default is None (not set).
             regex (bool, optional):
                 Should the name be interpreted as a regular expression?
-            iframe (str | None):
+            iframe (str | None, optional):
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
             download_time (int, optional):
-                Time in seconds to wait for the download to complete.
+                Time in seconds to wait for the download to complete. Defaults to 30.
 
         Returns:
             str | None:
@@ -1314,9 +1324,9 @@ class BrowserAutomation:
         Args:
             selector (str):
                 The selector to find the element on the page.
-            selector_type (str):
+            selector_type (str, optional):
                 One of "id", "name", "class_name", "xpath", "css", "role", "text", "title",
-                "label", "placeholder", "alt".
+                "label", "placeholder", "alt". Defaults to "id".
                 When using css, the selector becomes a raw CSS selector, and you can skip attribute
                 and value filtering entirely if your selector already narrows it down.
                 Examples for CSS:
@@ -1327,23 +1337,23 @@ class BrowserAutomation:
             role_type (str | None, optional):
                 ARIA role when using selector_type="role", e.g., "button", "textbox".
                 If irrelevant then None should be passed for role_type.
-            value (str, optional):
+            value (str | None, optional):
                 Value to match in attribute or element content.
             exact_match (bool | None, optional):
                 If an exact matching is required. Default is None (not set).
-            attribute (str, optional):
+            attribute (str | None, optional):
                 Attribute name to inspect. If None, uses element's text.
-            substring (bool):
-                If True, allow partial match.
-            iframe (str | None):
+            substring (bool, optional):
+                If True, allow partial match. Defaults to True.
+            iframe (str | None, optional):
                 Is the element in an iFrame? Then provide the name of the iframe with this parameter.
-            min_count (int):
-                Minimum number of required matches (# elements on page).
+            min_count (int, optional):
+                Minimum number of required matches (# elements on page). Defaults to 1.
             wait_time (float, optional):
                 Time in seconds to wait for elements to appear. Default is 0.0 (no wait).
             wait_state (str, optional):
                 Defines if we wait for attached (element is part of DOM) or
-                if we wait for elem to be visible (attached, displayed, and has non-zero size).
+                if we wait for elem to be visible (attached, displayed, and has non-zero size). Defaults to "visible".
             show_error (bool, optional):
                 Whether to log warnings/errors. Default is True.
 
@@ -1390,7 +1400,7 @@ class BrowserAutomation:
         )
 
         # Wait for the element to be visible - don't immediately use logic like
-        # locator.count() as this does not wait but then fail immideately
+        # locator.count() as this does not wait but then fail immediately
         try:
             self.logger.info(
                 "Wait for locator to find first matching element with selector -> '%s' (%s%s) and state -> '%s'%s...",
@@ -1472,7 +1482,7 @@ class BrowserAutomation:
                 # Nothing to compare with - continue:
                 continue
 
-            # If substring is True we check with "in" otherwise we use the eual operator (==):
+            # If substring is True we check with "in" otherwise we use the equal operator (==):
             if (substring and value in attr_value) or (not substring and value == attr_value):
                 matching_elems.append(elem)
 
@@ -1605,7 +1615,7 @@ class BrowserAutomation:
     # end method definition
 
     def set_timeout(self, wait_time: float) -> None:
-        """Wait for the browser to finish tasks (e.g. fully loading a page).
+        """Set the default timeout for Playwright actions and page navigation.
 
         This setting is valid for the whole browser session and not just
         for a single command.

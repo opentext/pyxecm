@@ -1,4 +1,4 @@
-"""Metics for payload logs."""
+"""Metrics for payload logs."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"

@@ -220,6 +220,48 @@ class SuccessFactors:
 
         Returns parsed JSON by default. Returns the raw response only when
         `parse_request_response` is False.
+
+        Args:
+            url (str):
+                The URL to send the request to.
+            method (str, optional):
+                The HTTP method (GET, POST, etc.). Defaults to "GET".
+            headers (dict | None, optional):
+                The request headers. Defaults to None.
+            data (dict | None, optional):
+                The request payload sent as form data. Defaults to None.
+            json_data (dict | None, optional):
+                The request payload sent as JSON. Defaults to None.
+            timeout (float, optional):
+                The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+            show_error (bool, optional):
+                Whether to log an error if the request fails. If False, a warning is logged
+                only if show_warning is True. Defaults to True.
+            show_warning (bool, optional):
+                Whether to log a warning if the request fails (used if show_error is False
+                or for timeouts and connection errors). Defaults to False.
+            warning_message (str, optional):
+                Specific warning message. If not given the failure_message is used.
+            failure_message (str, optional):
+                Description of the failed action, used in log messages.
+            success_message (str, optional):
+                Message that is logged if the request succeeds.
+            max_retries (int, optional):
+                The maximum number of retries. Defaults to REQUEST_MAX_RETRIES.
+            retry_delay (float, optional):
+                The base delay in seconds between retries. The delay is multiplied
+                by the number of the retry. Defaults to REQUEST_RETRY_DELAY.
+            retry_status_codes (tuple[int, ...], optional):
+                The HTTP status codes that trigger a retry. Defaults to REQUEST_RETRY_STATUS_CODES.
+            parse_request_response (bool, optional):
+                Whether the response should be parsed as JSON into a dictionary.
+                If False, the raw response is returned. Defaults to True.
+
+        Returns:
+            dict | requests.Response | None:
+                The parsed response, or the raw response if parse_request_response is False.
+                None in case of an error.
+
         """
 
         retries = 0
@@ -357,16 +399,16 @@ class SuccessFactors:
         the vars() built-in method.
 
         Args:
-            response_object (object):
-                This is response object delivered by the request call.
+            response_object (requests.Response):
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
-                Provide a  more specific error message in case of an error.
-            show_error (bool):
-                True: write an error to the log file
-                False: write a warning to the log file
+                Provide a more specific error message in case of an error.
+            show_error (bool, optional):
+                True: write an error to the log file.
+                False: write a warning to the log file. Defaults to True.
 
         Returns:
-            dict:
+            dict | None:
                 The response information or None in case of an error.
 
         """
@@ -397,11 +439,11 @@ class SuccessFactors:
     # end method definition
 
     def exist_result_item(self, response: dict, key: str, value: str) -> bool:
-        """Check existence of key / value pair in the response properties of an SuccessFactors API call.
+        """Check existence of key / value pair in the response properties of a SuccessFactors API call.
 
         Args:
             response (dict):
-                REST response from an SuccessFactors API call
+                REST response from a SuccessFactors API call
             key (str):
                 The property name (key).
             value (str):
@@ -438,11 +480,11 @@ class SuccessFactors:
         key: str,
         index: int = 0,
     ) -> str | None:
-        """Get value of a result property with a given key of an SuccessFactors API call.
+        """Get value of a result property with a given key of a SuccessFactors API call.
 
         Args:
             response (dict):
-                REST response from an SuccessFactors REST Call
+                REST response from a SuccessFactors REST Call
             key (str):
                 The property name (key).
             index (int, optional):
@@ -494,11 +536,9 @@ class SuccessFactors:
     def get_saml_assertion(self) -> str | None:
         """Get SAML Assertion for SuccessFactors authentication.
 
-        Args:
-            None
         Returns:
-            str:
-                The SAML assertion. Also stores access token in self._assertion.
+            str | None:
+                The SAML assertion. Also stores the assertion in self._assertion.
                 Returns None in case of an error.
 
         """
@@ -538,7 +578,7 @@ class SuccessFactors:
 
         Args:
             revalidate (bool, optional):
-                Determine if a re-athentication is enforced
+                Determine if a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
 
         Returns:
@@ -609,30 +649,6 @@ class SuccessFactors:
             dict | None:
                 Country details
 
-        Example return data in "d" dictionary:
-        {
-            '__metadata': {
-                'uri': "https://apisalesdemo2.successfactors.eu/odata/v2/UserAccount('twalker')",
-                'type': 'SFOData.UserAccount'
-            },
-            'username': 'twalker',
-            'lastModifiedDateTime': '/Date(1692701804000+0000)/',
-            'accountUuid': '5c7390e0-d9d2-e348-1700-2b02b3a61aa5',
-            'createdDateTime': '/Date(1420745485000+0000)/',
-            'timeZone': 'US/Eastern',
-            'lastInactivationDateTime': None,
-            'accountIsLocked': 'FALSE',
-            'accountStatus': 'ACTIVE',
-            'defaultLocale': 'en_US',
-            'lastLoginFailedDateTime': None,
-            'accountId': '90',
-            'sapGlobalUserId': None,
-            'personIdExternal': '82094',
-            'userType': 'employee',
-            'email': 'twalker@m365x41497014.onmicrosoft.com',
-            'user': {'__deferred': {...}}
-        }
-
         """
 
         if not self._access_token and not self.authenticate():
@@ -675,22 +691,24 @@ class SuccessFactors:
         If you want to query all users, use query option $filter=status in 't','f','T','F','e','d'.
 
         Args:
-            user_id (str):
-                The login name of the user (e.g. "twalker")
-            field_name (str):
+            user_id (str, optional):
+                The ID of the user (e.g. 106020). This is NOT the login name.
+                If given, the user is queried by key predicate.
+            field_name (str, optional):
                 The field name of the filter.
-            field_value (str):
+            field_value (str, optional):
                 The filter value to compare the field with.
             field_operation (str, optional):
-                The operation of the filter. Like "in".
+                The operation of the filter. Like "in". Defaults to "eq".
             max_results (int, optional):
                 The maximum number of results to return. Default is 1.
 
         Returns:
             dict | None:
-                User Account details
+                User details
 
-            Example return data in "d" dictionary:
+        Example:
+            Return data in the "d" dictionary:
 
             {
                 '__metadata': {
@@ -809,29 +827,31 @@ class SuccessFactors:
             dict | None:
                 User Account details.
 
-        Example return data in "d" dictionary:
-        {
-            '__metadata': {
-                'uri': "https://apisalesdemo2.successfactors.eu/odata/v2/UserAccount('twalker')",
-                'type': 'SFOData.UserAccount'
-            },
-            'username': 'twalker',
-            'lastModifiedDateTime': '/Date(1692701804000+0000)/',
-            'accountUuid': '5c7390e0-d9d2-e348-1700-2b02b3a61aa5',
-            'createdDateTime': '/Date(1420745485000+0000)/',
-            'timeZone': 'US/Eastern',
-            'lastInactivationDateTime': None,
-            'accountIsLocked': 'FALSE',
-            'accountStatus': 'ACTIVE',
-            'defaultLocale': 'en_US',
-            'lastLoginFailedDateTime': None,
-            'accountId': '90',
-            'sapGlobalUserId': None,
-            'personIdExternal': '82094',
-            'userType': 'employee',
-            'email': 'twalker@m365x41497014.onmicrosoft.com',
-            'user': {'__deferred': {...}}
-        }
+        Example:
+            Return data in the "d" dictionary:
+
+            {
+                '__metadata': {
+                    'uri': "https://apisalesdemo2.successfactors.eu/odata/v2/UserAccount('twalker')",
+                    'type': 'SFOData.UserAccount'
+                },
+                'username': 'twalker',
+                'lastModifiedDateTime': '/Date(1692701804000+0000)/',
+                'accountUuid': '5c7390e0-d9d2-e348-1700-2b02b3a61aa5',
+                'createdDateTime': '/Date(1420745485000+0000)/',
+                'timeZone': 'US/Eastern',
+                'lastInactivationDateTime': None,
+                'accountIsLocked': 'FALSE',
+                'accountStatus': 'ACTIVE',
+                'defaultLocale': 'en_US',
+                'lastLoginFailedDateTime': None,
+                'accountId': '90',
+                'sapGlobalUserId': None,
+                'personIdExternal': '82094',
+                'userType': 'employee',
+                'email': 'twalker@m365x41497014.onmicrosoft.com',
+                'user': {'__deferred': {...}}
+            }
 
         """
 
@@ -871,7 +891,7 @@ class SuccessFactors:
                 The data to update the user with.
 
         Returns:
-            dict:
+            dict | None:
                 Request response or None if an error occurred.
 
         """
@@ -924,104 +944,105 @@ class SuccessFactors:
                 Value to match in the Field
             field_operation (str, optional):
                 The operation to apply for the filter. Default is 'eq' (equal).
-            max_results (int):
+            max_results (int, optional):
                 The maximum number of results to return. Default is 1.
 
         Returns:
             dict | None:
                 Dictionary with the SuccessFactors object data or None in case the request failed.
 
-        Example result values for "PerPerson" inside the "d" structure:
-        "results": [
-            {
-                '__metadata': {...},
-                'personIdExternal': '109031',
-                'lastModifiedDateTime': '/Date(1442346839000+0000)/',
-                'lastModifiedBy': 'admindlr',
-                'createdDateTime': '/Date(1442346265000+0000)/',
-                'dateOfBirth': '/Date(-501206400000)/',
-                'perPersonUuid': '0378B0E6F41444EBB90345B56D537D3D',
-                'createdOn': '/Date(1442353465000)/',
-                'lastModifiedOn': '/Date(1442354039000)/',
-                'countryOfBirth': 'RUS',
-                'createdBy': 'admindlr',
-                'regionOfBirth': None,
-                'personId': '771',
-                'personalInfoNav': {...},
-                'emergencyContactNav': {...},
-                'secondaryAssignmentsNav': {...},
-                'personEmpTerminationInfoNav': {...},
-                'phoneNav': {...},
-                'employmentNav': {...},
-                ...
-            }
-        ]
+        Examples:
+            Example result values for "PerPerson" inside the "d" structure:
+            "results": [
+                {
+                    '__metadata': {...},
+                    'personIdExternal': '109031',
+                    'lastModifiedDateTime': '/Date(1442346839000+0000)/',
+                    'lastModifiedBy': 'admindlr',
+                    'createdDateTime': '/Date(1442346265000+0000)/',
+                    'dateOfBirth': '/Date(-501206400000)/',
+                    'perPersonUuid': '0378B0E6F41444EBB90345B56D537D3D',
+                    'createdOn': '/Date(1442353465000)/',
+                    'lastModifiedOn': '/Date(1442354039000)/',
+                    'countryOfBirth': 'RUS',
+                    'createdBy': 'admindlr',
+                    'regionOfBirth': None,
+                    'personId': '771',
+                    'personalInfoNav': {...},
+                    'emergencyContactNav': {...},
+                    'secondaryAssignmentsNav': {...},
+                    'personEmpTerminationInfoNav': {...},
+                    'phoneNav': {...},
+                    'employmentNav': {...},
+                    ...
+                }
+            ]
 
-        Example result values for "PerPersonal" inside the "d" structure:
-        "results": [
-            {
-                '__metadata': {
-                    'uri': "https://apisalesdemo2.successfactors.eu/odata/v2/PerPersonal(personIdExternal='108729',startDate=datetime'2017-03-13T00:00:00')",
-                    'type': 'SFOData.PerPersonal'
-                },
-                'personIdExternal': '108729',
-                'startDate': '/Date(1489363200000)/',
-                'lastModifiedDateTime': '/Date(1489442337000+0000)/',
-                'endDate': '/Date(253402214400000)/',
-                'createdDateTime': '/Date(1489442337000+0000)/',
-                'suffix': None,
-                'attachmentId': None,
-                'preferredName': 'Hillary',
-                'lastNameAlt1': None,
-                'firstName': 'Hillary',
-                'nationality': 'USA',
-                'salutation': '30085',
-                'maritalStatus': '10825',
-                'lastName': 'Lawson',
-                'gender': 'F',
-                'firstNameAlt1': None,
-                'createdOn': '/Date(1489445937000)/',
-                'middleNameAlt1': None,
-                'lastModifiedBy': '82094',
-                'lastModifiedOn': '/Date(1489445937000)/',
-                'createdBy': '82094',
-                'middleName': None,
-                'nativePreferredLang': '10249',
-                'localNavAUS': {'__deferred': {...}},
-                'localNavBGD': {'__deferred': {...}},
-                'localNavHKG': {'__deferred': {...}},
-                'localNavMYS': {'__deferred': {...}},
-                'localNavAUT': {'__deferred': {...}},
-                'localNavLKA': {'__deferred': {...}},
-                'localNavPOL': {'__deferred': {...}},
-                'localNavCZE': {'__deferred': {...}},
-                'localNavTWN': {'__deferred': {...}},
-                'localNavARE': {'__deferred': {...}},
-                'localNavARG': {'__deferred': {...}},
-                'localNavCAN': {'__deferred': {...}},
-                'localNavNOR': {'__deferred': {...}},
-                'localNavOMN': {'__deferred': {...}},
-                'localNavPER': {'__deferred': {...}},
-                'localNavSGP': {'__deferred': {...}},
-                'localNavVEN': {'__deferred': {...}},
-                'localNavZAF': {'__deferred': {...}},
-                'localNavCHL': {'__deferred': {...}},
-                'localNavCHE': {'__deferred': {...}},
-                'localNavDNK': {'__deferred': {...}},
-                'localNavGTM': {'__deferred': {...}},
-                'localNavNZL': {'__deferred': {...}},
-                'salutationNav': {'__deferred': {...}},
-                'localNavCHN': {'__deferred': {...}},
-                'localNavVNM': {'__deferred': {...}},
-                'localNavIDN': {'__deferred': {...}},
-                'localNavPRT': {'__deferred': {...}},
-                'localNavCOL': {'__deferred': {...}},
-                'localNavHUN': {'__deferred': {...}},
-                'localNavSWE': {'__deferred': {...}},
-                'localNavESP': {'__deferred': {...}},
-                'localNavUSA': {'__deferred': {...}},
-                'nativePreferredLangNav': {'__deferred': {...}},
-                'maritalStatusNav': {'__deferred': {...}}, ...}
+            Example result values for "PerPersonal" inside the "d" structure:
+            "results": [
+                {
+                    '__metadata': {
+                        'uri': "https://apisalesdemo2.successfactors.eu/odata/v2/PerPersonal(personIdExternal='108729',startDate=datetime'2017-03-13T00:00:00')",
+                        'type': 'SFOData.PerPersonal'
+                    },
+                    'personIdExternal': '108729',
+                    'startDate': '/Date(1489363200000)/',
+                    'lastModifiedDateTime': '/Date(1489442337000+0000)/',
+                    'endDate': '/Date(253402214400000)/',
+                    'createdDateTime': '/Date(1489442337000+0000)/',
+                    'suffix': None,
+                    'attachmentId': None,
+                    'preferredName': 'Hillary',
+                    'lastNameAlt1': None,
+                    'firstName': 'Hillary',
+                    'nationality': 'USA',
+                    'salutation': '30085',
+                    'maritalStatus': '10825',
+                    'lastName': 'Lawson',
+                    'gender': 'F',
+                    'firstNameAlt1': None,
+                    'createdOn': '/Date(1489445937000)/',
+                    'middleNameAlt1': None,
+                    'lastModifiedBy': '82094',
+                    'lastModifiedOn': '/Date(1489445937000)/',
+                    'createdBy': '82094',
+                    'middleName': None,
+                    'nativePreferredLang': '10249',
+                    'localNavAUS': {'__deferred': {...}},
+                    'localNavBGD': {'__deferred': {...}},
+                    'localNavHKG': {'__deferred': {...}},
+                    'localNavMYS': {'__deferred': {...}},
+                    'localNavAUT': {'__deferred': {...}},
+                    'localNavLKA': {'__deferred': {...}},
+                    'localNavPOL': {'__deferred': {...}},
+                    'localNavCZE': {'__deferred': {...}},
+                    'localNavTWN': {'__deferred': {...}},
+                    'localNavARE': {'__deferred': {...}},
+                    'localNavARG': {'__deferred': {...}},
+                    'localNavCAN': {'__deferred': {...}},
+                    'localNavNOR': {'__deferred': {...}},
+                    'localNavOMN': {'__deferred': {...}},
+                    'localNavPER': {'__deferred': {...}},
+                    'localNavSGP': {'__deferred': {...}},
+                    'localNavVEN': {'__deferred': {...}},
+                    'localNavZAF': {'__deferred': {...}},
+                    'localNavCHL': {'__deferred': {...}},
+                    'localNavCHE': {'__deferred': {...}},
+                    'localNavDNK': {'__deferred': {...}},
+                    'localNavGTM': {'__deferred': {...}},
+                    'localNavNZL': {'__deferred': {...}},
+                    'salutationNav': {'__deferred': {...}},
+                    'localNavCHN': {'__deferred': {...}},
+                    'localNavVNM': {'__deferred': {...}},
+                    'localNavIDN': {'__deferred': {...}},
+                    'localNavPRT': {'__deferred': {...}},
+                    'localNavCOL': {'__deferred': {...}},
+                    'localNavHUN': {'__deferred': {...}},
+                    'localNavSWE': {'__deferred': {...}},
+                    'localNavESP': {'__deferred': {...}},
+                    'localNavUSA': {'__deferred': {...}},
+                    'nativePreferredLangNav': {'__deferred': {...}},
+                    'maritalStatusNav': {'__deferred': {...}}, ...}
 
         """
 
@@ -1152,7 +1173,7 @@ class SuccessFactors:
             email_address (str):
                 The new email address of user.
             email_type (int, optional):
-                Type of the email. 8448 = Business.
+                Type of the email. 8448 = Business. Defaults to 8448.
 
         Returns:
             dict | None:

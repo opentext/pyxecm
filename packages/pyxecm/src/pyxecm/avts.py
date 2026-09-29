@@ -1,4 +1,4 @@
-"""AVTS stands for Aviator Search and is an OpenText offering for LLMM-based search across multiple repositories."""
+"""AVTS stands for Aviator Search and is an OpenText offering for LLM-based search across multiple repositories."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"
@@ -172,7 +172,7 @@ class AVTS:
                 HTTP method (GET, POST, etc.). Defaults to "GET".
             headers (dict | None, optional):
                 Request headers. Defaults to None.
-            data (dict | None, optional):
+            data (dict | list | None, optional):
                 Request payload. Defaults to None.
             json_data (dict | None, optional):
                 Request payload for the JSON parameter. Defaults to None.
@@ -315,7 +315,7 @@ class AVTS:
 
         Args:
             response_object (requests.Response):
-                This is reponse object delivered by the request call.
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
                 Use a more specific error message in case of an error.
             show_error (bool, optional):
@@ -650,13 +650,13 @@ class AVTS:
             certificate_password (str):
                 The password for the certificate.
             index_attachments (bool, optional):
-                Whether or not to index / crawl attachments.
+                Whether or not to index / crawl attachments. Defaults to True.
             index_call_recordings (bool, optional):
-                Whether or not to index / crawl meeting recordings.
+                Whether or not to index / crawl meeting recordings. Defaults to True.
             index_message_replies (bool, optional):
-                Whether or not to index / crawl message replies.
+                Whether or not to index / crawl message replies. Defaults to True.
             index_user_chats (bool, optional):
-                Whether or not to index / crawl user chats.
+                Whether or not to index / crawl user chats. Defaults to True.
 
         Returns:
             dict | None:
@@ -956,9 +956,9 @@ class AVTS:
             tenant_id (str):
                 The M365 tenant ID.
             certificate_file (str):
-                TODO: _description_
+                The path to the certificate file.
             certificate_password (int):
-                TODO: _description_
+                The password for the certificate.
             sharepoint_url (str):
                 The SharePoint URL.
             sharepoint_url_type (str):
@@ -968,11 +968,11 @@ class AVTS:
             sharepoint_admin_url (str):
                 The SharePoint administration URL.
             index_user_profiles (bool, optional):
-                TODO: _description_. Defaults to True.
+                Whether or not to index information from user profiles. Defaults to True.
             oauth2_site_name (str, optional):
-                TODO: _description_. Defaults to "AVTS".
+                The value of the "OAuth2SiteName" repository parameter. Defaults to "AVTS".
             oauth2_sites_file (str, optional):
-                TODO: _description_. Defaults to "".
+                The value of the "OAuth2SitesFile" repository parameter. Defaults to "".
 
         Returns:
             dict | None:
@@ -1440,7 +1440,7 @@ class AVTS:
 
         Returns:
             dict | None:
-                ID of a repostiory by name or None in case of an error
+                The repository data for the given name or None if no repository is found or in case of an error
 
         """
 
@@ -1459,7 +1459,7 @@ class AVTS:
     def get_certificate_file_content_base64(self, filepath: str) -> str | None:
         """Return the certificate as a base64 string.
 
-        In Kubernetes deploymnets the certificate is already mounted base64 encoded.
+        In Kubernetes deployments the certificate is already mounted base64 encoded.
 
         Args:
             filepath (str):
@@ -1512,7 +1512,7 @@ class AVTS:
     # end method definition
 
     def set_questions(self, questions: list) -> list | None:
-        """Get a list of all repositories.
+        """Set the list of proposed questions.
 
         Args:
             questions (list):
@@ -1520,7 +1520,7 @@ class AVTS:
 
         Returns:
             list | None:
-                Parsed response object from the API listing all repositories or None in case of an error.
+                Parsed response object from the API or None in case of an error.
 
         """
 

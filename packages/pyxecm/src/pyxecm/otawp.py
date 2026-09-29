@@ -1,4 +1,4 @@
-"""Synchronize AppWorks projects, publsh and create run time instances for that."""
+"""Synchronize AppWorks projects, publish and create run time instances for that."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"
@@ -326,9 +326,9 @@ class OTAWP:
             protocol (str):
                 Either http or https.
             hostname (str):
-                The hostname of Extended ECM server to communicate with.
+                The hostname of the AppWorks server to communicate with.
             port (int):
-                The port number used to talk to the Extended ECM server.
+                The port number used to talk to the AppWorks server.
             username (str | None, optional):
                 The admin user name of OTAWP. Optional if otawp_ticket is provided.
             password (str | None, optional):
@@ -832,7 +832,7 @@ class OTAWP:
                 The unparsed XML string of the SOAP response.
             soap_tag (str):
                 The XML tag name (without namespace) of the element
-                incuding the text to be returned.
+                including the text to be returned.
 
         Returns:
             str | None:
@@ -887,13 +887,12 @@ class OTAWP:
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, then a warning is logged only if show_warning is True. Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a
+                failed REST call. Only used if show_error is False. Defaults to False.
             warning_message (str, optional):
-                Specific warning message. Defaults to "". If not given the error_message will be used.
+                Specific warning message. Defaults to "". If not given the failure_message will be used.
             failure_message (str, optional):
                 Specific error message. Defaults to "".
             success_message (str, optional):
@@ -901,16 +900,13 @@ class OTAWP:
             parse_request_response (bool, optional):
                 If True the response.text will be interpreted as json and loaded into a dictionary.
                 True is the default.
-            user_credentials (bool, optional):
-                Defines if admin or user credentials are used for the REST API call.
-                Default = False = admin credentials
             verify (bool, optional):
                 Specify whether or not SSL certificates should be verified when making an HTTPS request.
                 Default = True
 
         Returns:
             dict | None:
-                Response of OTDS REST API or None in case of an error.
+                Response of AppWorks REST API or None in case of an error.
 
         """
 
@@ -991,7 +987,7 @@ class OTAWP:
 
         Args:
             response_object (object):
-                This is reponse object delivered by the request call.
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
                 Print a custom error message.
             show_error (bool, optional):
@@ -1146,7 +1142,7 @@ class OTAWP:
         key: str,
         show_error: bool = True,
     ) -> list | None:
-        """Read an values from the REST API response.
+        """Read the values from the REST API response.
 
         Args:
             response (dict):
@@ -1201,13 +1197,11 @@ class OTAWP:
         value: str,
         show_error: bool = True,
     ) -> dict | None:
-        """Check existence of key / value pair in the response properties of an REST API call.
+        """Check existence of key / value pair in the response properties of a REST API call.
 
         Args:
             response (dict):
                 REST response from an AppWorks REST Call.
-                Name of the sub-dictionary holding the actual values.
-                This typically stands for the type of the AppWorks entity.
             entity_type (str):
                 Name of the sub-dictionary holding the actual values.
                 This typically stands for the type of the AppWorks entity.
@@ -1373,7 +1367,7 @@ class OTAWP:
 
         Returns:
             dict | None:
-                Response dictionary or error text.
+                Parsed SOAP response as a dictionary, or None if the workspace could not be created.
             bool:
                 True, if a new workspace has been created, False if the workspace did already exist.
 
@@ -1858,9 +1852,6 @@ class OTAWP:
     def get_priorities(self) -> dict | None:
         """Get all priorities from entity.
 
-        Args:
-            None
-
         Returns:
             dict:
                 Request response (dictionary with priority values) or None if the REST call fails.
@@ -1948,8 +1939,6 @@ class OTAWP:
     def get_priority_ids(self) -> list:
         """Get all priority entity instances IDs.
 
-        Args:
-            None
         Returns:
             list:
                 A list with all priority IDs.
@@ -2013,9 +2002,6 @@ class OTAWP:
 
     def get_customers(self) -> dict | None:
         """Get all customer entity instances.
-
-        Args:
-            None
 
         Returns:
             dict | None:
@@ -2095,8 +2081,6 @@ class OTAWP:
     def get_customer_ids(self) -> list:
         """Get all customer entity instances IDs.
 
-        Args:
-            None
         Returns:
             list:
                 A list of all customer IDs.
@@ -2117,7 +2101,8 @@ class OTAWP:
                 The name of the case type.
             description (str, optional):
                 The description of the case type.
-            status (int, optional): status
+            status (int, optional):
+                The status of the case type. Default is 1.
 
         Returns:
             dict:
@@ -2150,9 +2135,6 @@ class OTAWP:
 
     def get_case_types(self) -> dict | None:
         """Get all case type entity instances.
-
-        Args:
-            None
 
         Returns:
             dict:
@@ -2232,9 +2214,6 @@ class OTAWP:
     def get_case_type_ids(self) -> list:
         """Get All CaseType entity instances IDs.
 
-        Args:
-            None
-
         Returns:
             list:
                 List of all case type IDs.
@@ -2263,8 +2242,8 @@ class OTAWP:
                 The description for the category.
             name (str):
                 The name of the category.
-            status (int):
-                The status code.
+            status (int, optional):
+                The status code. Default is 1.
 
         Returns:
             dict:
@@ -2277,7 +2256,7 @@ class OTAWP:
             },
             '_links': {
                 'self': {
-                    href': '/OpentextCaseManagement/entities/Category/items/327681'
+                    'href': '/OpentextCaseManagement/entities/Category/items/327681'
                 }
             }
         }
@@ -2315,8 +2294,6 @@ class OTAWP:
     def get_categories(self) -> dict | None:
         """Get all categories entity instances.
 
-        Args:
-            None
         Returns:
             dict | None:
                 Request response (dictionary) or None if the REST call fails.
@@ -2416,8 +2393,6 @@ class OTAWP:
     def get_category_ids(self) -> list:
         """Get All category entity instances IDs.
 
-        Args:
-            None
         Returns:
             list: list of category IDs
 
@@ -2436,7 +2411,7 @@ class OTAWP:
         description: str = "",
         status: int = 1,
     ) -> dict | None:
-        """Create sub categoy entity instances.
+        """Create sub category entity instances.
 
         Args:
             parent_id (int):
@@ -2485,7 +2460,7 @@ class OTAWP:
     # end method definition
 
     def get_sub_categories(self, parent_id: int) -> dict | None:
-        """Get all sub categeries entity instances.
+        """Get all sub categories entity instances.
 
         Args:
             parent_id (int):
@@ -2740,9 +2715,6 @@ class OTAWP:
     def get_cases(self) -> dict | None:
         """Get all case entity instances.
 
-        Args:
-           None
-
         Returns:
             dict:
                 Request response (dictionary) or None if the REST call fails.
@@ -2771,7 +2743,7 @@ class OTAWP:
 
         Returns:
             dict | None:
-                Returns the category item or None if a category with the given name does not exist.
+                Returns the case item or None if a case with the given name does not exist.
 
         """
 
@@ -2831,7 +2803,7 @@ class OTAWP:
     # end method definition
 
     def create_roles_from_config_file(self, otawpsection: str, otds_object: OTDS) -> None:
-        """Read grop information from customizer file and call create grop method.
+        """Read group information from customizer file and call create group method.
 
         Args:
             otawpsection (str):
@@ -3022,7 +2994,7 @@ class OTAWP:
 
         Returns:
             bool:
-                True if the user has the role, False if not, or None if request fails.
+                True if the user has the role, False if not or if the request keeps failing.
 
         """
 

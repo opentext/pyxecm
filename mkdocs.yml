@@ -1,4 +1,5 @@
 site_name: pyxecm
+site_description: Python library to interact with the OpenText Content Management REST APIs
 
 site_url: https://opentext.github.io/pyxecm/
 
@@ -15,16 +16,43 @@ theme:
     - content.code.copy
     - content.tabs.link
     - content.tooltips
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - toc.follow
 
 plugins:
   - search
-  - mkdocstrings
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            heading_level: 2
+            show_root_heading: true
+            show_root_full_path: false
+            show_root_toc_entry: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            filters: ["!^_"]
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            show_source: true
+            summary: true
 
 repo_url: https://github.com/opentext/pyxecm
 repo_name: opentext/pyxecm
 edit_uri: edit/main/docs/
 
 markdown_extensions:
+  - toc:
+      permalink: true
   - pymdownx.snippets:
       check_paths: true
   - pymdownx.highlight:
@@ -32,14 +60,12 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
   - pymdownx.superfences
   - pymdownx.critic
   - pymdownx.caret
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.tilde
-  - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
   - def_list
@@ -47,13 +73,14 @@ markdown_extensions:
       custom_checkbox: true
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
 
 nav:
-  - Index: index.md
+  - Home: index.md
+  - Getting Started: getting-started.md
   - pyxecm:
+      - Overview: pyxecm/index.md
       - Archive Center (OTAC): pyxecm/otac.md
-      - Aviator Search: pyxecm/avts.md
+      - Aviator Search (AVTS): pyxecm/avts.md
       - Content Server (OTCS): pyxecm/otcs.md
       - Core Share: pyxecm/coreshare.md
       - Directory Services (OTDS): pyxecm/otds.md
@@ -65,13 +92,13 @@ nav:
   - pyxecm-api:
       - API: pyxecm-api/index.md
       - API Settings: pyxecm-api/settings.md
-      
+
   - pyxecm-customizer:
       - Customizer: pyxecm-customizer/index.md
       - Customizer Settings: pyxecm-customizer/settings.md
-      - Browser Automation: pyxecm-customizer/browser.md
       - Payload: pyxecm-customizer/payload.md
       - Payload Syntax: pyxecm-customizer/payload-syntax.md
+      - Browser Automation: pyxecm-customizer/browser.md
       - K8s: pyxecm-customizer/k8s.md
       - Microsoft 365: pyxecm-customizer/m365.md
       - Salesforce: pyxecm-customizer/salesforce.md

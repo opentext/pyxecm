@@ -115,9 +115,6 @@ class Customizer:
     def init_m365(self) -> M365:
         """Initialize the M365 object we use to talk to the Microsoft Graph API.
 
-        Args:
-            None
-
         Returns:
             M365:
                 M365 object or None if the object couldn't be created or
@@ -380,9 +377,6 @@ class Customizer:
     def init_otca(self) -> OTCA:
         """Initialize the Content Aviator object we use to talk to the CSAI REST API.
 
-        Args:
-            None
-
         Returns:
             OTCA object:
                 Content Aviator object or None if the object couldn't be created or
@@ -415,9 +409,6 @@ class Customizer:
 
     def init_otkd(self) -> OTKD:
         """Initialize the Knowledge Discovery object we use to talk to the Nifi REST API.
-
-        Args:
-            None
 
         Returns:
             OTKD object:
@@ -452,9 +443,6 @@ class Customizer:
 
     def init_avts(self) -> AVTS:
         """Initialize the Aviator Search object we use to talk to the REST API.
-
-        Args:
-            None
 
         Returns:
             AVTS object:
@@ -503,8 +491,6 @@ class Customizer:
     def init_coreshare(self) -> CoreShare:
         """Initialize the Core Share object we use to talk to the Core Share API.
 
-        Args:
-            None
         Returns:
             CoreShare:
                 Core Share object or None if the object couldn't be created or
@@ -567,9 +553,6 @@ class Customizer:
 
     def init_k8s(self) -> K8s:
         """Initialize the Kubernetes object we use to talk to the Kubernetes API.
-
-        Args:
-            None
 
         Returns:
             K8s:
@@ -641,9 +624,6 @@ class Customizer:
     def init_otds(self) -> OTDS:
         """Initialize the OTDS object and parameters and authenticate at OTDS once it is ready.
 
-        Args:
-            None
-
         Returns:
             OTDS:
                 The OTDS object
@@ -701,7 +681,7 @@ class Customizer:
             # Setting the value to 0 disables password expiry.
             # The default is 90 days and we may have Terrarium
             # instances that are running longer than that. This
-            # avoids problems with customerizer re-runs of
+            # avoids problems with customizer re-runs of
             # instances that are > 90 days old.
             otds_object.update_password_policy(
                 update_values={"passwordMaximumDuration": 0},
@@ -716,8 +696,6 @@ class Customizer:
 
         Configure the Archive Server as a known server
         if environment variable OTAC_KNOWN_SERVER is set.
-
-        Args: None
 
         Returns:
             The OTAC object.
@@ -803,7 +781,7 @@ class Customizer:
         """Initialize the OTCS class and parameters and authenticate at OTCS once it is ready.
 
         Args:
-            url (HttpURL):
+            url (HttpUrl):
                 The OTCS URL.
 
         Returns:
@@ -933,12 +911,9 @@ class Customizer:
     def init_otiv(self) -> OTIV | None:
         """Initialize the OTIV (Intelligent Viewing) object and its OTDS settings.
 
-        Args:
-            None
-
         Returns:
-            OTIV:
-                The OTIV object.
+            OTIV | None:
+                The OTIV object, or None if the license could not be applied.
 
         """
 
@@ -1022,9 +997,6 @@ class Customizer:
 
     def init_otpd(self) -> OTPD:
         """Initialize the OTPD (PowerDocs) object and parameters.
-
-        Args:
-            None
 
         Returns:
             OTPD:
@@ -1137,7 +1109,7 @@ class Customizer:
 
         self.logger.info("Found Content Server OTDS resource ID -> %s", otcs_resource_id)
 
-        # make sure code is idempotent and only try to add ressource if it doesn't exist already:
+        # make sure code is idempotent and only try to add resource if it doesn't exist already:
         awp_resource = self.otds_object.get_resource(name=self.settings.otawp.resource_name)
         if not awp_resource:
             self.logger.info(
@@ -1257,7 +1229,7 @@ class Customizer:
             )
 
         # Add the OTDS user partition for OTCS to the AppWorks Platform Access Role in OTDS.
-        # This will effectvely sync all OTCS users with AppWorks Platform:
+        # This will effectively sync all OTCS users with AppWorks Platform:
         self.otds_object.add_partition_to_access_role(
             access_role=self.settings.otawp.access_role_name,
             partition=self.settings.otcs.partition,
@@ -1529,7 +1501,7 @@ class Customizer:
     def set_maintenance_mode(self, enable: bool = True) -> None:
         """Enable or Disable Maintenance Mode.
 
-        This redirects the Kubernetes Ingress to a maintenace web page.
+        This redirects the Kubernetes Ingress to a maintenance web page.
 
         Args:
             enable (bool, optional):

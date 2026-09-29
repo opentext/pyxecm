@@ -65,8 +65,8 @@ class Guidewire:
             base_url (str):
                 The base URL of the Guidewire Cloud API.
             as_url (str):
-                The application server endpount the Guidewire system.
-            auth_type (str):
+                The application server endpoint of the Guidewire system.
+            auth_type (str, optional):
                 The authorization type, either "oauth" or "basic".
             client_id (str, optional):
                 The Client ID for authentication (required for client credential flow).
@@ -77,7 +77,7 @@ class Guidewire:
             password (str, optional):
                 The password for authentication (required for password-based authentication).
             scope (str, optional):
-                The OAuth2 scope(s). Multiple scopes needs to be separated by spaces.
+                The OAuth2 scope(s). Multiple scopes need to be separated by spaces.
                 Typical scopes for Guidewire:
                     "grantedAuthorities",
                     "groups",
@@ -91,9 +91,9 @@ class Guidewire:
                 You can get the IDP configuration via the IDP URL - like this for OKTA:
                 https://guidewire-hub.okta.com/oauth2/default/.well-known/openid-configuration
             token_url (str, optional):
-                If native OAuth2 is not enabled in Guidewire but an external IDP (like OKTA) ist used
-                then the IDP token URL can to be provided via this parameter.
-            logger:
+                If native OAuth2 is not enabled in Guidewire but an external IDP (like OKTA) is used
+                then the IDP token URL can be provided via this parameter.
+            logger (logging.Logger, optional):
                 The logging object used for all log messages. Default is default_logger.
 
         """
@@ -333,11 +333,11 @@ class Guidewire:
 
         Args:
             fields (list | None, optional):
-                List of filter values. Defaults to None.
+                List of field names to return. Defaults to None.
             filters (list | None, optional):
                 List of filter values. Defaults to None.
-            page_size (int, optional):
-                The maximum number of groups to return. Defaults to 25.
+            page_size (int | None, optional):
+                The maximum number of items to return per page. Defaults to 25.
 
         Returns:
             str | None:
@@ -474,7 +474,7 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
+                Fields for Guidewire groups:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
@@ -511,43 +511,43 @@ class Guidewire:
 
         Returns:
             dict:
-                JSON response containing account data. None in case of an error.
+                JSON response containing group data. None in case of an error.
 
-        Example reponse:
-        {
-            'count': 25,
-            'data': [
-                {
-                    'attributes': {
-                        'displayName': 'Actuary Unit',
-                        'groupType': {...},
-                        'id': 'pc:S_I-NOU3hb3FU0qTfu8fd',
-                        'loadFactor': 100,
-                        'name': 'Actuary Unit',
-                        'organization': {...},
-                        'parent': {...},
-                        'securityZone': {...},
-                        'supervisor': {...}
+        Example:
+            {
+                'count': 25,
+                'data': [
+                    {
+                        'attributes': {
+                            'displayName': 'Actuary Unit',
+                            'groupType': {...},
+                            'id': 'pc:S_I-NOU3hb3FU0qTfu8fd',
+                            'loadFactor': 100,
+                            'name': 'Actuary Unit',
+                            'organization': {...},
+                            'parent': {...},
+                            'securityZone': {...},
+                            'supervisor': {...}
+                        },
+                        'checksum': '0',
+                        'links': {
+                            'self': {...}
+                        }
                     },
-                    'checksum': '0',
-                    'links': {
-                        'self': {...}
-                    }
-                },
-                ...
-            ],
-            'links': {
-                'first': {
-                    'href': '/admin/v1/groups?fields=%2Adefault',
-                    'methods': ['get']
-                },
-                'next': {
-                    'href': '/admin/v1/groups?fields=%2Adefault&pageOffset=25',
-                    'methods': ['get']
-                },
-                'self': {...}
+                    ...
+                ],
+                'links': {
+                    'first': {
+                        'href': '/admin/v1/groups?fields=%2Adefault',
+                        'methods': ['get']
+                    },
+                    'next': {
+                        'href': '/admin/v1/groups?fields=%2Adefault&pageOffset=25',
+                        'methods': ['get']
+                    },
+                    'self': {...}
+                }
             }
-        }
 
         """
 
@@ -570,7 +570,7 @@ class Guidewire:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of groups.
 
-        Example usage:
+        Example:
             groups = guidewire_object.get_groups_iterator()
             for group in groups:
                 logger.info("Traversing Guidewire group -> '%s'...", group.get("attributes", {}).get("displayName"))
@@ -579,7 +579,7 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
+                Fields for Guidewire groups:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
@@ -628,7 +628,7 @@ class Guidewire:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield groups one at a time:
             yield from response["data"]
 
             # See if we have an additional result page.
@@ -647,52 +647,52 @@ class Guidewire:
         """Retrieve details of a specific group.
 
         Args:
-            group_id:
+            group_id (str):
                 The unique identifier of the group.
 
         Returns:
             dict:
                 JSON response containing group details.
 
-        Example response;
-        {
-            'data': {
-                'attributes': {
-                    'displayName': 'Actuary Unit',
-                    'groupType': {
-                        'code': 'actuary',
-                        'name': 'Actuary unit'
+        Example:
+            {
+                'data': {
+                    'attributes': {
+                        'displayName': 'Actuary Unit',
+                        'groupType': {
+                            'code': 'actuary',
+                            'name': 'Actuary unit'
+                        },
+                        'id': 'pc:S_I-NOU3hb3FU0qTfu8fd',
+                        'loadFactor': 100,
+                        'name': 'Actuary Unit',
+                        'organization': {
+                            'displayName': 'Enigma Fire & Casualty',
+                            'id': 'systemTables:1',
+                            'type': 'Organization',
+                            'uri': '/admin/v1/organizations/systemTables:1'
+                        },
+                        'parent': {
+                            'displayName': 'Enigma Fire & Casualty',
+                            'id': 'systemTables:1',
+                            'type': 'Group',
+                            'uri': '/admin/v1/groups/systemTables:1'
+                        },
+                        'securityZone': {
+                            'displayName': 'HO UW',
+                            'id': 'pc:So-lJXKuecOco_hGZ_8iR'
+                        },
+                        'supervisor': {
+                            'displayName': 'Super Visor',
+                            'id': 'pc:S1cZ06yduoQadHVOcVCyv',
+                            'type': 'User',
+                            'uri': '/admin/v1/users/pc:S1cZ06yduoQadHVOcVCyv'
+                        }
                     },
-                    'id': 'pc:S_I-NOU3hb3FU0qTfu8fd',
-                    'loadFactor': 100,
-                    'name': 'Actuary Unit',
-                    'organization': {
-                        'displayName': 'Enigma Fire & Casualty',
-                        'id': 'systemTables:1',
-                        'type': 'Organization',
-                        'uri': '/admin/v1/organizations/systemTables:1'
-                    },
-                    'parent': {
-                        'displayName': 'Enigma Fire & Casualty',
-                        'id': 'systemTables:1',
-                        'type': 'Group',
-                        'uri': '/admin/v1/groups/systemTables:1'
-                    },
-                    'securityZone': {
-                        'displayName': 'HO UW',
-                        'id': 'pc:So-lJXKuecOco_hGZ_8iR'
-                    },
-                    'supervisor': {
-                        'displayName': 'Super Visor',
-                        'id': 'pc:S1cZ06yduoQadHVOcVCyv',
-                        'type': 'User',
-                        'uri': '/admin/v1/users/pc:S1cZ06yduoQadHVOcVCyv'
-                    }
-                },
-                'checksum': '0',
-                'links': {...}
+                    'checksum': '0',
+                    'links': {...}
+                }
             }
-        }
 
         """
 
@@ -715,160 +715,7 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
-                - *all = return all fields
-                - *default = return just the default list of fields
-                - *summary = return the fields defined for giving a summary
-                - *detail = details
-                - displayName
-                - groupType
-                - id
-                - loadFactor
-                - name
-                - organization
-                - parent
-                - securityZone
-                - supervisor
-            filters (list | None, optional):
-                List of dictionaries with three keys each:
-                - "attribute" - name of the attribute to use for the filter (available attributes see above)
-                - "op" - operator:
-                    * eq - equal
-                    * ne - not equal
-                    * lt - less than - also usable for dates (before)
-                    * gt - greater than - also usable for dates (after)
-                    * le - less or equal
-                    * ge - greater or equal
-                    * in - is in list
-                    * ni - is NOT in list
-                    * sw - starts with
-                    * cn - contains
-                - "value": the value to filter for. Either literal or list of values
-            page_size (int, optional):
-                The maximum number of groups to return.
-            next_page_url (str | None, optional):
-                The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
-                This is used for the iterator get_groups_iterator() below.
-
-        Returns:
-            dict:
-                JSON response containing account data.
-
-        Example reponse:
-        {
-            'count': 10,
-            'data': [
-                {
-                    'attributes': {
-                        'active': True,
-                        'displayName': 'Alice Applegate',
-                        'externalUser': False,
-                        'firstName': 'Alice',
-                        'groups': [
-                            {
-                                'displayName': 'Eastern Region Underwriting',
-                                'id': 'pc:SDrypgK62o6oS1TxOGcvF',
-                                'type': 'Group',
-                                'uri': '/admin/v1/groups/pc:SDrypgK62o6oS1TxOGcvF'
-                            },
-                            {
-                                'displayName': 'Los Angeles Branch UW',
-                                'id': 'pc:SJxAbEha2jYpG9Mb5_KAo',
-                                'type': 'Group',
-                                'uri': '/admin/v1/groups/pc:SJxAbEha2jYpG9Mb5_KAo'
-                            }
-                        ],
-                        'id': 'pc:Si6MBM-35EAhneDubeFsl',
-                        'lastName': 'Applegate',
-                        'organization': {
-                            'displayName': 'Enigma Fire & Casualty',
-                            'id': 'systemTables:1',
-                            'type': 'Organization',
-                            'uri': '/admin/v1/organizations/systemTables:1'
-                        },
-                        'roles': [
-                            {
-                                'displayName': 'Reinsurance Manager',
-                                'id': 'reinsurance_manager',
-                                'type': 'Role',
-                                'uri': '/admin/v1/roles/reinsurance_manager'
-                            },
-                            {
-                                'displayName': 'Underwriter',
-                                'id': 'underwriter',
-                                'type': 'Role',
-                                'uri': '/admin/v1/roles/underwriter'
-                            }
-                        ],
-                        'useOrgAddress': True,
-                        'useProducerCodeSecurity': False,
-                        'userType': {
-                            'code': 'underwriter',
-                            'name': 'Underwriter'
-                        },
-                        'username': 'aapplegate',
-                        'uwAuthorityProfiles': [
-                            {
-                                'displayName': 'Underwriter 1',
-                                'id': 'pc:underwriter1',
-                                'type': 'UWAuthorityProfile',
-                                'uri': '/admin/v1/uw-authority-profiles/pc:underwriter1'
-                            }
-                        ],
-                        'vacationStatus': {
-                            'code': 'atwork',
-                            'name': 'At work'
-                        },
-                        'workPhone': {
-                            'displayName': '213-555-8164',
-                            'number': '2135558164'
-                        }
-                    },
-                    'checksum': 'ec4710cd2af59bdc1cd7e15a18707d84',
-                    'links': {
-                        'self': {'href': '/admin/v1/users/pc:Si6MBM-35EAhneDubeFsl', 'methods': ['delete', 'get', 'patch']}
-                    }
-                },
-                ...
-            ],
-            'links': {
-                'first': {'href': '/admin/v1/users?fields=%2Adefault&pageSize=20', 'methods': ['get']},
-                'next': {'href': '/admin/v1/users?fields=%2Adefault&pageSize=20&pageOffset=20', 'methods': ['get']},
-                'self': {'href': '/admin/v1/users?fields=%2Adefault&pageSize=20', 'methods': ['get']}
-            }
-        }
-
-        """
-
-        if not next_page_url:
-            request_url = self.config()["adminUrl"] + "/users"
-
-            encoded_query = self.process_parameters(fields=fields, filters=filters, page_size=page_size)
-            if encoded_query:
-                request_url += "?" + encoded_query
-        else:
-            request_url = self.config()["restUrl"] + next_page_url
-
-        return self.do_request(method="GET", url=request_url)
-
-    # end method definition
-
-    def get_users_iterator(self, fields: list | None = None, filters: list | None = None, page_size: int = 25) -> iter:
-        """Get an iterator object that can be used to traverse all Guidewire users.
-
-        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
-        can iterate over the potential large list of users.
-
-        Example usage:
-            users = guidewire_object.get_users_iterator()
-            for user in users:
-                logger.info("Traversing Guidewire user -> '%s'...", user.get("attributes", {}).get("displayName"))
-
-        Args:
-            fields (list | None, optional):
-                The list of fields in the results. If None, all default
-                fields are returned.
-                Fields for Guidewire accounts:
+                Fields for Guidewire users:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
@@ -899,10 +746,161 @@ class Guidewire:
                     * cn - contains
                 - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return.
-            next_page_url (str, optional):
-                The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
-                This is used for the iterator get_groups_iterator() below.
+                The maximum number of users to return.
+            next_page_url (str | None, optional):
+                The Guidewire URL to retrieve the next page of Guidewire users (pagination).
+                This is used for the iterator get_users_iterator() below.
+
+        Returns:
+            dict:
+                JSON response containing user data.
+
+        Example:
+            {
+                'count': 10,
+                'data': [
+                    {
+                        'attributes': {
+                            'active': True,
+                            'displayName': 'Alice Applegate',
+                            'externalUser': False,
+                            'firstName': 'Alice',
+                            'groups': [
+                                {
+                                    'displayName': 'Eastern Region Underwriting',
+                                    'id': 'pc:SDrypgK62o6oS1TxOGcvF',
+                                    'type': 'Group',
+                                    'uri': '/admin/v1/groups/pc:SDrypgK62o6oS1TxOGcvF'
+                                },
+                                {
+                                    'displayName': 'Los Angeles Branch UW',
+                                    'id': 'pc:SJxAbEha2jYpG9Mb5_KAo',
+                                    'type': 'Group',
+                                    'uri': '/admin/v1/groups/pc:SJxAbEha2jYpG9Mb5_KAo'
+                                }
+                            ],
+                            'id': 'pc:Si6MBM-35EAhneDubeFsl',
+                            'lastName': 'Applegate',
+                            'organization': {
+                                'displayName': 'Enigma Fire & Casualty',
+                                'id': 'systemTables:1',
+                                'type': 'Organization',
+                                'uri': '/admin/v1/organizations/systemTables:1'
+                            },
+                            'roles': [
+                                {
+                                    'displayName': 'Reinsurance Manager',
+                                    'id': 'reinsurance_manager',
+                                    'type': 'Role',
+                                    'uri': '/admin/v1/roles/reinsurance_manager'
+                                },
+                                {
+                                    'displayName': 'Underwriter',
+                                    'id': 'underwriter',
+                                    'type': 'Role',
+                                    'uri': '/admin/v1/roles/underwriter'
+                                }
+                            ],
+                            'useOrgAddress': True,
+                            'useProducerCodeSecurity': False,
+                            'userType': {
+                                'code': 'underwriter',
+                                'name': 'Underwriter'
+                            },
+                            'username': 'aapplegate',
+                            'uwAuthorityProfiles': [
+                                {
+                                    'displayName': 'Underwriter 1',
+                                    'id': 'pc:underwriter1',
+                                    'type': 'UWAuthorityProfile',
+                                    'uri': '/admin/v1/uw-authority-profiles/pc:underwriter1'
+                                }
+                            ],
+                            'vacationStatus': {
+                                'code': 'atwork',
+                                'name': 'At work'
+                            },
+                            'workPhone': {
+                                'displayName': '213-555-8164',
+                                'number': '2135558164'
+                            }
+                        },
+                        'checksum': 'ec4710cd2af59bdc1cd7e15a18707d84',
+                        'links': {
+                            'self': {'href': '/admin/v1/users/pc:Si6MBM-35EAhneDubeFsl', 'methods': ['delete', 'get', 'patch']}
+                        }
+                    },
+                    ...
+                ],
+                'links': {
+                    'first': {'href': '/admin/v1/users?fields=%2Adefault&pageSize=20', 'methods': ['get']},
+                    'next': {'href': '/admin/v1/users?fields=%2Adefault&pageSize=20&pageOffset=20', 'methods': ['get']},
+                    'self': {'href': '/admin/v1/users?fields=%2Adefault&pageSize=20', 'methods': ['get']}
+                }
+            }
+
+        """
+
+        if not next_page_url:
+            request_url = self.config()["adminUrl"] + "/users"
+
+            encoded_query = self.process_parameters(fields=fields, filters=filters, page_size=page_size)
+            if encoded_query:
+                request_url += "?" + encoded_query
+        else:
+            request_url = self.config()["restUrl"] + next_page_url
+
+        return self.do_request(method="GET", url=request_url)
+
+    # end method definition
+
+    def get_users_iterator(self, fields: list | None = None, filters: list | None = None, page_size: int = 25) -> iter:
+        """Get an iterator object that can be used to traverse all Guidewire users.
+
+        Returning a generator avoids loading a large number of nodes into memory at once. Instead you
+        can iterate over the potential large list of users.
+
+        Example:
+            users = guidewire_object.get_users_iterator()
+            for user in users:
+                logger.info("Traversing Guidewire user -> '%s'...", user.get("attributes", {}).get("displayName"))
+
+        Args:
+            fields (list | None, optional):
+                The list of fields in the results. If None, all default
+                fields are returned.
+                Fields for Guidewire users:
+                - *all = return all fields
+                - *default = return just the default list of fields
+                - *summary = return the fields defined for giving a summary
+                - *detail = details
+                - active
+                - displayName
+                - externalUser
+                - firstName
+                - id
+                - lastName
+                - organization
+                - useOrgAddress
+                - useProducerCodeSecurity
+                - username
+            filters (list | None, optional):
+                List of dictionaries with three keys each:
+                - "attribute" - name of the attribute to use for the filter (available attributes see above)
+                - "op" - operator:
+                    * eq - equal
+                    * ne - not equal
+                    * lt - less than - also usable for dates (before)
+                    * gt - greater than - also usable for dates (after)
+                    * le - less or equal
+                    * ge - greater or equal
+                    * in - is in list
+                    * ni - is NOT in list
+                    * sw - starts with
+                    * cn - contains
+                - "value": the value to filter for. Either literal or list of values
+            page_size (int, optional):
+                The maximum number of users to return.
 
         Returns:
             iter:
@@ -941,60 +939,60 @@ class Guidewire:
 
         Args:
             user_id (str):
-                The unique identifier of the group.
+                The unique identifier of the user.
 
         Returns:
             dict:
-                JSON response containing group details.
+                JSON response containing user details.
 
-        Example response;
-        {
-            'data': {
-                'attributes': {
-                    'active': True,
-                    'displayName': 'Alice Applegate',
-                    'externalUser': False,
-                    'firstName': 'Alice',
-                    'groups': [{...}, {...}],
-                    'id': 'pc:Si6MBM-35EAhneDubeFsl',
-                    'lastName': 'Applegate',
-                    'organization': {
-                        'displayName': 'Enigma Fire & Casualty',
-                        'id': 'systemTables:1',
-                        'type': 'Organization',
-                        'uri': '/admin/v1/organizations/systemTables:1'
+        Example:
+            {
+                'data': {
+                    'attributes': {
+                        'active': True,
+                        'displayName': 'Alice Applegate',
+                        'externalUser': False,
+                        'firstName': 'Alice',
+                        'groups': [{...}, {...}],
+                        'id': 'pc:Si6MBM-35EAhneDubeFsl',
+                        'lastName': 'Applegate',
+                        'organization': {
+                            'displayName': 'Enigma Fire & Casualty',
+                            'id': 'systemTables:1',
+                            'type': 'Organization',
+                            'uri': '/admin/v1/organizations/systemTables:1'
+                        },
+                        'roles': [{...}, {...}],
+                        'useOrgAddress': True,
+                        'useProducerCodeSecurity': False,
+                        'userType': {
+                            'code': 'underwriter',
+                            'name': 'Underwriter'
+                        },
+                        'username': 'aapplegate',
+                        'uwAuthorityProfiles': [{...}],
+                        'vacationStatus': {
+                            'code': 'atwork',
+                            'name': 'At work'
+                        },
+                        'workPhone': {
+                            'displayName': '213-555-8164',
+                            'number': '2135558164'
+                        }
                     },
-                    'roles': [{...}, {...}],
-                    'useOrgAddress': True,
-                    'useProducerCodeSecurity': False,
-                    'userType': {
-                        'code': 'underwriter',
-                        'name': 'Underwriter'
-                    },
-                    'username': 'aapplegate',
-                    'uwAuthorityProfiles': [{...}],
-                    'vacationStatus': {
-                        'code': 'atwork',
-                        'name': 'At work'
-                    },
-                    'workPhone': {
-                        'displayName': '213-555-8164',
-                        'number': '2135558164'
-                    }
-                },
-                'checksum': 'ec4710cd2af59bdc1cd7e15a18707d84',
-                'links': {
-                    'producer-codes': {
-                        'href': '/admin/v1/users/pc:Si6MBM-35EAhneDubeFsl/producer-codes',
-                        'methods': [...]
-                    },
-                    'self': {
-                        'href': '/admin/v1/users/pc:Si6MBM-35EAhneDubeFsl',
-                        'methods': [...]
+                    'checksum': 'ec4710cd2af59bdc1cd7e15a18707d84',
+                    'links': {
+                        'producer-codes': {
+                            'href': '/admin/v1/users/pc:Si6MBM-35EAhneDubeFsl/producer-codes',
+                            'methods': [...]
+                        },
+                        'self': {
+                            'href': '/admin/v1/users/pc:Si6MBM-35EAhneDubeFsl',
+                            'methods': [...]
+                        }
                     }
                 }
             }
-        }
 
         """
 
@@ -1072,12 +1070,12 @@ class Guidewire:
                     * ni - is NOT in list
                     * sw - starts with
                     * cn - contains
-                - "value": the filue to filter for. Either literal or list of values
+                - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return. Defaults to 25.
+                The maximum number of accounts to return. Defaults to 25.
             next_page_url (str | None, optional):
-                The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
-                This is used for the iterator get_groups_iterator() below.
+                The Guidewire URL to retrieve the next page of Guidewire accounts (pagination).
+                This is used for the iterator get_accounts_iterator() below.
 
         Returns:
             dict:
@@ -1106,7 +1104,7 @@ class Guidewire:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of accounts.
 
-        Example usage:
+        Example:
             accounts = guidewire_object.get_accounts_iterator()
             for account in accounts:
                 logger.info("Traversing Guidewire account -> '%s'...", account.get("attributes", {}).get("displayName"))
@@ -1149,7 +1147,7 @@ class Guidewire:
                     * ni - is NOT in list
                     * sw - starts with
                     * cn - contains
-                - "value": the filue to filter for. Either literal or list of values
+                - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
                 The maximum number of accounts to return.
 
@@ -1172,7 +1170,7 @@ class Guidewire:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield accounts one at a time:
             yield from response["data"]
 
             # See if we have an additional result page.
@@ -1191,7 +1189,7 @@ class Guidewire:
         """Retrieve details of a specific account.
 
         Args:
-            account_id:
+            account_id (str):
                 The unique identifier of the account.
 
         Returns:
@@ -1224,50 +1222,50 @@ class Guidewire:
                 JSON response containing account details.
 
         Example:
-        {
-            'count': 2,
-            'data': [
-                {
-                    'attributes': {
-                        'accountHolder': {
-                            'displayName': 'Armstrong and Company',
-                            'id': 'test_pc:1',
-                            'type': 'AccountContact',
-                            'uri': '/account/v1/accounts/pc:ds:1/contacts/test_pc:1'
+            {
+                'count': 2,
+                'data': [
+                    {
+                        'attributes': {
+                            'accountHolder': {
+                                'displayName': 'Armstrong and Company',
+                                'id': 'test_pc:1',
+                                'type': 'AccountContact',
+                                'uri': '/account/v1/accounts/pc:ds:1/contacts/test_pc:1'
+                            },
+                            'accountNumber': 'C000212105',
+                            'accountStatus': {...},
+                            'businessOperationsDescription': 'business description',
+                            'createdDate': '2025-07-14T03:59:30.055Z',
+                            'frozen': False,
+                            'id': 'pc:ds:1',
+                            'industryCode': {...},
+                            'numberOfContacts': '8',
+                            'organizationType': {...},
+                            'preferredCoverageCurrency': {...},
+                            'preferredSettlementCurrency': {...},
+                            'primaryLanguage': {...},
+                            'primaryLocale': {...},
+                            'primaryLocation': {...},
+                            'producerCodes': [...]
                         },
-                        'accountNumber': 'C000212105',
-                        'accountStatus': {...},
-                        'businessOperationsDescription': 'business description',
-                        'createdDate': '2025-07-14T03:59:30.055Z',
-                        'frozen': False,
-                        'id': 'pc:ds:1',
-                        'industryCode': {...},
-                        'numberOfContacts': '8',
-                        'organizationType': {...},
-                        'preferredCoverageCurrency': {...},
-                        'preferredSettlementCurrency': {...},
-                        'primaryLanguage': {...},
-                        'primaryLocale': {...},
-                        'primaryLocation': {...},
-                        'producerCodes': [...]
+                        'checksum': '2',
+                        'links': {
+                            'do-not-destroy': {...},
+                            'freeze': {...},
+                            'merge': {...},
+                            'move-policies': {...},
+                            'move-submissions': {...},
+                            'self': {...}
+                        }
                     },
-                    'checksum': '2',
-                    'links': {
-                        'do-not-destroy': {...},
-                        'freeze': {...},
-                        'merge': {...},
-                        'move-policies': {...},
-                        'move-submissions': {...},
-                        'self': {...}
-                    }
-                },
-                {...}
-            ],
-            'links': {
-                'first': {...},
-                'self': {...}
+                    {...}
+                ],
+                'links': {
+                    'first': {...},
+                    'self': {...}
+                }
             }
-        }
 
         """
 
@@ -1283,7 +1281,7 @@ class Guidewire:
         """Create a new account.
 
         Args:
-            account_data:
+            account_data (dict):
                 Dictionary containing account information.
 
         Returns:
@@ -1302,9 +1300,9 @@ class Guidewire:
         """Update an existing account.
 
         Args:
-            account_id:
+            account_id (str):
                 The unique identifier of the account.
-            account_data:
+            account_data (dict):
                 Dictionary containing updated account information.
 
         Returns:
@@ -1351,20 +1349,12 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
+                Special values for Guidewire policies:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
                 - *detail = details
-                - displayName
-                - groupType
-                - id
-                - loadFactor
-                - name
-                - organization
-                - parent
-                - securityZone
-                - supervisor
+                - individual field names of the policy
             filters (list | None, optional):
                 List of dictionaries with three keys each:
                 - "attribute" - name of the attribute to use for the filter (available attributes see above)
@@ -1381,14 +1371,14 @@ class Guidewire:
                     * cn - contains
                 - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return.
+                The maximum number of policies to return.
             next_page_url (str | None, optional):
-                The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
-                This is used for the iterator get_groups_iterator() below. Default is None for the initial call.
+                The Guidewire URL to retrieve the next page of Guidewire policies (pagination).
+                This is used for the iterator get_policies_iterator() below. Default is None for the initial call.
 
         Returns:
             dict | None:
-                JSON response containing claim data.
+                JSON response containing policy data.
 
         """
 
@@ -1413,7 +1403,7 @@ class Guidewire:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of policies.
 
-        Example usage:
+        Example:
             policies = guidewire_object.get_policies_iterator()
             for policy in policies:
                 logger.info("Traversing Guidewire policy -> '%s'...", policy.get("attributes", {}).get("displayName"))
@@ -1422,20 +1412,12 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
+                Special values for Guidewire policies:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
                 - *detail = details
-                - displayName
-                - groupType
-                - id
-                - loadFactor
-                - name
-                - organization
-                - parent
-                - securityZone
-                - supervisor
+                - individual field names of the policy
             filters (list | None, optional):
                 List of dictionaries with three keys each:
                 - "attribute" - name of the attribute to use for the filter (available attributes see above)
@@ -1456,7 +1438,7 @@ class Guidewire:
 
         Returns:
             iter:
-                A generator yielding one Guidewire account per iteration.
+                A generator yielding one Guidewire policy per iteration.
                 If the REST API fails, returns no value.
 
         """
@@ -1473,7 +1455,7 @@ class Guidewire:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield policies one at a time:
             yield from response["data"]
 
             # See if we have an additional result page.
@@ -1509,36 +1491,36 @@ class Guidewire:
 
         Returns:
             dict:
-                JSON response containing account details.
+                JSON response containing policy details.
 
         Example:
-        {
-            'count': 1,
-            'data': [
-                {
-                    'attributes': {
-                        'accountNumber': 'C000212105',
-                        'effectiveDate': '2025-07-14T04:01:00.000Z',
-                        'expirationDate': '2026-07-14T04:01:00.000Z',
-                        'insuredName': 'Armstrong and Company',
-                        'policyAddress': '142 Central Ave, Metter, GA 30439',
-                        'policyId': 'pc:Sn09Itxh7Btpc8izhUrtc',
-                        'policyNumber': '5050680845',
-                        'producerOfRecordName': 'Armstrong and Company',
-                        'producerOfServiceName': 'Armstrong and Company',
-                        'product': {
-                            'displayName': 'Manual Products',
-                            'id': 'Manual'
-                        }
-                    },
-                    'links': {...}
+            {
+                'count': 1,
+                'data': [
+                    {
+                        'attributes': {
+                            'accountNumber': 'C000212105',
+                            'effectiveDate': '2025-07-14T04:01:00.000Z',
+                            'expirationDate': '2026-07-14T04:01:00.000Z',
+                            'insuredName': 'Armstrong and Company',
+                            'policyAddress': '142 Central Ave, Metter, GA 30439',
+                            'policyId': 'pc:Sn09Itxh7Btpc8izhUrtc',
+                            'policyNumber': '5050680845',
+                            'producerOfRecordName': 'Armstrong and Company',
+                            'producerOfServiceName': 'Armstrong and Company',
+                            'product': {
+                                'displayName': 'Manual Products',
+                                'id': 'Manual'
+                            }
+                        },
+                        'links': {...}
+                    }
+                ],
+                'links': {
+                    'first': {'href': '/policy/v1/search/policies', 'methods': ['post']},
+                    'self': {'href': '/policy/v1/search/policies', 'methods': ['post']}
                 }
-            ],
-            'links': {
-                'first': {'href': '/policy/v1/search/policies', 'methods': ['post']},
-                'self': {'href': '/policy/v1/search/policies', 'methods': ['post']}
             }
-        }
 
         """
 
@@ -1563,20 +1545,12 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
+                Special values for Guidewire claims:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
                 - *detail = details
-                - displayName
-                - groupType
-                - id
-                - loadFactor
-                - name
-                - organization
-                - parent
-                - securityZone
-                - supervisor
+                - individual field names of the claim
             filters (list | None, optional):
                 List of dictionaries with three keys each:
                 - "attribute" - name of the attribute to use for the filter (available attributes see above)
@@ -1593,10 +1567,10 @@ class Guidewire:
                     * cn - contains
                 - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return.
+                The maximum number of claims to return.
             next_page_url (str, optional):
-                The Guidewire URL to retrieve the next page of Guidewire groups (pagination).
-                This is used for the iterator get_groups_iterator() below.
+                The Guidewire URL to retrieve the next page of Guidewire claims (pagination).
+                This is used for the iterator get_claims_iterator() below.
 
         Returns:
             dict | None:
@@ -1623,7 +1597,7 @@ class Guidewire:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of claims.
 
-        Example usage:
+        Example:
             claims = guidewire_object.get_claims_iterator()
             for claim in claims:
                 logger.info("Traversing Guidewire claim -> '%s'...", claim.get("attributes", {}).get("displayName"))
@@ -1632,20 +1606,12 @@ class Guidewire:
             fields (list | None, optional):
                 The list of fields in the results. If None, all default
                 fields are returned.
-                Fields for Guidewire accounts:
+                Special values for Guidewire claims:
                 - *all = return all fields
                 - *default = return just the default list of fields
                 - *summary = return the fields defined for giving a summary
                 - *detail = details
-                - displayName
-                - groupType
-                - id
-                - loadFactor
-                - name
-                - organization
-                - parent
-                - securityZone
-                - supervisor
+                - individual field names of the claim
             filters (list | None, optional):
                 List of dictionaries with three keys each:
                 - "attribute" - name of the attribute to use for the filter (available attributes see above)
@@ -1662,7 +1628,7 @@ class Guidewire:
                     * cn - contains
                 - "value": the value to filter for. Either literal or list of values
             page_size (int, optional):
-                The maximum number of groups to return.
+                The maximum number of claims to return.
 
         Returns:
             iter:
@@ -1681,7 +1647,7 @@ class Guidewire:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield claims one at a time:
             yield from response["data"]
 
             # See if we have an additional result page.
@@ -1725,7 +1691,7 @@ class Guidewire:
 
         Returns:
             dict:
-                JSON response containing account details.
+                JSON response containing claim details.
 
         """
 

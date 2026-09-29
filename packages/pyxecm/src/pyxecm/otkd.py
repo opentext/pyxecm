@@ -79,9 +79,9 @@ class OTKD:
             protocol (str):
                 Either http or https.
             hostname (str):
-                The hostname of the Knowledge Discovery  to communicate with.
+                The hostname of the Knowledge Discovery server to communicate with.
             port (int):
-                The port number used to talk to the Knowledge Discovery .
+                The port number used to talk to the Knowledge Discovery server.
             username (str):
                 The admin user name of Knowledge Discovery.
             password (str):
@@ -161,9 +161,15 @@ class OTKD:
     def credentials(self, basic_auth: bool = False) -> dict:
         """Get credentials (username + password).
 
+        Args:
+            basic_auth (bool, optional):
+                If True, return the credentials as a (username, password) tuple
+                (as used for HTTP basic authentication). Defaults to False.
+
         Returns:
-            dict:
-                A dictionary with username and password.
+            dict | tuple:
+                A dictionary with username and password, or a tuple
+                (username, password) if basic_auth is True.
 
         """
 
@@ -227,10 +233,7 @@ class OTKD:
 
         Consists of Token + Form Headers (see global variable)
 
-        Args:
-            None.
-
-        Return:
+        Returns:
             dict:
                 The request header for forms content type that includes the authorization token.
 
@@ -250,10 +253,7 @@ class OTKD:
 
         Consists of JSON Headers (see global variable) and optional Authorization bearer token.
 
-        Args:
-            None.
-
-        Return:
+        Returns:
             dict:
                 The request header for JSON content type that optionally includes the authorization token.
 
@@ -274,10 +274,7 @@ class OTKD:
         Consists of only the 'User-Agent' Header (see global variable) and optional Authorization bearer token.
         For uploads it is IMPORTANT to NOT set the 'Content-Type' header.
 
-        Args:
-            None.
-
-        Return:
+        Returns:
             dict:
                 The request header without the 'Content-Type' that only includes
                 the 'User-Agent' header and optionally the authorization token.
@@ -311,7 +308,7 @@ class OTKD:
         retry_forever: bool = False,
         parse_request_response: bool = True,
     ) -> dict | None:
-        """Call an Nifi REST API in a safe way.
+        """Call a Nifi REST API in a safe way.
 
         Args:
             url (str):
@@ -331,13 +328,12 @@ class OTKD:
                 The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, then a warning is logged only if show_warning is True. Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a
+                failed REST call. Only used if show_error is False. Defaults to False.
             warning_message (str, optional):
-                Specific warning message. Defaults to "". If not given the error_message will be used.
+                Specific warning message. Defaults to "". If not given the failure_message will be used.
             failure_message (str, optional):
                 Specific error message. Defaults to "".
             success_message (str, optional):
@@ -352,7 +348,7 @@ class OTKD:
 
         Returns:
             dict | None:
-                Response of OTDS REST API or None in case of an error.
+                Response of Nifi REST API or None in case of an error.
 
         """
 
@@ -473,11 +469,11 @@ class OTKD:
 
         Args:
             response_object (object):
-                The reponse object delivered by the request call.
-            additional_error_message (str):
+                The response object delivered by the request call.
+            additional_error_message (str, optional):
                 To print a custom error message.
-            show_error (bool):
-                If True, log an error, if False log a warning.
+            show_error (bool, optional):
+                If True, log an error, if False log a debug message.
 
         Returns:
             dict:
@@ -515,15 +511,13 @@ class OTKD:
 
         Args:
             revalidate (bool, optional):
-                Determins if a re-athentication is enforced
+                Determines if a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
-                By default we use the OTDS ticket (if exists) for the authentication with OTCS.
-                This switch allows the forced usage of username / password for the authentication.
 
         Returns:
             str | None:
-                Token information of None in case of an error.
-                Also stores cookie information in self._cookie
+                Token information or None in case of an error.
+                Also stores the token in self._otkd_token.
 
         """
 
@@ -605,7 +599,7 @@ class OTKD:
 
         Returns:
             list | None:
-                The list of process groups. None in case an error has occured.
+                The list of process groups. None in case an error has occurred.
 
         Example:
         [
@@ -673,7 +667,7 @@ class OTKD:
                     'permissions': {...},
                     'component': {...}
                 },
-                inputPortCount': 0,
+                'inputPortCount': 0,
                 'outputPortCount': 0
             }
         ]
@@ -699,13 +693,13 @@ class OTKD:
 
         Args:
             name (str):
-                The name of the parent group to retrieve.
-            parent_id (str | None):
-                The ID of the parent process group.
+                The name of the process group to retrieve.
+            parent_id (str | None, optional):
+                The ID of the parent process group. If None, the root process group is used.
 
         Returns:
             dict | None:
-                Process group information, nor None if no process group
+                Process group information, or None if no process group
                 with the given name is found under the specified parent.
 
         Example:
@@ -776,7 +770,7 @@ class OTKD:
 
         """
 
-        # If no specific parent ID is provided we dtermine the root process ID:
+        # If no specific parent ID is provided we determine the root process ID:
         if parent_id is None:
             root_process_group = self.get_root_process_group()
             if not root_process_group:
@@ -802,15 +796,15 @@ class OTKD:
         """Get a top-level process group based on the name.
 
         This is a pure convenience wrapper for get_process_group_by_parent_and_name()
-        in cases you want to look process group under 'root'.
+        in cases you want to look up a process group under 'root'.
 
         Args:
             name (str):
-                The name of the parent group to retrieve.
+                The name of the process group to retrieve.
 
         Returns:
             dict | None:
-                Process group information, nor None if no process group
+                Process group information, or None if no process group
                 with the given name is found under the specified parent.
 
         """
@@ -838,7 +832,7 @@ class OTKD:
 
         Returns:
             dict | None:
-                Request response. None in case an error has occured.
+                Request response. None in case an error has occurred.
 
         """
 
@@ -1003,6 +997,10 @@ class OTKD:
     def get_parameter_context_by_name(self, name: str) -> dict | None:
         """Get the parameter context with the given name.
 
+        Args:
+            name (str):
+                The name of the parameter context.
+
         Returns:
             dict | None:
                 The parameter contexts with the given name.
@@ -1041,7 +1039,7 @@ class OTKD:
             sensitive (bool, optional):
                 Indication if parameter is sensitive. Defaults to False.
             description (str, optional):
-                Description of the parameter.
+                Description of the parameter. Defaults to "".
 
         Returns:
             dict | None:
@@ -1078,7 +1076,7 @@ class OTKD:
                         'complete': False
                     }
                 ],
-                referencingComponents': [
+                'referencingComponents': [
                     {
                         'revision': {...},
                         'id': '516d8089-9886-307a-99ba-f08ce519f446',
@@ -1211,7 +1209,7 @@ class OTKD:
 
         Returns:
             list | None:
-                The list of process groups. None in case an error has occured.
+                The list of controller services. None in case an error has occurred.
 
         Example:
         [

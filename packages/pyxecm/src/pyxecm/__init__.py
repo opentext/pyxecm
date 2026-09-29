@@ -1,4 +1,4 @@
-"""pyxecm - A python library to interact with Opentext REST APIs."""
+"""pyxecm - A python library to interact with OpenText REST APIs."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"

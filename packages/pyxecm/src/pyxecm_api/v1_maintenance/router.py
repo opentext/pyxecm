@@ -67,7 +67,7 @@ async def set_maintenance_mode_options(
         dict: _description_
 
     """
-    # Enable / Disable the acutual Maintenance Mode
+    # Enable / Disable the actual Maintenance Mode
     set_maintenance_mode_via_ingress(config.enabled, k8s_object)
 
     if config.title:

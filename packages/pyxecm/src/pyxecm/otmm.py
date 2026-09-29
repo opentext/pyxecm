@@ -172,7 +172,7 @@ class OTMM:
     # end method definition
 
     def thread_wrapper(self, target: Callable, *args: tuple, **kwargs: dict) -> None:
-        """Wrap around threads to catch exceptions during exection.
+        """Wrap around threads to catch exceptions during execution.
 
         Args:
             target (Callable):
@@ -279,9 +279,6 @@ class OTMM:
 
     def get_lookup_domains(self) -> dict | None:
         """Get all OTMM lookup domains.
-
-        Args:
-            None
 
         Returns:
             dict | None:
@@ -482,7 +479,7 @@ class OTMM:
         lookup_bus = self.get_lookup_domain_values(domain) or []
 
         # Comprehension to create a dictionary.
-        # Keys are the product names, values the product IDs:
+        # Keys are the business unit names, values the business unit IDs:
         return {bu.get("display_value").strip(): bu.get("field_value").get("value") for bu in lookup_bus}
 
     # end method definition
@@ -633,8 +630,8 @@ class OTMM:
                 Result pagination. Page length. Defaults to 200.
 
         Returns:
-            dict:
-                Search Results
+            list | None:
+                The list of assets from the search results or None if the search fails.
 
         """
 
@@ -737,7 +734,7 @@ class OTMM:
     ) -> list | None:
         """Get all Media Assets for a given product (ID).
 
-        This does currently NOT include the asset metadata even though lead type
+        This does currently NOT include the asset metadata even though load type
         is set to "metadata" below as "metadata_to_return" is set to a single field.
 
         Args:
@@ -749,13 +746,13 @@ class OTMM:
             limit (int, optional):
                 Result pagination. Page length. Defaults to 200.
             metadata_table_id (str, optional):
-                Specific descriptor for the metadata table ID in OTMM.
+                Specific descriptor for the metadata table ID in OTMM. Defaults to "OTM.TABLE.PRODUCT_TABLE_FIELD".
             metadata_field_id (str, optional):
-                Specific descriptor for the metadata field ID in OTMM.
+                Specific descriptor for the metadata field ID in OTMM. Defaults to "PRODUCT_CHAR_ID".
 
         Returns:
-            dict:
-                Search Results
+            list | None:
+                The list of assets from the search results or None if the search fails.
 
         """
 
@@ -848,8 +845,8 @@ class OTMM:
                 ID of the asset to download. This becomes the file name.
             asset_name (str):
                 The name of the asset.
-            download_url (str, optiona):
-                URL to download the asset (optional).
+            download_url (str, optional):
+                URL to download the asset. If empty, the default content URL of the asset is used.
             asset_modification_date (str | None, optional):
                 The last asset modification in OpenText Media Management.
 
@@ -967,7 +964,7 @@ class OTMM:
             asset_id (str):
                 The ID of the asset to delete in the file system.
             asset_name (str, optional):
-                The name of the assets. Just uswed for logging.
+                The name of the assets. Just used for logging.
 
         Returns:
             bool: True = success, False = failure
@@ -993,7 +990,7 @@ class OTMM:
     # end method definition
 
     def search_assets(self, payload: dict) -> dict | None:
-        """Search an asset based on the given parameters / criterias.
+        """Search an asset based on the given parameters / criteria.
 
         Args:
             payload (dict):
@@ -1115,7 +1112,7 @@ class OTMM:
         load_path: bool = True,
         load_deep_zoom_info: bool = True,
     ) -> dict | None:
-        """Retrieve details of an asset based on the given parameters / criterias.
+        """Retrieve details of an asset based on the given parameters / criteria.
 
         Args:
             asset_id (str):
@@ -1146,7 +1143,7 @@ class OTMM:
                 If True, load security policies, default = True.
             load_path (bool, optional):
                 If True, load path, default = True.
-            load_deep_zoom_info(bool, optional):
+            load_deep_zoom_info (bool, optional):
                 If True, load deep zoom information, default = True.
 
         Returns:
@@ -1313,8 +1310,9 @@ class OTMM:
                 will retrieve the asset data (including metadata) on the fly.
 
         Returns:
-            dict | None:
+            dict:
                 The simplified / flat structure for the Pandas data frame.
+                An empty dict in case of an error.
 
         Example:
             {
@@ -1469,10 +1467,10 @@ class OTMM:
 
         Args:
             load_products (bool, optional):
-                If True, load assets on Business Unit level.
+                If True, load assets on Product level.
                 Defaults to True.
             load_business_units (bool, optional):
-                If True, load assets on Product level. Defaults to True.
+                If True, load assets on Business Unit level. Defaults to True.
             download_assets (bool, optional):
                 Only if True assets will be downloaded. Defaults to True.
 
@@ -1782,7 +1780,7 @@ class OTMM:
 
         Args:
             asset_list (list):
-                Complete list of assets. The thread uses offset an partition size
+                Complete list of assets. The thread uses offset and partition size
                 to pick its working subset of it.
             partition_size (int):
                 The size of the partition.
@@ -1791,7 +1789,7 @@ class OTMM:
             download_assets (bool, optional):
                 Whether the thread should download the assets. Default is True.
 
-        Example asset that get's added to the Data Frame:
+        Example asset that gets added to the Data Frame:
             {
                 'access_control_descriptor': {
                     'permissions_map': {...}

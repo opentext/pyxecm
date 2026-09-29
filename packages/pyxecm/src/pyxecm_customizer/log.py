@@ -12,14 +12,16 @@ import pandas as pd
 
 
 class LogCountFilter(logging.Filter):
-    """LogFilter to be assinged to thread_logger to count the number os messages by level."""
+    """LogFilter to be assigned to thread_logger to count the number of messages by level."""
 
     def __init__(self, payload_items: pd.DataFrame, index: int) -> None:
         """LogCountFilter initializer.
 
         Args:
-            payload_items (pd.DataFrame): _description_
-            index (int): _description_
+            payload_items (pd.DataFrame):
+                The payload items data frame with the `log_<level>` counter columns.
+            index (int):
+                The row index of the payload item whose counters are incremented.
 
         """
         super().__init__()
@@ -30,10 +32,12 @@ class LogCountFilter(logging.Filter):
         """Filter method.
 
         Args:
-            record (_type_): _description_
+            record (logging.LogRecord):
+                The log record. Its level name selects the counter to increment.
 
         Returns:
-            bool: _description_
+            bool:
+                Always True (the record is never filtered out).
 
         """
         level_name = (record.levelname).lower()

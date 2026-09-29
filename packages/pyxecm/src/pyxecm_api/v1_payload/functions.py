@@ -1,4 +1,4 @@
-"""API Implemenation for the Customizer to start and control the payload processing."""
+"""API Implementation for the Customizer to start and control the payload processing."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"
@@ -22,7 +22,7 @@ from pyxecm_api.settings import api_settings
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger("pyxecm_api.v1_payload")
 
-# Initialize the globel Payloadlist object
+# Initialize the global Payloadlist object
 
 
 def import_payload(

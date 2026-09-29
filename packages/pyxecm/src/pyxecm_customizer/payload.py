@@ -1,8 +1,8 @@
 """Payload Module to implement functions to process Terrarium payload.
 
 This code processes a Terraform (HCL) or YAML payload file that includes various settings
-to auto-configure a OpenText Content Management environment, including Content Server (OTCS),
-OTDS; AppWorks, CoreShare, M365.
+to auto-configure an OpenText Content Management environment, including Content Server (OTCS),
+OTDS, AppWorks, CoreShare, M365.
 
 - WebHooks (URLs) to call (e.g. to start-up external services or applications)
 - OTDS partitions and OAuth clients
@@ -112,7 +112,7 @@ def load_payload(
     """Load payload file.
 
     We don't want to have this inside the class
-    to allow it to be used also indepent (see api.py)
+    to allow it to be used also independent (see api.py)
 
     Args:
         payload_source (str):
@@ -215,7 +215,7 @@ class Payload:
     _custom_settings_dir = ""
 
     # _payload_source (string): This is either path + filename of the yaml payload
-    # or an path + filename of the Terraform HCL payload
+    # or a path + filename of the Terraform HCL payload
     _payload_source = ""
 
     # _payload is a dict of the complete payload file.
@@ -275,34 +275,34 @@ class Payload:
             otpd_object (OTPD | None):
                 The OTPD object (PowerDocs).
                 Pass None if PowerDocs is not part of the deployment.
-            m365_object (object):
+            m365_object (M365 | None):
                 The M365 object to talk to Microsoft Graph API.
             core_share_object (CoreShare | None):
                 The Core Share object.
             placeholder_values (dict):
                 A dictionary of placeholder values to be replaced in admin settings.
-            log_header_callback:
+            log_header_callback (Callable):
                 Method to print a section break / header line into the log.
-            browser_headless (bool):
+            browser_headless (bool, optional):
                 If true, the Browser for the Automation will be started in Headless mode (default)
-            stop_on_error (bool):
+            stop_on_error (bool, optional):
                 This flag controls if transport deployment should stop
-                if a transport deployment in OTCS fails.
-            aviator_enabled (bool):
-                Flag that indicates whether or not the Content Aviator is enabled.
+                if a transport deployment in OTCS fails. Defaults to False.
+            aviator_enabled (bool, optional):
+                Flag that indicates whether or not the Content Aviator is enabled. Defaults to False.
             upload_status_files (bool, optional):
-                Whether or not status file should be uploaded to the peronal workspace
-                of the admin user in Content Server.
-            status_file_check:
-                Whether or not the check for previous executions of previous exeuctions
-                of a payload sections is enabled or not.
-            otawp_object (OTAWP):
+                Whether or not status file should be uploaded to the personal workspace
+                of the admin user in Content Server. Defaults to True.
+            status_file_check (bool, optional):
+                Whether or not the check for previous executions
+                of payload sections is enabled. Defaults to True.
+            otawp_object (OTAWP | None, optional):
                 An optional AppWorks Platform object.
-            otca_object (OTCA):
+            otca_object (OTCA | None, optional):
                 An optional Content Aviator object.
-            otkd_object (OTKD):
+            otkd_object (OTKD | None, optional):
                 An optional Knowledge Discovery object.
-            avts_object (AVTS):
+            avts_object (AVTS | None, optional):
                 An optional Aviator Search object.
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
@@ -325,7 +325,7 @@ class Payload:
         self._otpd = otpd_object
         self._m365 = m365_object
         self._core_share = core_share_object
-        # The SAP, SuccessFactors and Salesforce objects only exists after external systems have been processed
+        # The SAP, SuccessFactors and Salesforce objects only exist after external systems have been processed
         self._sap: SAP | None = None
         self._successfactors: SuccessFactors | None = None
         self._salesforce: Salesforce | None = None
@@ -334,7 +334,7 @@ class Payload:
         self._guidewire_claims_center: Guidewire | None = None
         self._otmm: OTMM | None = None
         self._otcs_source: OTCS | None = None
-        self._pht = None  # the OpenText prodcut hierarchy
+        self._pht = None  # the OpenText product hierarchy
         self._nhc = None  # National Hurricane Center
         self._otca = otca_object  # Content Aviator
         self._otkd = otkd_object  # Knowledge Discovery
@@ -425,7 +425,7 @@ class Payload:
     # end method definition
 
     def thread_wrapper(self, target: Callable, *args: tuple, **kwargs: dict) -> None:
-        """Wrap around threads to catch exceptions during exection.
+        """Wrap around threads to catch exceptions during execution.
 
         Args:
             target (callable):
@@ -453,7 +453,7 @@ class Payload:
         """Replace placeholders in file content.
 
         The content of the file is provided via a parameter.
-        The replacements are defined in a object variable
+        The replacements are defined in an object variable
         _placeholder_values (type = dictionary)
         The placeholder values are supposed to be surrounded by
         double % signs like %%OTAWP_RESOURCE_ID%%
@@ -500,9 +500,6 @@ class Payload:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="init_payload")
     def init_payload(self) -> dict | None:
         """Read the YAML or Terraform HCL payload file.
-
-        Args:
-            None
 
         Returns:
             dict | None:
@@ -658,7 +655,7 @@ class Payload:
         """Get a specific section of the payload based on its name.
 
         The section is delivered as a list of settings.
-        It deliveres an empty list if this payload section is disabled by the corresponding
+        It delivers an empty list if this payload section is disabled by the corresponding
         payload switch (this is read from the payloadSections dictionary of the payload)
 
         Args:
@@ -675,7 +672,7 @@ class Payload:
         if not isinstance(self._payload, dict):
             return []
 
-        # if the secton is not in the payload we return an empty list:
+        # if the section is not in the payload we return an empty list:
         if not self._payload.get(payload_section_name):
             return []
 
@@ -698,7 +695,7 @@ class Payload:
         """Process the configurations for AppWorks projects.
 
         This method is responsible for setting up the necessary configurations for AppWorks projects.
-        If the payload contains a `appworks` section, it will execute the corresponding actions
+        If the payload contains an `appworks` section, it will execute the corresponding actions
         to process and apply the custom configuration.
 
         This includes:
@@ -773,7 +770,7 @@ class Payload:
 
             access_role_name = "Access to " + organization
 
-            # make sure code is idempotent and only try to add ressource if it doesn't exist already:
+            # make sure code is idempotent and only try to add resource if it doesn't exist already:
             awp_resource = self._otds.get_resource(organization)
             if not awp_resource:
                 self.logger.info(
@@ -822,7 +819,7 @@ class Payload:
                 )
 
             # Add the OTDS user partition for OTCS to the AppWorks Platform Access Role in OTDS.
-            # This will effectvely sync all OTCS users with AppWorks Platform:
+            # This will effectively sync all OTCS users with AppWorks Platform:
             self._otds.add_partition_to_access_role(
                 access_role=access_role_name,
                 partition=self._otcs.partition_name(),
@@ -944,7 +941,7 @@ class Payload:
                         awp_resource["resourceID"],
                     )
 
-                # Assign AppWorks license to Content Server Members Partiton and otds.admin:
+                # Assign AppWorks license to Content Server Members Partition and otds.admin:
                 for partition_name in ["otds.admin", self._otcs.partition_name()]:
                     if self._otds.is_partition_licensed(
                         partition_name=partition_name,
@@ -1404,7 +1401,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_all_group_names")
     def get_all_group_names(self) -> list:
-        """Construct a list of all group name.
+        """Construct a list of all group names.
 
         Returns:
             list:
@@ -1446,7 +1443,7 @@ class Payload:
         # we don't want external payload runs to re-apply this processing:
         if payload_specific:
             file_name = os.path.basename(self._payload_source)  # remove directories
-            # Split once at the first occurance of a dot
+            # Split once at the first occurrence of a dot
             # as the _payload_source may have multiple suffixes
             # such as .yml.gz.b64:
             file_name = file_name.split(".", 1)[0]
@@ -1467,7 +1464,7 @@ class Payload:
     ) -> bool:
         """Check if the payload section has been processed before.
 
-        This is done by checking the existance of a text file in the Admin Personal
+        This is done by checking the existence of a text file in the Admin Personal
         workspace in Content Server with the name of the payload section.
 
         Args:
@@ -1563,11 +1560,11 @@ class Payload:
 
         Args:
             success (bool):
-                True, if the section was processed successful, False otherwise.
+                True, if the section was processed successfully, False otherwise.
             payload_section_name (str):
                 The name of the payload section.
             payload_section (list):
-                The payload section content - this is written as JSon into the file.
+                The payload section content - this is written as JSON into the file.
             payload_specific (bool, optional):
                 Whether or not the success should be specific for
                 each payload file or if success is "global" - like for the deletion
@@ -1576,7 +1573,7 @@ class Payload:
 
         Returns:
             bool:
-                True if the status file as been upladed to Content Server successfully, False otherwise
+                True if the status file has been uploaded to Content Server successfully, False otherwise
 
         """
 
@@ -1688,7 +1685,7 @@ class Payload:
                 The prefix of the file. Typically, either "success_" or "failure_".
 
         Returns:
-            list:
+            list | None:
                 Content of the status file as a list of dictionaries or None in case of an error.
 
         """
@@ -1737,7 +1734,7 @@ class Payload:
     def get_payload(self, drop_bulk_datasources_data: bool = False) -> dict:
         """Get the Payload as reference.
 
-        Optional a copy of the payload can be delivered the does not include the
+        Optionally, a copy of the payload can be delivered that does not include the
         "data" value of "bulkDatasource" (its content can be HUGE and many times we don't
         want it).
 
@@ -1782,7 +1779,7 @@ class Payload:
         return self._ontologies
 
     def get_otcs_frontend(self) -> object:
-        """Get OTCS Frontend oject."""
+        """Get OTCS Frontend object."""
         return self._otcs_frontend
 
     def get_otcs_backend(self) -> object:
@@ -1821,13 +1818,13 @@ class Payload:
             min_special (int, optional):
                 Define min amount of special characters. Defaults to 1.
             min_numerical (int, optional):
-                Define if numbers should be used. Defaults to 1.
+                Define min amount of numerical digits. Defaults to 1.
             min_upper (int, optional):
-                Define mininum number of upper case letters. Defaults to 1.
+                Define minimum number of upper case letters. Defaults to 1.
             min_lower (int, optional):
                 Define minimum number of lower case letters. Defaults to 1.
-            override_special (string | None, optional):
-                Define special characters to be used, if not set: !@#$%^&*()_-+=<>?/{}[]. Defaults to None.
+            override_special (str | None, optional):
+                Define special characters to be used, if not set: `!@#$%^&*()_-+=<>?/{}[]`. Defaults to None.
 
         Returns:
             str | None:
@@ -1889,7 +1886,8 @@ class Payload:
                 The group payload element.
 
         Returns:
-            int: group ID
+            int:
+                The group ID. 0 if the group cannot be determined.
 
         Side Effects:
             the group items are modified by adding an "id" dict element that
@@ -1909,7 +1907,7 @@ class Payload:
 
         existing_groups = self._otcs.get_group(name=group_name, group_type=group_type)
         # We use the lookup method here as get_group() could deliver more
-        # then 1 result element (in edge cases):
+        # than 1 result element (in edge cases):
         existing_group_id = self._otcs.lookup_result_value(
             response=existing_groups,
             key="name",
@@ -1938,7 +1936,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="determine_group_id_m365")
     def determine_group_id_m365(self, group: dict) -> str | None:
-        """Determine the id of a M365 group - either from payload or from M365 via Graph API.
+        """Determine the id of an M365 group - either from payload or from M365 via Graph API.
 
         If the group is found in M365 write back the M365 group ID into the payload.
 
@@ -2055,7 +2053,7 @@ class Payload:
 
         Returns:
             int:
-                The user ID in OTCS.
+                The user ID in OTCS. 0 if the user cannot be determined.
 
         Side Effects:
             The user items are modified by adding an "id" dict element that
@@ -2077,7 +2075,7 @@ class Payload:
         response = self._otcs.get_user(name=user_name, user_type=user_type)
 
         # We use the lookup method here as get_user() could deliver more
-        # then 1 result element (in edge cases):
+        # than 1 result element (in edge cases):
         user_id = self._otcs.lookup_result_value(
             response=response,
             key="name",
@@ -2103,7 +2101,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="determine_user_id_m365")
     def determine_user_id_m365(self, user: dict) -> str | None:
-        """Determine the id of a M365 user - either from payload or from M365 via Graph API.
+        """Determine the id of an M365 user - either from payload or from M365 via Graph API.
 
         If the user is found in M365 write back the M365 user ID into the payload.
 
@@ -2236,7 +2234,7 @@ class Payload:
 
         Returns:
             int:
-                The workspace Node ID.
+                The workspace Node ID. 0 if the workspace cannot be determined.
 
         Side Effects:
             The workspace items are modified by adding an "node_id" dict element that
@@ -2251,7 +2249,7 @@ class Payload:
             return workspace["node_id"]
 
         # 1. First we try to lookup the workspace via type and name - this is the most reliable way
-        # as the workspace name is defined in the payload in most cases match the actual workspace name in OTCS:
+        # as the workspace name defined in the payload in most cases matches the actual workspace name in OTCS:
         response = self._otcs.get_workspace_by_type_and_name(
             type_name=workspace["type_name"],
             name=workspace["name"],
@@ -2336,8 +2334,9 @@ class Payload:
                 Name of the workspace template. Defaults to "".
 
         Returns:
-            tuple[int, int]:
+            tuple[int | None, int | None]:
                 IDs of the workspace type (first) and workspace template (second).
+                An ID is None if it cannot be determined.
 
         """
 
@@ -2407,9 +2406,9 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_transport_extractions")
     def add_transport_extractions(self, extractions: list) -> int:
-        """Determine the number of extrations.
+        """Determine the number of extractions.
 
-        Safe them in a global list self._transport_extractions.
+        Save them in a global list self._transport_extractions.
 
         Args:
             extractions (list):
@@ -2417,7 +2416,7 @@ class Payload:
 
         Returns:
             int:
-                THE number of extractions that have actually extracted data.
+                The number of extractions that have actually extracted data.
 
         """
 
@@ -2519,7 +2518,7 @@ class Payload:
                         groups = self._groups_post if is_post else self._groups
                         self._log_header_callback(text=f"Process Groups{post_label}")
                         self.process_groups(groups=groups, section_name=payload_section["name"])
-                        # Add all groups with ID the a lookup dict for placeholder replacements
+                        # Add all groups with ID to a lookup dict for placeholder replacements
                         # in adminSetting. This also updates the payload with group IDs from OTCS
                         # if the group already exists in Content Server. This is important especially
                         # if the customizer pod is restarted / run multiple times:
@@ -2702,7 +2701,7 @@ class Payload:
                             section_name="contentTransportPackages",
                         )
                         # Process workspace permissions after content has been added:
-                        # (this is a workaround for a flaw in transport warehouse that don't
+                        # (this is a workaround for a flaw in transport warehouse that doesn't
                         # set workspace role permissions for content transported into workspaces)
                         self._log_header_callback(
                             text="Process Workspace Member Permissions",
@@ -3183,7 +3182,7 @@ class Payload:
             allow_impersonation = resource.get("allow_impersonation", True)
             secret = resource.get("secret", None)
 
-            # Check if Partition does already exist
+            # Check if resource does already exist
             # (in an attempt to make the code idem-potent)
             self.logger.info(
                 "Check if OTDS resource -> '%s' does already exist...",
@@ -3197,7 +3196,7 @@ class Payload:
                 )
                 continue
 
-            # Only continue if Partition does not exist already
+            # Only continue if resource does not exist already
             self.logger.info(
                 "Resource -> '%s' does not exist. Creating...",
                 resource_name,
@@ -3374,7 +3373,7 @@ class Payload:
                     success = False
             # end if access_role
 
-            # Partions may have an optional list of licenses in
+            # Partitions may have an optional list of licenses in
             # the payload. Assign the partition to all these licenses:
             partition_specific_licenses = partition.get("licenses")
             if partition_specific_licenses:
@@ -3582,7 +3581,7 @@ class Payload:
                     success = False
             # end if access_role
 
-            # Partions may have an optional list of licenses in
+            # Partitions may have an optional list of licenses in
             # the payload. Assign the partition to all these licenses:
             partition_specific_licenses = partition.get("licenses")
             if partition_specific_licenses:
@@ -3946,7 +3945,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_application_roles")
     def process_application_roles(self, section_name: str = "applicationRoles") -> bool:
-        """Process OTDS application rolesin payload and create them in OTDS.
+        """Process OTDS application roles in payload and create them in OTDS.
 
         Args:
             section_name (str, optional):
@@ -4068,7 +4067,7 @@ class Payload:
             - token_endpoint (str, optional for OAUTH)
             - scope_string (str, optional for OAUTH)
 
-        An authorization handler defined the connection to an Identity Provider (IdP).
+        An authorization handler defines the connection to an Identity Provider (IdP).
 
         The payload section is a list of dicts with these items:
         {
@@ -4081,7 +4080,7 @@ class Payload:
                 Description of the handler. This is shown in the second
                 column of the Auth Handler
             type (str):
-                Type of the handler. Possible values are SALM, SAP, OAUTH
+                Type of the handler. Possible values are SAML, SAP, OAUTH
             priority (int):
                 A numeric value to order different handlers in OTDS by priority
             active_by_default (bool):
@@ -4252,7 +4251,7 @@ class Payload:
                         continue
                     certificate_password = auth_handler.get("certificate_password")
                     if not certificate_password:
-                        # This is not an error - we canhave this key with empty string!
+                        # This is not an error - we can have this key with empty string!
                         self.logger.info(
                             "SAP Authorization handler -> '%s' (%s) does not have a certificate password - this can be OK.",
                             handler_name,
@@ -4577,7 +4576,7 @@ class Payload:
                 success = False
                 continue
 
-            # Check if the document geneneration has been explicitly disabled in payload
+            # Check if the document generation has been explicitly disabled in payload
             # (enabled = false). In this case we skip the payload element:
             if not docgen_setting.get("enabled", True):
                 self.logger.info(
@@ -4633,7 +4632,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_group_placeholders")
     def process_group_placeholders(self, groups: list | None = None) -> None:
-        """Replace a group placeholder (sourrounded by %%...%%) with the actual ID of the Content Server group.
+        """Replace a group placeholder (surrounded by %%...%%) with the actual ID of the Content Server group.
 
         For this we prepare a lookup dict. The dict self._placeholder_values already includes
         lookups for the OTCS and OTAWP OTDS resource IDs (see main.py)
@@ -4692,7 +4691,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_user_placeholders")
     def process_user_placeholders(self, users: list | None = None) -> None:
-        """Replace a user placeholder (sourrounded by %%...%%) with the ID of the Content Server user.
+        """Replace a user placeholder (surrounded by %%...%%) with the ID of the Content Server user.
 
         For this we prepare a lookup dict. The dict self._placeholder_values already includes
         lookups for the OTCS and OTAWP OTDS resource IDs (see customizer.py).
@@ -4777,9 +4776,11 @@ class Payload:
             - enable_core_share (bool, optional, default=False)
 
         Args:
-            groups (list, optional):
-                A list of groups to process. If not provided, the method will use self._groups. This allows to reuse the method for processing groups
+            groups (list | None, optional):
+                A list of groups to process. If not provided, the method will use self._groups.
+                This allows to reuse the method for processing groups
                 in different payload sections (e.g. "Groups" and "Post" sections).
+                Defaults to None.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -5123,7 +5124,7 @@ class Payload:
                     )
                     success = False
                     continue
-                else:  # we can read the ID from the
+                else:  # we can read the ID from the payload
                     parent_group_id = parent_group["id"]
 
                 # retrieve all members of the parent group (1 = get only groups)
@@ -5176,7 +5177,7 @@ class Payload:
                 role_name = role_parts[0]
                 role_partition = role_parts[1] if len(role_parts) > 1 else "OAuthClients"
 
-                # This is on OTDS method (not OTCS) thuis the group ID is the group name!
+                # This is an OTDS method (not OTCS), thus the group ID is the group name!
                 response = self._otds.assign_group_to_application_role(
                     group_id=group_name,
                     group_partition=group_partition,
@@ -5427,7 +5428,7 @@ class Payload:
                     group_name,
                     existing_group_id,
                 )
-                # Write M365 group ID back into the payload (for the success file)
+                # Write Salesforce group ID back into the payload (for the success file)
                 group["salesforce_id"] = existing_group_id
                 continue
 
@@ -5443,7 +5444,7 @@ class Payload:
                 key="id",
             )
             if new_group_id:
-                # Store the Microsoft 365 group ID in payload:
+                # Store the Salesforce group ID in payload:
                 group["salesforce_id"] = new_group_id
                 self.logger.info(
                     "Successfully created Salesforce group -> '%s' with ID -> %s.",
@@ -5622,7 +5623,7 @@ class Payload:
                 # Write Core Share group ID back into the payload (for the success file)
                 group["core_share_id"] = core_share_group_id
 
-                # For existing users we want to cleanup possible left-overs form old deployments
+                # For existing users we want to cleanup possible left-overs from old deployments
                 self.logger.info(
                     "Cleanup existing file shares of Core Share group -> '%s' (%s)...",
                     group_name,
@@ -5648,7 +5649,7 @@ class Payload:
                 key="id",
             )
             if new_group_id:
-                # Store the Microsoft 365 group ID in payload:
+                # Store the Core Share group ID in payload:
                 group["core_share_id"] = new_group_id
                 self.logger.info(
                     "Successfully created Core Share group -> '%s' with ID -> %s.",
@@ -5662,7 +5663,7 @@ class Payload:
                 )
                 success = False
 
-        # Core Share groups cannot be nested. So we are fone here.
+        # Core Share groups cannot be nested. So we are done here.
 
         self.write_status_file(
             success=success,
@@ -5727,7 +5728,7 @@ class Payload:
             return True
 
         # Even if this payload section has been processed successfully before we
-        # to process it once more. So we are NOT checking the status file.
+        # want to process it once more. So we are NOT checking the status file.
 
         success: bool = True
 
@@ -5857,7 +5858,7 @@ class Payload:
                     )
             # end for usage_privilege in usage_privileges:
 
-            # Assign usage privileges to the new user:
+            # Assign object privileges to the new user:
             object_privileges = user.get("object_privileges", [])
             for object_type in object_privileges:
                 response = self._otcs.assign_object_privilege(
@@ -5880,7 +5881,7 @@ class Payload:
                     )
             # end for object_type in object_privileges:
 
-            # Assign usage privileges to the new user:
+            # Set the signing authority flag of the new user if required:
             signing_admin = user.get("signing_admin", False)
             if signing_admin and use_browser_automation:
                 self.logger.info(
@@ -5942,7 +5943,7 @@ class Payload:
                         new_user_id,
                     )
 
-                # Cleanup session and and remove reference to the object:
+                # Cleanup session and remove reference to the object:
                 browser_automation_object.end_session()
                 browser_automation_object = None
 
@@ -6292,7 +6293,7 @@ class Payload:
                 True, if payload has been processed without errors, False otherwise.
 
         Side Effects:
-            The user items are modified by adding an "successfactors_user_id" dict element that
+            The user items are modified by adding a "successfactors_user_id" dict element that
             includes the personIdExternal of the user in SuccessFactors
 
         """
@@ -6445,13 +6446,13 @@ class Payload:
             * name (str, mandatory) - user login name
             * enabled (bool, optional, default = True)
             * enable_salesforce (bool, optional, default = False) - enable Salesforce sync for this user
-            * extra_attributes (dict, mandatory if enabled) - Salesforce-specific attributes
+            * extra_attributes (list[dict], mandatory if enabled) - the "value" of the first item is the Salesforce login
             * email (str, optional, default = "") - user email address
             * firstname (str, optional, default = "") - user first name
             * lastname (str, optional, default = "") - user last name
             * base_group (str, optional, default = "") - base Salesforce group
             * title (str, optional, default = "") - user title
-            * company (str, optional, default = None) - user company
+            * company (str, optional, default = "Innovate" for new users) - user company
             * salesforce_user_id (str, optional, output field set by method) - Salesforce user ID
             * salesforce_user_login (str, optional, output field set by method) - Salesforce user login
 
@@ -6715,7 +6716,7 @@ class Payload:
                 user_groups.append(base_group)  # list of groups the user is in
 
             for user_group in user_groups:
-                # "Business Administrators" is a OTCS generated group that we won't find
+                # "Business Administrators" is an OTCS generated group that we won't find
                 # in payload - skip this group.
                 if user_group == "Business Administrators":
                     continue
@@ -6816,8 +6817,9 @@ class Payload:
             * core_share_user_id (str, optional, output field set by method) - Core Share user ID
 
         Args:
-            users (list, optional):
+            users (list | None, optional):
                 List of user dicts to process. If not provided, it will be taken from self._users.
+                Defaults to None.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -6865,7 +6867,7 @@ class Payload:
             user_first_name = user.get("firstname", "")
             user_name = " ".join(filter(None, [user_first_name, user_last_name]))
             user_enabled = user.get("enabled", True) and user.get("enable_core_share", False)
-            if not user_name and user_enabled:  # Avoid a warning if not enbaled
+            if not user_name and user_enabled:  # Avoid a warning if not enabled
                 self.logger.error(
                     "User is missing last name and first name. Skipping to next user...",
                 )
@@ -7110,7 +7112,7 @@ class Payload:
                         core_share_user_id,
                     )
 
-                # For existing users we want to cleanup possible left-overs form old deployments
+                # For existing users we want to cleanup possible left-overs from old deployments
                 self.logger.info(
                     "Cleanup existing file shares of Core Share user -> '%s' (%s)...",
                     user_name,
@@ -7194,7 +7196,7 @@ class Payload:
                 user_groups.append(base_group)  # list of groups the user is in
 
             for user_group in user_groups:
-                # "Business Administrators" is a OTCS generated group that we won't find
+                # "Business Administrators" is an OTCS generated group that we won't find
                 # in payload - skip this group.
                 if user_group == "Business Administrators":
                     # Users that are Business Administrators in Content Server
@@ -7330,8 +7332,9 @@ class Payload:
             * m365_id (str, optional, output field set by method) - Microsoft 365 user ID
 
         Args:
-            users (list, optional):
+            users (list | None, optional):
                 List of user dicts to process. If not provided, it will be taken from self._users.
+                Defaults to None.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
                 for cases where multiple sections of same type
@@ -7453,7 +7456,7 @@ class Payload:
                     continue
             else:
                 # if the user exists we just set the password according
-                # the the payload definition to allow to bulk
+                # to the payload definition to allow to bulk
                 # update existing M365 users with new passwords:
                 self.logger.info(
                     "Found existing Microsoft 365 user -> '%s' - updating password...",
@@ -7477,7 +7480,7 @@ class Payload:
                     )
 
             # Now we assign a license to the new M365 user.
-            # First we see if there's a M365 SKU list in user
+            # First we see if there's an M365 SKU list in user
             # payload - if not we wrap the default SKU configured
             # for the m365 object into a single item list:
             existing_user_licenses = self._m365.get_user_licenses(user_id=m365_user_id)
@@ -8350,7 +8353,7 @@ class Payload:
             r"^DCTM\s-\s.*$",  # delete DCTM material team
             r"^CM\s-\s.*$",  # delete CM material team
             r"^[A-Za-z0-9]{18}\s-\s.*$",  # delete teams that start with the typical Salesforce IDs (e.g. opportunities)
-            r"^[A-Z]\d{9}\s.*$",  # delete teams that seems to be created as examples in a M365 subscription
+            r"^[A-Z]\d{9}\s.*$",  # delete teams that seems to be created as examples in an M365 subscription
             r".*\s\([A-Z]{3,4}\)$",  # delete stale Locations from NTSB scenario
         ]
 
@@ -8382,7 +8385,7 @@ class Payload:
 
         These are the SharePoint sites for the departmental groups such as "Sales",
         "Procurement", "Enterprise Asset Management", ...
-        Only departmental group that have a top-level folder with the exact same
+        Only departmental groups that have a top-level folder with the exact same
         name as the Department are configured.
 
         For each departmental group:
@@ -9008,7 +9011,7 @@ class Payload:
             system) with these items:
             {
                 enabled: True or False to enable or disable the payload item
-                external_system_name: Name of the external systen.
+                external_system_name: Name of the external system.
                 external_system_type: Type of the external system.
                                       Possible values are
                                       * SAP
@@ -9020,13 +9023,13 @@ class Payload:
                 base_url: Base URL of the external system
                 as_url: Application Server URL of the external system
                 username: (Technical) User Name for the connection
-                password: Passord of the (technical) user
+                password: Password of the (technical) user
                 oauth_client_id: OAuth client ID
                 oauth_client_secret: OAuth client secret
                 archive_logical_name: Logical name of Archive for SAP
                 archive_certificate_file: Path and filename to certificate file.
                                           This file is inside the customizer
-                                          pof file system.
+                                          pod file system.
                 skip_connection_test: Should we skip the connection test for this
                                       external system?
             }
@@ -9255,7 +9258,7 @@ class Payload:
                     return False
             # end match
 
-            # We do this existance test late in this function to make sure the payload
+            # We do this existence test late in this function to make sure the payload
             # datastructure is properly updated for debugging purposes.
             self.logger.info(
                 "Test if external system -> '%s' does already exist...",
@@ -9353,7 +9356,7 @@ class Payload:
                 self._sap = self.init_sap(sap_external_system=external_system)
 
             #
-            # In case of an SuccessFactors external system we also initialize the SuccessFactors object
+            # In case of a SuccessFactors external system we also initialize the SuccessFactors object
             #
             if system_type == "SuccessFactors":
                 # Initialize SuccessFactors object responsible for communication to SuccessFactors:
@@ -9362,7 +9365,7 @@ class Payload:
                 )
 
             #
-            # In case of an Salesforce external system we also initialize the Salesforce object
+            # In case of a Salesforce external system we also initialize the Salesforce object
             #
             if system_type == "Salesforce":
                 # Initialize Salesforce object responsible for communication to Salesforce:
@@ -9371,7 +9374,7 @@ class Payload:
                 )
 
             #
-            # In case of an Guidewire external system we also initialize the Guidewire objects:
+            # In case of a Guidewire external system we also initialize the Guidewire objects:
             #
             if system_type == "Guidewire":
                 if "claim" in system_name.lower():
@@ -9410,12 +9413,13 @@ class Payload:
         Args:
             ext_system_id (str):
                 The external system name to lookup.
-            prefix (str):
+            prefix (str, optional):
                 The prefix of the success file in the Admin personal workspace.
+                Defaults to "success_payload_".
 
         Returns:
             dict | None:
-                The configuration data of the external system.
+                The configuration data of the external system or None if it cannot be found.
 
         """
 
@@ -9468,16 +9472,14 @@ class Payload:
         package_url: str,
         download_dir: str | None = None,
     ) -> str | None:
-        """Download the transort package from the given URL.
+        """Download the transport package from the given URL.
 
         Args:
             package_url (str):
                 The URL to the transport package.
-            package_name (str):
-                The name of the transport package.
-            download_dir (str, optional):
+            download_dir (str | None, optional):
                 The file system directory to download to. If None,
-                a temporary directory is automatically determined.
+                a temporary directory is automatically determined. Defaults to None.
 
         Returns:
             str | None:
@@ -9686,7 +9688,7 @@ class Payload:
         Payload item keys (from _users):
             * name (str, mandatory) - user login name
             * enabled (bool, optional, default = True)
-            * type (str, optional, default = "User") - photo type
+            * type (str, optional, default = "User") - user type (users of type "ServiceUser" are skipped)
 
         Args:
             users (list | None, optional):
@@ -10622,7 +10624,7 @@ class Payload:
                             category_id,
                         )
                         # we write the group / set information also in the property mapping
-                        # tp have a plain list with all information:
+                        # to have a plain list with all information:
                         property_mapping["@groupName"] = group_name
                         property_mapping["@setName"] = set_name
                         property_mapping["@type"] = mapping_type
@@ -10745,7 +10747,7 @@ class Payload:
                 str(otcs_version),
             )
 
-        # now we enrich the business_object_type list elments (which are dicts)
+        # now we enrich the business_object_type list elements (which are dicts)
         # with additional dict elements for further processing:
         for business_object_type in self._business_object_types:
             # Flatten the response structure for more easy retrieval:
@@ -10765,7 +10767,7 @@ class Payload:
             ext_system_id = business_object_type["data"]["properties"]["ext_system_id"]
             self.logger.debug("External system ID -> %s", ext_system_id)
             business_object_type["ext_system_id"] = ext_system_id
-            # Get External System ID:
+            # Get Workspace Type ID:
             workspace_type_id = business_object_type["data"]["properties"]["workspace_type_id"]
             self.logger.debug("Workspace type ID -> %s", workspace_type_id)
             business_object_type["workspace_type_id"] = workspace_type_id
@@ -10784,7 +10786,7 @@ class Payload:
                 workspace_type_id,
             )
 
-            # Get additional information per BO Type (before 25.3 REST API is severly
+            # Get additional information per BO Type (before 25.3 REST API is severely
             # limited) - it does not return Property names from External System
             # and is also missing Business Property Groups. Thus, for older versions
             # we extract that information from the Transport XML files (see else case):
@@ -10826,7 +10828,7 @@ class Payload:
     def get_business_object_properties(self, bo_type_name: str) -> dict | None:
         """Get a dictionary with all property mapping of a business object type.
 
-        We contruct this dictionary from the two lists for the given
+        We construct this dictionary from the two lists for the given
         business object types (property mapping and property group mappings)
         These two lists have been created before by process_business_object_types()
 
@@ -10839,7 +10841,7 @@ class Payload:
         Returns:
             dict | None:
                 A dictionary with keys that are either the attribute name or
-                a key that is contructed like this: set name + "-" + attribute name.
+                a key that is constructed like this: set name + "-" + attribute name.
                 This allows for an easy lookup in methods that have access to
                 the category data of business workspaces.
 
@@ -10869,7 +10871,7 @@ class Payload:
 
         lookup_dict = {}
 
-        # 25.3 uses a new REST API to retreive the business object type details.
+        # 25.3 uses a new REST API to retrieve the business object type details.
         # Pre 25.3 we use extractions from the transport package to get this information
         # See process_business_object_type() method.
         otcs_version = float(self._otcs.get_server_version())
@@ -10966,7 +10968,7 @@ class Payload:
             )
             self.logger.debug("Workspace types -> %s", str(self._workspace_types))
 
-        # now we enrich the workspace_type list elments (which are dicts)
+        # now we enrich the workspace_type list elements (which are dicts)
         # with additional dict elements for further processing:
         for workspace_type in self._workspace_types:
             workspace_type_id = workspace_type["data"]["properties"]["wksp_type_id"]
@@ -11054,7 +11056,7 @@ class Payload:
         self,
         section_name: str = "workspaceTemplates",
     ) -> bool:
-        """Process workspace template playload.
+        """Process workspace template payload.
 
         Payload item keys:
             - enabled (bool, optional, default=True)
@@ -11235,7 +11237,7 @@ class Payload:
                         success = False
                         continue
 
-                    # Add member if it does not yet exists - suppress warning
+                    # Add member if it does not yet exist - suppress warning
                     # message if user is already in role:
                     response = self._otcs.add_workspace_member(
                         workspace_id=template_id,
@@ -11404,7 +11406,7 @@ class Payload:
         attribute values need to be IDs but the payload has names.
 
         This method is called for all attributes. If no special handling
-        is required it just return an unmodified attribute value.
+        is required it just returns an unmodified attribute value.
 
         Args:
             attribute_name (str):
@@ -11578,7 +11580,7 @@ class Payload:
             bo_type (str, optional):
                 The optional business object type ID.
             bo_id (str, optional):
-                the business object ID.
+                The optional business object ID.
             parent_workspace_node_id (int, optional):
                 The optional parent Workspace ID.
 
@@ -11615,7 +11617,7 @@ class Payload:
 
         categories_form = {}
 
-        # Typically the the create workspace form delivers 4-5 forms:
+        # Typically the create workspace form delivers 4-5 forms:
         # 1. Form for System Attributes (has no role name)
         # 2. Form for Category Data (role name = "categories")
         # 3. Form for Classifications (role name = "classifications")
@@ -11671,7 +11673,7 @@ class Payload:
             # * Sets with one (fixed) row have type = object
             # * Multi-value Sets with (multiple) rows have type = array and "properties" in "items" schema
             # * Multi-value attributes have also type = array but NO "properties" in "items" schema
-            for attr_id in data_attributes:  # these a attribute IDs (dict keys)
+            for attr_id in data_attributes:  # these are attribute IDs (dict keys)
                 self.logger.debug("Attribute ID -> %s", attr_id)
                 self.logger.debug("Attribute data -> %s", data_attributes[attr_id])
                 self.logger.debug(
@@ -11953,7 +11955,7 @@ class Payload:
         search_field: str,
         search_value: str,
     ) -> str | None:
-        """Get the Salesforce ID (str) of an Salesforce object by querying the Salesforce API.
+        """Get the Salesforce ID (str) of a Salesforce object by querying the Salesforce API.
 
         Args:
             workspace (dict):
@@ -12108,7 +12110,7 @@ class Payload:
         search_field: str,
         search_value: str,
     ) -> str | None:
-        """Get the Guidewire ID (str) of an Guidewire object by querying the Guidewire API.
+        """Get the Guidewire ID (str) of a Guidewire object by querying the Guidewire API.
 
         Args:
             external_system (dict):
@@ -12212,15 +12214,15 @@ class Payload:
 
         Args:
             parent_id (int):
-                The node the category should be applied to.
+                The ID of the parent node in which the item will be created.
             categories (list):
                 The categories list from the document payload.
-            subtype (int):
-                The subtype of the new node. Default is document.
+            subtype (int, optional):
+                The subtype of the new node. Defaults to document.
 
         Returns:
             dict | None:
-                Category structure for workspace creation or None
+                Category structure for item creation or None
                 in case of an error.
 
         """
@@ -12285,7 +12287,7 @@ class Payload:
 
         categories_form = {}
 
-        # Typically the the create item form delivers 4-5 forms:
+        # Typically the create item form delivers 4-5 forms:
         # 1. Form for System Attributes (has no role name)
         # 2. Form for Category Data (role name = "categories")
         # 3. Form for Classifications (role name = "classifications")
@@ -12341,7 +12343,7 @@ class Payload:
             # * Sets with one (fixed) row have type = object
             # * Multi-value Sets with (multiple) rows have type = array and "properties" in "items" schema
             # * Multi-value attributes have also type = array but NO "properties" in "items" schema
-            for attr_id in data_attributes:  # these a attribute IDs (dict keys)
+            for attr_id in data_attributes:  # these are attribute IDs (dict keys)
                 self.logger.debug("Attribute ID -> %s", attr_id)
                 self.logger.debug("Attribute data -> %s", data_attributes[attr_id])
                 self.logger.debug(
@@ -12622,7 +12624,7 @@ class Payload:
     ) -> list | None:
         """Prepare the business object data for the workspace creation.
 
-        This supports multiple external system connections. This methods
+        This supports multiple external system connections. This method
         also checks if the external system is reachable and tries to create
         missing business objects in the leading system if they are missing.
 
@@ -12715,26 +12717,22 @@ class Payload:
                 continue
             if not external_system.get("enabled", True):
                 self.logger.info(
-                    "External System -> '%s' is disabled in payload. Cannot connect workspace -> '%s' to -> (%s, %s, %s, %s, %s). Create workspace without connection...",
+                    "External System -> '%s' is disabled in payload. Cannot connect workspace -> '%s' to -> (%s, %s, %s). Create workspace without connection...",
                     ext_system_id,
                     name,
                     ext_system_id,
                     bo_type,
-                    bo_id,
-                    bo_search_field,
-                    bo_search_value,
+                    bo_id or "'{}' = '{}'".format(bo_search_field, bo_search_value),
                 )
                 continue
             if not external_system.get("reachable"):
                 self.logger.warning(
-                    "External System -> '%s' is not reachable. Cannot connect workspace -> '%s' to -> (%s, %s, %s, %s, %s). Create workspace without connection...",
+                    "External System -> '%s' is not reachable. Cannot connect workspace -> '%s' to -> (%s, %s, %s). Create workspace without connection...",
                     ext_system_id,
                     name,
                     ext_system_id,
                     bo_type,
-                    bo_id,
-                    bo_search_field,
-                    bo_search_value,
+                    bo_id or "'{}' = '{}'".format(bo_search_field, bo_search_value),
                 )
                 continue
             external_system_type = external_system.get("external_system_type", "")
@@ -12791,7 +12789,7 @@ class Payload:
                 bo_id,
             )
             # Update the payload structure to have the bo_id
-            # for downstream dtermine_workspace_id():
+            # for downstream determine_workspace_id():
             business_object_data["bo_id"] = bo_id
 
             business_object["ext_system_id"] = ext_system_id
@@ -12854,7 +12852,7 @@ class Payload:
             business_object_list = self.prepare_workspace_business_objects(
                 workspace=workspace,
             )
-            # Check if any of the external systems are avaiable:
+            # Check if any of the external systems are available:
             if business_object_list:
                 self.logger.info(
                     "Workspace -> '%s' will be connected to -> %s business object%s.",
@@ -12869,10 +12867,10 @@ class Payload:
             )
             business_object_list = []
 
-        # Intialize cross-application workspace to "off":
+        # Initialize cross-application workspace to "off":
         ibo_workspace_id = None
 
-        # check if the workspace has been created before (effort to make the customizing code idem-potent)
+        # check if the workspace has been created before (effort to make the customizing code idempotent)
         self.logger.debug(
             "Check if workspace -> '%s' of type -> '%s' does already exist...",
             name,
@@ -12881,7 +12879,7 @@ class Payload:
         # Check if workspace does already exist
         # In case the workspace exists, determine_workspace_id()
         # also stores the node ID into workspace["node_id"] and
-        # and the real workspace name into workspace["real_name"]
+        # the real workspace name into workspace["real_name"]
         # in case the name in payload is different from the real name
         # in the system (e.g. with nickname or business object lookup):
         workspace_id = self.determine_workspace_id(workspace=workspace)
@@ -13189,9 +13187,9 @@ class Payload:
                 ibo_workspace_id = workspace["node_id"]
 
                 # We also get the name the workspace was finally created with.
-                # This can be different form the name in the payload as additional
+                # This can be different from the name in the payload as additional
                 # naming conventions from the Workspace Type definitions may apply.
-                # This is important to make the python container idem-potent.
+                # This is important to make the python container idempotent.
                 response = self._otcs.get_workspace(node_id=workspace["node_id"])
                 workspace["name"] = self._otcs.get_result_value(
                     response=response,
@@ -13252,7 +13250,7 @@ class Payload:
             )
             return False
 
-        # Check if there's an workspace nickname configured:
+        # Check if there's a workspace nickname configured:
         if "nickname" in workspace:
             nickname = workspace["nickname"]
             self.logger.info(
@@ -13275,7 +13273,7 @@ class Payload:
                 )
         # end if "nickname" in workspace
 
-        # Check if there's an workspace icon/image configured:
+        # Check if there's a workspace icon/image configured:
         if "image_nickname" in workspace:
             image_nickname = workspace["image_nickname"]
 
@@ -13466,7 +13464,7 @@ class Payload:
 
         total_rows = len(partition)
 
-        # Process all datasets in the partion that was given to the thread:
+        # Process all datasets in the partition that was given to the thread:
         for index, row in partition.iterrows():
             # Calculate percentage of completion
             percent_complete = ((partition.index.get_loc(index) + 1) / total_rows) * 100
@@ -13837,7 +13835,7 @@ class Payload:
                     )
                     continue
 
-                # We can only use the follow REST API call to update the workspace type relationships
+                # We can only use the following REST API call to update the workspace type relationships
                 # for OTCM 26.2 and above. For older versions of OTCS we just write out the JSON file
                 # with the ontology information to a folder in Content Server and the Knowledge Graph
                 # class will read it from there (via the method load_workspace_ontology() in the OTCS class):
@@ -13992,7 +13990,7 @@ class Payload:
             - parent_path (list, optional)
             - categories (list, optional)
             - nickname (str, optional)
-            - photo_nickname (str, optional)
+            - image_nickname (str, optional)
             - rm_classification_path (list, optional)
             - classification_pathes (list, optional)
             - members (list, optional)
@@ -14013,7 +14011,7 @@ class Payload:
         Side Effects:
             Set workspace["node_id"] to the node ID of the created workspace and update
             the workspace["name"] to the final name of the workspaces (which may be different
-            from the ones in the payload depending on workspace type configutrations)
+            from the ones in the payload depending on workspace type configurations)
 
         """
 
@@ -14075,7 +14073,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that cause race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -14118,7 +14116,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -14266,7 +14264,7 @@ class Payload:
                 # 2. Option: Find the related workspace with plain nickname:
                 #
                 else:
-                    # See if a nickname exists the the provided related_workspace:
+                    # See if a nickname exists for the provided related_workspace:
                     response = self._otcs.get_node_from_nickname(nickname=related_workspace)
                     related_workspace_node_id = self._otcs.get_result_value(
                         response=response,
@@ -14332,7 +14330,7 @@ class Payload:
                 related_workspace_node_id,
             )
 
-            # Check if relationship does already exists:
+            # Check if relationship does already exist:
             response = self._otcs.get_workspace_relationships(
                 workspace_id=workspace_node_id, relationship_type=relationship_type
             )
@@ -14403,7 +14401,7 @@ class Payload:
 
         total_rows = len(partition)
 
-        # Process all datasets in the partion that was given to the thread:
+        # Process all datasets in the partition that was given to the thread:
         for index, row in partition.iterrows():
             # Calculate percentage of completion
             percent_complete = ((partition.index.get_loc(index) + 1) / total_rows) * 100
@@ -14440,10 +14438,10 @@ class Payload:
         """Process workspaces relationships in payload and create them in Content Server.
 
         Relationships can only be created if all workspaces have been created before.
-        Once a workspace got created, the node ID of that workspaces has been added
+        Once a workspace got created, the node ID of that workspace has been added
         to the payload["workspaces"] data structure (see process_workspaces())
         Relationships are created between the node IDs of two business workspaces
-        (and not the logical IDs in the inital payload specification)
+        (and not the logical IDs in the initial payload specification)
 
         Payload item keys (from _workspaces):
             * name (str, optional, for logging) - workspace name
@@ -14503,7 +14501,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that cause race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -14518,7 +14516,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -14653,14 +14651,14 @@ class Payload:
             # We don't want the workspace creator to be in the leader role
             # of automatically created workspaces - this can happen because the
             # creator gets added to the leader role automatically if
-            # the workspace type advanved configuration setting
+            # the workspace type advanced configuration setting
             # "Add the creator of a business workspace to the Lead role" is
             # enabled:
             roles_iterator = self._otcs.get_result_values_iterator(response=workspace_roles)
             for role in roles_iterator:
-                # We can have two leader roles if in a sub-workspaces a leader
-                # roles is inherited from the parent workspace. As we want
-                # don't want to consider leader role of the parent workspace
+                # We can have two leader roles if in a sub-workspace a leader
+                # role is inherited from the parent workspace. As we
+                # don't want to consider the leader role of the parent workspace
                 # we check that 'inherited_from_id' is not set:
                 if role["leader"] and role["inherited_from_id"] is None:
                     leader_role_id = role["id"]
@@ -14798,7 +14796,7 @@ class Payload:
                         )
                         continue
 
-                    # Add member if it does not yet exists - suppress warning
+                    # Add member if it does not yet exist - suppress warning
                     # message if user is already in role:
                     response = self._otcs.add_workspace_member(
                         workspace_id=workspace_node_id,
@@ -15144,7 +15142,7 @@ class Payload:
                 continue
 
             # We cannot just lookup with workspace.get("node_id") as the customizer
-            # may have been restarted inbetween - so we use our proper determine_workspace_id
+            # may have been restarted in between - so we use our proper determine_workspace_id
             # here...
             workspace_id = self.determine_workspace_id(workspace=workspace)
             if not workspace_id:
@@ -15155,7 +15153,7 @@ class Payload:
                 success = False
                 continue
 
-            # Make code idem-potent and check if Aviator is already enabled
+            # Make code idempotent and check if Aviator is already enabled
             # for this workspace:
             if self._otcs.check_workspace_aviator(workspace_id=workspace_id):
                 self.logger.info(
@@ -15215,7 +15213,7 @@ class Payload:
 
         Args:
             web_reports (list):
-                The payload list of web reports. As we have two different list (pre and post)
+                The payload list of web reports. As we have two different lists (pre and post)
                 we need to pass the actual list as parameter.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -15397,7 +15395,7 @@ class Payload:
         The CS Applications need to be installed in all frontend and backends.
 
         Args:
-            otcs_object (object):
+            otcs_object (OTCS):
                 This can either be the OTCS frontend or OTCS backend. If None
                 then the otcs_backend is used.
             section_name (str, optional):
@@ -15660,7 +15658,7 @@ class Payload:
 
         # We can only set favorites if we impersonate / authenticate as the user.
         # The following code (for loop) will change the authenticated user - we need to
-        # switch it back to admin user later so we safe the admin credentials for this:
+        # switch it back to admin user later so we save the admin credentials for this:
 
         for user in users:
             with tracer.start_as_current_span("process_user_favorites_and_profiles-user") as t:
@@ -15686,7 +15684,7 @@ class Payload:
                     )
                     continue
 
-                # We skip also user of type "ServiceUser":
+                # We also skip users of type "ServiceUser":
                 if user.get("type", "User") == "ServiceUser":
                     self.logger.info("Skipping service user -> '%s'...", user_name)
                     continue
@@ -15811,7 +15809,7 @@ class Payload:
                         )
                         if favorite_type == self._otcs.ITEM_TYPE_BUSINESS_WORKSPACE:
                             is_workspace = True
-                    # 2. Check if it a logical workspace identifier in the payload:
+                    # 2. Check if it is a logical workspace identifier in the payload:
                     if not favorite_id:
                         # check if favorite is a logical workspace name
                         favorite_item = next(
@@ -16484,10 +16482,10 @@ class Payload:
             else:
                 parent_id = holds_maintenance_id
 
-            # Holds are special - they ahve folders that cannot be traversed
+            # Holds are special - they have folders that cannot be traversed
             # in the normal way - we need to get the whole list of holds and use
-            # specialparameters for the exist_result_items() method as the REST
-            # API calls delivers a results->data->holds structure (not properties)
+            # special parameters for the exist_result_items() method as the REST
+            # API call delivers a results->data->holds structure (not properties)
             response = self._otcs.get_records_management_holds()
             if self._otcs.exist_result_item(
                 response=response,
@@ -17148,7 +17146,7 @@ class Payload:
                 success = False
                 continue
 
-            # Handling for shortcut items that have an orginal node:
+            # Handling for shortcut items that have an original node:
             original_nickname = item.get("original_nickname")
             original_path = item.get("original_path")
 
@@ -17368,7 +17366,7 @@ class Payload:
                     item_details["xecmpfAfterJobDataId"] = after_job_id
                 # Check if this bot should start based on a schedule.
                 # Then we need to configure the agent to run it:
-                elif str(start_mode) == "7558":  # 7558 is NOT a object ID but an internal agent type ID!
+                elif str(start_mode) == "7558":  # 7558 is NOT an object ID but an internal agent type ID!
                     self.logger.info(
                         "Scheduled bot item -> '%s' starts based on a schedule. Setting the agent ID to '7558'...",
                         item_name,
@@ -17495,7 +17493,7 @@ class Payload:
                 - 1 = Apply to sub-items only
                 - 2 = Apply to this item and its sub-items (default)
                 - 3 = Apply to this item and its immediate sub-items
-            workspace_id (int | None):
+            workspace_id (int | None, optional):
                 If role permissions should be set we also need the workspace_id.
                 Use None if node is not part of a workspace or no role permissions
                 should be set.
@@ -17766,7 +17764,7 @@ class Payload:
                     nodeid = "..."
                     volume = "..."
                     nickname = "..."
-                    public_permissions = ["see", "see_content", ...]
+                    public_permissions = ["see", "see_contents", ...]
                     owner_permissions = []
                     owner_group_permissions = []
                     groups = [
@@ -17903,7 +17901,7 @@ class Payload:
             # Make item + sub-items (2) the default:
             apply_to = permission.get("apply_to", 2)
 
-            # Prcess a single permission payload item:
+            # Process a single permission payload item:
             if not self.process_permission(
                 node_id=node_id,
                 node_name=node_name,
@@ -18239,7 +18237,7 @@ class Payload:
                         success = False
                         continue
                     user_id = user["id"]
-                    # add the group ID to the assignee list:
+                    # add the user ID to the assignee list:
                     assignees.append(user_id)
 
             if not assignees:
@@ -18578,8 +18576,9 @@ class Payload:
                 The name of the OTDS resource.
             license_feature (str):
                 The license feature to assign to the user (product specific).
-            license_name (str):
+            license_name (str, optional):
                 The name of the license Key (e.g. "EXTENDED_ECM" or "INTELLIGENT_VIEWING").
+                Defaults to "EXTENDED_ECM".
             user_specific_payload_field (str, optional):
                 The name of the user specific field in payload
                 (if empty it will be ignored). Default is "licenses".
@@ -18646,7 +18645,7 @@ class Payload:
                 continue
 
             # Check if the user payload has specific license features defined.
-            # IMPORTANT: Empty lists are interpreted as NOT giving the use any license features,
+            # IMPORTANT: Empty lists are interpreted as NOT giving the user any license features,
             # so we only check for the existence of the field in the payload:
             if user_specific_payload_field and user_specific_payload_field in user:
                 if not user[user_specific_payload_field]:
@@ -19273,7 +19272,7 @@ class Payload:
             allowed_verbs = {"SELECT", "INSERT", "UPDATE", "CREATE", "WITH"}
 
             try:
-                # Using a context managers (with ...) for automatic resource management:
+                # Using context managers (with ...) for automatic resource management:
                 with psycopg.connect(connect_string) as db_connection:
                     self.logger.info(
                         "Connected to database -> '%s' (%s) with user -> '%s'...", db_name, db_hostname, db_username
@@ -19768,7 +19767,7 @@ class Payload:
             workflow_attribute_definition (dict):
                 The workflow attribute definition.
             documents (list | None, optional):
-                The list of workflow documents (attachments9).
+                The list of workflow documents (attachments).
             process_id (int | None, optional):
                 The process ID of the workflow.
 
@@ -20681,7 +20680,7 @@ class Payload:
                             )
                             success = False
                             continue
-                            # Don't break here! We want to do all existance tests!
+                            # Don't break here! We want to do all existence tests!
                         self.logger.info(
                             "Successfully passed %sexistence test for %s%s%s on current page.",
                             "non-" if not want_exist else "",
@@ -20849,7 +20848,7 @@ class Payload:
 
         Args:
             sap_rfcs (list):
-                The payload list of SAP RFCs. As we have two different list (pre and post)
+                The payload list of SAP RFCs. As we have two different lists (pre and post)
                 we need to pass the actual list as parameter.
             section_name (str, optional):
                 The name of the payload section. It can be overridden
@@ -20961,14 +20960,14 @@ class Payload:
     ) -> SuccessFactors | None:
         """Initialize SuccessFactors object for workspace creation.
 
-        This is needed synchronize user passwords and emails with SuccessFactors.
+        This is needed to synchronize user passwords and emails with SuccessFactors.
 
         Args:
             sucessfactors_external_system (dict):
                 The payload of the SuccessFactors external system created before.
 
         Returns:
-            SuccessFactors: The SuccessFactors object.
+            SuccessFactors | None: The SuccessFactors object, or None if no external system payload was given.
 
         """
 
@@ -21027,7 +21026,7 @@ class Payload:
 
         Returns:
             Salesforce | None:
-                Salesforce object or None in case an error occured.
+                Salesforce object or None in case an error occurred.
 
         """
 
@@ -21076,7 +21075,7 @@ class Payload:
 
         Returns:
             Guidewire | None:
-                Guidewire object or None in case an error occured.
+                Guidewire object or None in case an error occurred.
 
         """
 
@@ -21121,13 +21120,13 @@ class Payload:
         Args:
             data_source (dict):
                 Data source dictionary with embedded "data" Data object.
-            compression (bool):
+            compression (bool, optional):
                 If True, a compressed JSON file gets saved. If False then
-                an uncompressed JSON is saved.
+                an uncompressed JSON is saved. Defaults to True.
 
         Returns:
             bool:
-                True if the data source file (JSON) as been upladed to
+                True if the data source file (JSON) has been uploaded to
                 Content Server successfully, False otherwise.
 
         """
@@ -21156,7 +21155,7 @@ class Payload:
             payload_file_name = os.path.basename(
                 self._payload_source,
             )  # remove directories
-            # Split once at the first occurance of a dot
+            # Split once at the first occurrence of a dot
             # as the _payload_source may have multiple suffixes
             # such as .yml.gz.b64:
             payload_file_name = payload_file_name.split(".", 1)[0] + "_"
@@ -21239,11 +21238,11 @@ class Payload:
             data_source (dict):
                 Data source dictionary with embedded "data" Data object.
             compression (bool, optional):
-                Use True, if the data source file is compressed.
+                Use True, if the data source file is compressed. Defaults to True.
 
         Returns:
             bool:
-                True if the data source file (JSON) as been loaded from
+                True if the data source file (JSON) has been loaded from
                 Content Server successfully, False otherwise
 
         """
@@ -21264,7 +21263,7 @@ class Payload:
             payload_file_name = os.path.basename(
                 self._payload_source,
             )  # remove directories
-            # Split once at the first occurance of a dot
+            # Split once at the first occurrence of a dot
             # as the _payload_source may have multiple suffixes
             # such as .yml.gz.b64:
             payload_file_name = payload_file_name.split(".", 1)[0] + "_"
@@ -21348,8 +21347,8 @@ class Payload:
                 Payload dict element for the data source.
 
         Returns:
-            Data:
-                Data class that includes a Pandas DataFrame
+            Data | None:
+                Data class that includes a Pandas DataFrame. None in case of an error.
 
         Side Effects:
             self._otcs_source is set to the OTCS object created by this method.
@@ -21420,7 +21419,7 @@ class Payload:
         otcs_filter_item_category = data_source.get("otcs_filter_item_category")
         # Filter item by attribute values (only consider items if they have the attributes with the defined values):
         otcs_filter_item_attributes = data_source.get("otcs_filter_item_attributes")
-        # Filter item also if the are in workspaces (default is True):
+        # Filter item also if they are in workspaces (default is True):
         otcs_filter_item_in_workspace = data_source.get(
             "otcs_filter_item_in_workspace",
             True,
@@ -21434,7 +21433,7 @@ class Payload:
         otcs_extract_zip = data_source.get("extract_zip", False)
         # The following parameter controls how column names are constructed. If it is true, then
         # attribute columns for workspaces and items will use the category ID in the column name.
-        # Wokspace attributes always start with "workspace_cat_". Item attributes start with item_cat_".
+        # Workspace attributes always start with "workspace_cat_". Item attributes start with item_cat_".
         # If the value of 'otcs_use_numeric_category_identifier' is False then the category name
         # is converted to lower-case and spaces and non-alphanumeric characters are replaced with "_".
         # Example with otcs_use_numeric_category_identifier = True: workspace_cat_47110815_10
@@ -21884,7 +21883,7 @@ class Payload:
 
         Returns:
             str:
-                Filename or Filename of the local temp file.
+                The filename unchanged if it is not an HTTP(S) link, otherwise the path of the local temp file.
 
         """
 
@@ -22105,7 +22104,7 @@ class Payload:
 
         # If no headers is specified it means the CSV does not have column
         # names in a row (typically row 0 = first row). If we also don't
-        # have the names for the columns we will end with having coumn names
+        # have the names for the columns we will end with having column names
         # that a index values (1, 2, 3, ...). This may not be what the payload
         # author wants - so we issue a warning:
         if not csv_column_names and csv_header_index is None:  # "is None" is important here as the index can be 0
@@ -22201,7 +22200,7 @@ class Payload:
 
         Returns:
             Data | None:
-                Data class that includes a Pandas data frame. None in cause of an error.
+                Data class that includes a Pandas data frame. None in case of an error.
 
         Side Effects:
             self._nhc is set to the NHC object created by this method.
@@ -22245,15 +22244,19 @@ class Payload:
         )  # don't use "/data"
 
         # 2. Creating the NHC object:
-        self._nhc = NHC(
-            basin=nhc_basin,
-            storm_plot_exclusions=nhc_storm_plot_exclusions,
-            download_dir_images=nhc_download_dir_images,
-            download_dir_data=nhc_download_dir_data,
-            logger=self.logger,
-        )
+        try:
+            self._nhc = NHC(
+                basin=nhc_basin,
+                storm_plot_exclusions=nhc_storm_plot_exclusions,
+                download_dir_images=nhc_download_dir_images,
+                download_dir_data=nhc_download_dir_data,
+                logger=self.logger,
+            )
+        except Exception:
+            self.logger.exception("Failed to initialize NHC object! Cannot process NHC datasource.")
+            return None
         if not self._nhc:
-            self.logger.error("Failed to initialize NHC object!")
+            self.logger.error("Failed to initialize NHC object! Cannot process NHC datasource.")
             return None
 
         # 3. Load the NHC storms into the Data object (Pandas DataFrame):
@@ -22349,8 +22352,8 @@ class Payload:
         Args:
             data_source_name (str):
                 The data source name.
-            force_reload (bool):
-                Force a reload of the data source if True.
+            force_reload (bool, optional):
+                Force a reload of the data source if True. Defaults to True.
 
         Returns:
             Data | None:
@@ -22884,7 +22887,7 @@ class Payload:
                 )
 
             # Check if duplicate rows for given fields should be removed. It is
-            # important to do this after sorting as Pandas always keep the first occurance,
+            # important to do this after sorting as Pandas always keep the first occurrence,
             # so ordering plays an important role in deduplication!
             unique_fields = bulk_workspace.get("unique", [])
             if unique_fields:
@@ -23023,7 +23026,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that causes race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -23041,7 +23044,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -23655,8 +23658,6 @@ class Payload:
                 The payload of the bulkWorkspace.
             partition (pd.DataFrame):
                 Data partition with rows to process.
-            template_id (int):
-                ID of the workspace template to use.
             workspace_type (dict):
                 Workspace type data.
             template_name_field (str | None):
@@ -23668,7 +23669,7 @@ class Payload:
             categories (list, optional):
                 List of category dictionaries.
             operations (list, optional):
-                Defines which operations should be applyed on workspaces.
+                Defines which operations should be applied on workspaces.
                 Possible values are "create", "update", "delete", "recreate".
             results (list, optional):
                 A mutable list of thread results.
@@ -23708,7 +23709,7 @@ class Payload:
         result["workspaces"] = {}
         result["success"] = True
 
-        # Check if workspaces have been processed before, e.i. testing
+        # Check if workspaces have been processed before, i.e. testing
         # if a "workspaces" key exists and if it is pointing to a non-empty list.
         # Additionally we check that workspace updates are not enforced:
         if (
@@ -23763,7 +23764,7 @@ class Payload:
         # For this the workspace names have a regexp "-| " in the payload.
         nickname_additional_regex_list = [r"[^\w\s-]"]
 
-        # Classification can either be provided by classification pathes
+        # Classification can either be provided by classification paths
         # or by nicknames:
         classification_pathes = bulk_workspace.get("classification_pathes", [])
         classification_nicknames = bulk_workspace.get("classification_nicknames", [])
@@ -23782,7 +23783,7 @@ class Payload:
                     percent_complete,
                 )
 
-                # Clear variables to esure clean state for each row:
+                # Clear variables to ensure clean state for each row:
                 workspace_id = None
 
                 workspace_template = None
@@ -23960,7 +23961,7 @@ class Payload:
                         )
                         row_operations.remove("delete")
 
-                # Check if all data conditions to delete the workspace are met:
+                # Check if all data conditions to update the workspace are met:
                 if "update" in row_operations:
                     conditions_update = bulk_workspace.get("conditions_update")
                     if conditions_update:
@@ -24399,7 +24400,7 @@ class Payload:
 
                 # end if not workspace_id and "create" or "recreate" in row_operations
 
-                # If "updates" are an requested row operation we update the existing workspace with
+                # If "updates" are a requested row operation we update the existing workspace with
                 # fresh metadata from the payload. Additionally we check the external
                 # modify date to support incremental load for content that has really
                 # changed.
@@ -24802,8 +24803,8 @@ class Payload:
                 The name of the workspace type. Default is "".
 
         Returns:
-            tuple[int | None, int | None]:
-                The workspace ID and the looked up workspace name or None in case the loomkup has failed.
+            tuple[int | None, str | None]:
+                The workspace ID and the looked up workspace name. `(None, None)` if the lookup has failed.
 
         """
 
@@ -24861,7 +24862,7 @@ class Payload:
             )
 
         if lookup_row is not None:
-            # Now we determine the real workspace name be taking it from
+            # Now we determine the real workspace name by taking it from
             # the name column in the result row:
             workspace_name = lookup_row[workspace_data_source_name_column]
             self.logger.info(
@@ -24904,7 +24905,7 @@ class Payload:
         data_source_name: str | None = None,
         show_error: bool = True,
     ) -> tuple[int | None, str | None]:
-        """Look the workspace name and ID.
+        """Look up the workspace name and ID.
 
         Use a combination of workspace name, workspace type, and workspace
         data source (using synonyms) to do so.
@@ -25011,7 +25012,7 @@ class Payload:
             if workspace_id is not None:
                 return (workspace_id, workspace_synonym_name)
 
-        # As this message may be hunderds of times in the log
+        # As this message may be hundreds of times in the log
         # we invest some effort to make it look nice:
         message = "Couldn't find a workspace "
         concat_string = ""
@@ -25046,7 +25047,7 @@ class Payload:
         self,
         section_name: str = "bulkWorkspaceRelationships",
     ) -> bool:
-        """Process workspaces in payload and bulk create them in Content Server (multi-threaded).
+        """Process workspace relationships in payload and bulk create them in Content Server (multi-threaded).
 
         Payload item keys:
             - enabled (bool, optional, default=True)
@@ -25285,7 +25286,7 @@ class Payload:
                 )
 
             # Check if duplicate rows for given fields should be removed. It is
-            # important to do this after sorting as Pandas always keep the first occurance,
+            # important to do this after sorting as Pandas always keep the first occurrence,
             # so ordering plays an important role in deduplication!
             unique_fields = bulk_workspace_relationship.get("unique", [])
             if unique_fields:
@@ -25337,7 +25338,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that causes race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -25355,7 +25356,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -25509,7 +25510,7 @@ class Payload:
         if not sub_workspace_name_field:
             return (workspace_id, workspace_name)
 
-        # Otherwise we are no processing the sub-workspaces to return
+        # Otherwise we are now processing the sub-workspaces to return
         # its ID instead:
         sub_workspace_name = self.replace_bulk_placeholders(
             input_string=sub_workspace_name_field,
@@ -25608,12 +25609,8 @@ class Payload:
                 The payload of the bulkWorkspaceRelationship.
             partition (pd.DataFrame):
                 The data partition with rows to process.
-            from_workspace (str):
-                The string pattern for nickname of workspace (from).
-            to_workspace (str):
-                The string pattern for nickname of workspace (to).
             operations (list, optional):
-                Defines which operations should be applyed on workspace relationships.
+                Defines which operations should be applied on workspace relationships.
                 Possible values are "create", "delete", "recreate".
             results (list, optional):
                 A mutable list of thread results.
@@ -25643,7 +25640,7 @@ class Payload:
         result["relationships"] = {}
         result["success"] = True
 
-        # Check if workspace relationships have been processed before, e.i. testing
+        # Check if workspace relationships have been processed before, i.e. testing
         # if a "relationships" key exists and if it is pointing to a non-empty list:
         if bulk_workspace_relationship.get("relationships") and "delete" not in operations:
             existing_workspace_relationships = bulk_workspace_relationship["relationships"]
@@ -25689,7 +25686,7 @@ class Payload:
 
         total_rows = len(partition)
 
-        # Process all datasets in the partion that was given to the thread:
+        # Process all datasets in the partition that was given to the thread:
         for index, row in partition.iterrows():
             # Calculate percentage of completion
             percent_complete = ((partition.index.get_loc(index) + 1) / total_rows) * 100
@@ -25704,7 +25701,7 @@ class Payload:
             # want to modify it per row:
             row_operations = list(operations)
 
-            # check if we have any exlusions that apply here:
+            # check if we have any exclusions that apply here:
             if conditions:
                 evaluated_condition = self.evaluate_conditions(
                     conditions=conditions,
@@ -26115,7 +26112,7 @@ class Payload:
         3. Find the category definition by a unique name and then assign it to the source node (then retrying approach 1)
 
         Args:
-            categories_payload (dict):
+            categories_payload (list):
                 The payload information for the workspace or document categories.
             source_node_id (int):
                 The item to derive or inherit the category data from. We expect this to
@@ -26202,7 +26199,7 @@ class Payload:
                             )
 
                 # if we found the payload category via nickname or unique name
-                # we assign it to thew source node (typically the parent node):
+                # we assign it to the source node (typically the parent node):
                 if category_node_id:
                     self._otcs_frontend.assign_category(
                         node_id=source_node_id,
@@ -26556,7 +26553,7 @@ class Payload:
                 )
 
             # Check if duplicate rows for given fields should be removed. It is
-            # important to do this after sorting as Pandas always keep the first occurance,
+            # important to do this after sorting as Pandas always keep the first occurrence,
             # so ordering plays an important role in deduplication!
             unique_fields = bulk_document.get("unique", [])
             if unique_fields:
@@ -26684,7 +26681,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that causes race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -26702,7 +26699,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -26733,7 +26730,7 @@ class Payload:
                     success = False
                 # Record all generated documents. This should allow us
                 # to restart in case of failures and avoid trying to
-                # uploading that have been successfully uploaded before.
+                # upload documents that have been successfully uploaded before.
                 bulk_document["documents"].update(result["documents"])
             # end for result in results
             self._log_header_callback(
@@ -26769,11 +26766,11 @@ class Payload:
 
         Args:
             path (str):
-                The base base in the file system. Placeholders need to be resolved before
+                The base path in the file system. Placeholders need to be resolved before
                 calling this method.
             download_name (str):
-                The filenname of document in the file system. This may include wildcards
-                like '*.pdf' or 'en/*.txt' or '**/*.pfd'. Then the actual download
+                The filename of document in the file system. This may include wildcards
+                like '*.pdf' or 'en/*.txt' or '**/*.pdf'. Then the actual download
                 file name is determined by a directory traversal using the 'path' parameter.
             download_name_wildcards (bool, optional):
                 Defines whether or not wildcards should be replaced in the download name.
@@ -26783,9 +26780,9 @@ class Payload:
                 The file extension - typically 3 letters like 'pdf'. Defaults to "".
 
         Returns:
-            str:
+            str | None:
                 The file name that is used to find the document in the filesystem (or if it does not yet exist)
-                the name that should be used for download. This can be None
+                the name that should be used for download. This can be None if the file name cannot be constructed.
 
         """
 
@@ -26889,7 +26886,8 @@ class Payload:
 
         Returns:
             tuple[str, str]:
-                The file name (first) and the mime type (second).
+                The file name (first) and the mime type (second). Both are None
+                if the file name cannot be determined or the download failed or was skipped.
 
         """
 
@@ -27053,7 +27051,7 @@ class Payload:
                         )
                         result["skipped_counter"] += 1
                         return None, None
-                    # Use the HHTP class to download the file:
+                    # Use the HTTP class to download the file:
                     if not self._http_object.download_file(
                         url=download_url,
                         filename=file_name,
@@ -27062,7 +27060,7 @@ class Payload:
                         wait_on_status=[403],
                         show_error=False,
                     ):
-                        # Fetch alternative download URL (if avialable)
+                        # Fetch alternative download URL (if available)
                         download_url_alt = bulk_document.get("download_url_alt")
                         if download_url_alt:
                             download_url_alt = self.replace_bulk_placeholders(
@@ -27780,7 +27778,7 @@ class Payload:
             categories (list, optional):
                 A list of category dictionaries.
             operations (list, optional):
-                A list of operations that should be applyed on workspaces.
+                A list of operations that should be applied on documents.
                 Possible values: "create", "update", "delete", "recreate".
             results (list, optional):
                 A mutable list of thread results.
@@ -27822,7 +27820,7 @@ class Payload:
         result["documents"] = {}
         result["success"] = True
 
-        # Check if documents have been processed before, e.i. testing
+        # Check if documents have been processed before, i.e. testing
         # if a "documents" key exists and if it is pointing to a non-empty list:
         # Additionally we check that workspace updates are not enforced:
         if (
@@ -28144,7 +28142,7 @@ class Payload:
             workspaces = bulk_document.get("workspaces", [])
             for workspace in workspaces:
                 # success will only be false if a config problem (failure)
-                # and not just a data problem (skipped) has occured:
+                # and not just a data problem (skipped) has occurred:
                 parent_id, success = self.get_bulk_document_location(
                     workspace=workspace, row=row, index=index, replacements=replacements, nickname=nickname
                 )
@@ -28882,7 +28880,7 @@ class Payload:
                 )
             # end for explosion in explosions
 
-            # Keep only selected rows if filters are specified in bulkDocuments.
+            # Keep only selected rows if filters are specified in bulkItems.
             # We have this _after_ "explosions" to allow access to subfields as well.
             # We have this _before_ "sorting" and "deduplication" as we may keep the wrong
             # rows otherwise (unique / deduplication always keeps the first matching row).
@@ -28912,7 +28910,7 @@ class Payload:
                 )
 
             # Check if duplicate rows for given fields should be removed. It is
-            # important to do this after sorting as Pandas always keep the first occurance,
+            # important to do this after sorting as Pandas always keep the first occurrence,
             # so ordering plays an important role in deduplication!
             unique_fields = bulk_item.get("unique", [])
             if unique_fields:
@@ -28996,7 +28994,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that causes race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -29014,7 +29012,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -29094,7 +29092,7 @@ class Payload:
             categories (list, optional):
                 A list of category dictionaries.
             operations (list, optional):
-                A list of operations that should be applyed on workspaces.
+                A list of operations that should be applied on items.
                 Possible values: "create", "update", "delete", "recreate".
             results (list, optional):
                 A mutable list of thread results.
@@ -29126,7 +29124,7 @@ class Payload:
         result["items"] = {}
         result["success"] = True
 
-        # Check if items have been processed before, e.i. testing
+        # Check if items have been processed before, i.e. testing
         # if a "items" key exists and if it is pointing to a non-empty list:
         # Additionally we check that workspace updates are not enforced:
         if (
@@ -29352,7 +29350,7 @@ class Payload:
                 row=row,
             )
 
-            # Determine the item type:
+            # Determine the item URL:
             item_url = self.replace_bulk_placeholders(
                 input_string=url_field,
                 row=row,
@@ -29374,7 +29372,7 @@ class Payload:
             # First try to get the original item for the shortcut via the nickname:
             if original_nickname:
                 item_original_node = self._otcs_frontend.get_node_from_nickname(nickname=original_nickname)
-            # FIf that didn't resolve the original node we try a path if provided in the payload:
+            # If that didn't resolve the original node we try a path if provided in the payload:
             if not item_original_node and original_path:
                 item_original_node = self._otcs_frontend.get_node_by_volume_and_path(
                     volume_type=self._otcs_frontend.VOLUME_TYPE_ENTERPRISE_WORKSPACE,
@@ -29438,7 +29436,7 @@ class Payload:
             workspaces = bulk_item.get("workspaces", [])
             for workspace in workspaces:
                 # success will only be false if a config problem (failure)
-                # and not just a data problem (skipped) has occured:
+                # and not just a data problem (skipped) has occurred:
                 parent_id, success = self.get_bulk_document_location(
                     workspace=workspace,
                     row=row,
@@ -29729,7 +29727,7 @@ class Payload:
                 # Additionally we check the external modify date to support
                 # incremental load for content that has really changed.
                 # In addition we check that "delete" is not requested as otherwise it will
-                # never go in elif "delete" ... below (and it does not make sense to update a item
+                # never go in elif "delete" ... below (and it does not make sense to update an item
                 # that is deleted in the next step...)
                 elif (
                     item_id
@@ -29741,7 +29739,7 @@ class Payload:
                     )
                 ):
                     # get the specific update operations given in the payload
-                    # if not specified we do all 4 update operations (name, description, categories and version)
+                    # if not specified we do all update operations (name, description, categories, nickname and url)
                     update_operations = bulk_item.get(
                         "update_operations",
                         ["name", "description", "categories", "nickname", "url"],
@@ -30068,7 +30066,7 @@ class Payload:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_avts_questions")
     def process_avts_questions(self, section_name: str = "avtsQuestions") -> bool:
-        """Process Aviator Search repositories.
+        """Process Aviator Search sample questions.
 
         Args:
             section_name (str, optional):
@@ -30191,7 +30189,7 @@ class Payload:
 
             # We support 3 ways to determine the node ID(s):
             # 1. Node ID is specified directly in the payload using 'id = "..."'
-            # 2. Node is is specified via a nickname of the node using 'nickname = "..."'
+            # 2. Node ID is specified via a nickname of the node using 'nickname = "..."'
             # 3. Nodes are specified via the name of a workspace type. In this
             #    case all nodes of workspace instances are considered.
 
@@ -30273,10 +30271,10 @@ class Payload:
             input_list (list):
                 A list of strings that contain placeholders.
             row (pd.Series):
-                The curent data frame row.
+                The current data frame row.
             index (int, optional):
                 Index for use if we encounter a list value.
-                Pass None here if you want alle elements of
+                Pass None here if you want all elements of
                 the list to be parsed and placeholders replaced.
             replacements (dict, optional):
                 The replacements to apply to given fields (dictionary key = field name)
@@ -30325,7 +30323,7 @@ class Payload:
             input_string (str):
                 The string to replace placeholders in.
             row (pd.Series):
-                Curent row in the data frame.
+                Current row in the data frame.
             index (int | None, optional):
                 The index for use if we encounter a list value.
                 If index is "None" then we return the complete list as value.
@@ -30348,7 +30346,7 @@ class Payload:
         This happens if the XML elements have attributes.
                pattern = r"\{([\w@]+(\.[\w@]+)*)\}"
                pattern = r"\{(\w+(\.\w+)*)\}"
-        Adjust Pattern to allow any sequence of characters withint the {...}
+        Adjust Pattern to allow any sequence of characters within the {...}
            pattern = r"\{([^}]*)\}"
         """
 
@@ -30542,7 +30540,7 @@ class Payload:
                 for regex in regex_list:
                     # We use the pipe symbol to divide patterns from replacements
                     # this is a short-hand syntax to keep it simple. If there's
-                    # no pipe in regex string and than we remove the pattern
+                    # no pipe in regex string and then we remove the pattern
                     # from the string
                     parts = regex.split("|")
                     pattern = parts[0]
@@ -30574,10 +30572,10 @@ class Payload:
         Args:
             conditions (list):
                 A list of dictionaries that have a "field" (mandatory)
-                and an "value" (optional) element.
+                and a "value" (optional) element.
             row (pd.Series):
                 The current data row to pull data from.
-            replacements (dict):
+            replacements (dict | None, optional):
                 The replacements to apply to given fields (dictionary key = field name).
 
         Returns:
@@ -30610,7 +30608,7 @@ class Payload:
                 field_value,
             )
             # we have 3 options for value:
-            # a) it does not exist in payload - then just the existance of the field is tested
+            # a) it does not exist in payload - then just the existence of the field is tested
             # b) it is a string - then we compare it 1:1 with the field value
             # c) it is a list of string - then the condition is met if one or more
             #    of the list values is equal to the field value
@@ -30618,7 +30616,7 @@ class Payload:
             #            if not value:
             if value is None:
                 # if there's no "value" element in the payload
-                # this means that we just check the existance of the field
+                # this means that we just check the existence of the field
                 if field_value:
                     # field does exist and has any non-"" value ==> condition met!
                     continue
@@ -30645,7 +30643,7 @@ class Payload:
                     break
             elif isinstance(value, bool):
                 # We can't do a bool(field_value) as this would return True
-                # for any non-empty string. So we explictly convert to a bool value
+                # for any non-empty string. So we explicitly convert to a bool value
                 # in a safe way:
                 bool_field_value: bool = field_value.lower() == "true" if field_value else False
                 if (should_be_equal and (value != bool_field_value)) or (
@@ -30856,7 +30854,7 @@ class Payload:
                 )
 
             # Check if duplicate rows for given fields should be removed. It is
-            # important to do this after sorting as Pandas always keep the first occurance,
+            # important to do this after sorting as Pandas always keep the first occurrence,
             # so ordering plays an important role in deduplication!
             unique_fields = bulk_classification.get("unique", [])
             if unique_fields:
@@ -30919,7 +30917,7 @@ class Payload:
                 thread.start()
                 threads.append(thread)
                 # Avoid that all threads start at the exact same time with
-                # potentially expired cookies that cases race conditions:
+                # potentially expired cookies that causes race conditions:
                 time.sleep(1)
             # end for index, partition in enumerate(partitions, start=1)
 
@@ -30937,7 +30935,7 @@ class Payload:
 
             # Print statistics for each thread. In addition,
             # check if all threads have completed without error / failure.
-            # If there's a single failure in on of the thread results we
+            # If there's a single failure in one of the thread results we
             # set 'success' variable to False.
             results.sort(key=lambda x: x["thread_name"])
             for result in results:
@@ -30994,7 +30992,7 @@ class Payload:
         operations: list | None = None,
         results: list | None = None,
     ) -> None:
-        """Thread worker to create classificatins in bulk.
+        """Thread worker to create classifications in bulk.
 
         Each worker thread gets a partition of the rows that include
         the data required for the classification creation.
@@ -31004,12 +31002,12 @@ class Payload:
                 The payload of the bulkClassification.
             partition (pd.DataFrame):
                 Data partition with rows to process.
-            categories (list):
+            categories (list, optional):
                 List of category dictionaries.
-            operations (list):
-                Defines which operations should be applyed on classifications.
+            operations (list, optional):
+                Defines which operations should be applied on classifications.
                 Possible values are "create", "update", "delete", "recreate".
-            results (list):
+            results (list, optional):
                 A mutable list of thread results.
 
         """
@@ -31039,7 +31037,7 @@ class Payload:
         result["classifications"] = {}
         result["success"] = True
 
-        # Check if classifications have been processed before, e.i. testing
+        # Check if classifications have been processed before, i.e. testing
         # if a "classifications" key exists and if it is pointing to a non-empty list.
         # Additionally we check that classification updates are not enforced:
         if (
@@ -31060,7 +31058,7 @@ class Payload:
         external_modify_date_field = bulk_classification.get("external_modify_date")
         external_create_date_field = bulk_classification.get("external_create_date")
 
-        # See if we have a key field to uniquely identify an existing document:
+        # See if we have a key field to uniquely identify an existing classification:
         key_field = bulk_classification.get("key")
 
         # Get dictionary of replacements for bulk classification creations
@@ -31115,7 +31113,7 @@ class Payload:
                 percent_complete,
             )
 
-            # Clear variables to esure clean state for each row:
+            # Clear variables to ensure clean state for each row:
             classification_id = None
 
             # Determine the classification name:
@@ -31259,7 +31257,7 @@ class Payload:
                     )
                     row_operations.remove("delete")
 
-            # Check if all data conditions to delete the classification are met:
+            # Check if all data conditions to update the classification are met:
             if "update" in row_operations:
                 conditions_update = bulk_classification.get("conditions_update")
                 if conditions_update:
@@ -31454,7 +31452,7 @@ class Payload:
                     )
                 else:
                     # if we couldn't determine the parent ID this means there are
-                    # now classification instances for this classification type. Then we set
+                    # no classification instances for this classification type. Then we set
                     # classification_id = None and let the code go into the else case below:
                     classification_id = None
 
@@ -31667,7 +31665,7 @@ class Payload:
 
             # end if not classification_id and "create" or "recreate" in row_operations
 
-            # If "updates" are an requested row operation we update the existing classification with
+            # If "updates" are a requested row operation we update the existing classification with
             # fresh metadata from the payload. Additionally we check the external
             # modify date to support incremental load for content that has really
             # changed.
@@ -31859,6 +31857,10 @@ class Payload:
                 The OTCS object to use. If not provided then the _otcs object
                 in the Payload object is used.
 
+        Returns:
+            bool:
+                True if the impersonation and the subsequent authentication succeeded, False otherwise.
+
         """
 
         if not otcs_object:
@@ -31901,11 +31903,13 @@ class Payload:
         """Impersonate back to admin user.
 
         Args:
-            username (str):
-                The user to impersonate.
             otcs_object (OTCS | None, optional):
                 The OTCS object to use. If not provided then the _otcs object
                 in the Payload object is used.
+
+        Returns:
+            bool:
+                True if the re-authentication as admin succeeded, False otherwise.
 
         """
 
@@ -32095,7 +32099,7 @@ class Payload:
             - enabled (bool, optional, default=True)
             - name (str, required)
             - url (str, optional) - URL for HTTP-based servers.
-            - transport (str, required) - Transport type: "streamable_http", "sse", or "stdio".
+            - transport (str, optional, default="streamable_http") - Transport: "streamable_http", "sse", or "stdio".
             - tool_scope (str, optional) - Where tools should be available: "default" or "custom".
             - auth_schema (dict, optional) - Authentication configuration.
             - command (str, optional) - Command for STDIO servers.

@@ -1,17 +1,13 @@
-# pyxecm Helper Classes
+# Helper Classes
 
-## ASSOC
+Utility classes that are used by the product classes and by the Customizer.
 
 ::: pyxecm.helper.assoc
 
-## Data
-
 ::: pyxecm.helper.data
-
-## XML
 
 ::: pyxecm.helper.xml
 
-## Web
-
 ::: pyxecm.helper.web
+
+::: pyxecm.helper.logadapter

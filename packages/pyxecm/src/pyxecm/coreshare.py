@@ -253,7 +253,7 @@ class CoreShare:
                   Data is sent as key-value pairs in the body of the request, similar to query parameters.
                 * multipart/form-data - Used for file uploads or when a form includes non-ASCII characters
 
-        Return:
+        Returns:
             dict:
                 The request header values.
 
@@ -279,7 +279,7 @@ class CoreShare:
             content_type (str, optional):
                 The content type for the request.
 
-        Return:
+        Returns:
             dict:
                 The request header values.
 
@@ -316,7 +316,7 @@ class CoreShare:
         user_credentials: bool = False,
         verify: bool = True,
     ) -> dict | None:
-        """Call an OTDS REST API in a safe way.
+        """Call a Core Share REST API in a safe way.
 
         Args:
             url (str):
@@ -338,9 +338,8 @@ class CoreShare:
                 Whether or not an error should be logged in case of a failed REST call.
                 If False, then only a warning is logged. Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a
+                failed REST call (only used if show_error is False). Defaults to False.
             warning_message (str, optional):
                 Specific warning message. Defaults to "". If not given the error_message will be used.
             failure_message (str, optional):
@@ -363,7 +362,7 @@ class CoreShare:
 
         Returns:
             dict | None:
-                Response of OTDS REST API or None in case of an error.
+                Response of the Core Share REST API or None in case of an error.
 
         """
 
@@ -519,7 +518,7 @@ class CoreShare:
 
         Args:
             response_object (object):
-                This is reponse object returned by the request call.
+                This is the response object returned by the request call.
             additional_error_message (str, optional):
                 Can be used to provide a more specific error message
                 in case an error occurs.
@@ -564,11 +563,11 @@ class CoreShare:
         value: str,
         return_key: str,
     ) -> str | None:
-        """Lookup a property value based on a provided key / value pair in the response of an Core Share REST API call.
+        """Lookup a property value based on a provided key / value pair in the response of a Core Share REST API call.
 
         Args:
             response (dict):
-                REST response from an Core Share REST Call
+                REST response from a Core Share REST Call
             key (str):
                 The property name (key).
             value (str):
@@ -617,7 +616,7 @@ class CoreShare:
             value (str):
                 The value to find in the item with the matching key.
             results_marker (str, optional):
-                The name of the data structure for the results.
+                The name of the data structure for the results. Defaults to "results".
 
         Returns:
             bool:
@@ -710,12 +709,12 @@ class CoreShare:
 
         Args:
             revalidate (bool, optional):
-                Defines whether or not a re-athentication is enforced
+                Defines whether or not a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
 
         Returns:
             str:
-                The access token. Also stores access token in self._access_token.
+                The access token. Also stores access token in self._access_token_admin.
                 None in case of error.
 
         """
@@ -796,14 +795,14 @@ class CoreShare:
 
         Args:
             revalidate (bool, optional):
-                Defines whether or not a re-athentication is enforced
+                Defines whether or not a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
             grant_type (str, optional):
-                Can either be "client_credentials" (default) or "password".
+                Can either be "client_credentials" or "password". Defaults to "password".
 
         Returns:
             str:
-                The access token. Also stores access token in self._access_token.
+                The access token. Also stores access token in self._access_token_user.
                 None in case of error.
 
         """
@@ -944,8 +943,8 @@ class CoreShare:
         Returning a generator avoids loading a large number of items into memory at once. Instead you
         can iterate over the potential large list of Core Share groups.
 
-        Example usage:
-            groups = core_share_object.get_groups_iterator(page_size=10)
+        Example:
+            groups = core_share_object.get_groups_iterator(count=10)
             for group in groups:
                 logger.info("Traversing Core Share group -> %s", group["name"])
 
@@ -956,7 +955,7 @@ class CoreShare:
 
         Returns:
             iter:
-                A generator yielding one OTDS group per iteration.
+                A generator yielding one Core Share group per iteration.
                 If the REST API fails, returns no value.
 
         """
@@ -1005,7 +1004,7 @@ class CoreShare:
         group_name: str,
         description: str = "",
     ) -> dict | None:
-        """Add a new Core Share group. This requires a Tenent Admin authorization.
+        """Add a new Core Share group. This requires a Tenant Admin authorization.
 
         Args:
             group_name (str):
@@ -1149,7 +1148,7 @@ class CoreShare:
 
         Returns:
             list | None:
-                Dictionary with the Core Share group membership or None if the request fails.
+                List with the Core Share group membership or None if the request fails.
 
             Example Response ('errors' is only output if success = False):
             [
@@ -1240,7 +1239,7 @@ class CoreShare:
 
         Returns:
             list | None:
-                Dictionary with the Core Share group membership or None if the request fails.
+                List with the Core Share group membership or None if the request fails.
 
             Example Response ('errors' is only output if success = False):
             [
@@ -1378,10 +1377,12 @@ class CoreShare:
         """Search Core Share group(s) using a query string.
 
         Args:
-            query_string(str): Query for the group name / property
+            query_string (str):
+                Query for the group name / property.
 
         Returns:
-            dict | None: Dictionary with the Core Share user data or None if the request fails.
+            dict | None:
+                Dictionary with the Core Share group data or None if the request fails.
 
         """
 
@@ -1412,9 +1413,6 @@ class CoreShare:
 
     def get_users(self) -> list | None:
         """Get Core Share users.
-
-        Args:
-            None
 
         Returns:
             list | None:
@@ -1664,7 +1662,7 @@ class CoreShare:
 
         """
 
-        # Search the users with this first and last name (and hope this is unique ;-).
+        # Search the users with this email address (and hope this is unique ;-).
         users = self.search_users(
             query_string=email,
             user_status=user_status,
@@ -1776,7 +1774,7 @@ class CoreShare:
         title: str | None = None,
         company: str | None = None,
     ) -> dict | None:
-        """Add a new Core Share user. This requires a Tenent Admin authorization.
+        """Add a new Core Share user. This requires a Tenant Admin authorization.
 
         Args:
             first_name (str):
@@ -2094,7 +2092,7 @@ class CoreShare:
 
         response = None
 
-        # Admins don't have/need specific access roles. They are controled by isAdmin flag.
+        # Admins don't have/need specific access roles. They are controlled by isAdmin flag.
         if is_admin is not None:
             update_data = {}
             update_data["isAdmin"] = is_admin
@@ -2514,7 +2512,7 @@ class CoreShare:
 
         Returns:
             dict | None:
-                Reponse of the REST call or None in case of an error.
+                Response of the REST call or None in case of an error.
 
         """
 
@@ -2604,7 +2602,7 @@ class CoreShare:
            * Local resources - not shared
            * Resources shared by the user
            * Resources shared by other users or groups
-           This method impersonate as the user. Only the user can delete its folders.
+           This method impersonates the user. Only the user can delete its folders.
            The Core Share admin is not entitled to do this.
 
         Args:
@@ -2795,7 +2793,7 @@ class CoreShare:
             group_id (str):
                 The Core Share group ID.
             resource_id (str):
-                The ID of the Core share folder.
+                The ID of the Core Share folder.
 
         Returns:
             dict | None:

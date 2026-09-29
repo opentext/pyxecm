@@ -59,7 +59,7 @@ request_headers = {
 
 
 class OTPD:
-    """Class OTPD is used to automate stettings in OpenText Extended ECM PowerDocs."""
+    """Class OTPD is used to automate settings in OpenText Extended ECM PowerDocs."""
 
     # Only class variables or class-wide constants should be defined here:
 
@@ -87,7 +87,7 @@ class OTPD:
                 The admin user name of PowerDocs Server Manager.
             password (str):
                 The admin password of PowerDocs Server Manager.
-            logger (logging.logger):
+            logger (logging.Logger, optional):
                 The logger object to use. Defaults to "default_logger".
 
         """
@@ -173,7 +173,7 @@ class OTPD:
     # end method definition
 
     def set_credentials(self, username: str = "admin", password: str = "") -> None:
-        """Set the credentials for PowerDocs for the based on user name and password.
+        """Set the credentials for PowerDocs based on user name and password.
 
         Args:
             username (str, optional):
@@ -223,7 +223,7 @@ class OTPD:
 
         Args:
             response_object (object):
-                Reponse object delivered by the request call.
+                Response object delivered by the request call.
             additional_error_message (str, optional):
                 If provided, print a custom error message.
             show_error (bool, optional):
@@ -267,14 +267,14 @@ class OTPD:
         """Authenticate at PowerDocs and retrieve session ID.
 
         Args:
-            revalidate (bool):
-                Determine, if a re-athentication is enforced
+            revalidate (bool, optional):
+                Determine, if a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
 
         Returns:
             dict:
-                Cookie information of None in case of an error.
-                Also stores cookie information in self._cookie
+                Cookie information or None in case of an error.
+                Also stores the session ID in self._jsessionid
 
         """
 
@@ -296,7 +296,7 @@ class OTPD:
         request_url = self.config()["settingsUrl"]
 
         # Fetching session id will be three step process:
-        # Step1: intiate a dummy request to tomcat
+        # Step1: initiate a dummy request to tomcat
         # Step2: fetch session id from the response,
         #        and hit j_security_check with proper authentication
         # Step3: get session id from the response, add to self.
@@ -324,7 +324,7 @@ class OTPD:
                     "Session id to perform Rest API calls to Tomcat -> %s",
                     session_dict["JSESSIONID"],
                 )
-                # store session ID an write it into the global request_headers variable:
+                # store session ID and write it into the global request_headers variable:
                 self._jsessionid = session_dict["JSESSIONID"]
                 request_headers["Cookie"] = "JSESSIONID=" + self._jsessionid
                 return session_response
@@ -436,8 +436,8 @@ class OTPD:
                 The name of the setting.
             setting_value (str):
                 The new value of the setting.
-            tenant_name (str):
-                The name of the PowerDocs tenant.
+            tenant_name (str, optional):
+                The name of the PowerDocs tenant. Defaults to "".
                 The tenant name is optional as some settings are not tenant-specific!
 
         Returns:
@@ -524,7 +524,7 @@ class OTPD:
         retry_forever: bool = False,
         parse_request_response: bool = True,
     ) -> dict | None:
-        """Call an OTDS REST API in a safe way.
+        """Call a PowerDocs REST API in a safe way.
 
         Args:
             url (str):
@@ -540,17 +540,16 @@ class OTPD:
             files (dict | None, optional):
                 Dictionary of {"name": file-tuple} for multipart encoding upload.
                 File-tuple can be a 2-tuple ("filename", fileobj) or a 3-tuple ("filename", fileobj, "content_type")
-            timeout (int | None, optional):
+            timeout (float | None, optional):
                 The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, then only a warning is logged (if show_warning is True). Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a
+                failed REST call. Only used if show_error is False. Defaults to False.
             warning_message (str, optional):
-                Specific warning message. Defaults to "". If not given the error_message will be used.
+                Specific warning message. Defaults to "". If not given the failure_message will be used.
             failure_message (str, optional):
                 Specific error message. Defaults to "".
             success_message (str, optional):
@@ -565,7 +564,7 @@ class OTPD:
 
         Returns:
             dict | None:
-                Response of OTDS REST API or None in case of an error.
+                Response of the PowerDocs REST API or None in case of an error.
 
         """
 

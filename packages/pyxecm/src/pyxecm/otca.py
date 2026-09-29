@@ -1,4 +1,4 @@
-"""OTCA stands for Content Aviator and is an OpenText offering for LLMM-based Agentic AI.
+"""OTCA stands for Content Aviator and is an OpenText offering for LLM-based Agentic AI.
 
 The REST API is documented here (OT internal):
 https://confluence.opentext.com/display/CSAI/LLM+Project+REST+APIs
@@ -67,15 +67,12 @@ class OTCA:
         """Initialize the Content Aviator (OTCA) object.
 
         Args:
-            base_url (str):
+            base_url (str | None, optional):
                 The Content Aviator base URL.
-            client_id (str):
+            client_id (str | None, optional):
                 The OTDS OAuth client ID.
-            client_secret (str):
+            client_secret (str | None, optional):
                 The OTDS OAuth client secret.
-            content_system (dict | None, optional):
-                Maps service type ("user", "service") to the auth variant
-                ("xecm", "otcm", "xecm-direct", "otcm-direct", "none").
             otcs_object (OTCS | None, optional):
                 The OTCS object.
             inline_citation (bool, optional):
@@ -272,7 +269,7 @@ class OTCA:
         retry_forever: bool = False,
         parse_request_response: bool = True,
     ) -> dict | None:
-        """Call an Content Aviator REST API in a safe way.
+        """Call a Content Aviator REST API in a safe way.
 
         Args:
             url (str):
@@ -283,7 +280,7 @@ class OTCA:
                 Request headers. Defaults to None.
             params (dict | None, optional):
                 URL query string parameters. Defaults to None.
-            data (dict | None, optional):
+            data (dict | list | None, optional):
                 Request payload. Defaults to None.
             json_data (dict | None, optional):
                 Request payload for the JSON parameter. Defaults to None.
@@ -441,7 +438,7 @@ class OTCA:
 
         Args:
             response_object (requests.Response):
-                This is reponse object delivered by the request call.
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
                 Use a more specific error message in case of an error.
             show_error (bool, optional):
@@ -605,7 +602,7 @@ class OTCA:
 
         Chat requests are meant to be called as end-users.  This should involve
         passing the end-user's access token via the Authorization HTTP header.
-        The chat service use OTDS's token endpoint to ensure that the token is valid.
+        The chat service uses OTDS's token endpoint to ensure that the token is valid.
 
         Args:
             context (str | None):
@@ -613,8 +610,8 @@ class OTCA:
                 (empty initially, returned by previous responses from POST /v1/chat).
             messages (list):
                 List of messages from conversation history.
-                TODO: document the message format. Especially which values the auther key can have.
-            where (list):
+                TODO: document the message format. Especially which values the author key can have.
+            where (list | None, optional):
                 Metadata name/value pairs for the query.
                 Could be used to specify workspaces, documents, or other criteria in the future.
                 Values need to match those passed as metadata to the embeddings API.
@@ -830,21 +827,21 @@ class OTCA:
 
         Search requests are meant to be called as end-users. This should involve
         passing the end-user's access token via the Authorization HTTP header.
-        The chat service use OTDS's token endpoint to ensure that the token is valid.
+        The chat service uses OTDS's token endpoint to ensure that the token is valid.
 
         Args:
             query (str):
                 The query.
-            document_ids (list, optional):
+            document_ids (list | None, optional):
                 List of documents (IDs) to use as scope for the query.
-            workspace_ids (list, optional):
+            workspace_ids (list | None, optional):
                 List of workspaces (IDs) to use as scope for the query.
             threshold (float, optional):
                 Minimum similarity score to accept a document. A value like 0.7 means
                 only bring back documents that are at least 70% similar.
             num_results (int, optional):
-                Also called "top-k". Defined how many "most similar" documents to retrieve.
-                Typical value: 3-20. Higher values gets broader context but risks pulling
+                Also called "top-k". Defines how many "most similar" documents to retrieve.
+                Typical value: 3-20. Higher values get broader context but risks pulling
                 in less relevant documents.
 
         Returns:
@@ -920,12 +917,12 @@ class OTCA:
         (token from a particular OAuth confidential client, using client credentials grant).
 
         Args:
-            content (str | None):
+            content (str | None, optional):
                 Content to be embedded. This is a document chunk. Can be empty for "delete" operations.
             operation (str, optional):
                 This can be either "add", "update" or "delete".
             document_id (int | None, optional):
-                The ID of the document the content originates from. This becmes metadata in the vector store.
+                The ID of the document the content originates from. This becomes metadata in the vector store.
             workspace_id (int | None, optional):
                 The ID of the workspace the content originates from. This becomes metadata in the vector store.
             additional_metadata (dict | None, optional):
@@ -992,7 +989,7 @@ class OTCA:
         Uses the same request model as embed() but targets the /v1/metadata endpoint.
 
         Args:
-            content (str | dict | None):
+            content (str | dict | None, optional):
                 Content or metadata to process. Can be empty for "delete" operations.
             operation (str, optional):
                 This can be either "add", "update" or "delete".
@@ -1045,10 +1042,10 @@ class OTCA:
         self,
         content: list[str] | None = None,
     ) -> dict | None:
-        """Direct embed a given a list of strings. Generates embeddings without storing them.
+        """Embed a given list of strings directly. Generates embeddings without storing them.
 
         Args:
-            content (list[str] | None):
+            content (list[str] | None, optional):
                 Content to be embedded. This is a list of strings.
 
         Returns:
@@ -1095,8 +1092,8 @@ class OTCA:
         Args:
             messages (list | None, optional):
                 List of messages including conversation history. Each list element is
-                a dictionary with two keys: "author" and "content".
-                Example: [{"author": "user", "content": "What is the recommended fridge temperature?"}]
+                a dictionary with two keys: "author" and "content". For example:
+                `[{"author": "user", "content": "What is the recommended fridge temperature?"}]`
             options (dict | None, optional):
                 Options for the LLM model. Supported keys:
                 * model (str) - e.g. "gemini-2.5-flash-lite"

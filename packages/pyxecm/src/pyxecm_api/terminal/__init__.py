@@ -1,4 +1,4 @@
-"""WebSocket Terminal Server defintion."""
+"""WebSocket Terminal Server definition."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"

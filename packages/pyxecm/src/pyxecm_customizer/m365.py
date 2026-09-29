@@ -57,7 +57,7 @@ REQUEST_LOGIN_HEADER = {
 
 
 class M365:
-    """Used to automate stettings in Microsoft 365 via the Graph API."""
+    """Used to automate settings in Microsoft 365 via the Graph API."""
 
     logger: logging.Logger = default_logger
 
@@ -92,11 +92,11 @@ class M365:
                 The name of the Extended ECM app for MS Teams.
             teams_app_external_id (str):
                 The external ID of the Extended ECM app for MS Teams
-            sharepoint_app_root_site (str):
+            sharepoint_app_root_site (str, optional):
                 The URL to the SharePoint root site.
-            sharepoint_app_client_id (str):
+            sharepoint_app_client_id (str, optional):
                 The SharePoint App client ID.
-            sharepoint_app_client_secret (str):
+            sharepoint_app_client_secret (str, optional):
                 The SharePoint App client secret.
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
@@ -215,10 +215,10 @@ class M365:
                 The M365 username.
             password (str):
                 The password of the M365 user.
-            scope (str):
+            scope (str, optional):
                 The scope of the delegated permission.
                 It is important to provide a scope for the intended operation
-                like "Files.ReadWrite".
+                like "Files.ReadWrite". Defaults to "Files.ReadWrite".
 
         Returns:
             dict:
@@ -276,7 +276,7 @@ class M365:
 
         Args:
             content_type (str, optional):
-                The content type for the request.
+                The content type for the request. Defaults to "application/json".
 
         Returns:
             dict:
@@ -391,11 +391,11 @@ class M365:
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, then a warning is logged only if show_warning is True. Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a
+                failed REST call (only used if show_error is False).
+                Defaults to False.
             warning_message (str, optional):
                 Specific warning message. Defaults to "". If not given the error_message will be used.
             failure_message (str, optional):
@@ -569,16 +569,17 @@ class M365:
         response_object to a dict using the vars() built-in method.
 
         Args:
-            response_object (object):
-                This is reponse object delivered by the request call.
+            response_object (requests.Response):
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
                 Use a more specific error message in case of an error.
             show_error (bool, optional):
                 True: write an error to the log file
                 False: write a warning to the log file
+                Defaults to True.
 
         Returns:
-            dict:
+            dict | None:
                 API response information or None in case of an error.
 
         """
@@ -690,7 +691,7 @@ class M365:
         if not response:
             return None
         if "value" not in response:  # If Graph APIs are called with specific IDs (and not name lookups)
-            # they may not return a list of dicts calles "values" but a single dict directly
+            # they may not return a list of dicts called "value" but a single dict directly
             if sub_dict_name and sub_dict_name in response:
                 sub_structure = response[sub_dict_name]
                 # also the substructure could be a list
@@ -732,7 +733,7 @@ class M365:
 
         Args:
             response (dict):
-                The REST response from an OTCS REST call, containing property data.
+                The REST response from an MS Graph REST call, containing property data.
             key (str):
                 Property name (key) to match in the response.
             value (str):
@@ -788,7 +789,7 @@ class M365:
 
         Args:
             revalidate (bool, optional):
-                Determins if a re-athentication is enforced.
+                Determines if a re-authentication is enforced.
                 (e.g. if session has timed out with 401 error)
 
         Returns:
@@ -845,11 +846,11 @@ class M365:
                 The password of the M365 user.
             scope (str | None, optional):
                 The scope of the delegated permission. E.g. "Files.ReadWrite".
-                Multiple delegated permissions should be separated by spaces.
+                Multiple delegated permissions should be separated by spaces. Defaults to None.
 
         Returns:
             str | None:
-                The access token for the user. Also stores access token in self._access_token.
+                The access token for the user. Also stores access token in self._user_access_token.
                 None in case of an error.
 
         """
@@ -976,7 +977,7 @@ class M365:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of users.
 
-        Example usage:
+        Example:
             users = m365_object.get_users_iterator()
             for user in users:
                 logger.info("Traversing M365 user -> '%s'...", user.get("displayName", "<undefined name>"))
@@ -1037,12 +1038,12 @@ class M365:
                 The M365 user email.
             user_id (str | None, optional):
                 The ID of the M365 user (alternatively to user_email). Optional.
-            show_error (bool):
+            show_error (bool, optional):
                 Whether or not an error should be displayed if the
-                user is not found.
+                user is not found. Defaults to False.
 
         Returns:
-            dict:
+            dict | None:
                 User information or None if the user couldn't be retrieved (e.g. because it doesn't exist
                 or if there is a permission problem).
 
@@ -1072,7 +1073,7 @@ class M365:
             )
             return None
 
-        # if there's an alias in the E-Mail Adress we remove it as
+        # if there's an alias in the E-Mail Address we remove it as
         # MS Graph seems to not support an alias to lookup a user object.
         if user_email and "+" in user_email:
             self.logger.info(
@@ -1134,15 +1135,15 @@ class M365:
             last_name (str):
                 The last name of the user.
             location (str, optional):
-                The country ISO 3166-1 alpha-2 code (e.g. US, CA, FR, DE, CN, ...)
+                The country ISO 3166-1 alpha-2 code (e.g. US, CA, FR, DE, CN, ...). Defaults to "US".
             department (str, optional):
-                The department of the user.
-            company_name (str):
-                The name of the company the user works for.
+                The department of the user. Defaults to "".
+            company_name (str, optional):
+                The name of the company the user works for. Defaults to "Innovate".
 
         Returns:
             dict | None:
-                User information or None if the user couldn't be created (e.g. because it exisits already
+                User information or None if the user couldn't be created (e.g. because it exists already
                 or if a permission problem occurs).
 
         """
@@ -1321,10 +1322,10 @@ class M365:
                 The M365 GUID of the user (can also be the M365 email of the user).
             show_error (bool, optional):
                 Whether or not an error should be logged if the user
-                does not have a photo in M365.
+                does not have a photo in M365. Defaults to True.
 
         Returns:
-            bytes:
+            bytes | None:
                 Image of the user photo or None if the user photo couldn't be retrieved.
 
         """
@@ -1369,7 +1370,7 @@ class M365:
                 The directory where the photo should be saved.
 
         Returns:
-            str:
+            str | None:
                 The name of the photo file in the file system (with full path) or None if
                 the call of the REST API fails.
 
@@ -1500,15 +1501,15 @@ class M365:
             user_id (str):
                 The M365 GUID of the user (can also be the M365 email of the user).
             me (bool, optional):
-                Should be True if the user itself is accessing the drive.
+                Should be True if the user itself is accessing the drive. Defaults to False.
             show_error (bool, optional):
                 Log a failed request as an error. Set this to False while polling for a
                 mySite that is still being provisioned - a 404 is expected there and
                 should not be reported as an error. Defaults to True.
 
         Returns:
-            dict:
-                A list of user licenses or None if request fails.
+            dict | None:
+                The drive information of the user or None if request fails.
 
         Example:
         {
@@ -1587,7 +1588,7 @@ class M365:
                 Field(s) to order results by (e.g., "displayName asc" or "createdDateTime desc").
 
         Returns:
-            dict:
+            dict | None:
                 A dictionary of all groups or None in case of an error.
 
         """
@@ -1637,7 +1638,7 @@ class M365:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of groups.
 
-        Example usage:
+        Example:
             groups = m365_object.get_groups_iterator()
             for group in groups:
                 logger.info("Traversing M365 group -> '%s'...", group.get("displayName", "<undefined name>"))
@@ -1675,7 +1676,7 @@ class M365:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield groups one at a time:
             yield from response["value"]
 
             # See if we have an additional result page.
@@ -1696,11 +1697,11 @@ class M365:
         Args:
             group_name (str):
                 The M365 Group name.
-            show_error (bool):
-                Should an error be logged if group is not found.
+            show_error (bool, optional):
+                Should an error be logged if group is not found. Defaults to False.
 
         Returns:
-            dict:
+            dict | None:
                 Group information or None if the group doesn't exist.
 
         Example:
@@ -1791,9 +1792,9 @@ class M365:
             name (str):
                 The name of the group.
             security_enabled (bool, optional):
-                Whether or not this group is used for permission management.
+                Whether or not this group is used for permission management. Defaults to False.
             mail_enabled (bool, optional):
-                Whether or not this group is email enabled.
+                Whether or not this group is email enabled. Defaults to True.
             description (str, optional):
                 A description for the group. Defaults to "".
             visibility (str, optional):
@@ -1814,7 +1815,7 @@ class M365:
 
         Returns:
             dict | None:
-                Group information or None if the group couldn't be created (e.g. because it exisits already).
+                Group information or None if the group couldn't be created (e.g. because it exists already).
 
         Example:
             {
@@ -1992,9 +1993,9 @@ class M365:
                 The M365 GUID of the group.
             member_id (str):
                 The M365 GUID of the user (member).
-            show_error (bool):
+            show_error (bool, optional):
                 Whether or not an error should be logged if the user
-                is not a member of the group.
+                is not a member of the group. Defaults to True.
 
         Returns:
             bool:
@@ -2084,7 +2085,7 @@ class M365:
             group_id (str):
                 The M365 GUID of the group.
             owner_id (str):
-                The M365 GUID of the new member.
+                The M365 GUID of the new owner.
 
         Returns:
             dict | None:
@@ -2379,7 +2380,7 @@ class M365:
         Returns:
             dict | None:
                 Team information (json - empty text!) or None if the team couldn't be created
-                (e.g. because it exisits already).
+                (e.g. because it exists already).
 
         """
 
@@ -2439,12 +2440,12 @@ class M365:
         Args:
             team_id (str):
                 The ID of the Microsoft 365 Team to delete.
-            show_error (bool):
-                Should an error be logged if the team cannot be deleted.
+            show_error (bool, optional):
+                Should an error be logged if the team cannot be deleted. Defaults to True.
 
         Returns:
             dict | None:
-                Response dictionary if the team has been deleted, False otherwise.
+                Response dictionary if the team has been deleted, None otherwise.
 
         """
 
@@ -2474,7 +2475,7 @@ class M365:
         """Delete Microsoft 365 Teams with a specific name.
 
         Microsoft 365 allows to have multiple teams with the same name. So this method may delete
-        multiple teams if the have the same name. The Graph API we use here
+        multiple teams if they have the same name. The Graph API we use here
         is the M365 Group API as deleting the group also deletes the associated team.
 
         Args:
@@ -2553,9 +2554,9 @@ class M365:
         may take some days until M365 finally deletes them.
 
         Args:
-            exception_list (list | None):
+            exception_list (list | None, optional):
                 A list of group names that should not be deleted.
-            pattern_list (list | None):
+            pattern_list (list | None, optional):
                 A list of patterns for group names to be deleted
                 (regular expression).
 
@@ -2802,7 +2803,7 @@ class M365:
     # end method definition
 
     def get_teams_apps(self, filter_expression: str = "") -> dict | None:
-        """Get a list of MS Teams apps in catalog that match a given filter criterium.
+        """Get a list of MS Teams apps in catalog that match a given filter criterion.
 
         Args:
             filter_expression (str, optional):
@@ -2892,7 +2893,7 @@ class M365:
             dict | None:
                 Response of the MS Graph API call or None if the call fails.
 
-        Examle:
+        Example:
             {
                 '@odata.context': 'https://graph.microsoft.com/v1.0/$metadata#appCatalogs/teamsApps(appDefinitions())/$entity',
                 'id': 'ccabe3fb-316f-40e0-a486-1659682cb8cd',
@@ -2947,7 +2948,7 @@ class M365:
         user_id: str,
         filter_expression: str = "",
     ) -> dict | None:
-        """Get a list of MS Teams apps of a user that match a given filter criterium.
+        """Get a list of MS Teams apps of a user that match a given filter criterion.
 
         Args:
             user_id (str):
@@ -2996,7 +2997,7 @@ class M365:
         team_id: str,
         filter_expression: str = "",
     ) -> dict | None:
-        """Get a list of MS Teams apps of a M365 team that match a given filter criterium.
+        """Get a list of MS Teams apps of a M365 team that match a given filter criterion.
 
         Args:
             team_id (str):
@@ -3083,11 +3084,12 @@ class M365:
             app_path (str):
                 The file path (with directory) to the app package to upload.
             update_existing_app (bool, optional):
-                Whether or not to update an existing app with the same name.
+                Whether or not to update an existing app with the same name. Defaults to False.
             app_catalog_id (str, optional):
                 The unique ID of the app. It is the ID the app has in
-                the catalog - which is different from ID an app gets
-                after installation (which is tenant specific).
+                the catalog - which is different from the ID an app gets
+                after installation (which is tenant specific). Required if
+                update_existing_app is True. Defaults to "".
 
         Returns:
             dict | None:
@@ -3338,7 +3340,7 @@ class M365:
                     app_name,
                 ),
             )
-            # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
+            # Retrieve the installation specific App ID - this is different from the App catalog ID!!
             app_installation_id = self.get_result_value(response=response, key="id", index=0)
         if not app_installation_id:
             self.logger.error(
@@ -3390,8 +3392,8 @@ class M365:
                 The M365 GUID of the user (can also be the M365 email of the user).
             app_name (str):
                 The exact name of the app.
-            app_installation_id (str | None):
-                The installation ID of the app. Default is None.
+            app_installation_id (str | None, optional):
+                The installation ID of the app. Defaults to None.
 
         Returns:
             dict | None:
@@ -3406,7 +3408,7 @@ class M365:
                     app_name,
                 ),
             )
-            # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
+            # Retrieve the installation specific App ID - this is different from the App catalog ID!!
             app_installation_id = self.get_result_value(response=response, key="id", index=0)
         if not app_installation_id:
             self.logger.error(
@@ -3498,7 +3500,7 @@ class M365:
 
         Args:
             team_id (str):
-                M365 GUID of the user (can also be the M365 email of the user).
+                The M365 GUID of the team.
             app_name (str):
                 The exact name of the app.
 
@@ -3512,7 +3514,7 @@ class M365:
             team_id=team_id,
             filter_expression="contains(teamsAppDefinition/displayName, '{}')".format(app_name),
         )
-        # Retrieve the installation specific App ID - this is different from thew App catalalog ID!!
+        # Retrieve the installation specific App ID - this is different from the App catalog ID!!
         app_installation_id = self.get_result_value(response=response, key="id", index=0)
         if not app_installation_id:
             self.logger.error(
@@ -3575,8 +3577,6 @@ class M365:
         Returns:
             dict | None:
                 Return data structure (dictionary) or None if the request fails.
-
-            Example return data:
 
         """
 
@@ -3962,7 +3962,7 @@ class M365:
     # end method definition
 
     def assign_sensitivity_label_to_user(self, user_email: str, label_name: str) -> dict | None:
-        """Assign a existing sensitivity label to a user.
+        """Assign an existing sensitivity label to a user.
 
         TODO: THIS IS CURRENTLY NOT WORKING!
 
@@ -4049,7 +4049,7 @@ class M365:
 
         Returns:
             dict | None:
-                App Registration data or None of the request fails.
+                App Registration data or None if the request fails.
 
         """
 
@@ -4087,16 +4087,16 @@ class M365:
             app_registration_name (str):
                 The name of the App Registration.
             description (str, optional):
-                The description of the app.
+                The description of the app. Defaults to "".
             api_permissions (list | None, optional):
-                The API permissions.
+                The API permissions. Defaults to None.
             supported_account_type (str, optional):
                 The type of account that is supposed to use
-                the App Registration.
+                the App Registration. Defaults to "AzureADMyOrg".
 
         Returns:
             dict:
-                App Registration data or None of the request fails.
+                App Registration data or None if the request fails.
 
             Example data:
             {
@@ -4179,11 +4179,11 @@ class M365:
                 The API permissions.
             supported_account_type (str, optional):
                 The type of account that is supposed to use
-                the App Registration.
+                the App Registration. Defaults to "AzureADMyOrg".
 
         Returns:
             dict:
-                App Registration data or None of the request fails.
+                App Registration data or None if the request fails.
 
         """
 
@@ -4242,17 +4242,17 @@ class M365:
         Args:
             user_id (str):
                 The M365 ID of the user.
-            sender (str):
+            sender (str, optional):
                 The sender email address to filter for.
-                If empty no sender filtering is performed.
-            subject (str):
+                If empty no sender filtering is performed. Defaults to "".
+            subject (str, optional):
                 The subject to filter for.
-                If empty no subject filtering is performed.
-            num_emails (int, optional):
-                The number of matching emails to retrieve.
+                If empty no subject filtering is performed. Defaults to "".
+            num_emails (int | None, optional):
+                The number of matching emails to retrieve. Defaults to None.
             show_error (bool, optional):
                 Whether or not an error should be displayed if the
-                user is not found.
+                user is not found. Defaults to False.
             folder (str, optional):
                 Mail folder to query (e.g. "inbox", "sentitems").
                 Defaults to "inbox".
@@ -4264,7 +4264,7 @@ class M365:
                 If set, adds a receivedDateTime ge filter. Use ISO8601 format
                 (e.g. "2026-05-03T00:00:00Z").
             include_attachments (bool, optional):
-                Whether to expand attachments in the response.
+                Whether to expand attachments in the response. Defaults to False.
             use_server_filter (bool, optional):
                 If True, applies sender/subject/date filters via Graph $filter.
                 If False (default), sender/subject filtering happens client-side
@@ -4278,8 +4278,8 @@ class M365:
                 For client-side filtering: case-sensitive subject matching if True.
 
         Returns:
-            dict:
-                Email or None of the request fails.
+            dict | None:
+                Email or None if the request fails.
 
         """
 
@@ -4392,7 +4392,7 @@ class M365:
 
         Returns:
             str | None:
-                Email body or None of the request fails.
+                Email body or None if the request fails.
 
         """
 
@@ -4478,7 +4478,7 @@ class M365:
                 break
             if search_pattern not in line:
                 continue
-            # Fine https:// in the current line:
+            # Find https:// in the current line:
             index = line.find("https://")
             if index == -1:
                 continue
@@ -4511,7 +4511,7 @@ class M365:
 
         Returns:
             dict | None:
-                Email or None of the request fails.
+                Email or None if the request fails.
 
         """
 
@@ -4554,7 +4554,7 @@ class M365:
 
         Args:
             user_email (str):
-                Email address of user recieving the verification mail.
+                Email address of user receiving the verification mail.
             sender (str):
                 Email sender (address)
             subject (str):
@@ -4562,15 +4562,17 @@ class M365:
             url_search_pattern (str):
                 String the URL needs to contain to identify it.
             line_end_marker (str, optional):
-                The character that marks line ends in the mail.
+                The character that marks line ends in the mail. Defaults to "=".
             multi_line (bool, optional):
-                Whether or not this is a multi-line mail.
+                Whether or not this is a multi-line mail. Defaults to True.
             multi_line_end_marker (str, optional):
                 If the URL spans multiple lines this is the "end" marker for the last line.
+                Defaults to "%3D".
             replacements (list, optional):
                 If the URL needs some treatment these replacements can be applied.
+                Defaults to None, which means that "=3D" is replaced by "=".
             max_retries (int, optional):
-                The number of retries in case of an error.
+                The number of retries in case of an error. Defaults to 6.
             use_browser_automation (bool, optional):
                 If Selenium-based browser automation should be used or not. Default = False.
             password (str, optional):
@@ -4948,7 +4950,7 @@ class M365:
         Returning a generator avoids loading a large number of nodes into memory at once. Instead you
         can iterate over the potential large list of SharePoint sites.
 
-        Example usage:
+        Example:
             sites = m365_object.get_sharepoint_sites_iterator(limit=10)
             for site in sites:
                 logger.info("Traversing SharePoint site -> '%s'...", site.get("name", "<undefined name>"))
@@ -4988,7 +4990,7 @@ class M365:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield sites one at a time:
             yield from response["value"]
 
             # See if we have an additional result page.
@@ -5008,7 +5010,7 @@ class M365:
 
         Args:
             site_id (str):
-                The ID of the SharePoint site the to retrieve.
+                The ID of the SharePoint site to retrieve.
 
         Returns:
             dict | None:
@@ -5219,7 +5221,7 @@ class M365:
 
         Returns:
             dict:
-                A dictionary including the list of SharePoint pages for a given page.
+                A dictionary including the list of SharePoint pages for a given site.
                 The actual list is included inside the "value" key of the dictionary.
 
         Example:
@@ -5277,7 +5279,7 @@ class M365:
 
         Args:
             site_id (str):
-                The ID of the SharePoint site the page should be get for.
+                The ID of the SharePoint site the page should be retrieved from.
             page_id (str):
                 The ID of the page to be retrieved.
 
@@ -5348,7 +5350,7 @@ class M365:
             page_name (str):
                 The name/title of the new page.
             publish (bool, optional):
-                If True, the page is immediately published.
+                If True, the page is immediately published. Defaults to True.
 
         Returns:
             dict:
@@ -5435,7 +5437,7 @@ class M365:
         section_id: str | int | None = None,
         show_error: bool = True,
     ) -> dict:
-        """Retrieve all sections SharePoint site page.
+        """Retrieve all sections of a SharePoint site page.
 
         Args:
             site_id (str):
@@ -5581,13 +5583,14 @@ class M365:
             site_id (str):
                 The ID of the SharePoint site.
             page_id (str):
-                The ID of the SharePoint page containing the web part.
+                The ID of the SharePoint page containing the section.
             section_type (str, optional):
                 "horizontalSections" (note the plural!)
                 "verticalSection" (note the singular!)
-            section_id (int | str):
+                Defaults to "horizontalSections".
+            section_id (int | str, optional):
                 The ID of the section. Only relevant for horizontal sections.
-                Simple values like 1,2,3...
+                Simple values like 1,2,3... Defaults to 1.
             columns (str, optional):
                 "fullWidth"
                 "oneColumn"
@@ -5600,10 +5603,10 @@ class M365:
                 "soft"
                 "strong"
             republish (bool, optional):
-                If True, the page is republished to make the section active.
+                If True, the page is republished to make the section active. Defaults to True.
 
         Returns:
-            dict:
+            dict | None:
                 The horizontal or vertical section.
 
         Example:
@@ -5673,16 +5676,16 @@ class M365:
             site_id (str):
                 The ID of the SharePoint site.
             page_id (str):
-                The ID of the SharePoint page containing the web part.
+                The ID of the SharePoint page containing the section.
             section_type (str, optional):
                 "horizontalSections" (note the plural!)
                 "verticalSection" (note the singular!)
-            section_id (int | str):
+            section_id (int | str, optional):
                 The ID of the section. Only relevant for horizontal sections.
-                Simple values like 1,2,3...
+                Simple values like 1,2,3... Defaults to 1.
 
         Returns:
-            dict:
+            dict | None:
                 Empty response.
 
         Example:
@@ -5767,10 +5770,10 @@ class M365:
             section_type (str, optional):
                 "horizontalSections" (note the plural!)
                 "verticalSection" (note the singular!)
-                Use None if you want to retrieve all webparts on page.
-            section_id (str | int | None):
+                Use None (default) if you want to retrieve all webparts on page.
+            section_id (str | int, optional):
                 The ID of the section. Only relevant for horizontal sections.
-                Simple values like 1,2,3...
+                Simple values like 1,2,3... Defaults to 1.
                 Not relevant for vertical section or if you want to retrieve
                 all webparts on the page.
             column_id (int | str, optional):
@@ -5904,7 +5907,7 @@ class M365:
     # end method definition
 
     def get_sharepoint_webpart(self, site_id: str, page_id: str, webpart_id: str) -> dict | None:
-        """Retrieve a page of a SharePoint site accessible to the authenticated user.
+        """Retrieve a web part of a SharePoint site page.
 
         Args:
             site_id (str):
@@ -6026,19 +6029,20 @@ class M365:
             section_type (str, optional):
                 "horizontalSections" (note the plural!)
                 "verticalSection" (note the singular!)
-            section_id (str | int):
-                The ID of the section.Only relevant for horizontal sections.
+                Defaults to "horizontalSections".
+            section_id (str | int, optional):
+                The ID of the section. Only relevant for horizontal sections.
                 Simple values like 1,2,3...
                 Defaults to 1.
             column_id (int | str, optional):
                 For horizontalSections the column ID has to be provided.
                 Defaults to 1.
             republish (bool, optional):
-                If True, the page is republished to make the section active.
+                If True, the page is republished to make the section active. Defaults to True.
 
         Returns:
-            dict:
-                The updated web part.
+            dict | None:
+                The created web part or None in case of an error.
 
         Example:
         {
@@ -6080,7 +6084,7 @@ class M365:
 
         # Construct the payload to update the specific property
         payload = {
-            "@odata.type": "#microsoft.graph.standardWebPart",  # likle "#microsoft.graph.standardWebPart" - this is mandatory!
+            "@odata.type": "#microsoft.graph.standardWebPart",  # like "#microsoft.graph.standardWebPart" - this is mandatory!
             "webPartType": webpart_type_id,  # this is mandatory!
             "data": create_data,
         }
@@ -6117,7 +6121,7 @@ class M365:
         update_data: dict,
         republish: bool = True,
     ) -> dict | None:
-        """Update a data of a specific web part on a SharePoint page.
+        """Update the data of a specific web part on a SharePoint page.
 
         Any data elements not provided for the update will remain unchanged!
 
@@ -6132,7 +6136,7 @@ class M365:
                 A dictionary with the updated data items that will be used
                 to update the "data" structure of the webpart.
             republish (bool, optional):
-                If True, the page is republished to make the section active.
+                If True, the page is republished to make the section active. Defaults to True.
 
         Returns:
             dict | None:
@@ -6186,7 +6190,7 @@ class M365:
 
         # Construct the payload to update the specific property
         payload = {
-            "@odata.type": webpart_type_name,  # likle "#microsoft.graph.standardWebPart" - this is mandatory!
+            "@odata.type": webpart_type_name,  # like "#microsoft.graph.standardWebPart" - this is mandatory!
             "webPartType": webpart_type_id,  # this is mandatory!
             "data": update_data,
         }
@@ -6233,16 +6237,16 @@ class M365:
         Args:
             site_id (str):
                 The ID of the SharePoint site.
-            username (str):
+            username (str | None, optional):
                 The login name of the user. Only relevant if the user ID
                 is not provided.
-            user_id (str):
-                The user ID. If it is not provied it will be derived from
+            user_id (str | None, optional):
+                The user ID. If it is not provided it will be derived from
                 the username.
 
         Returns:
-            dict:
-                The Graph API response or None in case an error occured..
+            dict | None:
+                The Graph API response or None in case an error occurred.
 
         Example:
         {

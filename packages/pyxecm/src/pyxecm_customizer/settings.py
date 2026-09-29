@@ -9,7 +9,7 @@ __email__ = "mdiefenb@opentext.com"
 import os
 import tempfile
 from ipaddress import ip_address
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import AliasChoices, BaseModel, Field, HttpUrl, SecretStr, model_validator
 from pydantic_settings import (
@@ -319,7 +319,7 @@ class CustomizerSettingsOTAWP(BaseModel):
     product_name: str = Field(default="APPWORKS_PLATFORM", description="Name of the Product for the license")
     product_description: str = Field(
         default="OpenText Appworks Platform",
-        description="Product desciption to be added in OTDS.",
+        description="Product description to be added in OTDS.",
     )
     resource_name: str = Field(default="awp", description="Name of the Resource for OTAWP")
     access_role_name: str = Field(default="Access to awp", description="Name of the Access Role for OTAWP")
@@ -339,7 +339,7 @@ class CustomizerSettingsM365(BaseModel):
     )
     password: SecretStr = Field(default="", description="Password of the M365 tenant Admin.")
     enabled: bool = Field(default=False, description="Enable/Disable the Microsoft 365 integration.")
-    tenant_id: str = Field(default="", description="TennantID of the Microsoft 365 tenant")
+    tenant_id: str = Field(default="", description="Tenant ID of the Microsoft 365 tenant")
     client_id: str = Field(default="", description="Client ID for the Microsoft 365 tenant.")
     client_secret: str = Field(default="", description="Client Secret for the Microsoft 365 tenant.")
     domain: str = Field(default="O365_DOMAIN", description="Base domain for the Microsoft 365 tenant.")
@@ -368,7 +368,7 @@ class CustomizerSettingsCoreShare(BaseModel):
 
     enabled: bool = Field(default=False, description="Enable/Disable Core Share integration")
     username: str = Field(default="", description="Admin username for Core Share")
-    password: SecretStr = Field(default=None, description="Admin username for Core Share")
+    password: SecretStr = Field(default=None, description="Admin password for Core Share")
     base_url: str = Field(default="https://core.opentext.com", description="Base URL of the Core Share Instance")
     sso_url: str = Field(default="https://sso.core.opentext.com", description="OTDS URL of the Core Share Instance")
     client_id: str = Field(default="", description="Client ID for the Core Share integration")
@@ -391,7 +391,7 @@ class CustomizerSettingsKnowledgeDiscovery(BaseModel):
 
     enabled: bool = Field(default=False, description="Knowledge Discovery enabled")
     url: HttpUrl | None = Field(default=None, description="URL of the Nifi Server")
-    username: str = Field(default="admin", description="Admin username for Knowledge Dicovery (Nifi)")
+    username: str = Field(default="admin", description="Admin username for Knowledge Discovery (Nifi)")
     password: SecretStr = Field(default="", description="Admin password for Knowledge Discovery (Nifi)")
 
 
@@ -407,6 +407,29 @@ class CustomizerSettingsAVTS(BaseModel):
         default=None,
         validate_default=True,
     )
+
+
+class ManagerPushSettings(BaseSettings):
+    """Configuration for optional manager run-history delivery."""
+
+    url: str = Field(default="", description="Manager base URL.")
+    key: str = Field(default="", description="Per-instance manager push key.")
+    run_id: str = Field(default="", description="External run identity.")
+    proxy: str = Field(default="", description="Dedicated manager egress proxy.")
+    ca_bundle: str = Field(default="", description="CA bundle for manager TLS.")
+    tls_verify: bool = Field(default=True, description="Verify manager TLS.")
+    push_logs: Literal["always", "on_error", "never"] = Field(default="on_error")
+    heartbeat_seconds: int = Field(default=60, gt=0)
+    max_log_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
+    queue_size: int = Field(default=100, gt=0)
+
+    model_config = SettingsConfigDict(env_prefix="CUSTOMIZER_MANAGER_")
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether manager delivery has been configured."""
+
+        return bool(self.url and self.key)
 
 
 class Settings(BaseSettings):
@@ -429,7 +452,7 @@ class Settings(BaseSettings):
     )
     cust_payload_gz: str = Field(
         default=f"{cust_payload_dir}payload.yml.gz.b64",
-        description="Location of the payload file in gz format, unzip format must bei either YAML or Terraform TFVARS.",
+        description="Location of the payload file in gz format, unzip format must be either YAML or Terraform TFVARS.",
     )
     cust_payload_external: str = Field(default="/payload-external/", deprecated=True)
 
@@ -441,19 +464,19 @@ class Settings(BaseSettings):
     cust_rm_settings_dir: str = Field(default="/settings/")
     stop_on_error: bool = Field(
         default=False,
-        description="Stop the payload processing when an error during the transport package deployment occours. This can be useful for debugging, to identify missing dependencies.",
+        description="Stop the payload processing when an error during the transport package deployment occurs. This can be useful for debugging, to identify missing dependencies.",
     )
 
     status_file_check: bool = Field(
         default=True,
-        description="Check for previous exection of a payload section, set to False to force the execution",
+        description="Check for previous execution of a payload section, set to False to force the execution",
     )
 
     placeholder_values: dict = Field(default={})
 
     profiling: bool = Field(
         default=False,
-        description="Profiling can only be enabled when using the CustomizerAPI. Switch to enable python profiling using cProfile. Result is a log file with the cProfile results, as well as a dump of the profiling session. The files are located in the logdir. The files are located in the logdir. Profilig is disabled by default.",
+        description="Profiling can only be enabled when using the CustomizerAPI. Switch to enable python profiling using cProfile. Result is a log file with the cProfile results, as well as a dump of the profiling session. The files are located in the logdir. Profiling is disabled by default.",
     )
 
     headless_browser: bool = Field(default=True, description="Headless Browser for the BrowserAutomation")

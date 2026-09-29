@@ -1,4 +1,4 @@
-"""API Implemenation for the Customizer to start and control the payload processing."""
+"""API Implementation for the Customizer to start and control the payload processing."""
 
 __author__ = "Dr. Marc Diefenbruch"
 __copyright__ = "Copyright (C) 2024-2025, OpenText"
@@ -11,7 +11,6 @@ import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from importlib.metadata import version
 
 import uvicorn
 from fastapi import FastAPI
@@ -25,6 +24,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_fastapi_instrumentator import Instrumentator
+from pyxecm_customizer.version import customizer_version
 from pyxecm_maintenance_page import run_maintenance_page
 
 from .auth.router import router as auth_router
@@ -106,7 +106,7 @@ app = FastAPI(
     openapi_url=api_settings.openapi_url,
     root_path=api_settings.root_path,
     lifespan=lifespan,
-    version=version("pyxecm"),
+    version=customizer_version(),
     openapi_tags=[
         {
             "name": "auth",

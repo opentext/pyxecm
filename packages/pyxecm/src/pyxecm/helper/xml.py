@@ -147,12 +147,12 @@ class XML:
             xpath (str):
                 XPath to select sub-elements.
             dir_name (str | None, optional):
-                Directory name to include in each dictionary, if provided.
-            logger (logging.Logger):
+                Directory name to include in each dictionary, if provided. Defaults to None.
+            logger (logging.Logger, optional):
                 The logging object used for all log messages.
 
         Returns:
-            dict | None:
+            list | None:
                 A list of dictionaries representing the parsed XML elements,
                 or None if an error occurs during file reading or parsing.
 
@@ -223,15 +223,15 @@ class XML:
             filenames (list):
                 A list of filenames. This can also be patterns like
                 "*/en/docovw.xml". If empty all filenames ending
-                with ".xml" is used.
+                with ".xml" are used.
             xpath (str, optional):
-                The XPath to the elements we want to select.
-            logger (logging.Logger):
+                The XPath to the elements we want to select. Defaults to None.
+            logger (logging.Logger, optional):
                 The logging object used for all log messages.
 
         Returns:
-            list:
-                List of dictionaries.
+            list | None:
+                List of dictionaries, or None if an error occurred.
 
         """
 
@@ -354,7 +354,7 @@ class XML:
                 against the XML files. If None or empty, defaults to ["*.xml"].
             xpath (str | None, optional):
                 An optional XPath string used to filter elements from the XML files.
-            logger (logging.Logger):
+            logger (logging.Logger, optional):
                 The logging object used for all log messages.
 
         Returns:
@@ -380,8 +380,8 @@ class XML:
                 file_path (str):
                     Path to the XML file.
 
-            Results:
-                Adds elements to the result_queue defined outside this sub-method.
+            Note:
+                Adds elements to the results_queue defined outside this sub-method.
 
             """
 
@@ -589,7 +589,7 @@ class XML:
 
         Returns:
             Element:
-                The XML element.
+                The XML element (None if no element matches the XPath).
 
         """
 
@@ -620,7 +620,7 @@ class XML:
                 XML Path to identify the XML element.
             new_value (str):
                 The new text (content).
-            logger (logging.Logger):
+            logger (logging.Logger, optional):
                 The logging object used for all log messages.
 
         """
@@ -663,10 +663,10 @@ class XML:
             is_simple (bool, optional):
                 True if the value is scalar (not having assocs with commas). Defaults to True.
             is_escaped (bool, optional):
-                True if the quotes or escaped with &quot;. Defaults to False.
+                True if the quotes are escaped with &quot;. Defaults to False.
 
         Returns:
-            str:
+            str | None:
                 The value of the setting or None if the setting is not found.
 
         """
@@ -720,7 +720,7 @@ class XML:
             is_simple (bool, optional):
                 True = value is a scalar like true, false, a number or none. Defaults to True.
             is_escaped (bool, optional):
-                True if the value is surrrounded with &quot;. Defaults to False.
+                True if the value is surrounded with &quot;. Defaults to False.
 
         Returns:
             str:
@@ -767,7 +767,7 @@ class XML:
                 The replacement string.
             xpath (str, optional):
                 An XPath can be given to narrow down the replacement to an XML element.
-                For now the XPath needs to be constructed in a way the it returns
+                For now the XPath needs to be constructed in a way that it returns
                 one or none element.
             setting (str, optional):
                 Narrow down the replacement to the line that includes the setting with this name.
@@ -776,7 +776,7 @@ class XML:
                 Lookup a specific assoc element. This parameter is optional.
             file_extensions (list[str] | None, optional):
                 File extensions to consider during traversal. If None, defaults to [".xml"].
-            logger (logging.Logger):
+            logger (logging.Logger, optional):
                 The logging object used for all log messages.
 
         Returns:
@@ -1101,12 +1101,13 @@ class XML:
                 The directory to traverse for XML files.
             xpath (str):
                 Used to determine XML elements to extract.
-            logger (logging.Logger):
+            logger (logging.Logger, optional):
                 The logging object used for all log messages.
 
         Returns:
             list | None:
-                Extracted data if it is found by the XPath, None otherwise.
+                List of dictionaries (one per extracted XML element). The list is empty
+                if the XPath does not match any element.
 
         """
 

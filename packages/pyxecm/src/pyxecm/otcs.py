@@ -431,7 +431,7 @@ class OTCS:
                 The date that is considered newer.
 
         Returns:
-            bool: True if date_new is indeed newer as date_old, False otherwise
+            bool: True if date_new is indeed newer than date_old, False otherwise
 
         """
 
@@ -440,9 +440,9 @@ class OTCS:
 
         # Define the date formats
         format1 = "%Y-%m-%dT%H:%M:%SZ"  # Format: "YYYY-MM-DDTHH:MM:SSZ"
-        format2 = "%Y-%m-%d %H:%M:%S"  # Format: "YYY-MM-DD HH:MM:SS"
-        format3 = "%Y-%m-%dT%H:%M:%S"  # Format: "YYY-MM-DDTHH:MM:SS"
-        format4 = "%Y-%m-%d"  # Format: "YYY-MM-DD"
+        format2 = "%Y-%m-%d %H:%M:%S"  # Format: "YYYY-MM-DD HH:MM:SS"
+        format3 = "%Y-%m-%dT%H:%M:%S"  # Format: "YYYY-MM-DDTHH:MM:SS"
+        format4 = "%Y-%m-%d"  # Format: "YYYY-MM-DD"
 
         # Parse the dates
         try:
@@ -562,7 +562,7 @@ class OTCS:
                 Parameter for load_items. Determines if the category ID is used
                 in the column name of the data frame (True) or a normalized
                 category name (False).
-            workspace_ontology (dict[str]):
+            workspace_ontology (dict[str] | None, optional):
                 A dictionary with keys "entities", "relationships".
                 The values of "entities" and "relationships" are lists.
                 The items in the entities list are dictionaries with keys:
@@ -676,6 +676,7 @@ class OTCS:
         otcs_config["holdUrlv2"] = otcs_rest_url + "/v2/hold"
         otcs_config["validationUrl"] = otcs_rest_url + "/v1/validation/nodes/names"
         otcs_config["aiUrl"] = otcs_rest_url + "/v2/ai"
+        otcs_config["aiAuthCheckUrl"] = otcs_config["aiUrl"] + "/auth/check"
         otcs_config["aiNodesUrl"] = otcs_config["aiUrl"] + "/nodes"
         otcs_config["aiChatUrl"] = otcs_config["aiUrl"] + "/chat"
         otcs_config["aiContextUrl"] = otcs_config["aiUrl"] + "/context"
@@ -818,6 +819,19 @@ class OTCS:
         """
 
         self._otcs_ticket = ticket
+
+    # end method definition
+
+    def is_hashed_ticket(self) -> bool:
+        """Check whether the current ticket is a legacy SHA-512 ticket hash.
+
+        Returns:
+            bool:
+                True if the current ticket is a 128-character hexadecimal SHA-512 digest.
+
+        """
+
+        return bool(self._otcs_ticket and re.fullmatch(r"[0-9a-fA-F]{128}", self._otcs_ticket))
 
     # end method definition
 
@@ -1118,6 +1132,11 @@ class OTCS:
         TODO: currently we cannot derive it from the workspace type definitions
         as this information is not managed in OTCS - this will change with 26.2.
 
+        Args:
+            force_reload (bool, optional):
+                If True, the ontology is (re-)loaded from the JSON file in the admin
+                Personal Workspace, even if it has already been initialized. Defaults to False.
+
         Returns:
             dict[str] | None:
                 Workspace ontology or None in case it is not provided via
@@ -1158,7 +1177,7 @@ class OTCS:
             return self._workspace_ontology
 
         # If the ontology is not yet initialized, we try to load
-        # it from a JSON file in the perosnal workspace of the admin user:
+        # it from a JSON file in the personal workspace of the admin user:
         if self._workspace_ontology or self.load_workspace_ontology():
             return self._workspace_ontology
 
@@ -1254,7 +1273,7 @@ class OTCS:
         """
 
         # First, try to find the ontology file via a nickname. If not found fall back
-        # top a file in the Admin personal workspaces. If still not found return False:
+        # to a file in the Admin personal workspaces. If still not found return False:
         response = self.get_node_from_nickname(nickname=self.ONTOLOGY_NICK_NAME)
         if not response:
             # If the file with the ontology nickname is not found we
@@ -1305,9 +1324,6 @@ class OTCS:
 
         Consists of Cookie + Form Headers (see global variable).
 
-        Args:
-            None.
-
         Returns:
             dict:
                 The request header values.
@@ -1326,9 +1342,6 @@ class OTCS:
 
         Consists of Cookie + Json Headers (see global variable).
 
-        Args:
-            None.
-
         Returns:
             dict:
                 The request header values for content type JSON.
@@ -1345,10 +1358,7 @@ class OTCS:
     def request_download_header(self) -> dict:
         """Deliver the request header used for the CRUD REST API calls.
 
-        Consists Form Headers (see global variable).
-
-        Args:
-            None.
+        Consists of Download Headers (see global variable).
 
         Returns:
             dict:
@@ -1408,6 +1418,7 @@ class OTCS:
         parse_request_response: bool = True,
         stream: bool = False,
         parse_error_response: bool = False,
+        authentication_required: bool = True,
     ) -> dict | None:
         """Call an OTCS REST API in a safe way.
 
@@ -1430,14 +1441,15 @@ class OTCS:
                 Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, a warning is logged if show_warning is True, otherwise only
+                a debug message is logged. Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a failed REST call.
+                This is only evaluated if show_error is False. If False, then only
+                a debug message is logged. Defaults to False.
             warning_message (str, optional):
                 Specific warning message. Defaults to "".
-                If not given, the error_message will be used.
+                If not given, the failure_message will be used.
             failure_message (str, optional):
                 Specific error message. Defaults to "".
             success_message (str, optional):
@@ -1450,9 +1462,11 @@ class OTCS:
                 Whether the response text should be interpreted as JSON and loaded
                 into a dictionary. Defaults to True.
             stream (bool, optional):
-                Enable stream for response content (e.g. for downloading large files).
+                Enable stream for response content (e.g. for downloading large files). Defaults to False.
             parse_error_response (bool, optional):
                 Whether the error response text should be interpreted as JSON and loaded. Defaults to False.
+            authentication_required (bool, optional):
+                Whether authentication is required for the request. Defaults to True.
 
         Returns:
             dict | None:
@@ -1470,15 +1484,17 @@ class OTCS:
                 # We protect this with a lock to not read
                 # a cookie that is in process of being renewed
                 # by another thread:
-                with self._session_lock:
-                    if not self.cookie():
-                        self.logger.error("Cannot call -> %s - user is not authenticatd!", url)
-                        return None
-                    # IMPORTANT: this needs to be a copy - dicts are mutable and
-                    # we need to preserve the old value to detect in reauthenticate()
-                    # if the cookie has been renewed already or not:
-                    request_cookie = self.cookie().copy()
-                    headers.update(request_cookie)
+                request_cookie = {}
+                if authentication_required:
+                    with self._session_lock:
+                        if not self.cookie():
+                            self.logger.error("Cannot call -> %s - user is not authenticatd!", url)
+                            return None
+                        # IMPORTANT: this needs to be a copy - dicts are mutable and
+                        # we need to preserve the old value to detect in reauthenticate()
+                        # if the cookie has been renewed already or not:
+                        request_cookie = self.cookie().copy()
+                        headers.update(request_cookie)
                 response = self.request_session().request(
                     method=method,
                     url=url,
@@ -1511,7 +1527,7 @@ class OTCS:
                     else:
                         return response
                 # Check if Session has expired - then re-authenticate and try once more
-                elif response.status_code == 401 and retries <= max_retries:
+                elif authentication_required and response.status_code == 401 and retries <= max_retries:
                     # Try to reauthenticate:
                     self.logger.info(
                         "Reauthentication at -> '%s' required...",
@@ -1705,8 +1721,8 @@ class OTCS:
         Args:
             response_object (object):
                 The response object delivered by the request call.
-            additional_error_message (str):
-                Custom error message to include in logs.
+            additional_error_message (str, optional):
+                Custom error message to include in logs. Defaults to "".
             show_error (bool, optional):
                 If True, logs an error / raises an exception. If False, logs a warning.
 
@@ -1767,8 +1783,8 @@ class OTCS:
         Args:
             response_object (object):
                 The response object delivered by the request call.
-            additional_error_message (str):
-                Custom error message to include in logs.
+            additional_error_message (str, optional):
+                Custom error message to include in logs. Defaults to "".
             show_error (bool, optional):
                 If True, logs an error / raises an exception. If False, logs a warning.
 
@@ -1904,7 +1920,7 @@ class OTCS:
         value: str,
         property_name: str = "properties",
     ) -> bool:
-        """Check existence of key / value pair in the response properties of an Content Server REST API call.
+        """Check existence of key / value pair in the response properties of a Content Server REST API call.
 
         Args:
             response (dict):
@@ -1914,7 +1930,7 @@ class OTCS:
             value (str):
                 The value to find in the item with the matching key.
             property_name (str, optional):
-                The name of the substructure that includes the values.
+                The name of the substructure that includes the values. Defaults to "properties".
 
         Returns:
             bool:
@@ -2041,7 +2057,7 @@ class OTCS:
                 Name of the sub-dictionary holding the actual values.
                 Defaults to "properties".
             show_error (bool, optional):
-                Whether an error or just a warning should be logged.
+                Whether an error should be logged if the value cannot be found. Defaults to True.
 
         Returns:
             str | None:
@@ -2323,9 +2339,6 @@ class OTCS:
     def is_configured(self) -> bool:
         """Check if the Content Server pod is configured to receive requests.
 
-        Args:
-            None.
-
         Returns:
             bool:
                 True if OTCS is configured. False if OTCS is not yet configured.
@@ -2366,9 +2379,6 @@ class OTCS:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="is_ready")
     def is_ready(self) -> bool:
         """Check if the Content Server pod is ready to receive requests.
-
-        Args:
-            None.
 
         Returns:
             bool: True if pod is ready. False if pod is not yet ready.
@@ -2441,7 +2451,7 @@ class OTCS:
                 Determines if re-authentication is enforced (e.g., if the session
                 has timed out with a 401 error). By default, the OTDS ticket
                 (if available) is used for authentication with OTCS. This flag
-                forces the use of a username and password for authentication.
+                forces the use of a username and password for authentication. Defaults to False.
             wait_for_ready (bool, optional):
                 Specifies whether to wait for the OTCS service to be "ready".
                 Defaults to True. Set to False if you want authentication to fail fast.
@@ -2678,7 +2688,7 @@ class OTCS:
                 # return the new cookie:
                 return self.cookie()
             else:
-                # No other thread has re-authenticatedyes.
+                # No other thread has re-authenticated yet.
                 # This thread will try to get the re-authentication role:
                 self.logger.debug(
                     "Session has still the old cookie used for the REST call -> %s",
@@ -2769,6 +2779,33 @@ class OTCS:
 
     # end method definition
 
+    def validate_hashed_ticket(self, hashed_ticket: str) -> dict | None:
+        """Validate a hashed ticket.
+
+        Args:
+            hashed_ticket (str): The hashed ticket to validate.
+
+        Returns:
+            dict | None: Ticket data if the hashed ticket is valid, otherwise None.
+
+        """
+        try:
+            response = self.do_request(
+                method="POST",
+                url=self.config()["aiAuthCheckUrl"],
+                data={"ticket": hashed_ticket},
+                parse_request_response=False,
+                authentication_required=False,
+            )
+        except requests.RequestException as exception:
+            message = "Failed to validate OTCSTicket with the AI authentication endpoint."
+            raise ValueError(message) from exception
+
+        if response is not None and response.status_code == requests.codes.ok:
+            return {"otcsticket": hashed_ticket}
+
+        return None
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_server_info")
     def get_server_info(self) -> dict | None:
         """Retrieve Content Server information.
@@ -2839,9 +2876,6 @@ class OTCS:
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_server_version")
     def get_server_version(self) -> str | None:
         """Get Content Server version.
-
-        Args:
-            None
 
         Returns:
             str | None:
@@ -2933,7 +2967,7 @@ class OTCS:
         Returns:
             dict | None:
                 Import response or None if the import fails.
-                The field response["results"]["data"]["restart"] indicates if the settings
+                The field `response["results"]["data"]["restart"]` indicates if the settings
                 require a restart of the OTCS services.
 
         """
@@ -2994,13 +3028,13 @@ class OTCS:
         page: int = 1,
         show_error: bool = False,
     ) -> dict | None:
-        """Get a Content Server users based on different criterias.
+        """Get Content Server users based on different criteria.
 
-        The criterias can be combined.
+        The criteria can be combined.
 
         REST API: GET /api/v2/members
 
-        All criterias except 'where_title' are evaluated by Content Server.
+        All criteria except 'where_title' are evaluated by Content Server.
         'where_title' is evaluated on the client side and is VERY INEFFICIENT -
         its use is NOT RECOMMENDED (see the parameter description below).
 
@@ -3020,16 +3054,16 @@ class OTCS:
                 Business email address of the user.
             where_title (str | None, optional):
                 Title of the user (e.g. "Sales Director").
-                WARNING: this criteria is VERY INEFFICIENT and its use is NOT
+                WARNING: this criterion is VERY INEFFICIENT and its use is NOT
                 RECOMMENDED. The REST API cannot filter on the 'title' property,
                 so this method has to traverse all users matching the other
-                criterias and filter on the client side. As OTCS caps the page
+                criteria and filter on the client side. As OTCS caps the page
                 size at 20, this costs one REST call per 20 users: a title lookup
                 on a system with 1.453 users took 74 REST calls and about 10
                 seconds - roughly 100 times slower than a server-side lookup.
                 Every call repeats the full traversal, so paging through the
                 result with 'page' is particularly expensive. Always combine
-                'where_title' with at least one server-side criteria.
+                'where_title' with at least one server-side criterion.
                 The comparison is case-insensitive and matches the complete title.
                 NOTE: 'limit' and 'page' are applied to the filtered result on the
                 client side. As no REST call is constrained by them in this case,
@@ -3161,7 +3195,7 @@ class OTCS:
 
         if where_title:
             # The REST API cannot filter on the title, so we traverse all users
-            # matching the remaining (server-side) criterias and filter on the
+            # matching the remaining (server-side) criteria and filter on the
             # client side. get_users_iterator() does NOT pass 'where_title' back
             # into this method, so this does not recurse:
             self.logger.debug(
@@ -3283,7 +3317,7 @@ class OTCS:
         'where_title' is implemented on the client side and is VERY INEFFICIENT -
         its use is NOT RECOMMENDED (see the parameter description below).
 
-        Using a generator avoids loading a large users into memory at once.
+        Using a generator avoids loading a large number of users into memory at once.
         Instead you can iterate over the potential large list of users.
 
         Example usage:
@@ -3322,10 +3356,10 @@ class OTCS:
                 seconds - roughly 100 times slower than a server-side lookup.
                 The cost is dominated by the number of round-trips, so 'fields'
                 barely helps (it cut the payload by 10x but the runtime only
-                by 1.2x). Only the server-side criterias really help: adding
+                by 1.2x). Only the server-side criteria really help: adding
                 'where_last_name' reduced the same lookup to 2 REST calls and
                 0.15 seconds. So always combine 'where_title' with at least one
-                server-side criteria, and avoid it entirely in loops or in code
+                server-side criterion, and avoid it entirely in loops or in code
                 that runs against large user bases.
                 The comparison is case-insensitive and matches the complete title.
             query_string (str | None, optional):
@@ -3558,10 +3592,10 @@ class OTCS:
     ) -> dict | None:
         """Get a Content Server user based on the login name and type.
 
-        REST API: GET /api/v2/members             (lookup by name or other criterias)
+        REST API: GET /api/v2/members             (lookup by name or other criteria)
                   GET /api/v2/members/{user_id}   (lookup by ID)
 
-        The criterias 'name', 'first_name', 'last_name' and 'business_email' are
+        The criteria 'name', 'first_name', 'last_name' and 'business_email' are
         the only user properties /v2/members can filter on. They can be combined.
 
         IMPORTANT: the lookup by 'user_id' addresses the member resource directly.
@@ -3586,7 +3620,7 @@ class OTCS:
                 the 'user_id' parameter is used to retrieve the user.
             user_id (int | None, optional):
                 ID of the user to retrieve. If provided, this parameter takes precedence
-                over the 'name' parameter (and over all other filter criterias).
+                over the 'name' parameter (and over all other filter criteria).
                 'user_type' is then ignored and the lookup also resolves groups and
                 business workspace roles - see the note above.
             user_type (int, optional):
@@ -3602,16 +3636,16 @@ class OTCS:
                 Business email address of the user.
             title (str | None, optional):
                 Title of the user (e.g. "Sales Director").
-                WARNING: this criteria is VERY INEFFICIENT and its use is NOT
+                WARNING: this criterion is VERY INEFFICIENT and its use is NOT
                 RECOMMENDED. The REST API cannot filter on the 'title' property,
                 so it is evaluated on the client side and this method has to
-                traverse all users matching the other criterias. As OTCS caps the
+                traverse all users matching the other criteria. As OTCS caps the
                 page size at 20, this costs one REST call per 20 users: looking up
                 a title on a system with 1.453 users took 74 REST calls and about
                 10 seconds - roughly 100 times slower than a server-side lookup.
                 'fields' barely helps here as the cost is dominated by the number
                 of round-trips. Always combine 'title' with at least one
-                server-side criteria (this reduced the same lookup to 2 REST calls
+                server-side criterion (this reduced the same lookup to 2 REST calls
                 and 0.15 seconds), and avoid it entirely in loops or in code that
                 runs against large user bases.
                 The comparison is case-insensitive and matches the complete title.
@@ -3732,7 +3766,7 @@ class OTCS:
 
         if user_id is None and title:
             # The REST API cannot filter on the title. get_users() applies the
-            # remaining criterias server-side and filters the title on the client
+            # remaining criteria server-side and filters the title on the client
             # side. Be aware that this traverses the complete result set.
             # limit = 0 disables the client-side paging so that we get all matches:
             response = self.get_users(
@@ -3828,9 +3862,10 @@ class OTCS:
         Args:
             value (str):
                 Field value to search for.
-            field (str):
+            field (str, optional):
                 User field to search with (e.g. "where_type", "where_name",
                 "where_first_name", "where_last_name", "where_business_email", "query").
+                Defaults to "where_name".
             fields (dict | None, optional):
                 If multiple fields should be combined provide them with this dict. E.g.:
                 {
@@ -3950,14 +3985,15 @@ class OTCS:
             privileges (list | None, optional):
                 Possible values are Login, Public Access, Content Manager,
                 Modify Users, Modify Groups, User Admin Rights,
-                Grant Discovery, System Admin Rights
+                Grant Discovery, System Admin Rights.
+                Defaults to ["Login", "Public Access"].
             user_type (int, optional):
                 The ID of the user type. 0 = regular user, 17 = service user.
 
         Returns:
             dict | None:
                 User information or None if the user couldn't be created
-                (e.g. because it exisits already).
+                (e.g. because it exists already).
 
         """
 
@@ -4055,13 +4091,9 @@ class OTCS:
 
         IMPORTANT: this method needs to be called by the authenticated user
 
-        Args:
-            None
-
         Returns:
             dict | None:
-                User information or None if the user couldn't be updated
-                (e.g. because it doesn't exist).
+                User profile settings or None if the request failed.
 
         """
 
@@ -4232,7 +4264,7 @@ class OTCS:
 
         Returns:
             bool:
-                True is user is proxy of current user. False if not.
+                True if user is proxy of current user. False if not.
 
         """
 
@@ -4272,7 +4304,7 @@ class OTCS:
         This method needs to be called as the user the proxy is acting for.
 
         Args:
-            use_v2 (bool):
+            use_v2 (bool, optional):
                 Whether or not to use the newer V2 version of this API.
                 Default is False (i.e. using the V1 version).
 
@@ -4410,9 +4442,9 @@ class OTCS:
         """Get the favorites for the current (authenticated) user.
 
         Args:
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 Name of the user (login).
-            expand (str | None = None):
+            expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
             fields (str | list, optional):
@@ -4494,6 +4526,15 @@ class OTCS:
         """Add a favorite for the current (authenticated) user.
 
         Deprecated: use add_user_favorite() instead.
+
+        Args:
+            node_id (int):
+                The ID of the node that should become a favorite.
+
+        Returns:
+            dict | None:
+                Request response or None if the favorite creation request has failed.
+
         """
 
         warnings.warn(
@@ -4539,9 +4580,20 @@ class OTCS:
     # end method definition
 
     def add_favorite_tab(self, tab_name: str, order: int) -> dict | None:
-        """Add a favorite for the current (authenticated) user.
+        """Add a favorite tab for the current (authenticated) user.
 
         Deprecated: use add_user_favorite_tab() instead.
+
+        Args:
+            tab_name (str):
+                The name of the new tab.
+            order (int):
+                The ordering position of the new tab.
+
+        Returns:
+            dict | None:
+                Request response or None if the favorite tab creation request has failed.
+
         """
 
         warnings.warn(
@@ -4607,14 +4659,14 @@ class OTCS:
         """Get the recently accessed items for the current (authenticated) user.
 
         Args:
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 Name of the user (login).
-            where_type (list[int] | None = None):
+            where_type (list[int] | None, optional):
                 List of node types to filter the results by.
                 (144 for document, 749 for email and so on)
-            where_parent_id (int | None = None):
+            where_parent_id (int | None, optional):
                 Filter results by parent node ID.
-            expand (str | None = None):
+            expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
             fields (str | list, optional):
@@ -4649,7 +4701,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Request response or None if the favorite request has failed.
+                Request response or None if the recently accessed items request has failed.
 
         """
 
@@ -4712,22 +4764,22 @@ class OTCS:
         """Get the user's mytodo workflow assignment items.
 
         Args:
-            expand (str | None = None):
+            expand (str, optional):
                 Resolve individual fields (e.g. assignments{from_user_id,location_id,workflow_id,workflow_subworkflow_id,workflow_subworkflow_task_id})
-                or entire sections (eg. expand=properties) that contain known identifiers (assigments, members, etc.).
+                or entire sections (eg. expand=properties) that contain known identifiers (assignments, members, etc.).
             fields (str | list, optional):
                 Which fields to retrieve. This can have a significant impact on performance.
                 Possible fields include:
                 - "assignments"
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
-                Defaults to "properties".
-            metadata (bool, optional):
+                Defaults to "assignments".
+            metadata (bool | None, optional):
                 If True, returns metadata (data type, field length, min/max values, etc.)
                 about the data.
                 The metadata will be returned under `results.metadata`, `metadata_map`,
                 and `metadata_order`.
-                Defaults to False.
+                Defaults to None.
             sort_column (str | None, optional):
                 Column to sort by (for example: `date_due`, `name`, `priority`).
                 Defaults to `date_due`.
@@ -4735,13 +4787,13 @@ class OTCS:
                 Sort direction prefix used with `sort_column`.
                 Use `asc` for ascending or `desc` for descending order.
                 Defaults to `asc`.
-            limit (int, optional):
+            limit (int | None, optional):
                 The maximum number of results per page.
             page (int, optional):
                 The page number to retrieve.
-            where_location_name (str, optional):
+            where_location_name (str | None, optional):
                 Filter results by location name.
-            where_name (str, optional):
+            where_name (str | None, optional):
                 Filter results by assignment name.
 
         Returns:
@@ -4802,9 +4854,9 @@ class OTCS:
         """Get the reserved nodes for the current (authenticated) user.
 
         Args:
-            where_name (str | None = None):
+            where_name (str | None, optional):
                 Name of the user (login).
-            expand (str | None = None):
+            expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
             fields (str | list, optional):
@@ -4839,7 +4891,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Request response or None if the favorite request has failed.
+                Request response or None if the reserved nodes request has failed.
 
         """
 
@@ -4898,7 +4950,7 @@ class OTCS:
             user_id (int | None, optional):
                 The ID of the user to get the group memberships for.
                 If None (default), the current (authenticated) user is used.
-            expand (str | None = None):
+            expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
             fields (str | list, optional):
@@ -4928,7 +4980,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Request response or None if the favorite request has failed.
+                Request response or None if the group memberships request has failed.
 
         Example:
         {
@@ -5100,8 +5152,8 @@ class OTCS:
                 }
             ```
 
-            To access the ID of the first group found, use ["results"][0]["data"]["properties"]["id"].
-            Or use the method get_result_value(response, key="id")
+            To access the ID of the first group found, use `["results"][0]["data"]["properties"]["id"]`.
+            Or use the method `get_result_value(response, key="id")`.
 
         """
 
@@ -5177,7 +5229,7 @@ class OTCS:
 
         Args:
             where_name (str | None, optional):
-                Name of the user (login).
+                The name of the group to look up.
             where_type (int | None, optional):
                 The type of the group to look up. For OTCS groups, use type = 1.
                 Default is 1. Use type = 101 for eSign signing groups.
@@ -5186,7 +5238,7 @@ class OTCS:
                 contained in the group name.
                 NOTE: query cannot be used together with 'where_name'.
             sort (str | None, optional):
-                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name ).
+                Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Format can be sort = id, sort = name, sort = group_id.
                 If the prefix of asc or desc is not used then asc will be assumed.
                 Default is None.
@@ -5288,7 +5340,7 @@ class OTCS:
         In this case results is a dict - not a list, containing the 'data' information directly.
 
         Args:
-            name (str | None, optiopnal):
+            name (str | None, optional):
                 The name of the group to look up. If name is not provided, the lookup will
                 rely on the group_id instead. This is an EXACT match. where_name="Sale" will
                 not match group named "Sales".
@@ -5360,8 +5412,8 @@ class OTCS:
                 }
             ```
 
-            To access the ID of the first group found, use ["results"][0]["data"]["properties"]["id"].
-            Or use the method get_result_value(response, key="id")
+            To access the ID of the first group found, use `["results"][0]["data"]["properties"]["id"]`.
+            Or use the method `get_result_value(response, key="id")`.
 
             NOTE: the response structure differs between the two lookups! The lookup by
             'name' delivers a LIST of results (see above), while the lookup by 'group_id'
@@ -5465,7 +5517,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Group information or None if the group couldn't be created (e.g. because it exisits already).
+                Group information or None if the group couldn't be created (e.g. because it exists already).
 
         """
 
@@ -5518,8 +5570,8 @@ class OTCS:
 
         Returns:
             dict | None:
-                Group information (from a subsequent REST API lookup) or None
-                if the group couldn't be created.
+                The HTTP response object of the group creation form submission (also
+                returned if the group already exists) or None if the group couldn't be created.
 
         """
 
@@ -5898,7 +5950,7 @@ class OTCS:
         Args:
             group_id (int):
                 The ID of the group to get the parent group memberships for.
-            expand (str | None = None):
+            expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
             fields (str | list, optional):
@@ -6012,7 +6064,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Response or None if adding a the member fails.
+                Response or None if adding the member fails.
 
         """
 
@@ -6051,11 +6103,11 @@ class OTCS:
             privilege_id (str):
                 The object_type (for an Object Privilege) or usage_id (for a Usage Privilege) value of the privilege.
             restricted (bool):
-                update the restricted propertiy of a usage privilege
+                Update the restricted property of a usage privilege.
 
         Returns:
             dict | None:
-                The id of the update privilege.
+                The ID of the updated privilege (as dictionary with key `id`), or None if the request failed.
 
         Example:
             ```json
@@ -6162,12 +6214,12 @@ class OTCS:
             usage_name (str | None, optional):
                 The name of the usage privilege. Needs to be provided if usage_id is None.
             update_cache (bool, optional):
-                Use the cached state of usage privileges if available.
-                Dewfault is False.
+                If True, the cache of usage privileges is cleared and the privileges
+                are reloaded from Content Server. Defaults to False.
 
         Returns:
-            dict:
-                The privilege data.
+            dict | None:
+                The privilege data or None if no matching privilege was found.
 
         Example:
             ```json
@@ -6231,7 +6283,7 @@ class OTCS:
             member_id (int):
                 The ID of user or group that the privilege should be given to.
             auto_restrict (bool, optional):
-                automatically restrict the usage privilege, if it is unrestricted
+                Automatically restrict the usage privilege, if it is unrestricted. Defaults to True.
 
         Returns:
             dict | None:
@@ -6301,13 +6353,13 @@ class OTCS:
     @cache
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_object_privileges")
     def get_object_privileges(self) -> list[dict] | None:
-        """Get list of all usage privileges defined in the system.
+        """Get list of all object privileges defined in the system.
 
         The returned values are cached, as they will not change for the lifetime of the system.
 
         Returns:
             list:
-                The complete list of usage privileges.
+                The complete list of object privileges.
 
         Example:
             [
@@ -6355,7 +6407,7 @@ class OTCS:
         object_type: int,
         update_cache: bool = False,
     ) -> dict | None:
-        """Get the usage privilege either based on ID or based on a name.
+        """Get the object privilege for a given object type.
 
         The returned values are cached, as they will not change for the lifetime of the system.
 
@@ -6363,12 +6415,12 @@ class OTCS:
             object_type (int):
                 The object type ID of the object to be fetched
             update_cache (bool, optional):
-                Use the cached state of usage privileges if available.
-                Dewfault is False.
+                If True, the cache of object privileges is cleared and the privileges
+                are reloaded from Content Server. Defaults to False.
 
         Returns:
-            dict:
-                The privilege data.
+            dict | None:
+                The privilege data or None if no privilege for the object type was found.
 
         Example:
             ```json
@@ -6406,15 +6458,15 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_object_privilege")
     def assign_object_privilege(self, object_type: str, member_id: int, auto_restrict: bool = True) -> dict | None:
-        """Assign a usage privilege to a user or group.
+        """Assign an object privilege to a user or group.
 
         Args:
             object_type (str):
-                The ID of the object type to the member_id should be added to.
+                The ID of the object type of the object privilege the member should be added to.
             member_id (int):
                 The ID of user or group that the privilege should be given to.
             auto_restrict (bool, optional):
-                automatically restrict the usage privilege, if it is unrestricted
+                Automatically restrict the usage privilege, if it is unrestricted. Defaults to True.
 
         Returns:
             dict | None:
@@ -6816,7 +6868,7 @@ class OTCS:
                 The node ID of the workspace.
             path (list):
                 A list of container items (top down).
-                The last item is name of to be retrieved item.
+                The last item is the name of the item to be retrieved.
                 If path is empty the node of the volume is returned.
             create_path (bool, optional):
                 Whether or not missing folders in the path should be created.
@@ -6955,11 +7007,11 @@ class OTCS:
 
         Args:
             volume_type (int):
-                Volume type ID (default is 141 = Enterprise Workspace)
+                Volume type ID (e.g. 141 = Enterprise Workspace).
                 See OTCS class declaration for a list of available types.
             path (list, optional):
                 A list of container items (top down),
-                last item is name of to be retrieved item.
+                last item is the name of the item to be retrieved.
                 If path is empty the node of the volume is returned.
             create_path (bool, optional):
                 if path elements are missing: should they be created?
@@ -7136,13 +7188,13 @@ class OTCS:
             node_id (int):
                 The ID of the node to assign a nickname for.
             nickname (str):
-                The to be assigned nickname of the node.
+                The nickname to be assigned to the node.
             show_error (bool, optional):
                 If True, treat as error if node is not found.
 
         Returns:
             dict | None:
-                Node information or None if nickname icouldn't be set.
+                Node information or None if the nickname couldn't be set.
 
         """
 
@@ -7235,7 +7287,7 @@ class OTCS:
                 Whether to return metadata (data type, field length, min/max values, etc.)
                 about the data.
                 Metadata will be returned under `results.metadata`, `metadata_map`,
-                or `metadata_order`.
+                and `metadata_order`.
 
         Returns:
             dict | None:
@@ -7404,7 +7456,7 @@ class OTCS:
                 Whether to return metadata (data type, field length, min/max values,...)
                 about the data.
                 Metadata will be returned under `results.metadata`, `metadata_map`,
-                or `metadata_order`.
+                and `metadata_order`.
             page_size (int, optional):
                 The number of subnodes that are requested per page.
                 For the iterator this is basically the chunk size.
@@ -7521,7 +7573,7 @@ class OTCS:
     ) -> dict | None:
         """Get the nodes under a given parent node ID with defined facet values.
 
-        NOTE: This is a V3 REST API that may not be aviable in older OTCS versions!
+        NOTE: This is a V3 REST API that may not be available in older OTCS versions!
 
         Args:
             parent_id (int):
@@ -7611,7 +7663,7 @@ class OTCS:
     ) -> iter:
         """Get an iterator object that can be used to traverse the filtered nodes.
 
-        NOTE: This is a V3 REST API that may not be aviable in older OTCS versions!
+        NOTE: This is a V3 REST API that may not be available in older OTCS versions!
 
         Using a generator avoids loading a large number of nodes into memory at once.
         Instead you can iterate over the potential large list of filtered nodes.
@@ -7646,7 +7698,7 @@ class OTCS:
 
         Example usage:
             ```python
-            nodes = otcs_object.get_nodes_by_parent_and_filters_iterator(parent_node_id=15838, facet_filters={...})
+            nodes = otcs_object.get_nodes_by_parent_and_filters_iterator(parent_id=15838, facet_values={...})
             for node in nodes:
                 logger.info("Node name -> '%s'", node["name"])
             ```
@@ -7798,7 +7850,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Node(s) wrapped in dictionary with "results" key or None if the REST API fails.
+                Node(s) wrapped in dictionary with "results" key or None if no matching node is found.
 
         """
 
@@ -7821,7 +7873,7 @@ class OTCS:
             node_name = self.get_result_value(node, "name")
             node_id = self.get_result_value(node, "id")
             category_schemas = node["metadata"]["categories"]
-            # Get the the matching category. For this we check that the name
+            # Get the matching category. For this we check that the name
             # of the first dictionary (representing the category itself) has
             # the requested name:
             category_schema = next(
@@ -7985,17 +8037,17 @@ class OTCS:
         parent_node_id: int,
         regex_list: list,
     ) -> dict | None:
-        """Lookup the node under a parent node that has a name that matches on of the given regular expressions.
+        """Lookup the node under a parent node that has a name that matches one of the given regular expressions.
 
         Args:
             parent_node_id (int):
                 The node ID of the parent (typically folder or workspace).
             regex_list (list):
-                A list of regular expression the item name should match.
+                A list of regular expressions the item name should match.
 
         Returns:
             dict | None:
-                Node wrapped in dictionary with "results" key or None if the REST API fails.
+                Node wrapped in dictionary with "results" key or None if no matching node is found.
 
         """
 
@@ -8257,12 +8309,12 @@ class OTCS:
         Args:
             node_id (int):
                 The ID of the Node.
-            facet_values (str, optional):
-                The current position in the facet tree (optional). Used
+            facet_values (dict[int, str] | None, optional):
+                The current position in the facet tree. Used
                 to determine remaining facet values if facets are already selected.
                 Specify selected facets using the following syntax:
                 '{facet id}:{value1}|{value2}|...' e.g. &where_facet=2101:331&where_facet=2100:23|9|17|20
-            facet_values_limit (int | None 0 None):
+            facet_values_limit (int | None, optional):
                 The maximum number of facet values to retrieve per facet.
 
         Returns:
@@ -8397,7 +8449,7 @@ class OTCS:
             dict | None:
                 Information of the Node actions or None if the request fails.
                 "results" is a dictionary with Node IDs as keys, and three
-                sub-sictionaries "data", "map", and "order.
+                sub-dictionaries "data", "map", and "order".
 
         Example:
             ```json
@@ -8543,7 +8595,7 @@ class OTCS:
         Args:
             node_id (int):
                 ID of the node. You can use the get_volume() function below to
-                to the node id for a volume.
+                get the node ID for a volume.
             name (str):
                 New name of the node.
             description (str | None, optional):
@@ -8702,9 +8754,9 @@ class OTCS:
             node_id (int | list):
                 ID(s) of the node(s) to be restored.
 
-        Results:
+        Returns:
             dict | None:
-                Dictionary include key 'success' with the successful restored IDs.
+                Dictionary include key 'success' with the successfully restored IDs.
 
         Example:
             ```json
@@ -8773,10 +8825,8 @@ class OTCS:
                 - 6000 : Content Sharing - Shared with external system
                 - 6014 : Content Sharing - Share Coordinator changed
                 - ...
-            filter_user_id (int, optional):
+            filter_user_id (int | None, optional):
                 Filter audit events by user ID. Defaults to no filter.
-                The date should be provided in YYYY-MM-DD notation. Time
-                is not considered (only days)
             filter_date_start (str | None, optional):
                 Filter audit events by start date. Defaults to no filter.
                 The date should be provided in YYYY-MM-DD notation. Time
@@ -8795,8 +8845,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Subnode information as a dictionary, or None if no nodes with
-                the given parent ID are found.
+                Audit information as a dictionary, or None if the request fails.
 
         Example:
                 {
@@ -8914,12 +8963,12 @@ class OTCS:
         page_size: int = 25,
         sort: str = "desc_audit_date",
     ) -> iter:
-        """Get an iterator object that can be used to traverse subnodes.
+        """Get an iterator object that can be used to traverse the audit information of a node.
 
         Filters can be applied that are given by the "filter" parameters.
 
-        Using a generator avoids loading a large number of nodes into memory at once.
-        Instead you can iterate over the potential large list of subnodes.
+        Using a generator avoids loading a large number of audit entries into memory at once.
+        Instead you can iterate over the potential large list of audit entries.
 
         Example usage:
             ```python
@@ -8942,10 +8991,8 @@ class OTCS:
                 - 6000 : Content Sharing - Shared with external system
                 - 6014 : Content Sharing - Share Coordinator changed
                 - ...
-            filter_user_id (int, optional):
+            filter_user_id (int | None, optional):
                 Filter audit events by user ID. Defaults to no filter.
-                The date should be provided in YYYY-MM-DD notation. Time
-                is not considered (only days)
             filter_date_start (str, optional):
                 Filter audit events by start date. Defaults to no filter.
                 The date should be provided in YYYY-MM-DD notation. Time
@@ -8953,7 +9000,7 @@ class OTCS:
             filter_date_end (str, optional):
                 Filter audit events by end date. Defaults to no filter.
             page_size (int, optional):
-                The number of subnodes that are requested per page.
+                The number of audit entries that are requested per page.
                 For the iterator this is basically the chunk size.
             sort (str, optional):
                 Sort order of audit results. Format can be sort=desc_audit_date or sort=asc_audit_date.
@@ -8961,7 +9008,7 @@ class OTCS:
 
         Returns:
             iter:
-                A generator yielding one node per iteration under the parent.
+                A generator yielding the audit information of the node.
                 If the REST API fails, returns no value.
 
         """
@@ -9031,14 +9078,11 @@ class OTCS:
     def get_volumes(self) -> dict | None:
         """Get all Volumes.
 
-        Args:
-            None
-
         Returns:
             dict | None:
-                Volume Details or None if an error occured.
+                Volume Details or None if an error occurred.
 
-        Exmaple:
+        Example:
             {
                 'links': {
                     'data': {...}
@@ -9079,7 +9123,7 @@ class OTCS:
                 ]
             }
             Usage:
-            ["results"][0]["data"]["properties"]["id"] is the node ID of the volume.
+            `["results"][0]["data"]["properties"]["id"]` is the node ID of the volume.
 
         """
 
@@ -9110,15 +9154,15 @@ class OTCS:
         Args:
             volume_type (int):
                 The ID of the volume type.
-            timeout (float | None, optional):
-                The timeout for the request in seconds.
+            timeout (float, optional):
+                The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
 
         Returns:
             dict | None:
                 Volume details or None if volume is not found.
 
         Example:
-            ["results"]["data"]["properties"]["id"] is the node ID of the volume.
+            `["results"]["data"]["properties"]["id"]` is the node ID of the volume.
 
         """
 
@@ -9327,7 +9371,7 @@ class OTCS:
 
         This is a helper method.
 
-        V2 of the nodes REST enpoint of OTCS requires a flat list of attributes
+        V2 of the nodes REST endpoint of OTCS requires a flat list of attributes
         (other than V1). So we need to flatten the structure. If category_data
         is already in a flat V2 structure it will remain unchanged.
 
@@ -9381,7 +9425,7 @@ class OTCS:
         replace_existing: bool = False,
         show_error: bool = True,
     ) -> dict | None:
-        """Fetch a file from a URL or local filesystem and uploads it to a OTCS parent.
+        """Fetch a file from a URL or local filesystem and upload it to an OTCS parent.
 
         The parent should be a container item such as a folder or business workspace.
 
@@ -9400,7 +9444,7 @@ class OTCS:
             mime_type (str | None, optional):
                 The mime type of the file (e.g., 'application/pdf').
                 If the mime type is not provided the method tries to "guess" the mime type.
-            file_content (str | bytes | None):
+            file_content (str | bytes | None, optional):
                 The file content provided directly in memory. If a string is provided,
                 it will be encoded using the specified encoding.
             encoding (str, optional):
@@ -9480,7 +9524,7 @@ class OTCS:
                 return None
 
             if not file_name:
-                # if path_or_url does not end with a "/"
+                # if file_url does not end with a "/"
                 # we may get the missing file name from there:
                 file_name = os.path.basename(file_url)
 
@@ -9519,7 +9563,7 @@ class OTCS:
                 )
                 file_content = response.content
 
-            # If path_or_url specifies a directory or a zip file we want to extract
+            # If file_url specifies a directory or a zip file we want to extract
             # it and then defer the upload to upload_directory_to_parent():
             elif os.path.exists(file_url) and (
                 ((file_url.endswith(".zip") or mime_type == "application/x-zip-compressed") and extract_zip)
@@ -9638,11 +9682,11 @@ class OTCS:
             file_path (str):
                 File system path to the directory or zip file.
             replace_existing (bool, optional):
-                If True, existing files are replaced by uploading a new version.
+                If True, existing files are replaced by uploading a new version. Defaults to True.
 
         Returns:
             dict | None:
-                Deliver the response of the first item created (wether this is a file oder folder)
+                Deliver the response of the first item created (whether this is a file or folder)
                 to make uploading a folder or zip behave like uploading a single document.
 
         """
@@ -9817,7 +9861,7 @@ class OTCS:
 
         Args:
             node_id (int):
-                The ID of the document to add add version to.
+                The ID of the document to add a version to.
             file_url (str | None, optional):
                 URL to download file from or the local file path.
             file_name (str | None, optional):
@@ -9825,7 +9869,7 @@ class OTCS:
             mime_type (str | None, optional):
                 The mime type of the file (e.g., 'application/pdf').
                 If the mime type is not provided the method tries to "guess" the mime type.
-            file_content (str | bytes | None):
+            file_content (str | bytes | None, optional):
                 The file content provided directly in memory. If a string is provided,
                 it will be encoded using the specified encoding.
             encoding (str, optional):
@@ -9839,7 +9883,7 @@ class OTCS:
 
         """
 
-        # Desciption of a version cannot be longer than 255 characters in OTCS:
+        # Description of a version cannot be longer than 255 characters in OTCS:
         if description and len(description) > 255:
             description = description[:255]
 
@@ -9881,7 +9925,7 @@ class OTCS:
                 return None
 
             if not file_name:
-                # if path_or_url does not end with a "/"
+                # if file_url does not end with a "/"
                 # we may get the missing file name from there:
                 file_name = os.path.basename(file_url)
 
@@ -9960,7 +10004,7 @@ class OTCS:
         # as multipart/form-data, which allows binary data (like files) to be sent along
         # with other form data.
         # The requests library sets this header correctly if the 'files' parameter is
-        # provided.cSo we just put the cookie in the header and trust the request
+        # provided. So we just put the cookie in the header and trust the request
         # library to add the Content-Type = multipart/form-data:
         request_header = self.cookie()
 
@@ -10184,10 +10228,10 @@ class OTCS:
         Args:
             node_id (int):
                 The ID of the document node to purge versions for.
-            versions_to_keep (int):
+            versions_to_keep (int, optional):
                 Number of versions to keep (from the newest to the oldest).
                 The minimum allowed number is 1. This is also the default.
-                If 1 is provided it means to keep the nerwest version only.
+                If 1 is provided it means to keep the newest version only.
 
         Returns:
             dict | None:
@@ -10351,7 +10395,7 @@ class OTCS:
             node_id (int):
                 The node ID of the document to download
             file_path (str):
-                The local file path (directory).
+                The local file path (including the file name) to save the document to.
             version_number (str | int, optional):
                 The version of the document to download.
                 If version = "" then download the latest version.
@@ -10364,7 +10408,7 @@ class OTCS:
 
         Returns:
             bool:
-                True if the document has been download to the specified file.
+                True if the document has been downloaded to the specified file.
                 False otherwise.
 
         """
@@ -10481,10 +10525,10 @@ class OTCS:
 
         Args:
             otcs_url_suffix (str):
-                OTCS URL suffix starting typically starting
+                OTCS URL suffix typically starting
                 with /cs/cs?func=, e.g. /cs/cs?func=officegroups.DownloadTeamsPackage
             file_path (str):
-                The local path to save the file (direcotry + filename).
+                The local path to save the file (directory + filename).
             search (str, optional):
                 An optional string to search for a replacement.
             replace (str, optional):
@@ -10877,7 +10921,7 @@ class OTCS:
             page_size (int, optional):
                 The maximum number of results to return. Default is 100.
                 For the iterator this is basically the chunk size.
-            limit (int | None = None), optional):
+            limit (int | None, optional):
                 The maximum number of results to return in total.
                 If None (default) all results are returned.
                 If a number is provided only up to this number of results is returned.
@@ -10944,11 +10988,12 @@ class OTCS:
 
         Args:
             show_error (bool, optional):
-                If True, treat as error if no connections are found.
+                If True, treat as error if no connections are found. Defaults to False.
 
         Returns:
-            list[dict] | None:
-                A list of external system connection details or None if the REST call fails.
+            dict | None:
+                The REST response (external system connection details are in the `results` list)
+                or None if the REST call fails.
 
         Example:
         {
@@ -11000,8 +11045,9 @@ class OTCS:
         (26.1 and newer "/externalsystems" endpoint) way of retrieving external system connections.
 
         Args:
-            connection_name (str):
-                The name of the connection to an external system.
+            connection_name (str | list | None, optional):
+                The name (or a list of names) of the connection(s) to an external system.
+                If None (default) then connections of all names are returned (requires OTCM 26.1 or newer).
             connection_types (str | list | None, optional):
                 The type of the connection. If None (default) then connections of all types are returned.
                 Supported type names:
@@ -11014,7 +11060,7 @@ class OTCS:
                 * "SF",
                 * "SFInstance"
             show_error (bool, optional):
-                If True, treat as error if connection is not found.
+                If True, treat as error if connection is not found. Defaults to False.
 
         Returns:
             dict | None:
@@ -11186,11 +11232,11 @@ class OTCS:
             password (str):
                 The password (used for BASIC authentication)
             authentication_method (str, optional):
-                Either BASIC (using username and password) or OAUTH.
+                Either BASIC (using username and password) or OAUTH. Default is "BASIC".
             client_id (str | None, optional):
-                The OAUTH Client ID (only required if authenticationMethod = OAUTH).
+                The OAUTH Client ID (only required if authentication_method = OAUTH).
             client_secret (str | None, optional):
-                OAUTH Client Secret (only required if authenticationMethod = OAUTH).
+                OAUTH Client Secret (only required if authentication_method = OAUTH).
             comment (str | None, optional):
                 An optional comment for the connection.
             display_names (dict | None, optional):
@@ -11519,7 +11565,7 @@ class OTCS:
                 List of XML subtrees to extract from each XML file in the transport.
                 Each dictionary must contain:
                 - 'xpath': defining the subtree to extract
-                - 'enabled': True if the extraction is active
+                - 'enabled' (optional): False if the extraction is disabled (defaults to True)
 
         Returns:
             dict | None:
@@ -11766,14 +11812,16 @@ class OTCS:
             zip_file_path (str):
                 Path to transport zip file.
             replacements (list[dict]):
-                List of replacement values; dict needs to have two values:
+                List of replacement values; a dict needs to have the two values 'placeholder' and 'value'
+                and can have an optional third one:
                 - placeholder: The text to replace.
                 - value: The replacement text.
                 - file_extensions: List of file extensions to consider (defaults to [".xml"]).
 
         Returns:
             bool:
-                True = success, False = error.
+                True = success, False = error or none of the replacements were found
+                (in this case no new transport package is created).
 
         """
 
@@ -11920,7 +11968,7 @@ class OTCS:
             extractions (list of dicts):
                 List of extraction values; dict needs to have two values:
                 - xpath: structure to find
-                - enabed (optional): if the extraction is active
+                - enabled (optional): if the extraction is active
 
         Returns:
             bool:
@@ -12113,13 +12161,10 @@ class OTCS:
                 bo_type_workspace_type_id = otcs_object.get_result_value(response=business_object_type, key="workspace_type_id")
             ```
 
-        Args:
-            None
-
         Returns:
-            dict | None:
-                Workspace Types information (for all external systems)
-                or None if the request fails.
+            iter:
+                An iterator over the business object types (for all external systems).
+                If the request fails then nothing is yielded.
 
         """
 
@@ -12272,9 +12317,9 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_business_object_type")
     def get_business_object_type(self, type_id: int) -> dict | None:
-        """Get information for all configured business object types.
+        """Get information for a single business object type.
 
-        This method uses an REST endpoint that was only introduced in OTCS 25.3.
+        This method uses a REST endpoint that was only introduced in OTCS 25.3.
 
         Args:
             type_id (int):
@@ -12282,8 +12327,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Workspace Types information (for all external systems)
-                or None if the request fails.
+                Business object type information or None if the request fails.
 
         Example:
         {
@@ -12535,19 +12579,19 @@ class OTCS:
         type_name: str | None = None,
         type_id: int | None = None,
     ) -> dict | None:
-        """Get information about search fields for a business objects of a given type.
+        """Get information about search fields for business objects of a given type.
 
         This information can be used to fill the where_clauses parameter of the
         get_business_objects method.
 
         Args:
-            external_system_id (str | None):
+            external_system_id (str | None, optional):
                 The External system ID (such as "TM6"). Optional parameter but
-                needed if type_id is NOT provided ot type_name. If type_id is provided,
+                needed if type_id is NOT provided (i.e. if type_name is used). If type_id is provided,
                 the external_system_id parameter will be ignored.
-            type_name (str | None):
+            type_name (str | None, optional):
                 Type name of the business object (such as "SAP Customer").
-            type_id (int | None):
+            type_id (int | None, optional):
                 The business object type ID. This is an alternative to the
                 type_name + external_system_id parameters.
                 Either external_system_id + type_name or type_id needs to be provided.
@@ -13439,7 +13483,7 @@ class OTCS:
                 Location ID of the folder in the workspace template.
             mandatory (bool | None, optional):
                 Mandatory flag.
-            mimetypes: list | None = None
+            mimetypes (list | None, optional):
                 List of allowed mimetypes for upload.
             validity_required (bool | None, optional):
                 Validity flag.
@@ -13448,9 +13492,9 @@ class OTCS:
             validity_months (int | None, optional):
                 Number of months the document is valid.
             based_on_category (int | None, optional):
-                Category Node ID. This category needs to be eitehr the default category
+                Category Node ID. This category needs to be either the default category
                 for Smart Document Types or needs to be assigned to the classification item.
-            based_on_attribute (int | None, optional):
+            based_on_attribute (str | None, optional):
                 Attribute ID.
             upload_members (list | None, optional):
                 List of member IDs allowed to upload documents.
@@ -14052,7 +14096,7 @@ class OTCS:
                 together with bo_type. If ext_system_id is provided but bo_type is not,
                 the REST API will fail.
             bo_type (str | None, optional):
-                Business Object type name to filter workspace types by. The is the
+                Business Object type name to filter workspace types by. This is the
                 technical name of the business object type - NOT the ID! E.g. "KNA1"
                 for customers in SAP S/4HANA. Needs to be provided together with ext_system_id.
                 If bo_type is provided but ext_system_id is not, the REST API will fail.
@@ -14198,6 +14242,7 @@ class OTCS:
         Returns:
             iter:
                 An iterator to traverse all workspace types.
+
         Example usage:
             ```python
             workspace_types = otcs_object.get_workspace_types_iterator()
@@ -14223,8 +14268,8 @@ class OTCS:
     def get_workspace_type_by_name(self, type_name: str, locale: str | None = None) -> dict | None:
         """Get information for a given workspace type.
 
-        This is a convinience method. It's implementation is potentially
-        inefficent as it traverse the full list of workspace types and
+        This is a convenience method. Its implementation is potentially
+        inefficient as it traverses the full list of workspace types and
         finds the matching one by name comparison.
 
         Args:
@@ -14313,7 +14358,7 @@ class OTCS:
     def get_workspace_type_name(self, type_id: int, renew: bool = False) -> str | None:
         """Get the name of a workspace type based on the provided workspace type ID.
 
-        The name is taken from a OTCS object variable self._workspace_type_lookup if recorded there.
+        The name is taken from an OTCS object variable self._workspace_type_lookup if recorded there.
         If not yet derived - or if renew is requested - it is determined via the REST API and
         then stored in self._workspace_type_lookup (as a lookup cache).
 
@@ -14330,7 +14375,7 @@ class OTCS:
         Returns:
             str | None:
                 The name of the workspace type. Or None if the type ID
-                was ot found.
+                was not found.
 
         Side effects:
             Caches the workspace type name in self._workspace_type_lookup
@@ -14358,10 +14403,10 @@ class OTCS:
         """Get a list of all workspace type names.
 
         Args:
-            lower_case (bool):
-                Whether to return the names in lower case.
-            renew (bool):
-                Whether to renew the cached workspace type names.
+            lower_case (bool, optional):
+                Whether to return the names in lower case. Defaults to False.
+            renew (bool, optional):
+                Whether to renew the cached workspace type names. Defaults to False.
 
         Returns:
             list[str] | None:
@@ -14400,8 +14445,8 @@ class OTCS:
         also populated on demand by get_workspace_type_name().
 
         Args:
-            renew (bool):
-                Whether to refresh the cached lookup via the REST API. If the
+            renew (bool, optional):
+                Whether to refresh the cached lookup via the REST API. Defaults to False. If the
                 cache is empty it is always populated regardless of this flag.
                 Passing True re-fetches the current workspace types and overwrites
                 existing entries. This is important because self._workspace_type_lookup
@@ -14490,9 +14535,9 @@ class OTCS:
         caller can fall back to client-side filtering (see _check_filter()).
 
         Args:
-            workspace_type_inclusions (str | int | list | None):
+            workspace_type_inclusions (str | int | list | None, optional):
                 Workspace type names and/or IDs to include. None/empty = include all types.
-            workspace_type_exclusions (str | int | list | None):
+            workspace_type_exclusions (str | int | list | None, optional):
                 Workspace type names and/or IDs to exclude.
 
         Returns:
@@ -14576,10 +14621,12 @@ class OTCS:
                     "predicates": list of predicate strings,
                 }
             synonyms (dict[str, list[str]] | None, optional):
-                Dictionary of synonyms to set for the workspace type. Keys are language codes and values are lists of synonyms. Synonyms are important for entity extraction
+                Dictionary of synonyms to set for the workspace type. Keys are language codes
+                and values are lists of synonyms. Synonyms are important for entity extraction
                 of user queries in Content Aviator.
             key_aspects (dict[str, list[str]] | None, optional):
-                Dictionary of key aspects to set for the workspace type. Keys are language codes and values are lists of key aspects. Key aspects can be used by Content Aviator
+                Dictionary of key aspects to set for the workspace type. Keys are language codes
+                and values are lists of key aspects. Key aspects can be used by Content Aviator
                 for tailored workspace summaries.
 
         Returns:
@@ -14701,7 +14748,7 @@ class OTCS:
         """
 
         request_url = self.config()["businessworkspacecreateform"] + "?template_id={}".format(template_id)
-        # Is a parent ID specifified? Then we need to add it to the request URL
+        # Is a parent ID specified? Then we need to add it to the request URL
         if parent_id is not None:
             request_url += "&parent_id={}".format(parent_id)
         # Is this workspace connected to a business application / external system?
@@ -14976,7 +15023,7 @@ class OTCS:
                 a "starts with" filter, e.g. if you have two workspace types called
                 "Product" and "Product Version" then workspaces instances of both types
                 are returned if you provide "Product" for type_name !
-                Preferrable use type_id if you can!
+                Preferably use type_id if you can!
             type_id (int | None, optional):
                 The ID of the workspace_type.
             name (str, optional):
@@ -15086,7 +15133,7 @@ class OTCS:
                 a "starts with" filter, e.g. if you have two workspace types called
                 "Product" and "Product Version" then workspaces instances of both types
                 are returned if you provide "Product" for type_name !
-                Preferrable use type_id if you can!
+                Preferably use type_id if you can!
             type_id (int, optional):
                 The ID of the workspace_type.
             name (str, optional):
@@ -15105,7 +15152,7 @@ class OTCS:
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
                 Default is None.
-            page_size (int | None, optional):
+            page_size (int, optional):
                 The maximum number of workspace instances that should be delivered in one page.
                 The default is 100. The OTCS REST API returns at most 500 instances per page;
                 values above 500 are clamped server-side to 500.
@@ -15776,7 +15823,7 @@ class OTCS:
             attribute (str):
                 The name of the attribute that includes the value to match with
             value (str):
-                The lookup value that is matched agains the node attribute value.
+                The lookup value that is matched against the node attribute value.
             attribute_set (str | None, optional):
                 The name of the attribute set. If None (default) the attribute to lookup
                 is supposed to be a top-level attribute.
@@ -15797,7 +15844,7 @@ class OTCS:
 
                 This parameter can be a string to select one field group or a list of
                 strings to select multiple field groups.
-                Defaults to None which is internal set to ["properties", "categories"].
+                Defaults to None which is internally set to ["properties", "categories"].
             page_size (int, optional):
                 The number of subnodes that are requested per request.
                 For the lookup nodes this is basically the chunk size.
@@ -15902,10 +15949,11 @@ class OTCS:
             bo_id (str | None, optional):
                 Business object identifier / key (None if no external system)
             show_error (bool, optional):
-                Log an error if workspace cration fails. Otherwise log a warning.
+                Log an error if the workspace reference update fails. Otherwise log a warning.
 
         Returns:
-            Request response or None in case of an error.
+            dict | None:
+                Request response or None in case of an error.
 
         """
 
@@ -15977,10 +16025,11 @@ class OTCS:
             bo_id (str | None, optional):
                 Business object identifier / key (None if no external system)
             show_error (bool, optional):
-                Log an error if workspace cration fails. Otherwise log a warning.
+                Log an error if the workspace reference deletion fails. Otherwise log a warning.
 
         Returns:
-            Request response or None in case of an error.
+            dict | None:
+                Request response or None in case of an error.
 
         """
 
@@ -16284,7 +16333,7 @@ class OTCS:
                 Date of last modification in the external system
                 (format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
             show_error (bool, optional):
-                If True, log an error if workspace cration fails.
+                If True, log an error if the workspace update fails.
                 Otherwise log a warning.
 
         Returns:
@@ -16348,7 +16397,7 @@ class OTCS:
         and the other of type 'child', but this is a less common use case.
 
         Adding a relationship R1: A --> Child --> B makes A to the parent of B _AND_ also
-        B to the child of A. Requesting the childs of A will include relationship R1. Requesting the
+        B to the child of A. Requesting the children of A will include relationship R1. Requesting the
         parents of B will include R1 as well. But it is still possible to add a relationship
         R2: A --> Parent --> B. This will be a separate relationship.
 
@@ -16362,7 +16411,7 @@ class OTCS:
                 is provided, it falls back to "child" instead of sending an invalid
                 relationship type to the REST API.
             show_error (bool, optional):
-                If True, log an error if relationship cration fails.
+                If True, log an error if relationship creation fails.
                 Otherwise log a warning.
 
         Returns:
@@ -16434,7 +16483,7 @@ class OTCS:
     ) -> dict | None:
         """Get the Workspace relationships to other workspaces.
 
-        Optionally, filter criterias can be provided
+        Optionally, filter criteria can be provided
         such as the related workspace name (starts with) or
         the related workspace TYPE IDs (one or multiple)
 
@@ -16666,7 +16715,7 @@ class OTCS:
     ) -> iter:
         """Get an iterator object to traverse all related workspaces for a workspace.
 
-        Filter criterias can be provided by the parameters.
+        Filter criteria can be provided by the parameters.
 
         Using a generator avoids loading a large number of nodes into memory at once.
         Instead you can iterate over the potential large list of related workspaces.
@@ -16698,11 +16747,9 @@ class OTCS:
                 Defaults to "properties" which delivers all properties of the workspace.
             page_size (int, optional):
                 The maximum number of related workspaces that should be delivered
-                in one page.
-                The default is None, in this case the internal OTCS limit seems
-                to be 500.
+                in one page. The default is 100.
                 This is basically the chunk size for the iterator.
-            limit (int | None = None), optional):
+            limit (int | None, optional):
                 The maximum number of workspaces to return in total.
                 If None (default) all workspaces are returned.
                 If a number is provided only up to this number of results is returned.
@@ -16720,7 +16767,7 @@ class OTCS:
 
         Returns:
             iter:
-                A generator yielding one node per iteration under the parent.
+                A generator yielding one related workspace per iteration.
                 If the REST API fails, returns no value.
 
         """
@@ -16844,7 +16891,7 @@ class OTCS:
             relationship_type (str, optional):
                 Can be "parent" or "child" - "child" is default if not provided.
             show_error (bool, optional):
-                If True, log an error if relationship cration fails.
+                If True, log an error if relationship deletion fails.
                 Otherwise log a warning.
 
         Returns:
@@ -16895,7 +16942,7 @@ class OTCS:
     ) -> bool:
         """Delete all relationships of a given workspace to related workspaces.
 
-        Optionally, filter criterias can be provided such as the related workspace name
+        Optionally, filter criteria can be provided such as the related workspace name
         (starts with) or the related workspace TYPE ids (one or multiple)
 
         Args:
@@ -16903,14 +16950,15 @@ class OTCS:
                 The ID of the workspace.
             relationship_type (str, optional):
                 Either "parent" or "child". "child" is the default.
-            related_workspace_name (str, optional):
+            related_workspace_name (str | None, optional):
                 Filter for a certain workspace name in the related items.
-            related_workspace_type_id (int | list | None):
+            related_workspace_type_id (int | list | None, optional):
                 ID of related workspace type (or list of IDs)
 
         Returns:
-            dict | None:
-                Workspace relationships or None if the request fails.
+            bool:
+                True if all matching relationships have been deleted (or none were found),
+                False if the deletion of a relationship failed.
 
         """
 
@@ -17359,7 +17407,7 @@ class OTCS:
         file_path: str,
         file_mimetype: str = "image/*",
     ) -> dict | None:
-        """Update a workspace with a with a new icon (which is uploaded).
+        """Update a workspace with a new icon (which is uploaded).
 
         Args:
             workspace_id (int):
@@ -17465,7 +17513,7 @@ class OTCS:
                 Defaults to True.
             expand_fields (list[str] | None, optional):
                 Expand additional response details, for example:
-                * "template_id": expland the workspace template information
+                * "template_id": expand the workspace template information
                 * "smart_document_type_id": expand the smart document type information
                 * "member_info": expand the member information
                 Defaults to None.
@@ -17750,19 +17798,19 @@ class OTCS:
             item_description (str, optional):
                 The description of the item.
             url (str, optional):
-                Address of the URL item (if it is an URL item type).
+                Address of the URL item (if it is a URL item type).
             original_id (int, optional):
                 Node ID of the original (referenced) item.
                 Required if a shortcut item is created.
             category_data (dict | None, optional):
                 New category and attributes values.
-            classifications (list):
+            classifications (list | None, optional):
                 List of classification item IDs to apply to the new item.
-            body (bool):
-                Should the payload be put in an body tag. Most V2 REST API methods
-                do require this but some not (like Scheduled Bots)
+            body (bool, optional):
+                Should the payload be put in a body tag. Most V2 REST API methods
+                do require this but some not (like Scheduled Bots). Defaults to True.
             show_error (bool, optional):
-                Log an error if item cration fails. Otherwise log a warning.
+                Log an error if item creation fails. Otherwise log a warning.
             parse_error_response (bool | None, optional):
                 Whether to parse the request response or not. Defaults to False.
             **kwargs (dict):
@@ -17892,7 +17940,7 @@ class OTCS:
     def copy_node(
         self, node_id: int, parent_id: int, new_name: str, parse_error_response: bool | None = False
     ) -> dict | None:
-        """Create a copy of a node based on an existing, specified node to a specified destination, optionally with as a new name.
+        """Create a copy of an existing node at a specified destination under a new name.
 
         Args:
             parent_id (int):
@@ -17907,7 +17955,7 @@ class OTCS:
         Returns:
             dict | None:
                 Response of the REST call (converted to a Python dictionary) or
-                None if the calls fails.
+                None if the call fails.
 
         """
 
@@ -17965,14 +18013,14 @@ class OTCS:
             item_description (str | None, optional):
                 The new description of the item.
             url (str, optional):
-                Address of the URL item (if it is an URL item type).
+                Address of the URL item (if it is a URL item type).
             category_data (dict | None, optional):
                 New category and attributes values.
             classifications (list | None, optional):
                 List of classification item IDs to apply to the new item.
             body (bool, optional):
-                Should the payload be put in an body tag. Most V2 REST API methods
-                do require this but some not (like Scheduled Bots)
+                Should the payload be put in a body tag. Most V2 REST API methods
+                do require this but some not (like Scheduled Bots). Defaults to True.
             **kwargs (dict, optional):
                 Add additional attributes to the body of the POST request
 
@@ -18026,7 +18074,7 @@ class OTCS:
             response = None
 
         # As category data and classifications cannot be added to the REST call above
-        # we use seperate methods to set the values for each category separately and classifiions
+        # we use separate methods to set the values for each category separately and classifications
         # See: https://developer.opentext.com/ce/products/extended-ecm/documentation/content-server-rest-api-implementation-notes/7
         if category_data:
             for category_id in category_data:
@@ -18064,7 +18112,7 @@ class OTCS:
                 The parent node of the new node to create.
             subtype (int, optional):
                 The subtype of the new node. Default is document.
-            category_ids (int | list[int], optional):
+            category_ids (int | list[int] | None, optional):
                 The ID of the category or a list of category IDs.
 
         Returns:
@@ -18257,7 +18305,7 @@ class OTCS:
     ) -> dict | None:
         """Change custom system attributes of a node.
 
-        These are NOT the normal node attributres like name or create date! In a standard
+        These are NOT the normal node attributes like name or create date! In a standard
         OTCS deployment these are NOT used.
 
         Args:
@@ -18293,7 +18341,7 @@ class OTCS:
 
         Args:
             parent_id (int):
-                TRhe node ID of target location (e.g. a folder)
+                The node ID of target location (e.g. a folder)
 
         Returns:
             dict | None:
@@ -18403,7 +18451,7 @@ class OTCS:
         Returns:
             dict | None:
                 Response of the REST call (converted to a Python dictionary) or
-                None if the calls fails.
+                None if the call fails.
 
         """
 
@@ -18464,7 +18512,7 @@ class OTCS:
             description (str, optional):
                 The description of the wiki item
             show_error (bool, optional):
-                Log an error if item cration fails. Otherwise log a warning.
+                Log an error if item creation fails. Otherwise log a warning.
 
         Returns:
             dict | None:
@@ -18526,7 +18574,7 @@ class OTCS:
             description (str, optional):
                 The description for the wiki page item.
             show_error (bool, optional):
-                Log an error if item cration fails. Otherwise log a warning.
+                Log an error if item creation fails. Otherwise log a warning.
 
         Returns:
             dict | None:
@@ -18713,7 +18761,7 @@ class OTCS:
         instruction: str,
         assignees: list,
     ) -> dict | None:
-        """Assign an Content Server item to users and groups.
+        """Assign a Content Server item to users and groups.
 
         This is a function used by OT Content Management for Government.
 
@@ -18767,7 +18815,7 @@ class OTCS:
     # end method definition
 
     def convert_permission_string_to_permission_value(self, permissions: list) -> int:
-        """Convert a list of permission names (strongs) to a bit-mask.
+        """Convert a list of permission names (strings) to a bit-mask.
 
         Args:
             permissions (list):
@@ -18852,7 +18900,7 @@ class OTCS:
         assignee: int = 0,
         apply_to: int = 0,
     ) -> dict | None:
-        """Assign permissions to a user or group for an Content Server item.
+        """Assign permissions to a user or group for a Content Server item.
 
         This method allows you to assign specified permissions to a user or group for a given
         Content Server item (node). The permissions can be applied to the item itself, its sub-items,
@@ -19013,7 +19061,7 @@ class OTCS:
         assignee: int = 0,
         apply_to: int = 0,
     ) -> dict | None:
-        """Delete permissions from a user or group for an Content Server item.
+        """Delete permissions from a user or group for a Content Server item.
 
         This method allows you to delete specified permissions from a user or group for a given
         Content Server item (node). The permissions can be applied to the item itself, its sub-items,
@@ -19038,7 +19086,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                The response of the permission assignment request, or None if the operation fails.
+                The response of the permission deletion request, or None if the operation fails.
 
         Notes:
             - If `assignee_type` is "custom", `assignee` must refer to a valid user or group ID.
@@ -19115,7 +19163,7 @@ class OTCS:
                 List of node IDs to check.
             user_id (int | None, optional):
                 The user ID to check permissions for. If None, the current user is used.
-                This can only execurted by an administrator or Business Administrator.
+                This can only be executed by an administrator or Business Administrator.
                 Default: None (current user)
 
         Returns:
@@ -19151,8 +19199,8 @@ class OTCS:
 
             permission_post_data = {"ids": node_ids}
 
-            if float(self.get_server_version()) < 25.4:
-                permission_post_data["user_hash"] = self.otcs_ticket_hashed()
+            if self.is_hashed_ticket():
+                permission_post_data["user_hash"] = self._otcs_ticket
         else:
             # Use the specific user:
             request_url = self.config()["nodesUrlv2"] + "/permissions/check"
@@ -19185,10 +19233,11 @@ class OTCS:
             node_ids (list[int]):
                 One or more node IDs. MUST be specified unless only wanting the environment description.
             attributes (int, optional):
-                Total number (approx) of how many attributes to retrieve. Any negative number means all attributes, 0 means no attributes, positive numbers will be a limit we'll try to limit to. (Default: -1 / all attributes)
+                Total number (approx) of how many attributes to retrieve. Any negative number means
+                all attributes, 0 means no attributes, positive numbers will be a limit we'll try to limit to.
+                (Default: -1 / all attributes)
             environment (bool, optional):
                 Include the environment description in the response. (Default: True)
-
 
         Returns:
             dict | None:
@@ -19517,7 +19566,7 @@ class OTCS:
     ) -> tuple[int, dict]:
         """Get category definition (category id and attribute names, IDs and types).
 
-        This is a convenience method that wraps the the complex return value
+        This is a convenience method that wraps the complex return value
         of get_node_categories() in an easier to parse structure.
 
         Args:
@@ -19541,7 +19590,7 @@ class OTCS:
                 The dict keys are the attribute names.
                 The dict values are sub-dictionaries with the id and type of the attribute.
                 For set attributes the key is constructed as <set name>:<attribute name>.
-                Set attributes also incluide an additional value "set_id".
+                Set attributes also include an additional value "set_id".
 
         Example:
             ```json
@@ -19953,7 +20002,8 @@ class OTCS:
 
         Returns:
             dict | None:
-                REST response with category data or None if the call to the REST API fails.
+                The category data as a streamlined dictionary (see above) or None
+                if neither a category ID nor a category name is provided.
 
         """
 
@@ -20140,7 +20190,7 @@ class OTCS:
             }
 
             # we need to wrap the body of this POST call into a "body"
-            # tag. This is documented worngly on developer.opentext.com
+            # tag. This is documented wrongly on developer.opentext.com
             response = self.do_request(
                 url=request_url_apply_sub_items,
                 method="POST",
@@ -20186,7 +20236,7 @@ class OTCS:
             set_row (int, optional):
                 Index of the row (first row = 1!). Defaults to 1.
             cat_definitions (dict | None, optional):
-                This is for performance optimization to avoid repeatedly calculation the
+                This is for performance optimization to avoid repeatedly calculating the
                 definition dictionary of the same node. Optional. Default is None
                 (in default case we calculate the category definition inside the method).
             node_categories (dict | None, optional):
@@ -20316,7 +20366,7 @@ class OTCS:
         Args:
             node_id (int):
                 The ID of the node.
-            value (multi-typed):
+            value (str | int | list):
                 The value to be set - can be string or list of strings
                 (for multi-value attributes)
             category_id (int):
@@ -20418,6 +20468,7 @@ class OTCS:
                 If True, turn on inheritance for the category
                 (this makes only sense if the node is a container like a folder or workspace).
                 For documents or other non-container-item you should pass None to avoid errors.
+                Defaults to False.
 
         Returns:
             dict | None:
@@ -20495,7 +20546,7 @@ class OTCS:
             category_id (int):
                 The node ID of the category definition item.
             enable (bool, optional):
-                Whether the inheritance should be enabled (True) or disabled (False).
+                Whether the inheritance should be enabled (True) or disabled (False). Defaults to True.
 
         Returns:
             dict | None:
@@ -20686,7 +20737,7 @@ class OTCS:
 
         if "results" not in node:
             # Support also iterators that have resolved the "results" already.
-            # In this case we wrap it in a "rsults" dict to make it look like
+            # In this case we wrap it in a "results" dict to make it look like
             # a full response:
             if "data" in node:
                 node = {"results": node}
@@ -20872,9 +20923,9 @@ class OTCS:
 
         Args:
             collection_id (int):
-                The node ID of the colection.
+                The node ID of the collection.
             node_ids (list | int):
-                The ID of the node to add or remove from the collection.
+                The ID(s) of the node(s) to add to or remove from the collection.
             operation (str, optional):
                 Operation to apply.
                 Use "add" to add a node to the collection
@@ -20925,7 +20976,7 @@ class OTCS:
 
         Args:
             collection_id (int):
-                The node ID of the colection.
+                The node ID of the collection.
             node_ids (int | list):
                 The ID(s) of the node(s) to add to the collection.
 
@@ -20953,7 +21004,7 @@ class OTCS:
 
         Args:
             collection_id (int):
-                The node ID of the colection.
+                The node ID of the collection.
             node_ids (int | list):
                 The ID(s) of the node(s) to remove from the collection.
 
@@ -20973,15 +21024,15 @@ class OTCS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_classifications")
     def get_node_classifications(self, node_id: int) -> dict | None:
-        """Assign one or multiple classifications to a Content Server item.
+        """Get the classifications assigned to a Content Server item.
 
         Args:
             node_id (int):
-                The node ID of the Content Server item to assign classifications to.
+                The node ID of the Content Server item to get the classifications of.
 
         Returns:
             dict | None:
-                Repose of the request or None in case of an error:
+                Response of the request or None in case of an error.
 
         Example:
             ```json
@@ -21109,7 +21160,7 @@ class OTCS:
 
         The method supports the removal of existing classification
         and the addition of new classifications. This can be controlled
-        by the parametes given.
+        by the parameters given.
 
         Args:
             node_id (int):
@@ -21120,11 +21171,12 @@ class OTCS:
                 If True, the classification is applied to the item and all
                 its sub-items.
                 If False, the classification is only applied to the item itself.
+                Defaults to False.
             remove_existing (bool, optional):
-                If True, existing classifications will be remove and the node
-                only gets the classification provided in the `classification` parameter.
+                If True, existing classifications will be removed and the node
+                only gets the classifications provided in the `classifications` parameter.
                 If False, the provided classifications will be added in addition to the
-                existing ones.
+                existing ones. Defaults to False.
 
         Returns:
             dict | None:
@@ -21198,6 +21250,7 @@ class OTCS:
                 If True, the RM classification is applied to
                 the item and all its sub-items.
                 If False the RM classification is only applied to the item itself.
+                Defaults to False.
             metadata_token (str, optional):
                 Required if changing an RM Classification to another, otherwise not required.
 
@@ -21469,9 +21522,6 @@ class OTCS:
         These are the most basic data types of the Records Management configuration
         and required to create RSIs and other higher-level Records Management configurations.
 
-        Args:
-            None
-
         Returns:
             dict | None:
                 The RM codes or None if the request fails.
@@ -21699,11 +21749,14 @@ class OTCS:
                 The retention intervals.
             fixed_retention (bool, optional):
                 True, if a fixed retention should be used. False otherwise.
-            maximum_retention (bool,optional): maximumRetention
-            fixed_date(str, optional):
+            maximum_retention (bool, optional):
+                The maximum retention flag (sent as "maximumRetention"). Defaults to True.
+            fixed_date (str, optional):
                 The format for fixed dates. Default is YYYY-MM-DDTHH:mm:ss
-            event_condition (str, optional): eventCondition
-            disposition (str, optional): disposition
+            event_condition (str, optional):
+                The event condition (sent as "eventCondition").
+            disposition (str, optional):
+                The disposition (sent as "disposition").
             action_code (int, optional):
                 0 None,
                 1 Change Status,
@@ -21805,7 +21858,7 @@ class OTCS:
             hold_type (str):
                 The type of the hold.
             name (str):
-                The name of the RSI.
+                The name of the hold.
             comment (str):
                 A comment.
             alternate_id (str, optional):
@@ -21870,9 +21923,6 @@ class OTCS:
         Even though there are folders in the holds management area in RM these
         are not real folders - they cannot be retrieved with get_node_by_parent_and_name()
         thus we need this method to get them all.
-
-        Args:
-            None
 
         Returns:
             dict | None:
@@ -22006,7 +22056,7 @@ class OTCS:
 
         Returns:
             bool:
-                True, if if the REST call succeeds, or False otherwise.
+                True, if the REST call succeeds, or False otherwise.
 
         """
 
@@ -22078,7 +22128,7 @@ class OTCS:
 
         Returns:
             bool:
-                True, if if the REST call succeeds, or False otherwise.
+                True, if the REST call succeeds, or False otherwise.
 
         """
 
@@ -22144,7 +22194,7 @@ class OTCS:
 
         Returns:
             bool:
-                True if if the REST call succeeds, or False otherwise.
+                True if the REST call succeeds, or False otherwise.
 
         """
 
@@ -22205,12 +22255,12 @@ class OTCS:
         Args:
             file_path (str):
                 The path + filename of config file in the local filesystem.
-            update_existing_codes (bool):
-                Whether or not existing codes should be updated (default = True).
+            update_existing_codes (bool, optional):
+                Whether or not existing codes should be updated. Defaults to True.
 
         Returns:
             bool:
-                True, if if the REST call succeeds, or False otherwise.
+                True, if the REST call succeeds, or False otherwise.
 
         """
 
@@ -22273,7 +22323,7 @@ class OTCS:
 
         Returns:
             bool:
-                True, if if the REST call succeeds, or False otherwise.
+                True, if the REST call succeeds, or False otherwise.
 
         """
 
@@ -22339,7 +22389,7 @@ class OTCS:
 
         Returns:
             bool:
-                True, if if the REST call succeeds, or False otherwise.
+                True, if the REST call succeeds, or False otherwise.
 
         """
 
@@ -22528,18 +22578,19 @@ class OTCS:
         Args:
             node_id (int):
                 The node ID of the Content Server item to set the records details for.
-            metadata_token (str | None):
+            metadata_token (str | None, optional):
                 The metadata token to be used for setting the records management details.
-            rsi (str | None):
-                The security clearance level to be set for the node.
-            status (str | None):
-                The record status to be set for the node.
-            essential (str | None):
-                The essential to be set for the node.
-            storage (str | None):
-                The storage to be set for the node.
-            official (bool | None):
-                The official flag to be set for the node.
+                Defaults to None.
+            rsi (str | None, optional):
+                The RSI to be set for the node. If None, it is not changed. Defaults to None.
+            status (str | None, optional):
+                The record status to be set for the node. If None, it is not changed. Defaults to None.
+            essential (str | None, optional):
+                The essential value to be set for the node. If None, it is not changed. Defaults to None.
+            storage (str | None, optional):
+                The storage to be set for the node. If None, it is not changed. Defaults to None.
+            official (bool | None, optional):
+                The official flag to be set for the node. If None, it is not changed. Defaults to None.
 
         Returns:
             dict | None:
@@ -22850,41 +22901,43 @@ class OTCS:
         """Create and queue a viewx Transformation (POST /v1/viewx/transform).
 
         Args:
-            transform (dict): The viewx_Transform object (nodes, transformOptions, outputOptions, etc).
-            nodes
-                Array of node objects
-                Example:
+            transform (dict):
+                The viewx_Transform object. It contains the following keys:
+
+                - `nodes` (list): Array of node objects. Example:
                     ```json
                     "nodes": [
                         {
-                        "applyocr": true,
-                        "id": 0,
-                        "markup": true,
-                        "order": 0,
-                        "pageList": "1,3,5-6",
-                        "vernum": 0,
-                        "vertype": "string",
-                        "extended_data": {}
+                            "applyocr": true,
+                            "id": 0,
+                            "markup": true,
+                            "order": 0,
+                            "pageList": "1,3,5-6",
+                            "vernum": 0,
+                            "vertype": "string",
+                            "extended_data": {}
                         }
+                    ]
                     ```
+                - `transformOptions` (dict): Object containing transformation options. Most
+                    transformOptions properties correspond to Viewing & Transformation features found at
+                    https://developer.opentext.com/services/products/viewing-transformation-services/documentation/transformation-service/3
 
-            transformOptions
-                Object containing transformation options. Most transformationOptions properties correspond to Viewing & Transformation features found at https://developer.opentext.com/services/products/viewing-transformation-services/documentation/transformation-service/3
+                    The schema for any feature supported by Transformation can be retrieved using an HTTP GET
+                    request to the Configuration Service using a query on the feature name and version.
+                    For example, URL: `https://configservice.dev.bp-paas.otxlab.net/api/v1/config/api/v1/features?name=<feature-name>&version=<feature-version>`
 
-                The schema for any feature supported by Transformation can be retrieved using HTTP GET request to the Configuration Service using a query on the feature name and version.
-
-                For example, URL: https://configservice.dev.bp-paas.otxlab.net/api/v1/config/api/v1/features?name=<feature-name>&version=<feature-version>"
-
-                example:
+                    For example:
                     ```json
-                        "transformOptions": {
+                    "transformOptions": {
                         "isoConformance": "none",
                         "banner": {
-                        "BottomCenter": {
-                            "font": "Arial",
-                            "size": 14,
-                            "text": "Bottom Center Banner Text"
-                        }, },
+                            "BottomCenter": {
+                                "font": "Arial",
+                                "size": 14,
+                                "text": "Bottom Center Banner Text"
+                            }
+                        },
                         "colorConversion": "string",
                         "includeLayers": "string",
                         "markupBurnin": "comment",
@@ -22897,11 +22950,10 @@ class OTCS:
                         "dotsPerInch": 0,
                         "appendedSummary": true,
                         "appendReasons": true
-                    },
+                    }
                     ```
-
-            outputOptions
-                Object containing properties that determine how the output of the transformation is handled.
+                - `outputOptions` (dict): Object containing properties that determine how the output of
+                    the transformation is handled.
 
         Returns:
             dict | None: API response.
@@ -23125,7 +23177,7 @@ class OTCS:
                     }
                 ]
                 }
-            ```json
+            ```
 
         """
 
@@ -23432,13 +23484,13 @@ class OTCS:
     ) -> list | None:
         """Get a list of workflows with a defined kind and status.
 
-        IMPORTANT: This method is personlalized, you
+        IMPORTANT: This method is personalized, you
         need to call it with the user these workflows are related / assigned to.
 
         Args:
             kind (str | None, optional):
                 Possible values: "Managed", "Initiated", "Both". Defaults to None.
-            status (str | None, optional):
+            status (str | list | None, optional):
                 The workflow status. Possible values are "ontime", "workflowlate", "stopped",
                 "completed". Defaults to None (=all).
             sort (str | None, optional):
@@ -23712,7 +23764,7 @@ class OTCS:
 
         Args:
             process_id (int):
-                The ID of the process (worflow instance).
+                The ID of the process (workflow instance).
 
         Returns:
             dict | None:
@@ -23843,7 +23895,7 @@ class OTCS:
             workflow_id (int):
                 The node ID of the workflow map.
             documents (list | None, optional):
-                The node IDs of the attachmewnt documents.
+                The node IDs of the attachment documents. Defaults to None.
 
         Returns:
             dict | None:
@@ -24140,7 +24192,7 @@ class OTCS:
         r"""Get the task information of a workflow assignment.
 
         This method must be called with the user authenticated
-        that has the task in ts inbox.
+        that has the task in its inbox.
 
         Args:
             process_id (int):
@@ -24152,7 +24204,7 @@ class OTCS:
 
         Returns:
             dict | None:
-                Response of REST API call. None in case an error occured.
+                Response of REST API call. None in case an error occurred.
 
         Example:
             ```json
@@ -24257,9 +24309,9 @@ class OTCS:
 
         Args:
             process_id (int):
-                The ID of the draft process that has been created before with create_draft_process().
-            subprocess_id (int):
-                The ID of the subprocess.
+                The process ID of the workflow instance.
+            subprocess_id (int | None, optional):
+                The ID of the subprocess. Defaults to None (= process_id).
             task_id (int, optional):
                 The ID of the task. Default is 1.
             values (dict | None, optional):
@@ -24272,9 +24324,10 @@ class OTCS:
                 (for example, "Delegate" or "Review"). Defaults to None.
             custom_action (str, optional):
                 Here we can have custom actions like "Approve" or "Reject".
-                If "custom_action" is not None then the "action" parameter is ignored.
+                If "custom_action" is not empty then the "action" parameter is ignored.
+                Defaults to "".
             comment (str, optional):
-                The comment given with the action.
+                The comment given with the action. Defaults to "".
 
         Returns:
             dict | None:
@@ -24513,7 +24566,7 @@ class OTCS:
                         "author": "ai", "content": "..."
                     }
                 ]
-            where (list):
+            where (list[dict] | None, optional):
                 Metadata name/value pairs for the query.
                 Could be used to specify workspaces, documents, or other criteria in the future.
                 Values need to match those passed as metadata to the embeddings API.
@@ -24526,11 +24579,12 @@ class OTCS:
                 Whether or not inline citations should be used in the response. Default is True.
             parse_request_response (bool, optional):
                 Whether or not the response should be parsed and returned as a dictionary.
-                If False, the raw requests.Response object is returned. Default is
+                If False, the raw requests.Response object is returned. Default is True.
 
         Returns:
-            dict:
-                Conversation status
+            dict | requests.Response | None:
+                Conversation status (the raw response if parse_request_response is False).
+                None if the request fails.
 
         Example:
         {
@@ -24676,7 +24730,7 @@ class OTCS:
         current_depth: int = 0,
         **kwargs: dict,
     ) -> dict | None:
-        """Recursively traverse the node an its subnodes.
+        """Recursively traverse the node and its subnodes.
 
         This method is preferred for CPU intensive traversals.
 
@@ -24685,14 +24739,15 @@ class OTCS:
                 The node datastructure (like in a V2 REST Call response)
             executables (list[callable]):
                 A list of methods to call for each traversed node. The node
-                and a optional dictionary of keyword arguments (kwargs)
+                and an optional dictionary of keyword arguments (kwargs)
                 are passed. The executables are called BEFORE the subnodes
-                are traversed. The executables should return a boolean result.
-                If the result is False, then the execution of the executables
-                list is stopped.
+                are traversed. Each executable must return a tuple of two booleans
+                (result_success, result_traverse). If result_success is False,
+                then the execution of the executables list is stopped. If at least one
+                executable returns result_traverse = True, the subnodes are traversed.
             current_depth (int, optional):
-                The recursion depth - distance in hierarchy from the root note
-                traverse_node() was INITIALLY called from.
+                The recursion depth - distance in hierarchy from the root node
+                traverse_node() was INITIALLY called from. Defaults to 0.
             kwargs:
                 Additional keyword arguments for the executables.
 
@@ -24732,13 +24787,13 @@ class OTCS:
             if not result_success:
                 break
         else:
-            # else case is processed only if NO break occured in the for loop
+            # else case is processed only if NO break occurred in the for loop
             # If all executables have been successful than the node counts as processed:
             processed += 1
 
         node_type = self.get_result_value(response=node, key="type")
 
-        # We only traverse the subtnodes if the current node is a container type
+        # We only traverse the subnodes if the current node is a container type
         # and the executables have all been executed successfully:
         if traverse and node_type in self.CONTAINER_ITEM_TYPES:
             # Get children nodes of the current node:
@@ -24786,14 +24841,14 @@ class OTCS:
             executables (list[callable]):
                 Callables to execute per node.
             workers (int, optional):
-                Number of parallel workers.
+                Number of parallel workers. Defaults to 3.
             workers_name (str, optional):
-                Name prefix for worker threads.
+                Name prefix for worker threads. Defaults to "TraverseNodeWorker".
             strategy (str, optional):
                 Either "DFS" for Depth First Search, or "BFS" for Breadth First Search.
                 "BFS" is the default.
             timeout (float, optional):
-                Wait time for the queue to have items:
+                Wait time (in seconds) for the queue to have items. Defaults to 1.0.
             kwargs (dict):
                 Additional arguments for executables.
 
@@ -24912,7 +24967,7 @@ class OTCS:
                         with lock:
                             results["processed"] += 1
 
-                    # We only traverse the subtnodes if the current node is a container type
+                    # We only traverse the subnodes if the current node is a container type
                     # and at least one executables (if they any) indicate to require further traversal:
                     if traverse and node_type in self.CONTAINER_ITEM_TYPES:
                         subnodes = self.get_subnodes_iterator(parent_node_id=node_id, page_size=100)
@@ -24954,7 +25009,7 @@ class OTCS:
     def translate_node(self, node: dict | int, **kwargs: dict) -> bool:
         """Translate a node.
 
-        The actual translation is done by a tranlator object. This recursive method just
+        The actual translation is done by a translator object. This recursive method just
         traverses the hierarchy and calls the translate() method of the translator object.
 
         Args:
@@ -24962,7 +25017,7 @@ class OTCS:
                 The current node to translate. This can be the node data structure or just
                 the node ID. If it is just the ID the actual node will be fetched.
             kwargs (dict):
-                Keyword parameters. The methods expects the follwoing keyword parameters:
+                Keyword parameters. The method expects the following keyword parameters:
                 * simulate (bool):
                     If True, do not really rename but just traverse and log info.
                 * translator (object):
@@ -25081,11 +25136,11 @@ class OTCS:
                 The name of the workspace type.
             workspace_type_id (int):
                 The ID of the workspace type.
-            workspace_type_exclusions (str | list | None):
+            workspace_type_exclusions (str | list | None, optional):
                 List of workspace types to exclude. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly excluded is included.
                 None = filter is not active.
-            workspace_type_inclusions (str | list | None):
+            workspace_type_inclusions (str | list | None, optional):
                 List of workspace types to include. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly included is excluded.
                 None = filter is not active.
@@ -25135,11 +25190,11 @@ class OTCS:
         """Traverse all workspaces of a given type and execute executables.
 
         Args:
-            workspace_type_exclusions (str | list | None):
+            workspace_type_exclusions (str | list | None, optional):
                 List of workspace types to exclude. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly excluded is included.
                 None = filter is not active.
-            workspace_type_inclusions (str | list | None):
+            workspace_type_inclusions (str | list | None, optional):
                 List of workspace types to include. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly included is excluded.
                 None = filter is not active.
@@ -25148,7 +25203,7 @@ class OTCS:
                 queue initialization not the traversal via workspace relationships.
                 If True the inclusion and exclusion filters are also tested
                 during the traversal of workspace relationships.
-            node_executables (list[callable]):
+            node_executables (list[callable] | None, optional):
                 A list of methods to call for each traversed workspace. Each is
                 called as executable(workspace_node=..., **kwargs) - the same
                 keyword traverse_workspaces_parallel() uses, so an executable can
@@ -25156,11 +25211,11 @@ class OTCS:
                 BEFORE the subnodes are traversed. The executables should return a
                 boolean result. If the result is False, then the execution of the
                 executables list is stopped.
-            relationship_executables (list[callable]):
+            relationship_executables (list[callable] | None, optional):
                 Callables to execute per workspace relationship.
             relationship_types (list | None, optional):
                 The default that will be established if None is provided is ["child", "parent"].
-            max_depth (int | None):
+            max_depth (int | None, optional):
                 The maximum depth for the recursive traversal.
             fields (str | list, optional):
                 The fields to retrieve for each workspace. Default is "properties".
@@ -25266,11 +25321,11 @@ class OTCS:
             processed_workspaces (dict):
                 The already processed workspaces. Required to avoid running in circles
                 and reprocess already traversed workspaces.
-            workspace_type_exclusions (str | list | None):
+            workspace_type_exclusions (str | list | None, optional):
                 List of workspace types to exclude. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly excluded is included.
                 None = filter is not active.
-            workspace_type_inclusions (str | list | None):
+            workspace_type_inclusions (str | list | None, optional):
                 List of workspace types to include. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly included is excluded.
                 None = filter is not active.
@@ -25279,21 +25334,23 @@ class OTCS:
                 queue initialization not the traversal via workspace relationships.
                 If True the inclusion and exclusion filters are also tested
                 during the traversal of workspace relationships.
-            node_executables (list[callable]):
+            node_executables (list[callable] | None, optional):
                 A list of methods to call for each traversed workspace. Each is
                 called as executable(workspace_node=..., **kwargs) - the same
                 keyword traverse_workspaces_parallel() uses, so an executable can
                 be shared between both traversals. The executables are called
-                BEFORE the subnodes are traversed. The executables should return a
-                boolean result. If the result is False, then the execution of the
-                executables list is stopped.
-            relationship_executables (list[callable]):
+                BEFORE the related workspaces are traversed. Each executable must
+                return a tuple of two booleans (result_success, result_traverse).
+                If result_success is False, then the execution of the executables list
+                is stopped. The related workspaces are only traversed if at least one
+                executable returned result_traverse as True.
+            relationship_executables (list[callable] | None, optional):
                 Callables to execute per workspace relationship.
             relationship_types (list | None, optional):
                 The default that will be established if None is provided is ["child", "parent"].
             current_depth (int):
                 The current depth of the traversal.
-            max_depth (int | None):
+            max_depth (int | None, optional):
                 The maximum depth for the recursive traversal.
             fields (str | list, optional):
                 The fields to retrieve for each workspace. Default is "properties".
@@ -25376,7 +25433,7 @@ class OTCS:
             if not result_success:
                 break
         else:
-            # else case is processed only if NO break occured in the for loop
+            # else case is processed only if NO break occurred in the for loop
             # If all executables have been successful than the node counts as processed:
             processed += 1
 
@@ -25493,11 +25550,11 @@ class OTCS:
         This method is preferred for I/O or API intensive traversals.
 
         Args:
-            workspace_type_exclusions (str | list | None):
+            workspace_type_exclusions (str | list | None, optional):
                 List of workspace types to exclude. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly excluded is included.
                 None = filter is not active.
-            workspace_type_inclusions (str | list | None):
+            workspace_type_inclusions (str | list | None, optional):
                 List of workspace types to include. Can be a single workspace type
                 or a list of workspace types. Everything that is not explicitly included is excluded.
                 None = filter is not active.
@@ -25506,7 +25563,7 @@ class OTCS:
                 queue initialization not the traversal via workspace relationships.
                 If True the inclusion and exclusion filters are also tested
                 during the traversal of workspace relationships.
-            node_executables (list[callable]):
+            node_executables (list[callable] | None, optional):
                 Callables to execute per node. Each is called as
                 executable(workspace_node=..., metadata=..., business_objects=..., **kwargs)
                 and must return a (success, traverse) tuple. The executables are
@@ -25516,20 +25573,20 @@ class OTCS:
                 if at least one executable returned traverse as True. An executable
                 that raises is treated like one returning success as False - the
                 error is logged and the traversal continues with the next workspace.
-            relationship_executables (list[callable]):
+            relationship_executables (list[callable] | None, optional):
                 Callables to execute per workspace relationship. Each is called as
                 executable(workspace_node_from=..., workspace_node_to=..., rel_type=..., **kwargs)
                 and must return a (success, traverse) tuple.
             relationship_types (list | None, optional):
                 The default that will be established if None is provided is ["child", "parent"].
             workers (int, optional):
-                Number of parallel workers.
+                Number of parallel workers. Defaults to 3.
             workers_name (str, optional):
-                Name prefix for worker threads.
+                Name prefix for worker threads. Defaults to "TraverseWorkspaceWorker".
             strategy (str, optional):
                 Either "DFS" for Depth First Search, or "BFS" for Breadth First Search.
                 "BFS" is the default.
-            max_depth (int | None):
+            max_depth (int | None, optional):
                 The maximum traversal depth, counted as the number of hops away from a
                 traversal root. A workspace is a traversal root whenever its type passes
                 the inclusion/exclusion filter - such a workspace is always recorded at
@@ -26156,12 +26213,12 @@ class OTCS:
             file_path (str):
                 File system path - location to download to.
             extract_after_download (bool, optional):
-                Extract the downloaded (compressed) file recusively to a folder
-                with same name as the document.
+                Extract the downloaded (compressed) file recursively to a folder
+                with same name as the document. Defaults to False.
 
         """
 
-        # Aquire and release thread semaphore to limit parallel API executions
+        # Acquire and release thread semaphore to limit parallel API executions
         # to not overload source system:
         with self._semaphore:
             self.download_document(node_id=node_id, file_path=file_path)
@@ -26309,7 +26366,7 @@ class OTCS:
             # In this case we determine it here:
             if node_categories is None:
                 # We pre-calculated the node categories to avoid doing this
-                # multiple times in the methodes get_node_category_names(),
+                # multiple times in the methods get_node_category_names(),
                 # get_node_category_definitions() and get_category_value() below:
                 node_categories = self.get_node_categories(
                     node_id=node["id"],
@@ -26434,7 +26491,7 @@ class OTCS:
                         filter_value,
                         list,
                     ):
-                        # check if there's an non-empty intersetion set of both lists:
+                        # check if there's a non-empty intersection set of both lists:
                         if not set(actual_value) & set(filter_value):
                             self.logger.debug(
                                 "Node -> '%s' (%s) failed filter test. Its filter values -> %s do not intersect with node attribute values -> %s for attribute -> '%s'.",
@@ -26507,7 +26564,7 @@ class OTCS:
 
         Returns:
             bool:
-                True = succeess, False = error.
+                True = success, False = error.
 
         """
 
@@ -26534,7 +26591,7 @@ class OTCS:
             metadata = category["metadata"]["categories"]
             category_item = metadata.pop(first_key) if (first_key := next(iter(metadata), None)) else None
             category_name = category_item.get("name")
-            # Replace non-aphanumeric characters in the name with underscores
+            # Replace non-alphanumeric characters in the name with underscores
             # but avoid having multiple underscores following each other:
             category_name = re.sub(r"[^a-z0-9]+", "_", category_name.lower())
 
@@ -26550,7 +26607,7 @@ class OTCS:
                 # and the attribute or set ID (after first "_"):
                 attribute_key = get_attribute_identifier(key)
                 meta = metadata[attribute_key]
-                if self._use_numeric_category_identifier:  # this value is set be the class initializer
+                if self._use_numeric_category_identifier:  # this value is set by the class initializer
                     column_header = prefix + column_key
                 else:
                     # Construct the final column name by replacing the leading <cat_num>_ with the
@@ -26618,7 +26675,7 @@ class OTCS:
             filter_workspace_category (str | None, optional):
                 Additive filter criterium for workspace category.
                 Defaults to None = filter not active.
-            filter_workspace_attributes (dict | list, optional):
+            filter_workspace_attributes (dict | list | None, optional):
                 Additive filter criterium for workspace attribute values.
                 Defaults to None = filter not active
             filter_item_depth (int | None, optional):
@@ -26630,32 +26687,34 @@ class OTCS:
             filter_item_category (str | None, optional):
                 Additive filter criterium for item category.
                 Defaults to None = filter not active.
-            filter_item_attributes (dict | list, optional):
+            filter_item_attributes (dict | list | None, optional):
                 Additive filter criterium for item attribute values.
                 Defaults to None = filter not active.
             filter_item_in_workspace (bool, optional):
                 Defines if item filters should be applied to
                 items inside workspaces as well. If False,
                 then items inside workspaces are always included.
-            exclude_node_ids (list, optional):
-                List of node IDs to exclude from traversal.
+                Defaults to True.
+            exclude_node_ids (list | None, optional):
+                List of node IDs to exclude from traversal. Defaults to None.
             workspace_metadata (bool, optional):
-                If True, include workspace metadata.
+                If True, include workspace metadata. Defaults to True.
             item_metadata (bool, optional):
-                If True, include item metadata.
+                If True, include item metadata. Defaults to True.
             download_documents (bool, optional):
-                Whether or not documents should be downloaded.
+                Whether or not documents should be downloaded. Defaults to True.
             skip_existing_downloads (bool, optional):
-                If True, reuse already existing downloads in the file system.
+                If True, reuse already existing downloads in the file system. Defaults to True.
             extract_zip (bool, optional):
                 If True, documents that are downloaded with mime-type
-                "application/x-zip-compressed" will be extracted recursively.
+                "application/x-zip-compressed" will be extracted recursively. Defaults to False.
             workers (int, optional):
-                Number of worker threads to start.
+                Number of worker threads to start. Defaults to 3.
 
         Returns:
-            dict:
+            dict | None:
                 Stats with processed and traversed counters.
+                None if neither workspaces nor items are requested.
 
         Side Effects:
         ```markdown
@@ -26666,7 +26725,10 @@ class OTCS:
             - workspace_name
             - workspace_description
             - workspace_outer_path
-            - workspace_<cat_id>_<attr_id> for each workspace attribute if workspace_metadata is True
+            - workspace_cat_<cat_id>_<attr_id> for each workspace attribute if workspace_metadata is True
+              and self._use_numeric_category_identifier is True
+            - workspace_cat_<cat_name>_<attr_id> for each workspace attribute if workspace_metadata is True
+              and self._use_numeric_category_identifier is False
             - item_id
             - item_type
             - item_name
@@ -26675,14 +26737,13 @@ class OTCS:
             - item_download_name
             - item_mime_type
             - item_url
-            - item_<cat_id>_<attr_id> for each item attribute if item_metadata is True
             - item_cat_<cat_id>_<attr_id> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is True
-            - item_cat_<cat_name>_<attr_name> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is False
+            - item_cat_<cat_name>_<attr_id> for each item attribute if item_metadata is True and self._use_numeric_category_identifier is False
         ```
 
         """
 
-        # Initiaze download threads for document items:
+        # Initialize download threads for document items:
         download_threads = []
 
         def check_node_exclusions(node: dict, **kwargs: dict) -> tuple[bool, bool]:
@@ -27181,24 +27242,24 @@ class OTCS:
             node (dict | None, optional):
                 If the caller already has the node data it can be passed with this parameter.
             crawl (bool, optional):
-                Defines if the task is a "crawl" (vs. and "index"). Defaults to False (= "index").
+                Defines if the task is a "crawl" (vs. an "index"). Defaults to False (= "index").
             wait_for_completion (bool, optional):
                 Defines if the method waits for the completion of the embedding. Defaults to True.
             message_override (dict | None, optional):
                 Overwrite specific message details. Defaults to None.
             timeout (float, optional):
-                Time in seconds to wait until the WebSocket times out. Defaults to 10.0.
+                Time in seconds to wait until the WebSocket times out. Defaults to 30.0.
             document_metadata (bool, optional):
-                Defines whether or not to embed document metadata.
+                Defines whether or not to embed document metadata. Defaults to False.
             images (bool, optional):
-                Defines whether or not to embed images.
+                Defines whether or not to embed images. Defaults to False.
             image_prompt (str, optional):
                 The prompt for the LLM to extract information from images.
                 If empty ("") a default prompt will be used.
             workspace_metadata (bool, optional):
-                Defines whether or not to embed workspace metadata.
+                Defines whether or not to embed workspace metadata. Defaults to True.
             remove_existing (bool, optional):
-                Defines whether or not existing embeddings should be removed.
+                Defines whether or not existing embeddings should be removed. Defaults to False.
 
         """
 
@@ -27223,7 +27284,7 @@ class OTCS:
 
             self.logger.debug("Open WebSocket connection to -> %s", uri)
             async with websockets.connect(uri) as websocket:
-                # Define if one node (index), or all childs should be processed (crawl)
+                # Define if one node (index), or all children should be processed (crawl)
                 task = "crawl" if crawl else "index"
 
                 message = {
@@ -27962,7 +28023,7 @@ class OTCS:
         client_id: int | None = None,
         type_id: int | None = None,
     ) -> dict | None:
-        """Get the available reminder types .
+        """Get the available reminder types.
 
         REST API endpoint: GET /v1/forms/nodes/followup/getClientTypes
 
@@ -28774,7 +28835,7 @@ class OTCS:
                 Activation unit. Defaults to None.
             activation_business_day (bool | None, optional):
                 Whether activation should use business days. Defaults to None.
-            recurring (bool):
+            recurring (bool, optional):
                 True for recurrence (RSRULE = 2). Defaults to False.
             recurring_start_date (date | None, optional):
                 Recurrence start date. Required when ``recurring`` is True.
@@ -29276,29 +29337,32 @@ class OTCS:
                 List of recipient user/group IDs for the reminder.
             description (str, optional):
                 Description of the reminder. Defaults to "".
-            priority (Literal["low", "medium", "high", "Low", "Medium", "High"] | None, optional):
-                Priority of the reminder. Accepted values are "low", "medium", "high"
-                and title case variants. They are mapped to API values
-                (low=0, medium=50, high=100).
-                Defaults to None.
-            due_date (date | None, optional):
+            priority (Literal["low", "medium", "high"], optional):
+                Priority of the reminder. Accepted values are "low", "medium", "high".
+                They are mapped to API values (low=0, medium=50, high=100).
+                Defaults to "medium".
+            due_date (str | date | None, optional):
                 Due date for the reminder ("Due On"). It is converted to OTCS format,
                 for example "D/2026/5/28:0:0:0". Defaults to None.
             due_in_value (int | None, optional):
-                Rule value for recurrence. E.g. number of days, number of weeks, etc. Defaults to None.
+                Rule value for the relative due date (RSRULEVALUE). E.g. number of days, number of weeks, etc.
+                Defaults to None.
                 Reminder form schema indicates recurrence interval fields with range 1..9.
             due_in_unit (Literal["day", "week", "month", "year"] | None, optional):
-                Rule unit for recurrence. Defaults to None. (day=1, week=2, month=3, year=4)
+                Rule unit for the relative due date (RSRULEUNIT). Defaults to None. (day=1, week=2, month=3, year=4)
             activation_value (int, optional):
                 Activation offset value that corresponds to `activation_unit`.
                 For example, with `activation_unit="day"`, a value of 2 means 2 days.
-                Reminder form schema indicates `due_in_period` range 1..999.
+                Reminder form schema indicates `due_in_period` range 1..999. Defaults to 1.
             activation_unit (Literal["day", "week", "month", "year"] | None, optional):
                 Activation unit. Defaults to None. (day=1, week=2, month=3, year=4)
             activation_business_day (bool, optional):
                 Whether activation should use business days. Defaults to True.
-            recurring (bool):
-                True for recurrence (RSRULE = 2), False for no recurrence (RSRULE = 0).
+            recurring (bool, optional):
+                True for recurrence (RSRULE = 2), False for non-recurring behavior.
+                When False, ``RSRULE`` is derived from ``due_date``:
+                ``RSRULE = 0`` when ``due_date`` is provided, otherwise ``RSRULE = 1``.
+                Defaults to False.
             recurring_start_date (date | None, optional):
                 Recurrence start date. Converted to OTCS format. Only sent when
                 ``RSRULE = 2``. Defaults to None.
@@ -29318,11 +29382,11 @@ class OTCS:
                 List of user/group IDs to escalate to. Defaults to None.
             escalation_when (Literal["before", "after"] | None, optional):
                 When to escalate. Defaults to None.
-                Mapped to API values: before=-1, after=1.
+                Mapped to API values: before=1, after=-1.
             escalation_value (int | None, optional):
                 Escalation offset value. Defaults to None.
-            escalation_unit (Literal["day", "week", "month", "year"] | None, optional):
-                Escalation unit. Defaults to None. (day=1, week=2, month=3, year=4)
+            escalation_unit (Literal["day", "week", "month", "year"], optional):
+                Escalation unit. Defaults to "day". (day=1, week=2, month=3, year=4)
             escalation_business_day (bool | None, optional):
                 Whether escalation uses business days. Defaults to None.
 
@@ -29442,9 +29506,6 @@ class OTCS:
                 1 -> 2 (Open -> Completed)
                 -1 -> -2 (Active -> In Progress)
                 -1 -> 2 (Active -> Completed)
-                -2 -> 2 (In Progress -> Completed)
-                1 -> -2 (Open -> In Progress)
-                1 -> 2 (Open -> Completed)
                 -2 -> 2 (In Progress -> Completed)
 
         Returns:
@@ -29569,7 +29630,7 @@ class OTCS:
                 List of recipient user/group IDs for the reminder. Defaults to None.
             description (str, optional):
                 Description of the reminder. Defaults to "".
-            priority (Literal["low", "medium", "high"]):
+            priority (Literal["low", "medium", "high"], optional):
                 Priority of the reminder. Accepted values are "low", "medium", "high".
                 They are mapped to API values (low=0, medium=50, high=100). Defaults to "medium".
             due_date (str | date | None, optional):
@@ -29583,18 +29644,19 @@ class OTCS:
                 Reminder form schema indicates relative due date fields with range 1..9.
             due_in_unit (Literal["day", "week", "month", "year"] | None, optional):
                 Rule unit for relative due date calculation. Defaults to None. (day=1, week=2, month=3, year=4)
-            activation_value (int, optional):
+            activation_value (int | None, optional):
                 Activation offset value that corresponds to `activation_unit`.
                 For example, with `activation_unit="day"`, a value of 2 means 2 days.
-                Reminder form schema indicates `due_in_period` range 1..999.
+                Reminder form schema indicates `due_in_period` range 1..999. Defaults to None.
             activation_unit (Literal["day", "week", "month", "year"] | None, optional):
                 Activation unit. Defaults to None. (day=1, week=2, month=3, year=4)
             activation_business_day (bool | None, optional):
                 Whether activation should use business days. Defaults to None.
-            recurring (bool):
+            recurring (bool, optional):
                 True for recurrence (RSRULE = 2), False for non-recurring behavior.
                 When False, ``RSRULE`` is derived from ``due_date``:
                 ``RSRULE = 0`` when ``due_date`` is provided, otherwise ``RSRULE = 1``.
+                Defaults to False.
             recurring_start_date (date | None, optional):
                 Recurrence start date. Converted to OTCS format. Only sent when
                 ``RSRULE = 2``. Defaults to None.
@@ -29614,7 +29676,7 @@ class OTCS:
                 List of user/group IDs to escalate to. Defaults to None.
             escalation_when (Literal["before", "after"] | None, optional):
                 When to escalate. Defaults to None.
-                Mapped to API values: before=-1, after=1.
+                Mapped to API values: before=1, after=-1.
             escalation_value (int | None, optional):
                 Escalation offset value. Defaults to None.
             escalation_unit (Literal["day", "week", "month", "year"] | None, optional):

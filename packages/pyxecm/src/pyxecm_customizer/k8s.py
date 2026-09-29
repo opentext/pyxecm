@@ -1,6 +1,6 @@
 """Kubernetes Module to implement functions to read / write Kubernetes objects.
 
-This includes as Pods, Stateful Sets, Config Maps, ...
+This includes Pods, Stateful Sets, Config Maps, ...
 
 https://github.com/kubernetes-client/python
 https://github.com/kubernetes-client/python/blob/master/kubernetes/README.md
@@ -223,8 +223,10 @@ class K8s:
         See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#list_namespaced_pod
 
         Args:
-            field_selector (str): filter result based on fields
-            label_selector (str): filter result based on labels
+            field_selector (str, optional):
+                Filter result based on fields. Defaults to "".
+            label_selector (str, optional):
+                Filter result based on labels. Defaults to "".
 
         Returns:
             V1PodList (object) or None if the call fails
@@ -269,8 +271,8 @@ class K8s:
                 The name of the Kubernetes pod in the current namespace.
             condition_name (str):
                 The name of the condition, e.g. "Ready".
-            sleep_time (int):
-                The number of seconds to wait between repetitive status checks.
+            sleep_time (int, optional):
+                The number of seconds to wait between repetitive status checks. Defaults to 30.
 
         Returns:
             None
@@ -332,15 +334,14 @@ class K8s:
             command (list):
                 A list of command and its parameters, e.g. ["/bin/bash", "-c", "pwd"]
                 The "-c" is required to make the shell executing the command.
-            max_retry (int):
-                The maximum number of attempts to execute the command.
-            time_retry (int):
-                Wait time in seconds between retries.
-            container (str):
-                The container name if the pod runs multiple containers inside.
-            timeout (int):
-                Timeout duration that is waited for any response in seconds.
-                Each time a response is found in stdout or stderr we wait another timeout duration [60]
+            max_retry (int, optional):
+                The maximum number of attempts to execute the command. Defaults to 3.
+            time_retry (int, optional):
+                Wait time in seconds between retries. Defaults to 10.
+            container (str | None, optional):
+                The container name if the pod runs multiple containers inside. Defaults to None.
+            timeout (int, optional):
+                Timeout duration that is waited for any response in seconds. Defaults to 60.
 
         Returns:
             str | None:
@@ -425,13 +426,13 @@ class K8s:
             commands (list):
                 A list of command and its parameters, e.g. ["/bin/bash", "/etc/init.d/spawner restart"]
                 Here we should NOT have a "-c" parameter!
-            timeout (int):
-                Timeout duration that is waited for any response.
-                Each time a resonse is found in stdout or stderr we wait another timeout duration
+            timeout (int, optional):
+                Timeout duration that is waited for any response. Defaults to 30.
+                Each time a response is found in stdout or stderr we wait another timeout duration
                 to make sure we get the full output of the command.
-            write_stderr_to_error_log (bool):
-                Flag to control if output in stderr should be written to info or error log stream.
-                Default is write to error log (True).
+            write_stderr_to_error_log (bool, optional):
+                Flag to control if output in stderr should be written to the debug or the error log stream.
+                Defaults to True (write to error log).
 
         Returns:
             str | None:
@@ -593,10 +594,10 @@ class K8s:
         See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#list_namespaced_config_map
 
         Args:
-            field_selector (str):
-                To filter the result based on fields.
-            label_selector (str):
-                To filter result based on labels.
+            field_selector (str | None, optional):
+                To filter the result based on fields. Defaults to None.
+            label_selector (str | None, optional):
+                To filter result based on labels. Defaults to None.
 
         Returns:
             V1ConfigMapList (object) or None if the call fails
@@ -775,8 +776,8 @@ class K8s:
         Args:
             sts_name (str):
                 The name of the Kubernetes stateful set in the current namespace.
-            sts_body (str):
-                The patch string.
+            sts_body (dict):
+                The patch body.
 
         Returns:
             V1StatefulSet (object):
@@ -848,7 +849,7 @@ class K8s:
         Returns:
             V1Service (object):
                 Kubernetes Service object or None if the call fails
-                This is NOT a dict but an object - the you have to use the "." syntax to access to returned elements.
+                This is NOT a dict but an object - then you have to use the "." syntax to access to returned elements.
                 See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1Service.md
 
         """
@@ -876,10 +877,10 @@ class K8s:
         See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/CoreV1Api.md#list_namespaced_service
 
         Args:
-            field_selector (str):
-                To filter result based on fields.
-            label_selector (str):
-                To filter result based on labels.
+            field_selector (str, optional):
+                To filter result based on fields. Defaults to "".
+            label_selector (str, optional):
+                To filter result based on labels. Defaults to "".
 
         Returns:
             V1ServiceList (object):
@@ -918,7 +919,7 @@ class K8s:
 
         Args:
             service_name (str):
-                The name of the Kubernetes Ingress in the current namespace.
+                The name of the Kubernetes Service in the current namespace.
             service_body (dict):
                 The new / updated Service body spec.
                 (will be merged with existing values)
@@ -960,7 +961,7 @@ class K8s:
         Returns:
             V1Ingress (object):
                 Kubernetes Ingress or None if the call fails
-                This is NOT a dict but an object - the you have to use the "." syntax to access to returned elements.
+                This is NOT a dict but an object - then you have to use the "." syntax to access to returned elements.
                 See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/V1Ingress.md
 
         """
@@ -982,7 +983,7 @@ class K8s:
     # end method definition
 
     def patch_ingress(self, ingress_name: str, ingress_body: dict) -> V1Ingress:
-        """Patch a Kubernetes Ingress with a updated spec.
+        """Patch a Kubernetes Ingress with an updated spec.
 
         See: https://github.com/kubernetes-client/python/blob/master/kubernetes/docs/NetworkingV1Api.md#patch_namespaced_ingress
 
@@ -1042,7 +1043,7 @@ class K8s:
                 The new backend service name.
             service_port (int):
                 The new backend service port.
-            path (str):
+            path (str, optional):
                 The path to match for the backend service update. Defaults to "/".
 
         Returns:
@@ -1239,10 +1240,10 @@ class K8s:
         Args:
             pod_name (str):
                 The name of the pod to check.
-            timeout (int):
-                Maximum time to wait for the pod to be deleted (in seconds).
-            retry_interval:
-                Time interval between retries (in seconds).
+            timeout (int, optional):
+                Maximum time to wait for the pod to be deleted (in seconds). Defaults to 300.
+            retry_interval (int, optional):
+                Time interval between retries (in seconds). Defaults to 30.
 
         Returns:
             bool:
@@ -1293,12 +1294,12 @@ class K8s:
         Args:
             deployment_name (str):
                 Name of the Kubernetes deployment.
-            force (bool):
-                If True, all pod instances will be forcefully deleted. [False]
-            wait (bool):
-                If True, wait for the stateful set to be ready again. [False]
-            wait_timeout (int):
-                Maximum time to wait for the stateful set to be ready again (in seconds). [1800]
+            force (bool, optional):
+                If True, all pod instances will be forcefully deleted. Defaults to False.
+            wait (bool, optional):
+                If True, wait for the deployment to be ready again. Defaults to False.
+            wait_timeout (int, optional):
+                Maximum time to wait for the deployment to be ready again (in seconds). Defaults to 1800.
 
         Returns:
             bool:
@@ -1442,14 +1443,14 @@ class K8s:
         - Rollout completion validation
 
         Args:
-            sts_name:
-                Name of the stateful set
-            wait:
-                Whether to wait for rollout completion
-            wait_timeout:
-                Max seconds to wait
-            endpoint_service_name:
-                Optional Service name for endpoint gating
+            sts_name (str):
+                Name of the stateful set.
+            wait (bool, optional):
+                Whether to wait for rollout completion. Defaults to True.
+            wait_timeout (int, optional):
+                Max seconds to wait. Defaults to 1800.
+            endpoint_service_name (str | None, optional):
+                Service name for endpoint gating. Defaults to None (no endpoint gating).
 
         Returns:
             bool:

@@ -3,7 +3,7 @@
 For documentation of PyRFC see here: https://github.com/SAP/PyRFC
 and here: https://sap.github.io/PyRFC/pyrfc.html
 
-RFC typically uses port 3300 to communication with the SAP server.
+RFC typically uses port 3300 to communicate with the SAP server.
 Make sure this port is not blocked by your firewall.
 
 Connection Parameter:
@@ -13,13 +13,13 @@ Connection Parameter:
 * user (e.g. "nwheeler")
 * passwd (password of the user)
 * lang (logon language as two-character ISO-Code, e.g. EN)
-* trace (on of 0(off), 1(brief), 2(verbose), 3(detailed), 4(full))
+* trace (one of 0(off), 1(brief), 2(verbose), 3(detailed), 4(full))
 * use_tls (activates SSL/TLS encryption. Set to 0 or 1. By default TLS is turned on (1))
 * tls_client_pse (Specifies the PSE file containing the necessary certificates for TLS communication.
                   A PSE file is a SAP proprietary certificate store, similar to a p12 file,
                   containing the private key and the certificate chain to be used in the TLS
                   handshake with the server, beginning with the server's public certificate and
-                  ending with the root CA certifcate. It should also contain the client certificate
+                  ending with the root CA certificate. It should also contain the client certificate
                   used for login at the server, if your client program does not use basic
                   user & password authentication)
 """
@@ -122,8 +122,8 @@ class SAP:
         Args:
             rfc_name (str):
                 This is the name of the RFC (typical in capital letters), e.g. SM02_ADD_MESSAGE.
-            options (dictionary, optional):
-                The call options for the RFC call. Defaults to {}. Potential options (keys):
+            options (dict):
+                The call options for the RFC call. Potential options (keys):
                 * not_requested:
                     Allows to deactivate certain parameters in the function module interface.
                     This is particularly useful for BAPIs which have many large tables, the Python client is not interested in.
@@ -135,12 +135,12 @@ class SAP:
                     Cancel RFC connection if ongoing RFC call not completed within timeout seconds.
                     Timeout can be also set as client connection configuration option, in which case is valid
                     for all RFC calls.
-            rfc_parameters (dict, optional):
-                The actual RFC parameters that are specific for the type of the call. Defaults to {}.
+            rfc_parameters (dict):
+                The actual RFC parameters that are specific for the type of the call.
 
         Returns:
             dict | None:
-                Result of the RFC call or None if the call fails or timeouts.
+                Result of the RFC call or None if the call fails or times out.
 
         """
 

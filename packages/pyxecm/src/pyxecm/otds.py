@@ -1,6 +1,6 @@
 """OTDS Module to implement functions to read / write OTDS objects.
 
-This includes Ressources, Users, Groups, Licenses, Trusted Sites, OAuth Clients, ...
+This includes Resources, Users, Groups, Licenses, Trusted Sites, OAuth Clients, ...
 
 The documentation for the used REST APIs can be found here:
     - [https://developer.opentext.com](https://developer.opentext.com/ce/products/opentext-directory-services)
@@ -68,7 +68,7 @@ default_logger = logging.getLogger(MODULE_NAME)
 
 
 class OTDS:
-    """Class OTDS is used to automate stettings in OpenText Directory Services (OTDS)."""
+    """Class OTDS is used to automate settings in OpenText Directory Services (OTDS)."""
 
     # Only class variables or class-wide constants should be defined here:
 
@@ -205,9 +205,7 @@ class OTDS:
     # end method definition
 
     def set_cookie(self, ticket: str) -> dict:
-        """Return the login cookie of OTDS.
-
-        This is set by the authenticate() method
+        """Set the ticket value of the login cookie of OTDS.
 
         Args:
             ticket (str):
@@ -239,7 +237,7 @@ class OTDS:
     # end method definition
 
     def set_access_token(self, token: str) -> str | None:
-        """Get the access token for OAuth2 authentication.
+        """Set the access token for OAuth2 authentication.
 
         Args:
             token (str):
@@ -260,9 +258,13 @@ class OTDS:
     def get_access_token_info(self, resource_id: str | None = None) -> str | None:
         """Get the access token information for OAuth2 authentication.
 
+        Args:
+            resource_id (str | None, optional):
+                The ID of an OTDS resource to include in the token info request. Defaults to None.
+
         Returns:
             str | None:
-                The access token, or None in case of an error.
+                The access token information, or None in case of an error.
 
         """
 
@@ -568,12 +570,8 @@ class OTDS:
         Consists of Bearer access token and Content Type
 
         Args:
-            service_type (str, optional):
-                Service type for which the header should be returned.
-                Either "chat" or "embed". "chat" is the default.
-
             content_type (str, optional):
-                Custom content type for the request.
+                Custom content type for the request. Defaults to "application/json".
                 Typical values:
                 * application/json - Used for sending JSON-encoded data
                 * application/x-www-form-urlencoded - The default for HTML forms.
@@ -635,13 +633,12 @@ class OTDS:
                 The timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                If False, then only a warning is logged (if show_warning is True). Defaults to True.
             show_warning (bool, optional):
-                Whether or not an warning should be logged in case of a
-                failed REST call.
-                If False, then only a warning is logged. Defaults to True.
+                Whether or not a warning should be logged in case of a
+                failed REST call. Only used if show_error is False. Defaults to False.
             warning_message (str, optional):
-                Specific warning message. Defaults to "". If not given the error_message will be used.
+                Specific warning message. Defaults to "". If not given the failure_message will be used.
             failure_message (str, optional):
                 Specific error message. Defaults to "".
             success_message (str, optional):
@@ -797,7 +794,7 @@ class OTDS:
 
         Args:
             response_object (object):
-                This is reponse object delivered by the request call.
+                This is the response object delivered by the request call.
             additional_error_message (str, optional):
                 Print a custom error message.
             show_error (bool, optional):
@@ -844,7 +841,7 @@ class OTDS:
 
         Args:
             revalidate (bool, optional):
-                Determine if a re-athentication is enforced.
+                Determine if a re-authentication is enforced.
                 (e.g. if session has timed out with 401 error)
             grant_type (str | None, optional):
                 The grant type to use for authentication.
@@ -1061,8 +1058,8 @@ class OTDS:
         """Impersonate as a user.
 
         Args:
-            partition (str):
-                The partition of the user.
+            partition (str, optional):
+                The partition of the user. Defaults to "Content Server Members".
             user_id (str):
                 The ID (= login) of the user.
             ticket (str, optional):
@@ -1164,11 +1161,11 @@ class OTDS:
 
         Args:
             name (str):
-                The name of the new partition.
+                The name of the new application role.
             partition_id (str, optional):
                 ID of the partition to add the role to, defaults to "OAuthClients".
-            description (str):
-                The description of the new partition.
+            description (str, optional):
+                The description of the new application role. Defaults to "".
             values (list, optional):
                 List of optional values to pass with the create request.
             custom_attributes (list, optional):
@@ -1217,8 +1214,8 @@ class OTDS:
         Args:
             name (str):
                 The name of the application role to retrieve.
-            partition (str):
-                Partition of the application role.
+            partition (str, optional):
+                Partition of the application role. Defaults to "OAuthClients".
             show_error (bool, optional):
                 Defines whether or not we want to log an error
                 if the partition is not found.
@@ -1267,17 +1264,17 @@ class OTDS:
 
         Args:
             user_id (str):
-                The ID of the user (= login name) to assign to the license.
+                The ID of the user (= login name) to assign to the application role.
             user_partition (str):
                 The user partition in OTDS, e.g. "Content Server Members".
             role_name (str):
                 Name of the application role to be assigned.
-            role_partition (str):
+            role_partition (str, optional):
                 The name of the partition of the Role, defaults to "OAuthClients".
 
         Returns:
             bool:
-                True if successful or False if the REST call fails or the license is not found.
+                True if successful or False if the REST call fails or the application role is not found.
 
         """
 
@@ -1358,12 +1355,12 @@ class OTDS:
                 The group partition in OTDS, e.g. "Content Server Members".
             role_name (str):
                 Name of the application role to be assigned.
-            role_partition (str):
+            role_partition (str, optional):
                 The name of the partition of the Role, defaults to "OAuthClients".
 
         Returns:
             bool:
-                True if successful or False if the REST call fails or the license is not found.
+                True if successful or False if the REST call fails or the application role is not found.
 
         """
 
@@ -1650,13 +1647,13 @@ class OTDS:
                 ]
                 Default is True (= attributes as keys).
             next_page_cookie (str, optional):
-                A key returned by a former call to this method in with
-                a return key 'nextPageCookie' (see example below). This
+                A key returned by a former call to this method in
+                the return key 'nextPageCookie' (see example below). This
                 can be used to get the next page of result items.
 
         Returns:
             dict | None:
-                Request response or None if the user was not found.
+                Request response or None if the REST call fails.
 
         Example:
         {
@@ -2050,7 +2047,7 @@ class OTDS:
 
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_group")
     def get_group(self, group: str, show_error: bool = True) -> dict | None:
-        """Get a OTDS group by its group name.
+        """Get an OTDS group by its group name.
 
         Args:
             group (str):
@@ -2149,13 +2146,13 @@ class OTDS:
                 ]
                 Default is True (= attributes as keys).
             next_page_cookie (str, optional):
-                A key returned by a former call to this method in with
-                a return key 'nextPageCookie' (see example below). This
+                A key returned by a former call to this method in
+                the return key 'nextPageCookie' (see example below). This
                 can be used to get the next page of result items.
 
         Returns:
             dict | None:
-                Request response or None if the user was not found.
+                Request response or None if the REST call fails.
 
         Example:
         {
@@ -2335,7 +2332,7 @@ class OTDS:
                 # like an empty iterable when used in a loop or converted to a list:
                 return
 
-            # Yield users one at a time:
+            # Yield groups one at a time:
             yield from response["groups"]
 
             # See if we have an additional result page.
@@ -2454,17 +2451,17 @@ class OTDS:
         Args:
             name (str):
                 The name of the new OTDS resource.
-            description (str):
+            description (str, optional):
                 The optional description of the new OTDS resource.
             display_name (str, optional):
                 The optional display name of the OTDS resource.
-            allow_impersonation (bool):
-                Defines whether or not the resource allows impersonation.
+            allow_impersonation (bool, optional):
+                Defines whether or not the resource allows impersonation. Defaults to True.
             resource_id (str | None, optional):
                 Allows to set a predefined resource ID. This requires the
-                secret parameter in additon.
-            secret (str):
-                A 24 charcters secret key. Required to set a predefined resource ID.
+                secret parameter in addition.
+            secret (str | None, optional):
+                A 24 characters secret key. Required to set a predefined resource ID.
             additional_payload (dict, optional):
                 Additional values for the JSON payload.
 
@@ -2526,7 +2523,7 @@ class OTDS:
 
         Args:
             name (str):
-                The name of the new OTDS resource.
+                The name of the OTDS resource.
             show_error (bool, optional):
                 If True, log an error if resource is not found. Else log just a warning.
 
@@ -2656,9 +2653,6 @@ class OTDS:
     def get_access_roles(self) -> dict | None:
         """Get a list of all OTDS access roles.
 
-        Args:
-            None
-
         Returns:
             dict | None:
                 Request response or None if the REST call fails.
@@ -2730,7 +2724,7 @@ class OTDS:
         Returns:
             bool:
                 True if partition is in access role or has been successfully added.
-                False if partition has been not been added (error)
+                False if partition has not been added (error)
 
         """
 
@@ -2867,7 +2861,7 @@ class OTDS:
         Returns:
             bool:
                 True if group is in access role or has been successfully added.
-                False if group has been not been added (error)
+                False if group has not been added (error)
 
         """
 
@@ -3806,9 +3800,6 @@ class OTDS:
     def get_trusted_sites(self) -> dict | None:
         """Get all configured OTDS trusted sites.
 
-        Args:
-            None
-
         Returns:
             dict | None:
                 Request response or None if the REST call fails.
@@ -4004,12 +3995,12 @@ class OTDS:
                 The name of the new OAuth client (should not have blanks).
             description (str):
                 The description of the OAuth client.
-            redirect_urls (list):
+            redirect_urls (list, optional):
                 A list of redirect URLs (strings).
             allow_impersonation (bool, optional):
                 Whether or not to allow impersonation.
             confidential (bool, optional):
-                is confidential
+                Whether or not the OAuth client is confidential.
             auth_scopes (list, optional):
                 The authorization scope. If empty then "Global" is assumed.
             allowed_scopes (list, optional):
@@ -4135,7 +4126,7 @@ class OTDS:
             client_id (str):
                 The name (= ID) of the OAuth client to retrieve
             show_error (bool, optional):
-                Whether or not we want to log an error if partion is not found.
+                Whether or not we want to log an error if the OAuth client is not found.
 
         Returns:
             dict | None:
@@ -4259,7 +4250,7 @@ class OTDS:
 
         oauth_client_location = response["location"]
 
-        # adding OAuthClients info to acess roles organizational units
+        # adding OAuthClients info to access roles organizational units
         oauth_clients_ou_block = {
             "location": oauth_client_location,
             "name": oauth_client_location,
@@ -4373,10 +4364,10 @@ class OTDS:
                 The name of the new authentication handler.
             description (str):
                 The description of the new authentication handler.
-            scope (str):
+            scope (str | None):
                 The name of the user partition (to define a scope of the auth handler)
             provider_name (str):
-                The description of the new authentication handler.
+                The name of the identity provider.
             saml_url (str):
                 The SAML URL.
             otds_sp_endpoint (str):
@@ -4384,10 +4375,10 @@ class OTDS:
             enabled (bool, optional):
                 Defines if the handler should be enabled or disabled. Default is True = enabled.
             priority (int, optional):
-                Priority of the Authentical Handler (compared to others). Default is 5
+                Priority of the Authentication Handler (compared to others). Default is 5
             active_by_default (bool, optional):
                 Defines whether OTDS should redirect immediately to provider page
-                (not showing the OTDS login at all).
+                (not showing the OTDS login at all). Defaults to False.
             auth_principal_attributes (list, optional):
                 List of Authentication principal attributes
             nameid_format (str, optional):
@@ -4723,7 +4714,7 @@ class OTDS:
                 The name of the new authentication handler.
             description (str):
                 The description of the new authentication handler.
-            scope (str):
+            scope (str | None):
                 The name of the user partition (to define a scope of the auth handler)
             certificate_file (str):
                 A fully qualified file name (with path) to the certificate file.
@@ -4732,7 +4723,7 @@ class OTDS:
             enabled (bool, optional):
                 Defines if the handler should be enabled or disabled. Default is True = enabled.
             priority (int, optional):
-                Priority of the Authentical Handler (compared to others). Default is 10.
+                Priority of the Authentication Handler (compared to others). Default is 10.
             auth_principal_attributes (list, optional):
                 List of Authentication principal attributes.
 
@@ -4955,7 +4946,7 @@ class OTDS:
                 The name of the new authentication handler.
             description (str):
                 The description of the new authentication handler.
-            scope (str):
+            scope (str | None):
                 The name of the user partition (to define a scope of the auth handler).
             provider_name (str):
                 The name of the authentication provider. This name is displayed on the login page.
@@ -4967,6 +4958,7 @@ class OTDS:
                 Defines, whether to activate this handler for any request to the OTDS login page.
                 If True, any login request to the OTDS login page will be redirected to this OAuth provider.
                 If False, the user has to select the provider on the login page.
+                Defaults to False.
             authorization_endpoint (str, optional):
                 The URL to redirect the browser to for authentication.
                 It is used to retrieve the authorization code or an OIDC id_token.
@@ -4978,7 +4970,7 @@ class OTDS:
             enabled (bool, optional):
                 Defines if the handler should be enabled or disabled. Default is True = enabled.
             priority (int, optional):
-                Priority of the Authentical Handler (compared to others). Default is 5.
+                Priority of the Authentication Handler (compared to others). Default is 10.
             auth_principal_attributes (list, optional):
                 List of Authentication principal attributes.
 
@@ -5417,15 +5409,15 @@ class OTDS:
         """Configure impersonation for an OTDS resource.
 
         Args:
-             resource_name (str):
-                 Name of the resource to configure impersonation for.
-             allow_impersonation (bool, optional):
-                 Whether to turn on or off impersonation (default = True)
-             impersonation_list (list, optional):
-                 A list of users to restrict it to (default = empty list = all users)
+            resource_name (str):
+                Name of the resource to configure impersonation for.
+            allow_impersonation (bool, optional):
+                Whether to turn on or off impersonation (default = True)
+            impersonation_list (list, optional):
+                A list of users to restrict it to (default = empty list = all users)
 
         Returns:
-             bool:
+            bool:
                 True if the impersonation setting succeeded or False if it failed.
 
         """
@@ -5521,9 +5513,6 @@ class OTDS:
     def get_password_policy(self) -> dict | None:
         """Get the global password policy.
 
-        Args:
-            None
-
         Returns:
             dict | None:
                 Request response or None if the REST call fails.
@@ -5570,7 +5559,7 @@ class OTDS:
         Args:
             update_values (dict):
                 New values for selected settings.
-                A value of 0 means the settings is deactivated.
+                A value of 0 means the setting is deactivated.
 
         Example:
             {

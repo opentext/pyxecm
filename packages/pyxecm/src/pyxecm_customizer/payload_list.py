@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from pyxecm_customizer.customizer import Customizer
 from pyxecm_customizer.exceptions import StopOnError
 from pyxecm_customizer.log import LogCountFilter
+from pyxecm_customizer.manager_push import ManagerPushClient
 from pyxecm_customizer.payload import load_payload
 
 tracer = trace.get_tracer(__name__)
@@ -53,6 +54,7 @@ class PayloadList:
             self.logger = default_logger
 
         self._stopped = True
+        self.manager_push = ManagerPushClient(logger=self.logger)
         self.payload_items = pd.DataFrame(
             columns=[
                 "name",
@@ -811,10 +813,32 @@ class PayloadList:
                 {"stop_time": stop_time, "duration": formatted_duration},
             )
 
+            if self.manager_push.settings.enabled:
+                completed_item = self.get_payload_item(index=payload_item["index"])
+                self.manager_push.push_payload_result(completed_item)
+
+                should_push_log = self.manager_push.settings.push_logs == "always" or (
+                    self.manager_push.settings.push_logs == "on_error"
+                    and (
+                        completed_item["status"] == "failed"
+                        or completed_item["log_error"] > 0
+                        or completed_item["log_critical"] > 0
+                    )
+                )
+                if should_push_log:
+                    self.manager_push.push_payload_log(
+                        index=payload_item["index"],
+                        name=payload_item["name"],
+                        logfile_path=payload_item["logfile"],
+                    )
+
         # end  def run_and_complete_payload()
 
         # add delay here to allow for logging to work reliably for the the first payload
         time.sleep(10)
+
+        run_observed_running = False
+        terminal_status_pushed = False
 
         while not self._stopped:
             # Get runnable items as subset of the initial data frame:
@@ -841,6 +865,7 @@ class PayloadList:
                         self.payload_items["name"] == item["name"],
                         "status",
                     ] = "running"
+                    run_observed_running = True
 
                     # Start the process_payload method in a new thread
                     thread = threading.Thread(
@@ -850,6 +875,13 @@ class PayloadList:
                     )
                     thread.start()
                     break
+
+            if not terminal_status_pushed and run_observed_running and not self.pick_running():
+                enabled_items = self.payload_items[self.payload_items["enabled"]]
+                if not enabled_items.empty and enabled_items["status"].isin(["planned", "running"]).sum() == 0:
+                    terminal_status = "failed" if (enabled_items["status"] == "failed").any() else "completed"
+                    self.manager_push.push_run(status=terminal_status, finished_at=datetime.now(UTC))
+                    terminal_status_pushed = True
 
             # Sleep briefly to avoid a busy wait loop
             time.sleep(1)
@@ -872,6 +904,23 @@ class PayloadList:
         )
         self._stopped = False
         scheduler_thread.start()
+
+        started_at = datetime.now(UTC)
+        self.manager_push.push_run(status="running", started_at=started_at)
+
+        def heartbeat() -> None:
+            while not self._stopped:
+                time.sleep(self.manager_push.settings.heartbeat_seconds)
+                if not self._stopped:
+                    self.manager_push.push_run(status="running", started_at=started_at)
+
+        if self.manager_push.settings.enabled:
+            heartbeat_thread = threading.Thread(
+                target=heartbeat,
+                daemon=True,
+                name="ManagerHeartbeat",
+            )
+            heartbeat_thread.start()
 
     # end method definition
 

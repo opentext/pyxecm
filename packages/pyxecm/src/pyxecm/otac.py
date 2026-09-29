@@ -49,7 +49,7 @@ default_logger = logging.getLogger(MODULE_NAME)
 
 
 class OTAC:
-    """Class OTAC is used to automate stettings in OpenText Archive Center."""
+    """Class OTAC is used to automate settings in OpenText Archive Center."""
 
     # Only class variables or class-wide constants should be defined here:
 
@@ -73,9 +73,9 @@ class OTAC:
             protocol (str):
                 Either http or https.
             hostname (str):
-                The hostname of the Archive Center  to communicate with.
+                The hostname of the Archive Center to communicate with.
             port (int):
-                The port number used to talk to the Archive Center .
+                The port number used to talk to the Archive Center.
             ds_username (str):
                 The admin user name of Archive Center (dsadmin).
             ds_password (str):
@@ -263,10 +263,7 @@ class OTAC:
 
         Consists of Token + Form Headers (see global variable)
 
-        Args:
-            None.
-
-        Return:
+        Returns:
             dict:
                 The request header for forms content type that includes the authorization token.
 
@@ -287,10 +284,7 @@ class OTAC:
 
         Consists of Cookie + JSON Headers (see global variable)
 
-        Args:
-            None.
-
-        Return:
+        Returns:
             dict:
                 The request header for JSON content type that includes the authorization token.
 
@@ -322,14 +316,14 @@ class OTAC:
 
         Args:
             response_object (object):
-                The reponse object delivered by the request call.
-            additional_error_message (str):
-                To print a custom error message.
-            show_error (bool):
-                If True, log an error, if False log a warning.
+                The response object delivered by the request call.
+            additional_error_message (str, optional):
+                To print a custom error message. Defaults to "".
+            show_error (bool, optional):
+                If True, log an error, if False log a debug message. Defaults to True.
 
         Returns:
-            dict:
+            dict | None:
                 The response or None in case of an error.
 
         """
@@ -364,15 +358,15 @@ class OTAC:
 
         Args:
             revalidate (bool, optional):
-                Determins if a re-athentication is enforced
+                Determines if a re-authentication is enforced
                 (e.g. if session has timed out with 401 error).
-                By default we use the OTDS ticket (if exists) for the authentication with OTCS.
+                By default we use the OTDS ticket (if exists) for the authentication with OTAC.
                 This switch allows the forced usage of username / password for the authentication.
 
         Returns:
             dict | None:
-                Cookie information of None in case of an error.
-                Also stores cookie information in self._cookie
+                Ticket, or None in case of an error.
+                Also stores the ticket in self._otac_ticket
 
         """
 
@@ -441,9 +435,6 @@ class OTAC:
 
     def authenticate_soap(self) -> str:
         """Authenticate via SOAP with admin User.
-
-        Args:
-            None
 
         Returns:
             str:
@@ -530,7 +521,7 @@ class OTAC:
 
         """
 
-        # Check if the photo file exists
+        # Check if the certificate file exists
         if not os.path.isfile(cert_path):
             self.logger.error("Certificate file -> '%s' not found!", cert_path)
             return None
@@ -601,7 +592,7 @@ class OTAC:
         logical_archive: str,
         enable: bool = True,
     ) -> bool:
-        """Enable Certitificate on Archive Center via SOAP call.
+        """Enable Certificate on Archive Center via SOAP call.
 
         Args:
             auth_id (str):
@@ -612,7 +603,7 @@ class OTAC:
                 Enable or Disable certificate. Defaults to True.
 
         Returns:
-            True if certificate has been activated, False if an error has occured.
+            True if certificate has been activated, False if an error has occurred.
 
         """
 

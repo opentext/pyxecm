@@ -16,7 +16,7 @@ REQUEST_TIMEOUT = 60.0
 
 
 class Translator:
-    """Class Translator is used for translation of of strings based on the Google Translate API.
+    """Class Translator is used for translation of strings based on the Google Translate API.
 
     The class supports V2 and V3 translation APIs.
     """
@@ -75,7 +75,7 @@ class Translator:
 
         Returns:
             dict:
-                The onfiguration parameters.
+                The configuration parameters.
 
         """
 
@@ -94,7 +94,7 @@ class Translator:
 
         Returns:
             str:
-                The translated string.
+                The translated string, or None if the request failed.
 
         """
 
@@ -136,7 +136,7 @@ class Translator:
 
         Returns:
             str:
-                The translated string.
+                The translated string, or None if the request failed.
 
         """
 

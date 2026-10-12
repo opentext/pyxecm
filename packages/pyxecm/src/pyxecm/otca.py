@@ -898,7 +898,7 @@ class OTCA:
             headers=request_header,
             json_data=search_data,
             timeout=None,
-            failure_message="Failed to to do a semantic search with query -> '{}'".format(query),
+            failure_message="Failed to do a semantic search with query -> '{}'".format(query),
         )
 
     # end method definition
@@ -1285,7 +1285,7 @@ class OTCA:
             url=request_url,
             method="GET",
             headers=request_header,
-            failure_message="Canbnot get list of tools",
+            failure_message="Cannot get list of tools",
         )
 
     # end method definition

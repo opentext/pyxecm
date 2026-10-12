@@ -16,7 +16,7 @@ from http import HTTPStatus
 from typing import Annotated, Literal
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pyxecm_customizer.payload import load_payload
 
@@ -25,8 +25,15 @@ from pyxecm_api.auth.models import User
 from pyxecm_api.common.functions import PAYLOAD_LIST, get_settings
 from pyxecm_api.settings import CustomizerAPISettings
 
-from .functions import prepare_dependencies, tail_log
-from .models import PayloadListItem, PayloadListItems, UpdatedPayloadListItem
+from .functions import GrowingFileResponse, prepare_dependencies, run_log_read, tail_log
+from .log_reader import (
+    DEFAULT_LIMIT,
+    DEFAULT_MAX_BYTES,
+    build_lines_request,
+    read_log_info,
+    read_log_lines,
+)
+from .models import PayloadListItem, PayloadListItems, PayloadLogInfo, PayloadLogLines, UpdatedPayloadListItem
 
 router = APIRouter(prefix="/api/v1/payload", tags=["payload"])
 
@@ -483,16 +490,204 @@ async def download_payload_logfile(
             detail="Log file -> '{}' not found".format(filename),
         )
 
-    async with await anyio.open_file(filename, "rb") as file:
-        content = await file.read()
-
-    return Response(
-        content,
+    # The file is streamed from disk (a log can have several gigabytes) and a part of it can be
+    # requested with a "Range" header. Without one the complete file is sent.
+    return GrowingFileResponse(
+        filename,
         media_type="application/octet-stream",
         headers={
             "Content-Disposition": f'attachment; filename="{os.path.basename(filename)}"',
+            # The response carries validators now (ETag, Last-Modified) but a log changes
+            # all the time: keep browsers from reusing a stored copy on their own.
+            "Cache-Control": "no-cache",
         },
     )
+
+
+def get_payload_logfile(payload_id: int) -> tuple[str, bool]:
+    """Get the log file of a payload for the endpoints that read parts of it.
+
+    Args:
+        payload_id (int):
+            The payload item ID.
+
+    Raises:
+        HTTPException:
+            A payload item with the given ID couldn't be found.
+
+    Returns:
+        tuple[str, bool]:
+            The path of the log file and whether the payload is running, i.e. whether
+            the log is still being written.
+
+    """
+
+    payload = PAYLOAD_LIST.get_payload_item(index=payload_id)
+
+    if payload is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Payload not found")
+
+    return payload.logfile, payload.status == "running"
+
+
+@router.get(path="/{payload_id}/log/info")
+async def get_payload_logfile_info(
+    user: Annotated[User, Depends(get_authorized_user)],  # noqa: ARG001
+    payload_id: int,
+) -> PayloadLogInfo:
+    """Describe the logfile of a payload and the progress of its line index.
+
+    The line index makes it possible to read any part of a log of any size (see
+    `/log/lines`). It is built in the background when a log is looked at for the first time.
+
+    Args:
+        user: Annotated[User, Depends(get_authorized_user)]
+        payload_id (int):
+            The payload item ID.
+
+    Raises:
+        HTTPException:
+            The payload item or its logfile couldn't be found.
+
+    Returns:
+        PayloadLogInfo:
+            Size, number of lines and number of log records per level of the logfile, how
+            far the line index reaches and whether the payload is running.
+
+    """
+
+    filename, running = get_payload_logfile(payload_id)
+
+    try:
+        info = await run_log_read(None, read_log_info, filename, running)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Log file -> '{}' not found".format(filename),
+        ) from exc
+
+    return PayloadLogInfo(**info)
+
+
+@router.get(path="/{payload_id}/log/lines")
+async def get_payload_logfile_lines(
+    request: Request,
+    user: Annotated[User, Depends(get_authorized_user)],  # noqa: ARG001
+    payload_id: int,
+    offset: Annotated[
+        int | None,
+        Query(description="Byte offset to start at. It is snapped back to the start of the line containing it."),
+    ] = None,
+    line: Annotated[
+        int | None,
+        Query(description="Line number (1-based) to start at. Alternative to the offset."),
+    ] = None,
+    direction: Annotated[
+        str,
+        Query(
+            description="'forward' returns the lines from the start position on, "
+            "'backward' the lines before it. Without start position, 'forward' starts "
+            "at the beginning of the logfile and 'backward' at its end.",
+        ),
+    ] = "forward",
+    limit: Annotated[int, Query(description="Maximum number of lines to return (0 to 5000).")] = DEFAULT_LIMIT,
+    max_bytes: Annotated[
+        int,
+        Query(description="Soft cap on the summed size of the returned lines. At most 4 MiB are used."),
+    ] = DEFAULT_MAX_BYTES,
+    levels: Annotated[
+        str | None,
+        Query(
+            description="Comma separated list of the levels to return (DEBUG, INFO, WARNING, ERROR). "
+            "Lines without a level are always returned. An empty value returns only those.",
+        ),
+    ] = None,
+    q: Annotated[str | None, Query(description="Text to search for. Only matching lines are returned.")] = None,
+    regex: Annotated[bool, Query(description="The search text is a regular expression (Python syntax).")] = False,
+    case: Annotated[bool, Query(description="Match the case of the search text.")] = False,
+    word: Annotated[bool, Query(description="Match whole words only.")] = False,
+    count_only: Annotated[
+        bool,
+        Query(description="Return no lines but count them. The limit and max_bytes are ignored."),
+    ] = False,
+) -> PayloadLogLines:
+    """Read a window of lines from the logfile of a payload, optionally filtered.
+
+    The logfile is never read into memory as a whole, so this works for logs of any size.
+    A request stops after `limit` lines, after `max_bytes`, at the end (or the beginning) of
+    the logfile, or when it has worked for about a second. The response tells which byte range
+    of the logfile it covers: continue with `offset=<end>&direction=forward` or with
+    `offset=<start>&direction=backward` until `eof` or `bof` is true.
+
+    Args:
+        request (Request):
+            The request. The scan stops when its client disconnects.
+        user: Annotated[User, Depends(get_authorized_user)]
+        payload_id (int):
+            The payload item ID.
+        offset (int | None, optional):
+            The byte offset to start at.
+        line (int | None, optional):
+            The line number to start at.
+        direction (str, optional):
+            The direction to read in: "forward" or "backward".
+        limit (int, optional):
+            The maximum number of lines to return.
+        max_bytes (int, optional):
+            The soft cap on the summed size of the returned lines.
+        levels (str | None, optional):
+            The comma separated levels to return.
+        q (str | None, optional):
+            The text to search for.
+        regex (bool, optional):
+            Whether the search text is a regular expression.
+        case (bool, optional):
+            Whether the case of the search text has to match.
+        word (bool, optional):
+            Whether only whole words match.
+        count_only (bool, optional):
+            Whether to count the lines instead of returning them.
+
+    Raises:
+        HTTPException:
+            The payload item or its logfile couldn't be found (404), or a parameter
+            is invalid (400).
+
+    Returns:
+        PayloadLogLines:
+            The lines (ascending), the byte range they were taken from and the state of
+            the logfile.
+
+    """
+
+    filename, running = get_payload_logfile(payload_id)
+
+    try:
+        lines_request = build_lines_request(
+            offset=offset,
+            line=line,
+            direction=direction,
+            limit=limit,
+            max_bytes=max_bytes,
+            levels=levels,
+            q=q,
+            regex=regex,
+            case=case,
+            word=word,
+            count_only=count_only,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        result = await run_log_read(request, read_log_lines, filename, running, lines_request)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Log file -> '{}' not found".format(filename),
+        ) from exc
+
+    return PayloadLogLines(**result)
 
 
 @router.get(path="/{payload_id}/log/stream")

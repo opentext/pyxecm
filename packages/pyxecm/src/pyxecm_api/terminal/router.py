@@ -40,17 +40,14 @@ async def ws_terminal(
         # Wait for the first message to be the token
         token = await websocket.receive_text()
 
-        user = await get_current_user(token=token, api_key=token)
-        authrorized = await get_authorized_user(user)
+        # get_current_user is sync (blocking HTTP call to OTDS) - run it off the event loop
+        user = await asyncio.to_thread(get_current_user, token=token, api_key=token)
+        await get_authorized_user(user)
 
-        if not authrorized:
-            await websocket.send_text("Invalid User: " + str(user))
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-
-    except HTTPException:
-        await websocket.send_text("Invalid Token")
+    except HTTPException as e:
+        await websocket.send_text("Invalid Token" if e.status_code == status.HTTP_401_UNAUTHORIZED else e.detail)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
     except WebSocketDisconnect:
         return

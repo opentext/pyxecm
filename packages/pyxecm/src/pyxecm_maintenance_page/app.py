@@ -21,7 +21,9 @@ from .settings import settings
 
 logger = logging.getLogger("pyxecm_customizer.maintenance_page")
 
-app = FastAPI(openapi_url=None)
+# Runs in the same process as the customizer API, which owns the OpenTelemetry setup;
+# FastAPI's OTLP auto-configuration would add duplicate exporters to its providers.
+app = FastAPI(openapi_url=None, telemetry={"auto_configure": False})
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 static_dir = os.path.join(base_dir, "static")

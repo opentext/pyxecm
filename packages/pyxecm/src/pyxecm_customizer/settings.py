@@ -409,6 +409,103 @@ class CustomizerSettingsAVTS(BaseModel):
     )
 
 
+class CustomizerSettingsSAP(BaseModel):
+    """Class for SAP related settings."""
+
+    enabled: bool = Field(default=False, description="Enable/Disable the SAP integration")
+    username: str = Field(default="", description="Username of the SAP user (used for RFC and OData calls)")
+    password: SecretStr = Field(default=SecretStr(""), description="Password of the SAP user")
+    base_url: HttpUrl | None = Field(
+        default=None,
+        description="Base URL of the SAP system for OData REST API calls, e.g. 'https://s4.example.com:44300'",
+    )
+    verify_ssl: bool = Field(
+        default=True,
+        description="Verify the TLS certificate of the SAP system for OData calls",
+    )
+    client: str = Field(default="100", description="SAP client ('Mandant'), used for RFC and OData")
+    lang: str = Field(default="EN", description="Logon language as two-character ISO code, used for RFC and OData")
+
+    system_id: str = Field(default="", description="SAP system ID (RFC only)")
+    system_number: str = Field(default="00", description="SAP system number (RFC only)")
+    ashost: str = Field(
+        default="",
+        description="Hostname of the application server for direct application server logon (RFC only)",
+    )
+    mshost: str = Field(
+        default="",
+        description="Hostname of the message server for logon with load balancing (RFC only)",
+    )
+    msport: str = Field(default="3601", description="Port of the message server (RFC only)")
+    group: str = Field(default="PUBLIC", description="Logon group for logon with load balancing (RFC only)")
+    destination: str = Field(default="", description="RFC destination (RFC only)")
+    trace: str = Field(default="3", description="RFC trace level: 0=off, 1=brief, 2=verbose, 3=detailed, 4=full")
+
+    saml_idp_private_key_file: str = Field(
+        default="",
+        description=(
+            "Path to the PEM-encoded, unencrypted RSA private key (at least 2048 bits) of pyxecm's "
+            "SAML 2.0 identity provider. It signs the SAML assertions for principal propagation into "
+            "SAP (SAP.get_saml_assertion()). Whoever holds it can get an SAP access token for every "
+            "user the SAP-side NameID mapping reaches - mount it from a secret store. Created once per "
+            "deployment (see docs/pyxecm-customizer/sap-authentication.md). Requires the 'saml' extra. "
+            "Empty = principal propagation disabled."
+        ),
+    )
+    saml_idp_certificate_file: str = Field(
+        default="",
+        description=(
+            "Path to the PEM-encoded X.509 certificate of saml_idp_private_key_file. The SAP "
+            "administrator imports it in transaction SAML2 as the signing certificate of the trusted "
+            "identity provider. Checked against the private key and its expiry date at startup."
+        ),
+    )
+    saml_issuer: str = Field(
+        default="",
+        description=(
+            "Entity ID (provider name) of pyxecm's SAML 2.0 identity provider, as registered in "
+            "transaction SAML2, e.g. 'pyxecm-idp'. Required for principal propagation."
+        ),
+    )
+    saml_audience: str = Field(
+        default="",
+        description=(
+            "Provider name of the SAP system's local SAML 2.0 provider (transaction SAML2, 'Local "
+            "Provider' tab), e.g. 'S4HCLNT100'. Required for principal propagation."
+        ),
+    )
+    saml_nameid_format: str = Field(
+        default="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        description=(
+            "NameID format of the SAML assertions - must match the identity federation of pyxecm's "
+            "trusted provider in transaction SAML2. Default: e-mail address (the SAP user is found by "
+            "the e-mail address of the user)."
+        ),
+    )
+    oauth_client_id: str = Field(
+        default="",
+        description=(
+            "OAuth 2.0 client ID for principal propagation, registered in transaction SOAUTH2 - the user "
+            "name of the SU01 system user that represents pyxecm (see SAP.get_oauth_access_token())."
+        ),
+    )
+    oauth_client_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "Password of the SU01 system user of oauth_client_id (SOAUTH2 client authentication "
+            "'Password'). It authenticates pyxecm as application - it is not an end user's password."
+        ),
+    )
+    oauth_scope: str = Field(
+        default="",
+        description=(
+            "Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. "
+            "'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001'. Empty = the default scopes "
+            "of the OAuth client in SOAUTH2."
+        ),
+    )
+
+
 class ManagerPushSettings(BaseSettings):
     """Configuration for optional manager run-history delivery."""
 
@@ -494,11 +591,14 @@ class Settings(BaseSettings):
     otkd: CustomizerSettingsKnowledgeDiscovery = CustomizerSettingsKnowledgeDiscovery()
     avts: CustomizerSettingsAVTS = CustomizerSettingsAVTS()
     otmm: CustomizerSettingsOTMM = CustomizerSettingsOTMM()
+    sap: CustomizerSettingsSAP = CustomizerSettingsSAP()
 
     model_config = SettingsConfigDict(
         toml_file="config.toml",
+        env_file=".env",
         env_nested_delimiter="__",
         case_sensitive=False,
+        extra="ignore",
     )
 
     @classmethod

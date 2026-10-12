@@ -741,7 +741,7 @@ class Data:
         # the matching file name extension:
         if compression:
             compression = compression.lstrip(".")  # remove a dot prefix if present
-            suffix = "." + compression if compression != "gzip" else "gz"
+            suffix = "." + compression if compression != "gzip" else ".gz"
             if not json_path.endswith(suffix):
                 json_path += suffix
 
@@ -1093,6 +1093,13 @@ class Data:
         """
 
         try:
+            # Check if the data frame is initialized first
+            if self._df is None:
+                self.logger.error(
+                    "Cannot write Excel file -> '%s' from empty / non-initialized data frame!", excel_path
+                )
+                return False
+
             # Check if the directory exists
             directory = os.path.dirname(excel_path)
             if directory and not os.path.exists(directory):
@@ -1110,10 +1117,6 @@ class Data:
                 columns = existing_columns
 
             # Attempt to save the data frame to Excel:
-            if self._df is None:
-                self.logger.error(
-                    "Cannot write Excel file -> '%s' from empty / non-initialized data frame!", excel_path
-                )
             self._df.to_excel(
                 excel_path,
                 sheet_name=sheet_name,
@@ -1665,7 +1668,7 @@ class Data:
             # Traverse all values in the values list:
             for value in values:
                 # Do we want a special treatment for this value (e.g. the current year)
-                if value in special_values:
+                if special_values and value in special_values:
                     self.logger.debug("Processing special value -> '%s'...", value)
                     if value not in special_url_templates and str(value) not in special_url_templates:
                         self.logger.error(
@@ -1699,11 +1702,10 @@ class Data:
                             common_data=common_data,
                             pattern=pattern,
                         )
-        else:
+        elif not values:
             for url_template in url_templates:
-                url = url_template.format(value)
                 result_list += self.load_web_links(
-                    url=url,
+                    url=url_template,
                     common_data=None,
                     pattern=pattern,
                 )

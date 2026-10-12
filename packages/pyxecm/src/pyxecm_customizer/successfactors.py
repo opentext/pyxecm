@@ -420,12 +420,12 @@ class SuccessFactors:
             dict_object = json.loads(response_object.text) if response_object.text else vars(response_object)
         except json.JSONDecodeError as exception:
             if additional_error_message:
-                message = "Cannot decode response as JSon. {}; error -> {}".format(
+                message = "Cannot decode response as JSON. {}; error -> {}".format(
                     additional_error_message,
                     exception,
                 )
             else:
-                message = "Cannot decode response as JSon; error -> {}".format(
+                message = "Cannot decode response as JSON; error -> {}".format(
                     exception,
                 )
             if show_error:
@@ -559,7 +559,7 @@ class SuccessFactors:
             method="POST",
             data=idp_post_body,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to request an SuccessFactors SAML Assertion",
+            failure_message="Failed to request a SuccessFactors SAML Assertion",
             show_warning=False,
             parse_request_response=False,
         )
@@ -620,7 +620,7 @@ class SuccessFactors:
             method="POST",
             data=authenticate_post_body,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to request an SuccessFactors Access Token",
+            failure_message="Failed to request a SuccessFactors Access Token",
             show_warning=True,
             warning_message="Unable to connect to -> {}".format(request_url),
         )

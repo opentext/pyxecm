@@ -1513,7 +1513,7 @@ class Customizer:
         if enable and self.settings.k8s.enabled:
             self.log_header("Enable Maintenance Mode")
             self.logger.info(
-                "Put OTCS frontends in Maitenance Mode by changing the Kubernetes Ingress backend service...",
+                "Put OTCS frontends in Maintenance Mode by changing the Kubernetes Ingress backend service...",
             )
             self.k8s_object.update_ingress_backend_services(
                 self.settings.k8s.ingress_otxecm,
@@ -1808,7 +1808,7 @@ class Customizer:
 
                 # Now process the payload in the defined ordering:
                 payload_object.process_payload()
-                t.add_event("Payload processsed", timestamp=time.time_ns())
+                t.add_event("Payload processed", timestamp=time.time_ns())
 
                 self.log_header("Consolidate OTDS Resources")
                 self.consolidate_otds()

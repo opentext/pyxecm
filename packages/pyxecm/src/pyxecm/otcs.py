@@ -24,6 +24,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -44,6 +45,7 @@ from typing import Literal
 import requests
 import websockets
 from opentelemetry import trace
+from urllib3.connection import HTTPConnection
 from zeep import Client, xsd
 from zeep.helpers import serialize_object
 from zeep.transports import Transport
@@ -93,6 +95,24 @@ REQUEST_RETRY_DELAY = 30.0
 # few seconds instead of a flat 30s (previously a 60s timeout + 30s delay == ~90s stalls).
 REQUEST_RETRY_BACKOFF = 1.0
 REQUEST_MAX_RETRIES = 4
+
+# TCP keepalive for REST API connections. Many calls run with timeout=None because OTCS
+# can take very long to answer. Without keepalive a silently dropped connection (e.g. a
+# load balancer / NAT idle timeout or a vanished pod) makes recv() block forever. With it
+# the kernel probes the idle socket: a slow but alive server ACKs the probes, a dead peer
+# does not, and the request fails with a ConnectionError that do_request() retries.
+# Probes start after 60s idle (below the 4 min Azure LB default idle timeout, so they also
+# keep such idle timers from firing) and a dead peer is detected after ~2 min.
+REQUEST_SOCKET_OPTIONS = [*HTTPConnection.default_socket_options, (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+if hasattr(socket, "TCP_KEEPIDLE"):  # Linux
+    REQUEST_SOCKET_OPTIONS.append((socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60))
+elif hasattr(socket, "TCP_KEEPALIVE"):  # macOS
+    REQUEST_SOCKET_OPTIONS.append((socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, 60))
+if hasattr(socket, "TCP_KEEPINTVL") and hasattr(socket, "TCP_KEEPCNT"):
+    REQUEST_SOCKET_OPTIONS += [
+        (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 15),
+        (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 4),
+    ]
 
 # Gateway-style status codes produced by the ingress while an OTCS pod restarts or scales:
 REQUEST_RETRY_STATUS_CODES = [502, 503, 504]
@@ -1393,6 +1413,10 @@ class OTCS:
             session = requests.Session()
             # Never store response cookies -> identical to a fresh requests.request():
             session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+            # Enable TCP keepalive so dead connections fail instead of hanging forever
+            # (see REQUEST_SOCKET_OPTIONS). Applies to all connections the pools create:
+            for adapter in session.adapters.values():
+                adapter.poolmanager.connection_pool_kw["socket_options"] = REQUEST_SOCKET_OPTIONS
             self._thread_local.session = session
 
         return session
@@ -1488,12 +1512,14 @@ class OTCS:
                 if authentication_required:
                     with self._session_lock:
                         if not self.cookie():
-                            self.logger.error("Cannot call -> %s - user is not authenticatd!", url)
+                            self.logger.error("Cannot call -> %s - user is not authenticated!", url)
                             return None
                         # IMPORTANT: this needs to be a copy - dicts are mutable and
                         # we need to preserve the old value to detect in reauthenticate()
                         # if the cookie has been renewed already or not:
                         request_cookie = self.cookie().copy()
+                        if headers is None:
+                            headers = {}
                         headers.update(request_cookie)
                 response = self.request_session().request(
                     method=method,
@@ -4428,7 +4454,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_favorites")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_user_favorites")
     def get_user_favorites(
         self,
         where_name: str | None = None,
@@ -6252,6 +6278,7 @@ class OTCS:
 
         all_privileges = self.get_usage_privileges()
 
+        result = None
         if usage_id:
             result = next(
                 (priv for priv in all_privileges if priv.get("usage_id", "") == usage_id),
@@ -6391,7 +6418,7 @@ class OTCS:
             method="GET",
             headers=request_header,
             timeout=REQUEST_TIMEOUT,
-            failure_message="Failed to get system usage privileges",
+            failure_message="Failed to get object privileges",
         )
 
         if response:
@@ -7798,7 +7825,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_node")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_nodes")
     def lookup_nodes(
         self,
         parent_node_id: int,
@@ -10247,7 +10274,9 @@ class OTCS:
 
         # Sanity check:
         if versions_to_keep < 1:
-            self.logger.error("Purging to less than 1 version is not possible. The value -> %d is not valid!")
+            self.logger.error(
+                "Purging to less than 1 version is not possible. The value -> %d is not valid!", versions_to_keep
+            )
             return None
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/versions"
@@ -11215,6 +11244,9 @@ class OTCS:
         client_secret: str | None = None,
         comment: str | None = None,
         display_names: dict | None = None,
+        as_url_v4: str | None = None,
+        token_endpoint: str | None = None,
+        request_type: str | None = None,
     ) -> dict | None:
         """Add an external system connection (e.g. SAP, Salesforce, SuccessFactors).
 
@@ -11242,6 +11274,13 @@ class OTCS:
             display_names (dict | None, optional):
                 A dictionary of display names for the external system connection. It is used for the display
                 in the UI and can be multilingual. Default is None.
+            as_url_v4 (str | None, optional, keyword-only):
+                The application URL of the S/4HANA OData V4 API server. Default is None (not sent).
+            token_endpoint (str | None, optional, keyword-only):
+                The OAUTH token endpoint (only required if authentication_method = OAUTH).
+            request_type (str | None, optional, keyword-only):
+                The OAuth request type: BASIC or HTTPBODY. Default is None (not sent -
+                OTCS then uses BASIC).
 
         Returns:
             dict | None:
@@ -11278,6 +11317,15 @@ class OTCS:
             "password": password,
         }
 
+        # If the as_url_v4 parameter is provided, include it in the request body.
+        # This is for S/4HANA OData V4 API Server.
+        if as_url_v4:
+            external_system_post_body["asurl_v4"] = as_url_v4
+
+        # The 'request_type' parameter specifies the OAuth request type.
+        if request_type:
+            external_system_post_body["request_type"] = request_type
+
         # The 'system_comment' parameter was introduced with OTCM 26.1 so
         # we better only set it if we have a compatible version:
         if float(self.get_server_version()) >= 26.1 and comment is not None:
@@ -11297,6 +11345,8 @@ class OTCS:
             )
             external_system_post_body["client_id"] = str(client_id)
             external_system_post_body["client_secret"] = str(client_secret)
+            if token_endpoint:
+                external_system_post_body["token_endpoint"] = str(token_endpoint)
 
         request_url = self.config()["externalSystemUrl"]
         request_header = self.cookie()
@@ -11779,7 +11829,7 @@ class OTCS:
                 "Failed to deploy workbench -> '%s' (%s)!%s",
                 workbench_name,
                 str(workbench_id),
-                " {} error{} occured during deployment.".format(errors, "s" if errors > 1 else "")
+                " {} error{} occurred during deployment.".format(errors, "s" if errors > 1 else "")
                 if errors > 0
                 else "",
             )
@@ -11941,7 +11991,7 @@ class OTCS:
         zip_ref.close()
         old_zip_file_path = os.path.dirname(zip_file_path) + "/old_" + os.path.basename(zip_file_path)
         self.logger.debug(
-            "Rename orginal transport zip file -> '%s' to -> '%s'...",
+            "Rename original transport zip file -> '%s' to -> '%s'...",
             zip_file_path,
             old_zip_file_path,
         )
@@ -14388,6 +14438,8 @@ class OTCS:
             return type_name
 
         workspace_type = self.get_workspace_type(type_id=type_id)
+        if workspace_type is None:
+            return None
         type_name = workspace_type.get("workspace_type")
         if type_name:
             # Update the lookup cache:
@@ -14398,7 +14450,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_by_name")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_names")
     def get_workspace_type_names(self, lower_case: bool = False, renew: bool = False) -> list[str] | None:
         """Get a list of all workspace type names.
 
@@ -14425,6 +14477,7 @@ class OTCS:
         workspace_type_names = [
             self.get_result_value(response=workspace_type, key="wksp_type_name") for workspace_type in workspace_types
         ]
+        workspace_type_names = [name for name in workspace_type_names if name is not None]
         if lower_case:
             workspace_type_names = [name.lower() for name in workspace_type_names]
 
@@ -15799,7 +15852,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_workspace")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="lookup_workspaces")
     def lookup_workspaces(
         self,
         type_name: str,
@@ -15883,7 +15936,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_references")
     def get_workspace_references(
         self,
         node_id: int,
@@ -15915,6 +15968,8 @@ class OTCS:
 
         response = self.get_workspace(node_id=node_id, fields="workspace_references")
 
+        if response is None:
+            return None
         results = response.get("results")
         if not results:
             return None
@@ -18123,7 +18178,9 @@ class OTCS:
 
         request_header = self.request_form_header()
 
-        if isinstance(category_ids, int):
+        if category_ids is None:
+            category_ids = []
+        elif isinstance(category_ids, int):
             category_ids = [category_ids]
 
         self.logger.debug(
@@ -18328,7 +18385,7 @@ class OTCS:
             method="PUT",
             headers=request_header,
             data=system_attributes,
-            failure_message="Failed to update system attributes of item -> '{}' with values -> %s".format(
+            failure_message="Failed to update system attributes of item -> '{}'".format(
                 node_id,
             ),
         )
@@ -20268,7 +20325,7 @@ class OTCS:
         lookup = set_name + ":" + attribute_name if set_name else attribute_name
 
         if lookup not in cat_definitions:
-            self.logger.error("Cannot find attribute -> '%s' in category -> '%s'")
+            self.logger.error("Cannot find attribute -> '%s' in category -> '%s'", attribute_name, category_name)
 
         # Get the definition of the attribute:
         att_def = cat_definitions[lookup]
@@ -20884,7 +20941,7 @@ class OTCS:
                     if attribute_key.count("_") > 1:
                         set_data = set_lookup[truncate_before_underscore(attribute_key=attribute_key, n=2)]
                         if isinstance(set_data, dict):
-                            self.logger.debug("Taget dict is single-line set attribute.")
+                            self.logger.debug("Target dict is single-line set attribute.")
                             current_dict = set_data
                         elif isinstance(set_data, list):
                             row_number = get_row_number(attribute_key=attribute_key)
@@ -21146,9 +21203,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(
-        attributes=OTEL_TRACING_ATTRIBUTES, name="createassign_classifications_document_from_template"
-    )
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="assign_classifications")
     def assign_classifications(
         self,
         node_id: int,
@@ -21186,14 +21241,13 @@ class OTCS:
 
         # If we want to preserve the existing classifications we need to retrieve them first
         # and the create a "super-set" of the existing and new classifications:
+        existing_classification_ids = []
         if not remove_existing:
             existing_classifications = self.get_node_classifications(node_id=node_id)
             if existing_classifications and existing_classifications["data"]:
                 existing_classification_ids = [
                     classification["id"] for classification in existing_classifications["data"]
                 ]
-            else:
-                existing_classification_ids = []
 
         if existing_classification_ids:
             # Make sure we don't have redundant IDs by temporarily convert lists to sets,
@@ -26434,15 +26488,17 @@ class OTCS:
                     filter_value = filter_attribute.get("value", None)
                     # We pass in the category definitions if the attribute filter
                     # does not have a different category name specified in the payload:
-                    actual_value = self.get_category_value_by_name(
-                        node_id=node["id"],
-                        category_name=filter_category_name,
-                        set_name=filter_set_name,
-                        attribute_name=filter_attribute_name,
-                        set_row=filter_row,
-                        cat_definitions=cat_definitions if filter_category_name == filter_category else None,
-                        node_categories=node_categories,
-                    )
+                    kwargs = {
+                        "node_id": node["id"],
+                        "category_name": filter_category_name,
+                        "set_name": filter_set_name,
+                        "attribute_name": filter_attribute_name,
+                        "cat_definitions": cat_definitions if filter_category_name == filter_category else None,
+                        "node_categories": node_categories,
+                    }
+                    if filter_row is not None:
+                        kwargs["set_row"] = filter_row
+                    actual_value = self.get_category_value_by_name(**kwargs)
                     # Both actual value and filter value can be strings or list of strings.
                     # So we need to handle a couple of cases here:
 
@@ -27532,7 +27588,7 @@ class OTCS:
             text = response.text
             if text and "User is not authorized" in text:
                 self.logger.error(
-                    "The current user is not authorized to retrive document templates for document generation!"
+                    "The current user is not authorized to retrieve document templates for document generation!"
                 )
                 return None
             match = re.search(r'<textarea[^>]*name=["\']documentgeneration["\'][^>]*>(.*?)</textarea>', text, re.DOTALL)
@@ -27817,7 +27873,7 @@ class OTCS:
 
     # end method definition
 
-    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_valid_reminder_types")
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_valid_reminder_type_ids")
     def get_valid_reminder_type_ids(self) -> list[int]:
         """Get a flat list of all valid reminder type IDs.
 

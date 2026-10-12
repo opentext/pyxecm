@@ -17,6 +17,7 @@ __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
 import base64
+import binascii
 import json
 import logging
 import os
@@ -164,6 +165,10 @@ class OTDS:
         otds_config["tokenUrl"] = otds_rest_url + "/authentication/token"
         otds_config["tokenInfoUrl"] = otds_rest_url + "/authentication/oauth/tokeninfo"
         otds_config["ticketforuserUrl"] = otds_rest_url + "/authentication/ticketforuser"
+        otds_config["ticketforresourceUrl"] = otds_rest_url + "/authentication/ticketforresource"
+        otds_config["revokeTokenUrl"] = otds_rest_url + "/authentication/oauth"
+        otds_config["oidcConfigurationUrl"] = otds_base_url + "/.well-known/openid-configuration"
+        otds_config["jwksUrl"] = otds_base_url + "/oauth2/jwks"
         otds_config["oauthClientUrl"] = otds_rest_url + "/oauthclients"
         otds_config["oauthTokenUrl"] = otds_base_url + "/oauth2/token"
         otds_config["resourceUrl"] = otds_rest_url + "/resources"
@@ -288,6 +293,223 @@ class OTDS:
             failure_message="Failed to get OAuth token info{}".format(
                 " for resource -> '{}'".format(resource_id) if resource_id else ""
             ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_ticket_for_resource")
+    def get_ticket_for_resource(
+        self,
+        ticket: str,
+        target_resource_id: str,
+        source_resource_id: str = "",
+        username: str = "",
+        client_data: list | None = None,
+    ) -> dict | None:
+        """Exchange an existing OTDS ticket for a ticket/token scoped to another resource.
+
+        This is the "principal propagation" building block for resources (such as SAP
+        S/4HANA via its SOAUTH2 trust configuration) that accept an OTDS-issued
+        token/ticket as proof of the user's identity: the caller already holds an OTDS
+        ticket (e.g. from authenticate()) and obtains a ticket/token for the specific
+        target resource, which can then be used (e.g. as a bearer token) to call that
+        resource on behalf of the user.
+
+        Args:
+            ticket (str):
+                An OTDS ticket obtained through any authentication operation.
+            target_resource_id (str):
+                The ID of the resource (see add_resource()/get_resource()) the ticket
+                should be scoped to.
+            source_resource_id (str, optional):
+                The ID of the resource the ticket was originally issued for. Defaults to "".
+            username (str, optional):
+                Optional user name to request the ticket for. Defaults to "".
+            client_data (list | None, optional):
+                Optional list of {"name": str, "values": [str]} dictionaries with
+                additional client data. Defaults to None.
+
+        Returns:
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
+        Example:
+            {
+                'token': None,
+                'userId': 'nwheeler@Content Server Members',
+                'ticket': '*OTDSSSO*Adh...*',
+                'resourceID': 'd441e5cb-68ef-4cb7-a8a0-037ba6b35522',
+                'failureReason': None,
+                'passwordExpirationTime': 0,
+                'continuation': False,
+                'continuationContext': None,
+                'continuationData': None
+            }
+
+        """
+
+        ticket_for_resource_post_body = {
+            "ticket": ticket,
+            "targetResourceId": target_resource_id,
+        }
+        if source_resource_id:
+            ticket_for_resource_post_body["sourceResourceId"] = source_resource_id
+        if username:
+            ticket_for_resource_post_body["userName"] = username
+        if client_data:
+            ticket_for_resource_post_body["clientData"] = client_data
+
+        request_url = self.config()["ticketforresourceUrl"]
+
+        self.logger.debug(
+            "Get ticket for resource -> '%s'; calling -> %s",
+            target_resource_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=ticket_for_resource_post_body,
+            timeout=None,
+            failure_message="Failed to get ticket for resource -> '{}'".format(target_resource_id),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="revoke_access_token")
+    def revoke_access_token(self, token: str | None = None) -> bool:
+        """Revoke an OAuth2 refresh and access token.
+
+        Args:
+            token (str | None, optional):
+                The access token to revoke. Defaults to None, which revokes the
+                token currently held by this OTDS object (self._token).
+
+        Returns:
+            bool:
+                True if the token was revoked successfully, False otherwise.
+
+        """
+
+        if token is None:
+            token = self._token
+        if not token:
+            self.logger.error("Cannot revoke OAuth token - no token given or configured!")
+            return False
+
+        request_url = "{}/{}".format(self.config()["revokeTokenUrl"], token)
+
+        # The token is part of the URL - never log the full URL:
+        self.logger.debug("Revoking OAuth token; calling -> %s/<token>", self.config()["revokeTokenUrl"])
+
+        response = self.do_request(
+            url=request_url,
+            method="DELETE",
+            timeout=None,
+            failure_message="Failed to revoke OAuth token",
+            parse_request_response=False,
+        )
+
+        return bool(response and response.ok)
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_oidc_configuration")
+    def get_oidc_configuration(self) -> dict | None:
+        """Get the OpenID Connect discovery document of OTDS.
+
+        This is a public, unauthenticated endpoint. It is the standard mechanism a
+        relying party (e.g. a custom SAP authentication handler) would use to
+        auto-discover OTDS's token/authorization/JWKS endpoints and supported grant
+        types, instead of hard-coding them.
+
+        Returns:
+            dict | None:
+                Request response (dictionary with keys like "issuer", "token_endpoint",
+                "jwks_uri", "grant_types_supported", ...) or None if the REST call fails.
+
+        Example:
+        {
+            'issuer': 'https://auth.example.com/otdsws',
+            'authorization_endpoint': 'https://auth.example.com/otdsws/oauth2/auth',
+            'token_endpoint': 'https://auth.example.com/otdsws/oauth2/token',
+            'check_session_iframe': 'https://auth.example.com/otdsws/checksession',
+            'end_session_endpoint': 'https://auth.example.com/otdsws/logout',
+            'introspection_endpoint': 'https://auth.example.com/otdsws/oauth2/introspect',
+            'revocation_endpoint': 'https://auth.example.com/otdsws/oauth2/revoke',
+            'token_endpoint_auth_methods_supported': ['client_secret_basic', 'client_secret_post', 'client_secret_jwt', 'private_key_jwt'],
+            'token_endpoint_auth_signing_alg_values_supported': ['RS256'],
+            'userinfo_endpoint': 'https://auth.example.com/otdsws/oauth2/userinfo',
+            'jwks_uri': 'https://auth.example.com/otdsws/oauth2/jwks',
+            'scopes_supported': ['openid', 'otds:roles', 'otds:groups', 'otds:groupids', 'otds:roleids'],
+            'response_types_supported': ['code', 'code id_token', 'id_token', 'token id_token'],
+            'subject_types_supported': ['public'],
+            'userinfo_signing_alg_values_supported': ['RS256'],
+            'id_token_signing_alg_values_supported': ['RS256'],
+            'claims_parameter_supported': False,
+            'frontchannel_logout_supported': True,
+            'frontchannel_logout_session_supported': True,
+            'code_challenge_methods_supported': ['plain', 'S256'],
+            'claims_supported': ['sub', 'iss', 'aud', 'exp', 'iat', 'auth_time', 'name', 'given_name', 'family_name', 'middle_name', 'preferred_username', 'email', 'locale', 'address', 'phone_number', 'updated_at', 'acr', 'uid', 'pid', ...],
+            'grant_types_supported': ['authorization_code', 'password', 'refresh_token', 'client_credentials', 'urn:ietf:params:oauth:grant-type:saml2-bearer', 'urn:ietf:params:oauth:grant-type:jwt-bearer']}
+
+        """
+
+        request_url = self.config()["oidcConfigurationUrl"]
+
+        self.logger.debug("Get OIDC discovery document; calling -> %s", request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get OIDC discovery document",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_jwks")
+    def get_jwks(self) -> dict | None:
+        """Get the JSON Web Key Set (JWKS) OTDS uses to sign OAuth2/OIDC tokens.
+
+        This is a public, unauthenticated endpoint. A relying party (e.g. SAP's
+        SOAUTH2 OAuth 2.0 trust configuration, if it supports JWKS-URL based trust)
+        can point at this URL to validate the signature of OTDS-issued access
+        tokens without needing a manually exported/imported certificate, and to
+        automatically pick up new keys after a key rotation.
+
+        Returns:
+            dict | None:
+                Request response (dictionary with key "keys", a list of JWK objects)
+                or None if the REST call fails.
+
+        Example:
+        {
+            "keys": [
+                {
+                    "kty": "RSA",
+                    "kid": "8cd86c57...",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": "gmRA4IS...",
+                    "e": "AQAB"
+                    "value": "'-----BEGIN PUBLIC KEY-----MIIBIjAN...vREUAnWcDxhHMQIDAQAB-----END PUBLIC KEY-----'"
+                }
+            ]
+        }
+
+        """
+
+        request_url = self.config()["jwksUrl"]
+
+        self.logger.debug("Get JWKS; calling -> %s", request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get JWKS",
         )
 
     # end method definition
@@ -773,12 +995,12 @@ class OTDS:
                     else:
                         return None
             # end try
+            # Don't log the cookie - it contains the OTDS ticket:
             self.logger.info(
-                "Retrying REST API %s call -> %s... (retry = %s, cookie -> %s)",
+                "Retrying REST API %s call -> %s... (retry = %s)",
                 method,
                 url,
                 str(retries),
-                str(self.cookie()),
             )
         # end while True
 
@@ -1242,6 +1464,9 @@ class OTDS:
             failure_message="Failed to get application role -> '{}' in partition -> '{}'".format(name, partition),
             show_error=show_error,
         )
+
+        if not response:
+            return None
 
         role = next(
             (role for role in response.get("roles") if role["name"] == name and role["userPartitionID"] == partition),
@@ -1958,7 +2183,7 @@ class OTDS:
             parse_request_response=False,
         )
 
-        bool(response and response.ok)
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -1997,7 +2222,7 @@ class OTDS:
             parse_request_response=False,
         )
 
-        bool(response and response.ok)
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -2040,7 +2265,7 @@ class OTDS:
             method="POST",
             json_data=group_post_body_json,
             timeout=None,
-            failure_message="Failed to reset password for user -> '{}'".format(name),
+            failure_message="Failed to add group -> '{}'".format(name),
         )
 
     # end method definition
@@ -2517,6 +2742,130 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_resources")
+    def get_resources(
+        self,
+        where_filter: str | None = None,
+        limit: int | None = None,
+        page_size: int | None = None,
+        next_page_cookie: str | None = None,
+    ) -> dict | None:
+        """Get a (single page of) list of all OTDS resources.
+
+        Args:
+            where_filter (str | None, optional):
+                Filter for the resource name. If None, no filtering applies.
+            limit (int, optional):
+                The maximum number of resources to return. None = unlimited.
+                NOTE: OTDS has no 'limit' query parameter (it is silently ignored
+                by the REST API), so this is implemented via the page size. If
+                'page_size' is given as well, the smaller of the two wins.
+            page_size (int, optional):
+                The chunk size for the number of resources returned by one
+                REST API call. If None, then a default of 250 is used.
+                This is the only page control OTDS really honours - see 'limit'.
+            next_page_cookie (str | None, optional):
+                A key returned by a former call to this method (see the "nextPageCookie"
+                key in the response) to retrieve the next page of results.
+
+        Returns:
+            dict | None:
+                Request response (dictionary with key "resourceConfigList") or None
+                if the REST call fails.
+
+        """
+
+        # Add query parameters (these are NOT passed via request body!)
+        query = {}
+        if where_filter:
+            query["where_filter"] = where_filter
+        # OTDS has no 'limit' query parameter - it is silently ignored by the
+        # REST API. The page size is the only way to cap the number of returned
+        # resources, so we derive it from 'limit'. Deriving it (instead of trimming
+        # the response) keeps the returned 'nextPageCookie' consistent with the
+        # delivered resources:
+        effective_page_size = min(limit, page_size) if limit and page_size else (limit or page_size)
+        if effective_page_size:
+            query["page_size"] = effective_page_size
+        if next_page_cookie:
+            query["next_page_cookie"] = next_page_cookie
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.config()["resourceUrl"]
+        if query:
+            request_url += "?{}".format(encoded_query)
+
+        self.logger.debug("Get resources (limit -> %s); calling -> %s", limit, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get resources",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_resources_iterator")
+    def get_resources_iterator(
+        self,
+        where_filter: str | None = None,
+        page_size: int | None = None,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all OTDS resources.
+
+        Returning a generator avoids loading a large number of resources into memory at once.
+        The resources are read page by page while iterating.
+
+        Example usage:
+            resources = otds_object.get_resources_iterator(page_size=10)
+            for resource in resources:
+                logger.info("Traversing resource -> %s", resource["resourceName"])
+
+        Args:
+            where_filter (str | None, optional):
+                Filter for the resource name. If None, no filtering applies.
+            page_size (int | None, optional):
+                The chunk size for the number of resources returned by one
+                REST API call. If None, then a default of 250 is used.
+
+        Returns:
+            iter:
+                A generator yielding one OTDS resource per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_cookie = None
+
+        while True:
+            response = self.get_resources(
+                where_filter=where_filter,
+                page_size=page_size,
+                next_page_cookie=next_page_cookie,
+            )
+            if not response or "resourceConfigList" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield resources one at a time:
+            yield from response["resourceConfigList"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_cookie = response.get("nextPageCookie")
+            if not next_page_cookie:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_resource")
     def get_resource(self, name: str, show_error: bool = False) -> dict | None:
         """Get an existing OTDS resource.
@@ -2548,7 +2897,7 @@ class OTDS:
                 'pcCreatePermissionAllowed': True,
                 'pcModifyPermissionAllowed': True,
                 'pcDeletePermissionAllowed': True,
-                'logoutURL': 'https://otawp.dev.idea-te.eimdemo.com/home/system/wcp/sso/sso_logout.htm',
+                'logoutURL': 'https://otawp.example.com/home/system/wcp/sso/sso_logout.htm',
                 'logoutMethod': 'GET',
                 'allowImpersonation': True,
                 'connectionHealthy': True,
@@ -2615,6 +2964,36 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_resource")
+    def delete_resource(self, name: str) -> bool:
+        """Delete an existing OTDS resource.
+
+        Args:
+            name (str):
+                The name of the OTDS resource to delete.
+
+        Returns:
+            bool:
+                True if the resource was deleted successfully, False otherwise.
+
+        """
+
+        request_url = "{}/{}".format(self.config()["resourceUrl"], name)
+
+        self.logger.debug("Deleting resource -> '%s'; calling -> %s", name, request_url)
+
+        response = self.do_request(
+            url=request_url,
+            method="DELETE",
+            timeout=None,
+            failure_message="Failed to delete resource -> '{}'".format(name),
+            parse_request_response=False,
+        )
+
+        return bool(response and response.ok)
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="activate_resource")
     def activate_resource(self, resource_id: str) -> dict | None:
         """Activate an OTDS resource.
@@ -2646,6 +3025,54 @@ class OTDS:
             timeout=None,
             failure_message="Failed to activate resource -> '{}'".format(resource_id),
         )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="deactivate_resource")
+    def deactivate_resource(self, resource_id: str, authenticator: str, secure_secret: str) -> bool:
+        """Deactivate an OTDS resource.
+
+        Unlike activate_resource(), this requires the resource's own credentials
+        (as configured via the 'secret' parameter of add_resource()) rather than
+        OTDS admin credentials.
+
+        Args:
+            resource_id (str):
+                The ID of the OTDS resource to deactivate.
+            authenticator (str):
+                The resource authenticator (typically the resource name / resource ID).
+            secure_secret (str):
+                The resource's secret key (as configured in add_resource()).
+
+        Returns:
+            bool:
+                True if the resource was deactivated successfully, False otherwise.
+
+        """
+
+        resource_deactivate_post_body_json = {
+            "authenticator": authenticator,
+            "secureSecret": secure_secret,
+        }
+
+        request_url = "{}/{}/deactivate".format(self.config()["resourceUrl"], resource_id)
+
+        self.logger.debug(
+            "Deactivating resource -> '%s'; calling -> %s",
+            resource_id,
+            request_url,
+        )
+
+        response = self.do_request(
+            url=request_url,
+            method="POST",
+            json_data=resource_deactivate_post_body_json,
+            timeout=None,
+            failure_message="Failed to deactivate resource -> '{}'".format(resource_id),
+            parse_request_response=False,
+        )
+
+        return bool(response and response.ok)
 
     # end method definition
 
@@ -2972,7 +3399,7 @@ class OTDS:
             method="PUT",
             json_data=access_role_put_body_json,
             timeout=None,
-            failure_message="Failed to update access role -> '{}'".format(access_role),
+            failure_message="Failed to update access role -> '{}'".format(name),
         )
 
     # end method definition
@@ -3977,6 +4404,7 @@ class OTDS:
         description: str,
         redirect_urls: list | None = None,
         allow_impersonation: bool = True,
+        impersonation_list: list | None = None,
         confidential: bool = True,
         auth_scopes: list | None = None,  # None = "Global"
         allowed_scopes: list | None = None,  # in OTDS UI: Permissible scopes
@@ -3999,6 +4427,8 @@ class OTDS:
                 A list of redirect URLs (strings).
             allow_impersonation (bool, optional):
                 Whether or not to allow impersonation.
+            impersonation_list (list | None, optional):
+                A list of resource names to restrict it to; (default = empty list = all resources).
             confidential (bool, optional):
                 Whether or not the OAuth client is confidential.
             auth_scopes (list, optional):
@@ -4099,6 +4529,10 @@ class OTDS:
         if secret:
             oauth_client_post_body_json["secret"] = secret
 
+        # Is the impersonation restricted to certain resources?
+        if allow_impersonation and impersonation_list:
+            oauth_client_post_body_json["impersonateList"] = impersonation_list
+
         request_url = self.oauth_client_url()
 
         self.logger.debug(
@@ -4115,6 +4549,129 @@ class OTDS:
             timeout=None,
             failure_message="Failed to add OAuth client -> {}".format(client_id),
         )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_oauth_clients")
+    def get_oauth_clients(
+        self,
+        where_filter: str | None = None,
+        limit: int | None = None,
+        page_size: int | None = None,
+        next_page_cookie: str | None = None,
+    ) -> dict | None:
+        """Get a (single page of) list of all OTDS OAuth clients.
+
+        Args:
+            where_filter (str | None, optional):
+                Filter for the client name. If None, no filtering applies.
+            limit (int, optional):
+                The maximum number of OAuth clients to return. None = unlimited.
+                NOTE: OTDS has no 'limit' query parameter (it is silently ignored
+                by the REST API), so this is implemented via the page size. If
+                'page_size' is given as well, the smaller of the two wins.
+            page_size (int, optional):
+                The chunk size for the number of OAuth clients returned by one
+                REST API call. If None, then a default of 250 is used.
+                This is the only page control OTDS really honours - see 'limit'.
+            next_page_cookie (str | None, optional):
+                A key returned by a former call to this method (see the "nextPageCookie"
+                key in the response) to retrieve the next page of results.
+
+        Returns:
+            dict | None:
+                Request response (dictionary) or None if the REST call fails.
+
+        """
+
+        # Add query parameters (these are NOT passed via request body!)
+        query = {}
+        if where_filter:
+            query["where_filter"] = where_filter
+        # OTDS has no 'limit' query parameter - it is silently ignored by the
+        # REST API. The page size is the only way to cap the number of returned
+        # OAuth clients, so we derive it from 'limit'. Deriving it (instead of
+        # trimming the response) keeps the returned 'nextPageCookie' consistent
+        # with the delivered OAuth clients:
+        effective_page_size = min(limit, page_size) if limit and page_size else (limit or page_size)
+        if effective_page_size:
+            query["page_size"] = effective_page_size
+        if next_page_cookie:
+            query["next_page_cookie"] = next_page_cookie
+
+        encoded_query = urllib.parse.urlencode(query, doseq=True)
+
+        request_url = self.oauth_client_url()
+        if query:
+            request_url += "?{}".format(encoded_query)
+
+        self.logger.debug("Get OAuth clients (limit -> %s); calling -> %s", limit, request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get OAuth clients",
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_oauth_clients_iterator")
+    def get_oauth_clients_iterator(
+        self,
+        where_filter: str | None = None,
+        page_size: int | None = None,
+    ) -> iter:
+        """Get an iterator object that can be used to traverse all OTDS OAuth clients.
+
+        Returning a generator avoids loading a large number of OAuth clients into memory at once.
+        The OAuth clients are read page by page while iterating.
+
+        Example usage:
+            oauth_clients = otds_object.get_oauth_clients_iterator(page_size=10)
+            for oauth_client in oauth_clients:
+                logger.info("Traversing OAuth client -> %s", oauth_client["id"])
+
+        Args:
+            where_filter (str | None, optional):
+                Filter for the OAuth client name. If None, no filtering applies.
+            page_size (int | None, optional):
+                The chunk size for the number of OAuth clients returned by one
+                REST API call. If None, then a default of 250 is used.
+
+        Returns:
+            iter:
+                A generator yielding one OTDS OAuth client per iteration.
+                If the REST API fails, returns no value.
+
+        """
+
+        next_page_cookie = None
+
+        while True:
+            response = self.get_oauth_clients(
+                where_filter=where_filter,
+                page_size=page_size,
+                next_page_cookie=next_page_cookie,
+            )
+            if not response or "clients" not in response:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
+
+            # Yield OAuth clients one at a time:
+            yield from response["clients"]
+
+            # See if we have an additional result page.
+            # If not terminate the iterator and return
+            # no value.
+            next_page_cookie = response.get("nextPageCookie")
+            if not next_page_cookie:
+                # Don't return None! Plain return is what we need for iterators.
+                # Natural Termination: If the generator does not yield, it behaves
+                # like an empty iterable when used in a loop or converted to a list:
+                return
 
     # end method definition
 
@@ -4190,6 +4747,36 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="delete_oauth_client")
+    def delete_oauth_client(self, client_id: str) -> bool:
+        """Delete an existing OAuth client from OTDS.
+
+        Args:
+            client_id (str):
+                The name (= ID) of the OAuth client to delete.
+
+        Returns:
+            bool:
+                True if the OAuth client was deleted successfully, False otherwise.
+
+        """
+
+        request_url = "{}/{}".format(self.oauth_client_url(), client_id)
+
+        self.logger.debug("Delete OAuth client -> '%s'; calling -> %s", client_id, request_url)
+
+        response = self.do_request(
+            url=request_url,
+            method="DELETE",
+            timeout=None,
+            failure_message="Failed to delete OAuth client -> '{}'".format(client_id),
+            parse_request_response=False,
+        )
+
+        return bool(response and response.ok)
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="add_oauth_clients_to_access_role")
     def add_oauth_clients_to_access_role(self, access_role_name: str) -> dict | None:
         """Add OAuth clients (in the "OAuthClients" partition) to an OTDS access role.
@@ -4235,10 +4822,10 @@ class OTDS:
 
         # Getting location info for the OAuthClients partition
         # so it can be added to access roles json
-        request_url = self.config()["partitionsUrl"] + "/OAuthClients"
+        partition_url = self.config()["partitionUrl"] + "/OAuthClients"
 
         response = self.do_request(
-            url=request_url,
+            url=partition_url,
             method="GET",
             timeout=None,
             failure_message="Failed to get partition info for OAuthClients for role -> '{}'".format(
@@ -4260,9 +4847,13 @@ class OTDS:
             oauth_clients_ou_block,
         )
 
+        # Update the access role with the modified structure
+        update_url = self.config()["accessRoleUrl"] + "/" + access_role_name
+
         return self.do_request(
-            url=request_url,
+            url=update_url,
             method="PUT",
+            json_data=access_role,
             timeout=None,
             warning_message="Failed to add OAuthClients to access role -> '{}'".format(
                 access_role_name,
@@ -4848,7 +5439,7 @@ class OTDS:
                 cert_file_encoded = True
             else:
                 cert_file_encoded = False
-        except TypeError:
+        except (TypeError, binascii.Error):
             self.logger.debug(
                 "Certificate file -> '%s' is not base64 encoded!",
                 certificate_file,
@@ -5399,6 +5990,38 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_resource_impersonation")
+    def get_resource_impersonation(self, resource_name: str) -> dict | None:
+        """Get the impersonation settings of an OTDS resource.
+
+        Args:
+            resource_name (str):
+                Name of the resource to get the impersonation settings for.
+
+        Returns:
+            dict | None:
+                Request response (dictionary with keys "allowImpersonation" and
+                "impersonateList") or None if the REST call fails.
+
+        """
+
+        request_url = "{}/{}/impersonation".format(self.resource_url(), resource_name)
+
+        self.logger.debug(
+            "Get impersonation settings for resource -> '%s'; calling -> %s",
+            resource_name,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get impersonation settings for resource -> '{}'".format(resource_name),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="impersonate_resource")
     def impersonate_resource(
         self,
@@ -5414,7 +6037,7 @@ class OTDS:
             allow_impersonation (bool, optional):
                 Whether to turn on or off impersonation (default = True)
             impersonation_list (list, optional):
-                A list of users to restrict it to (default = empty list = all users)
+                A list of resource names to restrict it to (default = empty list = all resources)
 
         Returns:
             bool:
@@ -5434,8 +6057,9 @@ class OTDS:
         request_url = "{}/{}/impersonation".format(self.resource_url(), resource_name)
 
         self.logger.debug(
-            "Impersonation settings for resource -> '%s'; calling -> %s",
+            "Impersonation settings for resource -> '%s'%s; calling -> %s",
             resource_name,
+            " (restricted to resources -> {})".format(impersonation_list) if impersonation_list else "",
             request_url,
         )
 
@@ -5454,6 +6078,38 @@ class OTDS:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_oauth_client_impersonation")
+    def get_oauth_client_impersonation(self, client_id: str) -> dict | None:
+        """Get the impersonation settings of an OTDS OAuth Client.
+
+        Args:
+            client_id (str):
+                The ID of the OAuth Client to get the impersonation settings for.
+
+        Returns:
+            dict | None:
+                Request response (dictionary with keys "allowImpersonation" and
+                "impersonateList") or None if the REST call fails.
+
+        """
+
+        request_url = "{}/{}/impersonation".format(self.oauth_client_url(), client_id)
+
+        self.logger.debug(
+            "Get impersonation settings for OAuth Client -> '%s'; calling -> %s",
+            client_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            timeout=None,
+            failure_message="Failed to get impersonation settings for OAuth Client -> '{}'".format(client_id),
+        )
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="impersonate_oauth_client")
     def impersonate_oauth_client(
         self,
@@ -5469,7 +6125,7 @@ class OTDS:
             allow_impersonation (bool | None, optional):
                 Defines whether to turn on or off impersonation (default = True).
             impersonation_list (list | None, optional):
-                A list of users to restrict it to; (default = empty list = all users).
+                A list of resource names to restrict it to; (default = empty list = all resources).
 
         Returns:
             bool:
@@ -5489,8 +6145,9 @@ class OTDS:
         request_url = "{}/{}/impersonation".format(self.oauth_client_url(), client_id)
 
         self.logger.debug(
-            "Impersonation settings for OAuth Client -> '%s'; calling -> %s",
+            "Impersonation settings for OAuth Client -> '%s'%s; calling -> %s",
             client_id,
+            " (restricted to resources -> {})".format(impersonation_list) if impersonation_list else "",
             request_url,
         )
 

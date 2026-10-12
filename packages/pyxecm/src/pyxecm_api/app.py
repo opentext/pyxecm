@@ -107,6 +107,10 @@ app = FastAPI(
     root_path=api_settings.root_path,
     lifespan=lifespan,
     version=customizer_version(),
+    # Tracing is set up in lifespan(); FastAPI's own OTLP auto-configuration would
+    # register a global TracerProvider first (without the service name) and also
+    # export metrics / logs the collector does not accept.
+    telemetry={"auto_configure": False},
     openapi_tags=[
         {
             "name": "auth",
@@ -123,7 +127,7 @@ app = FastAPI(
     ],
 )
 
-FastAPIInstrumentor.instrument_app(app, excluded_urls="/metrics,/health")
+FastAPIInstrumentor.instrument_app(app, excluded_urls="/metrics,/health", exclude_spans=["receive", "send"])
 RequestsInstrumentor().instrument()
 ThreadingInstrumentor().instrument()
 
@@ -134,6 +138,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Ranged and streamed downloads (payload logs) need these headers in the browser.
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
 
 ## Add all Routers
@@ -177,7 +183,8 @@ def run_api() -> None:
     # Stdout
     log_config["formatters"]["standard"] = {
         "()": "uvicorn.logging.DefaultFormatter",
-        "fmt": "%(levelprefix)s [%(name)s] [%(threadName)s] %(message)s",
+        "fmt": "%(asctime)s %(levelprefix)s [%(name)s] [%(threadName)s] %(message)s",
+        "datefmt": "%d-%b-%Y %H:%M:%S",
         "use_colors": True,
     }
 
@@ -190,7 +197,15 @@ def run_api() -> None:
 
     log_config["formatters"]["accesslog"] = {
         "()": "uvicorn.logging.AccessFormatter",
-        "fmt": '%(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+        "fmt": '%(client_addr)s - [%(asctime)s] "%(request_line)s" %(status_code)s',
+        "datefmt": "%d/%b/%Y:%H:%M:%S %z",
+        "use_colors": False,
+    }
+
+    log_config["formatters"]["default"] = {
+        "()": "uvicorn.logging.DefaultFormatter",
+        "fmt": "%(asctime)s %(levelprefix)s %(message)s",
+        "datefmt": "%d-%b-%Y %H:%M:%S",
         "use_colors": False,
     }
 
@@ -212,6 +227,12 @@ def run_api() -> None:
         "class": "logging.FileHandler",
         "filename": os.path.join(api_settings.logfolder, "access.log"),
         "mode": "a",
+    }
+
+    log_config["handlers"]["access"] = {
+        "formatter": "accesslog",
+        "class": "logging.StreamHandler",
+        "stream": "ext://sys.stdout",
     }
 
     log_config["loggers"]["uvicorn.access"]["handlers"] = ["access", "accesslog"]

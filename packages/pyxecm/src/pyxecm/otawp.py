@@ -368,10 +368,6 @@ class OTAWP:
         otawp_config["productName"] = product_name or "APPWORKS_PLATFORM"
         otawp_config["productDescription"] = product_description or "OpenText Appworks Platform"
 
-        if otawp_ticket:
-            self._otawp_ticket = otawp_ticket
-            self._cookie = {"defaultinst_SAMLart": otawp_ticket}
-
         server_url = "{}://{}".format(protocol, otawp_config["hostname"])
         if str(port) not in ["80", "443"]:
             server_url += ":{}".format(port)
@@ -379,8 +375,8 @@ class OTAWP:
         otawp_config["serverUrl"] = server_url
 
         self._config = otawp_config
-        self._cookie = None
-        self._otawp_ticket = None
+        self._otawp_ticket = otawp_ticket
+        self._cookie = {"defaultinst_SAMLart": otawp_ticket} if otawp_ticket else None
 
         self.set_organization(otawp_config["organization"])
 
@@ -395,7 +391,7 @@ class OTAWP:
 
         """
 
-        return self.config()["server"]
+        return self.config()["serverUrl"]
 
     # end method definition
 
@@ -1126,7 +1122,7 @@ class OTAWP:
 
         try:
             entity = entity_list[index]
-        except KeyError:
+        except IndexError:
             if show_error:
                 self.logger.error("Response does not have an entity at index -> %d", index)
             return None
@@ -1708,7 +1704,7 @@ class OTAWP:
                     " -> '{}'".format(project_name) if project_name else "",
                     name,
                 )
-                return None
+                return False
 
         project_publish_data = f"""
         <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">

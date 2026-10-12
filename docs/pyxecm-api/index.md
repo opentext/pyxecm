@@ -47,6 +47,7 @@ running. See [API Settings](settings.md) for the available configuration options
 ::: pyxecm_api.v1_payload.router
 ::: pyxecm_api.v1_payload.models
 ::: pyxecm_api.v1_payload.functions
+::: pyxecm_api.v1_payload.log_reader
 
 ## Terminal
 

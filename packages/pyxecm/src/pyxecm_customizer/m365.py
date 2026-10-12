@@ -3210,7 +3210,7 @@ class M365:
                 "The M365 Teams app with ID -> %s has been successfully removed from the app catalog.",
                 app_id,
             )
-        else:
+        elif response:
             self.logger.error(
                 "An error occurred while removing the M365 Teams app from the M365 app catalog. Status code -> %s. Error message -> %s",
                 response.status_code,
@@ -3951,13 +3951,13 @@ class M365:
         if response and response.status_code == 201:
             self.logger.debug("Label -> '%s' has been created successfully!", name)
             return response
-        else:
+        elif response:
             self.logger.error(
                 "Failed to create the M365 label -> '%s'! Response status code -> %s",
                 name,
                 response.status_code,
             )
-            return None
+        return None
 
     # end method definition
 
@@ -4454,6 +4454,10 @@ class M365:
 
         if not message_body:
             return None
+
+        # Treat None replacements as empty list
+        if replacements is None:
+            replacements = []
 
         # Split all the lines after a CRLF:
         lines = [line.strip() for line in message_body.split("\r\n")]
@@ -5425,7 +5429,7 @@ class M365:
             parse_request_response=False,
         )
 
-        return bool(response.ok)
+        return bool(response) and bool(response.ok)
 
     # end method definition
 

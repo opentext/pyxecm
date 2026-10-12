@@ -15,7 +15,7 @@ authors = [
   { name = "Kai Gatzweiler", email = "kgatzweiler@opentext.com" },
   { name = "Dr. Marc Diefenbruch", email = "mdiefenb@opentext.com" },
 ]
-requires-python = '>=3.10'
+requires-python = '>=3.12'
 dependencies = [
   "lxml>=6.0.0",
   "opentelemetry-api>=1.34.1",
@@ -43,10 +43,11 @@ classifiers = [
 [project.optional-dependencies]
 magic = ['python-magic']
 sap = ['pyrfc==3.3.1']
+saml = ['signxml>=5.1.0']
 customizer = [
   "kubernetes>=33.1.0",
   "playwright>=1.53.0",
-  "pydantic>=2.11.7",
+  "pydantic>=2.12.0",
   "python-hcl2==7.3.1",
   "openpyxl>=3.1.5",
 ]

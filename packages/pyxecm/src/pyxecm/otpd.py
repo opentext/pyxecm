@@ -263,7 +263,7 @@ class OTPD:
     # This method is currently not used and not working...
     # It cannot handle the Request - ServerManager returns an
     # error stating that JavaScript is not enabled...
-    def authenticate(self, revalidate: bool = False) -> dict:
+    def authenticate(self, revalidate: bool = False) -> str | requests.Response | None:
         """Authenticate at PowerDocs and retrieve session ID.
 
         Args:
@@ -272,8 +272,8 @@ class OTPD:
                 (e.g. if session has timed out with 401 error).
 
         Returns:
-            dict:
-                Cookie information or None in case of an error.
+            str | requests.Response | None:
+                Session ID string, Response object, or None in case of an error.
                 Also stores the session ID in self._jsessionid
 
         """
@@ -365,6 +365,7 @@ class OTPD:
             )
             return None
 
+        request_url = None
         try:
             # Extract the filename
             file_name = os.path.basename(file_path)
@@ -379,7 +380,7 @@ class OTPD:
                 )
 
                 # Retrieve the request URL
-                request_url = self.config().get("otpdImportDatabaseUrl")
+                request_url = self.config().get("importDatabaseUrl")
 
                 if not request_url:
                     self.logger.error("Import database URL is not configured.")
@@ -460,7 +461,7 @@ class OTPD:
             "Update PowerDocs setting -> '%s' with value -> '%s'%s; calling -> %s",
             setting_name,
             setting_value,
-            " (tenant -> '%s')" if tenant_name else "",
+            " (tenant -> '{}')".format(tenant_name) if tenant_name else "",
             request_url,
         )
 
@@ -677,7 +678,7 @@ class OTPD:
 
     # end method definition
 
-    def generate_document(self, payload: str) -> dict | None:
+    def generate_document(self, payload: str) -> requests.Response | None:
         """Generate a PowerDocs document based on the provided XML payload.
 
         Args:
@@ -685,8 +686,8 @@ class OTPD:
                 The XML payload to generate the document.
 
         Returns:
-            dict | None:
-                The request response or None in case of an error.
+            requests.Response | None:
+                The raw response object or None in case of an error.
 
         """
 

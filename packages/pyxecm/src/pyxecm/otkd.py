@@ -561,7 +561,7 @@ class OTKD:
             return token
         else:
             self.logger.error(
-                "Failed to request an Nifi access token; status -> %s, error -> %s",
+                "Failed to request an NiFi access token; status -> %s, error -> %s",
                 response.status_code,
                 response.text,
             )
@@ -963,7 +963,7 @@ class OTKD:
             url=request_url,
             method="GET",
             headers=request_header,
-            failure_message="Cannot get flow status!",
+            failure_message="Cannot get flow configuration!",
         )
 
     # end method definition

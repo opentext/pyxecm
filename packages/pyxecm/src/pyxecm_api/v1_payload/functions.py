@@ -9,18 +9,31 @@ __email__ = "mdiefenb@opentext.com"
 import asyncio
 import logging
 import os
-from collections.abc import AsyncGenerator
+import threading
+from collections.abc import AsyncGenerator, Callable
+from typing import Any
 
 import anyio
+from anyio.lowlevel import RunVar
+from fastapi import Request
+from fastapi.responses import FileResponse
 from opentelemetry import trace
 from pyxecm_customizer.exceptions import PayloadImportError
 from pyxecm_customizer.payload import load_payload
+from starlette.types import Message, Receive, Scope, Send
 
 from pyxecm_api.common.functions import PAYLOAD_LIST
 from pyxecm_api.settings import api_settings
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger("pyxecm_api.v1_payload")
+
+# Number of log files that are read or searched at the same time. It keeps the worker threads
+# (and the CPU) available for the rest of the API while large logs are scanned.
+LOG_READERS = 4
+# Interval at which a running log read checks whether its client is still connected.
+CLIENT_CHECK_SECONDS = 0.25
+_log_read_limiter: RunVar[anyio.CapacityLimiter] = RunVar("log_read_limiter")
 
 # Initialize the global Payloadlist object
 
@@ -89,7 +102,7 @@ def import_payload(
 
                 if dependend_item is None:
                     exception = (
-                        f"The import of payload -> {name} failed. Dependencies cannot be resovled: {dependency_name}",
+                        f"The import of payload -> {name} failed. Dependencies cannot be resolved: {dependency_name}",
                     )
                     raise PayloadImportError(
                         exception,
@@ -188,3 +201,119 @@ async def tail_log(file_path: str) -> AsyncGenerator[str]:
                 yield line
     except asyncio.exceptions.CancelledError:
         pass
+
+
+class GrowingFileResponse(FileResponse):
+    """A file download for a file that may be appended to while it is sent.
+
+    The size of the file is announced before its content is sent. The plain `FileResponse`
+    then sends the file up to its end, which is more than announced if the file grew meanwhile,
+    and the server aborts such a response. This response sends exactly the announced bytes.
+    Everything else, `Range` requests included, is the behaviour of `FileResponse`.
+    """
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Send the response.
+
+        Args:
+            scope (Scope):
+                The ASGI connection scope.
+            receive (Receive):
+                The ASGI receive channel.
+            send (Send):
+                The ASGI send channel.
+
+        """
+
+        remaining: int | None = None
+        complete = False
+
+        async def send_bounded(message: Message) -> None:
+            nonlocal remaining, complete
+
+            if message["type"] == "http.response.start":
+                for name, value in message.get("headers", []):
+                    if name.lower() == b"content-length":
+                        remaining = int(value)
+            elif message["type"] == "http.response.body" and remaining is not None:
+                # Whatever is read beyond the announced size is dropped.
+                if complete:
+                    return
+                body = message.get("body", b"")
+                if len(body) >= remaining:
+                    message = {**message, "body": body[:remaining], "more_body": False}
+                    complete = True
+                remaining -= len(message["body"])
+            await send(message)
+
+        # Have the file sent by this response, not by the server, which knows nothing
+        # about the announced size.
+        extensions = scope.get("extensions") or {}
+        if "http.response.pathsend" in extensions:
+            scope = {**scope, "extensions": {k: v for k, v in extensions.items() if k != "http.response.pathsend"}}
+
+        await super().__call__(scope, receive, send_bounded)
+
+
+def _get_log_read_limiter() -> anyio.CapacityLimiter:
+    """Get the limiter for concurrent log reads of the running event loop."""
+
+    try:
+        return _log_read_limiter.get()
+    except LookupError:
+        limiter = anyio.CapacityLimiter(LOG_READERS)
+        _log_read_limiter.set(limiter)
+        return limiter
+
+
+async def run_log_read(request: Request | None, function: Callable[..., Any], *args: Any) -> Any:  # noqa: ANN401
+    """Run a function that reads a log file in a worker thread, off the event loop.
+
+    Args:
+        request (Request | None):
+            The request the result is for. If given, the function gets a `threading.Event`
+            as its last argument, which is set as soon as the client disconnects, so that
+            a long scan stops when nobody waits for its result any more.
+        function (Callable):
+            The function to run.
+        *args (Any):
+            The arguments of the function.
+
+    Returns:
+        Any:
+            The result of the function.
+
+    """
+
+    limiter = _get_log_read_limiter()
+    if request is None:
+        return await anyio.to_thread.run_sync(function, *args, limiter=limiter)
+
+    cancel = threading.Event()
+    result = None
+    error: Exception | None = None
+
+    async def watch_client() -> None:
+        # Most reads are done long before the first look at the connection.
+        while True:
+            await anyio.sleep(CLIENT_CHECK_SECONDS)
+            if await request.is_disconnected():
+                break
+        cancel.set()
+
+    try:
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(watch_client)
+            # An error must not leave the task group: it would arrive wrapped in a group.
+            try:
+                result = await anyio.to_thread.run_sync(function, *args, cancel, limiter=limiter)
+            except Exception as exc:
+                error = exc
+            task_group.cancel_scope.cancel()
+    finally:
+        # Also stops the scan if this request itself is cancelled.
+        cancel.set()
+
+    if error is not None:
+        raise error
+    return result

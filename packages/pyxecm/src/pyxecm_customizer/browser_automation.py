@@ -354,7 +354,7 @@ class BrowserAutomation:
         )
         output, error = process.communicate()
         if process.returncode == 0:  # 0 = success
-            self.logger.info("Successfuly completed installation of browser -> '%s'.", browser)
+            self.logger.info("Successfully completed installation of browser -> '%s'.", browser)
             self.logger.debug(output.decode())
         else:
             self.logger.error("Installation of browser -> '%s' failed! Error -> %s", browser, error.decode())
@@ -733,7 +733,7 @@ class BrowserAutomation:
         """
 
         failure_message = "Cannot find {} page element with selector -> '{}' ({}){}{}{}{}".format(
-            "occurence #{} of".format(occurrence) if occurrence > 1 else "any",
+            "occurrence #{} of".format(occurrence) if occurrence > 1 else "any",
             selector,
             selector_type,
             " and role type -> '{}'".format(role_type) if role_type else "",
@@ -742,7 +742,7 @@ class BrowserAutomation:
             ", waiting for state -> '{}'".format(wait_state),
         )
         success_message = "Found {} page element with selector -> '{}' ('{}'){}{}{}".format(
-            "occurence #{} of".format(occurrence) if occurrence > 1 else "a",
+            "occurrence #{} of".format(occurrence) if occurrence > 1 else "a",
             selector,
             selector_type,
             " and role type -> '{}'".format(role_type) if role_type else "",

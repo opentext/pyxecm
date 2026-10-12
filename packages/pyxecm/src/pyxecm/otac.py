@@ -272,7 +272,8 @@ class OTAC:
         # create union of two dicts: cookie and headers
         # (with Python 3.9 this would be easier with the "|" operator)
         request_header = {}
-        request_header.update("token" + self._otac_ticket)
+        if self._otac_ticket:
+            request_header["Authorization"] = "token " + self._otac_ticket
         request_header.update(REQUEST_FORM_HEADERS)
 
         return request_header

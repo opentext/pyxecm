@@ -72,6 +72,8 @@ from opentelemetry import trace
 from pyxecm import AVTS, OTAC, OTAWP, OTCA, OTCS, OTDS, OTIV, OTKD, OTMM, OTPD, CoreShare
 from pyxecm.helper import HTTP, XML, Data
 
+from pyxecm_customizer.settings import Settings
+
 from .browser_automation import BrowserAutomation
 from .exceptions import PayloadImportError, StopOnError
 from .guidewire import Guidewire
@@ -915,7 +917,7 @@ class Payload:
             product_description = self._otawp.product_name() + organization
             if os.path.isfile(self._otawp.license_file()):
                 self.logger.info(
-                    "Found OTAWP license file -> '%s', assiging it to OTDS resource -> '%s'...",
+                    "Found OTAWP license file -> '%s', assigning it to OTDS resource -> '%s'...",
                     self._otawp.license_file(),
                     organization,
                 )
@@ -1028,7 +1030,7 @@ class Payload:
             otawp_cookie = self._otawp.authenticate(revalidate=True)
             if not otawp_cookie:
                 self.logger.error(
-                    "Authentication at AppWorks failed. Cannot proceed with processing of AppWorks configutation -> '%s'!",
+                    "Authentication at AppWorks failed. Cannot proceed with processing of AppWorks configuration -> '%s'!",
                     organization,
                 )
                 success = False
@@ -3843,6 +3845,7 @@ class Payload:
             client_permission_scopes = oauth_client.get("permission_scopes")
             client_default_scopes = oauth_client.get("default_scopes")
             client_allow_impersonation = oauth_client.get("allow_impersonation", True)
+            client_impersonation_list = oauth_client.get("impersonation_list")
             client_secret = oauth_client.get("secret", "")
             client_user_type = oauth_client.get(
                 "user_type", ""
@@ -3879,6 +3882,7 @@ class Payload:
                 description=client_description,
                 redirect_urls=client_redirect_urls,
                 allow_impersonation=client_allow_impersonation,
+                impersonation_list=client_impersonation_list,
                 confidential=client_confidential,
                 auth_scopes=client_partition,
                 allowed_scopes=client_permission_scopes,
@@ -3999,7 +4003,7 @@ class Payload:
                 role_partition,
             )
             response = self._otds.get_application_role(
-                name=role,
+                name=role_name,
                 partition=role_partition,
                 show_error=False,
             )
@@ -4737,7 +4741,7 @@ class Payload:
                 continue
 
             # Add user with its ID to the dict self._placeholder_values:
-            self._placeholder_values["OTCS_USER_ID_%s", user_name.upper()] = str(
+            self._placeholder_values[f"OTCS_USER_ID_{user_name.upper()}"] = str(
                 user_id,
             )
 
@@ -8992,6 +8996,7 @@ class Payload:
             - external_system_number (str, optional)
             - description (str | dict, optional)
             - as_url (str, required)
+            - as_url_v4 (str, optional)
             - base_url (str, optional)
             - client (str, optional)
             - destination (str, optional)
@@ -9003,6 +9008,10 @@ class Payload:
             - external_system_hostname (str, optional)
             - archive_logical_name (str, optional)
             - archive_certificate_file (str, optional)
+            - saml_idp_private_key_file (str, optional, SAP only)
+            - saml_idp_certificate_file (str, optional, SAP only)
+            - saml_issuer (str, optional, SAP only)
+            - saml_audience (str, optional, SAP only)
             - oauth_client_id (str, optional)
             - oauth_client_secret (str, optional)
             - skip_connection_test (bool, optional, default=False)
@@ -9015,6 +9024,7 @@ class Payload:
                 external_system_type: Type of the external system.
                                       Possible values are
                                       * SAP
+                                      * SAP-OAuth
                                       * SuccessFactors
                                       * Salesforce
                                       * Guidewire
@@ -9022,14 +9032,29 @@ class Payload:
                                       * Business Scenario Sample
                 base_url: Base URL of the external system
                 as_url: Application Server URL of the external system
+                as_url_v4: Application Server URL of the V4 (REST) interface of the
+                           external system (optional)
                 username: (Technical) User Name for the connection
                 password: Password of the (technical) user
                 oauth_client_id: OAuth client ID
                 oauth_client_secret: OAuth client secret
+                request_type: OAuth request type (str, optional)
+                token_endpoint: OAuth token endpoint (str, optional)
+                comment: Comment for the external system (str, optional)
+                description: Description for the external system (str | dict, optional)
                 archive_logical_name: Logical name of Archive for SAP
                 archive_certificate_file: Path and filename to certificate file.
                                           This file is inside the customizer
                                           pod file system.
+                saml_idp_private_key_file: SAP only - path and filename of the PEM
+                                           private key of pyxecm's SAML 2.0 identity
+                                           provider for principal propagation (inside
+                                           the customizer pod, e.g. a mounted secret).
+                saml_idp_certificate_file: SAP only - path and filename of the matching
+                                           PEM certificate (trusted in SAP transaction SAML2).
+                saml_issuer: SAP only - entity ID of pyxecm's identity provider in SAML2.
+                saml_audience: SAP only - provider name of the SAP system's local SAML 2.0
+                               provider (e.g. "TE1CLNT600").
                 skip_connection_test: Should we skip the connection test for this
                                       external system?
             }
@@ -9037,7 +9062,8 @@ class Payload:
             and password are no longer used.
 
             In the payload for SAP external systems there are additional
-            items "client", "destination" that are processed by init_sap()
+            items "client", "destination" and the "saml_*" items that are processed
+            by init_sap(). "base_url" enables the OData REST APIs of the SAP object.
 
         Args:
             section_name (str, optional):
@@ -9083,7 +9109,7 @@ class Payload:
 
             if "external_system_type" not in external_system:
                 self.logger.error(
-                    "External System connection -> '%s' needs a type (SAP, Salesfoce, SuccessFactors, AppWorks Platform)! Skipping...",
+                    "External System connection -> '%s' needs a type (SAP, Salesforce, SuccessFactors, AppWorks Platform)! Skipping...",
                     system_name,
                 )
                 success = False
@@ -9105,6 +9131,9 @@ class Payload:
                 text="Process External System -> '{}' ({})".format(system_name, system_type),
                 char="-",
             )
+
+            # Get the optional comment for the external system.
+            comment = external_system.get("comment")
 
             # Check if external system has been explicitly disabled in payload
             # (enabled = false). In this case we skip the element:
@@ -9141,6 +9170,11 @@ class Payload:
                     auth_method = "BASIC"
                     oauth_client_id = None
                     oauth_client_secret = None
+                case "SAP-OAuth":
+                    connection_type = "HTTP"
+                    auth_method = "OAUTH"
+                    username = None
+                    password = None
                 case "Salesforce":
                     connection_type = "SF"
                     auth_method = "BASIC"
@@ -9228,6 +9262,8 @@ class Payload:
                     password = external_system["password"]
                     oauth_client_id = ""
                     oauth_client_secret = ""
+                    oauth_token_endpoint = None
+                    oauth_request_type = None
 
                 case "OAUTH":
                     if "oauth_client_id" not in external_system:
@@ -9246,6 +9282,8 @@ class Payload:
                         continue
                     oauth_client_id = external_system["oauth_client_id"]
                     oauth_client_secret = external_system["oauth_client_secret"]
+                    oauth_token_endpoint = external_system.get("token_endpoint")
+                    oauth_request_type = external_system.get("request_type")
                     # For backward compatibility we also read username/password
                     # with OAuth settings:
                     username = external_system["username"] if external_system.get("username") else None
@@ -9272,7 +9310,7 @@ class Payload:
                 )
                 # This is for handling re-runs of customizer pod where the transports
                 # are skipped and thus self._sap or self._salesforce may not be initialized:
-                if system_type == "SAP" and not self._sap:
+                if system_type in ("SAP", "SAP-OAuth") and not self._sap:
                     self.logger.info(
                         "Re-Initialize SAP connection for external system -> '%s'...",
                         system_name,
@@ -9327,12 +9365,17 @@ class Payload:
                 connection_name=system_name,
                 connection_type=connection_type,
                 as_url=as_url,
+                as_url_v4=external_system.get("as_url_v4"),
                 base_url=base_url,
-                username=str(username),
-                password=str(password),
+                # OAuth systems have no user - str(None) would send the text 'None':
+                username=str(username) if username is not None else "",
+                password=str(password) if password is not None else "",
                 authentication_method=auth_method,
                 client_id=oauth_client_id,
                 client_secret=oauth_client_secret,
+                token_endpoint=oauth_token_endpoint,
+                request_type=oauth_request_type,
+                comment=comment,
                 display_names=description,
             )
             if response is None:
@@ -9351,7 +9394,7 @@ class Payload:
             #
             # In case of an SAP external system we also initialize the SAP object
             #
-            if system_type == "SAP":
+            if system_type in ("SAP", "SAP-OAuth"):
                 # Initialize SAP object responsible for communication to SAP:
                 self._sap = self.init_sap(sap_external_system=external_system)
 
@@ -10809,8 +10852,8 @@ class Payload:
                 business_property_groups = response["results"]["GeneralTab"]["data"]["properties"][
                     "fWkspCreationConfig"
                 ]["propertyGroups"]
-                business_object_type["business_properties_groups"] = business_property_groups
-            elif not self.extract_properties_from_transport_packages(business_object_type, bo_type_id, bo_type_name):
+                business_object_type["business_property_groups"] = business_property_groups
+            elif not self.extract_properties_from_transport_packages(business_object_type, bo_type_name, bo_type_id):
                 success = False
         # end for business_object_type in self._business_object_types
 
@@ -11324,7 +11367,7 @@ class Payload:
 
                 if not category_nickname and not category_path:
                     self.logger.error(
-                        "Category assignment to workspace template needs eith the category nickname or the category path in the category volume!",
+                        "Category assignment to workspace template needs either the category nickname or the category path in the category volume!",
                     )
                     success = False
                     continue
@@ -14980,7 +15023,7 @@ class Payload:
             workspace_node_id = int(self.determine_workspace_id(workspace=workspace))
             if not workspace_node_id:
                 self.logger.warning(
-                    "Workspace without node ID cannot cannot get permission changes (workspaces creation may have failed). Skipping to next workspace...",
+                    "Workspace without node ID cannot get permission changes (workspaces creation may have failed). Skipping to next workspace...",
                 )
                 continue
 
@@ -15933,16 +15976,16 @@ class Payload:
             # end for user in self._users
 
         if self._users:
-            # Impersonate as the admin user:
+            # Switch back to authentication as the admin user:
             self.logger.info(
-                "Impersonate as admin user -> '%s'...",
+                "Re-Authenticate as admin user -> '%s'...",
                 self._otcs.credentials()["username"],
             )
-            # Stop the impersonation as a user:
+            # Stop impersonating the last user:
             result = self.stop_impersonation()
             if not result:
                 self.logger.error(
-                    "Couldn't impersonate as admin user -> '%s'!",
+                    "Couldn't authenticate as admin user -> '%s'!",
                     self._otcs.credentials()["username"],
                 )
                 success = False
@@ -17582,13 +17625,13 @@ class Payload:
         for user in users:
             if "name" not in user or "permissions" not in user:
                 self.logger.error(
-                    "Missing user name in user permission specificiation. Cannot set user permissions. Skipping...",
+                    "Missing user name in user permission specification. Cannot set user permissions. Skipping...",
                 )
                 return False
             user_name = user["name"]
             if "permissions" not in user:
                 self.logger.error(
-                    "Missing permissions in user -> '%s' permission specificiation. Cannot set user permissions. Skipping...",
+                    "Missing permissions in user -> '%s' permission specification. Cannot set user permissions. Skipping...",
                     user_name,
                 )
                 return False
@@ -17630,13 +17673,13 @@ class Payload:
         for group in groups:
             if "name" not in group:
                 self.logger.error(
-                    "Missing group name in group permission specificiation. Cannot set group permissions. Skipping...",
+                    "Missing group name in group permission specification. Cannot set group permissions. Skipping...",
                 )
                 return False
             group_name = group["name"]
             if "permissions" not in group:
                 self.logger.error(
-                    "Missing permissions in group -> '%s' permission specificiation. Cannot set group permissions. Skipping...",
+                    "Missing permissions in group -> '%s' permission specification. Cannot set group permissions. Skipping...",
                     group_name,
                 )
                 return False
@@ -17683,14 +17726,14 @@ class Payload:
         for role in roles:
             if "name" not in role:
                 self.logger.error(
-                    "Missing role name in role permission specificiation. Cannot set role permissions. Skipping...",
+                    "Missing role name in role permission specification. Cannot set role permissions. Skipping...",
                 )
                 return False
             role_name = role["name"]
             if "permissions" not in role:
                 self.logger.error(
-                    "Missing permissions in role -> '%s' permission specificiation. Cannot set role permissions. Skipping...",
-                    group_name,
+                    "Missing permissions in role -> '%s' permission specification. Cannot set role permissions. Skipping...",
+                    role_name,
                 )
                 return False
             role_permissions = role["permissions"]
@@ -18429,7 +18472,7 @@ class Payload:
             categories_payload = category_assignment.get("categories", {})
             if not categories_payload:
                 self.logger.error(
-                    "Category assignment for item -> '%s' does not have have category / attribute data defined!",
+                    "Category assignment for item -> '%s' does not have category / attribute data defined!",
                     item_name,
                 )
                 success = False
@@ -19611,8 +19654,10 @@ class Payload:
                         # the path we may have an error here. Then
                         # we fall back to workspace root level.
                         self.logger.warning(
-                            "Folder path does not exist in workspace -> '%s'. Using workspace root level instead...",
+                            "Folder path -> %s does not exist in workspace -> '%s' (%s). Using workspace root level instead...",
+                            workspace_folder_path,
                             workspace_name,
+                            workspace_id,
                         )
                         workspace_folder_id = workspace_id
                 else:
@@ -19732,6 +19777,7 @@ class Payload:
             if not attribute_definition:
                 self.logger.error(
                     "Cannot find the attribute -> '%s' in the workflow definition. Skipping...",
+                    attribute_name,
                 )
                 continue
             # Enrich the attribute dictionary with the attribute ID from the workflow definition:
@@ -19860,7 +19906,7 @@ class Payload:
                 self.logger.info(
                     "Successfully generated draft process with ID -> %s%s.",
                     str(draftprocess_id),
-                    " attching document IDs -> " + str(documents) if documents else "",
+                    " attaching document IDs -> " + str(documents) if documents else "",
                 )
             workflow_step["draftprocess_id"] = draftprocess_id
 
@@ -20089,8 +20135,10 @@ class Payload:
                         # the path we may have an error here. Then
                         # we fall back to workspace root level.
                         self.logger.warning(
-                            "Folder path does not exist in workspace -> '%s'. Using workspace root level instead...",
+                            "Folder path -> %s does not exist in workspace -> '%s' (%s). Using workspace root level instead...",
+                            workspace_folder_path,
                             workspace_name,
+                            workspace_id,
                         )
                         workspace_folder_id = workspace_id
                 else:
@@ -20673,7 +20721,7 @@ class Payload:
                                 if value
                                 else "",
                                 " in attribute -> '{}'".format(attribute) if attribute else "",
-                                " Found {}{} occurences.".format(
+                                " Found {}{} occurrences.".format(
                                     count,
                                     " undesirable" if not want_exist else " from a minimum of {}".format(min_count),
                                 ),
@@ -20729,11 +20777,17 @@ class Payload:
         sap_external_system: dict,
         direct_application_server_login: bool = True,
     ) -> SAP | None:
-        """Initialize SAP object for RFC communication with SAP S/4HANA.
+        """Initialize the SAP object for RFC and OData communication with SAP S/4HANA.
+
+        OData (and with it principal propagation) is enabled if the payload item has a
+        "base_url". Principal propagation additionally needs "saml_idp_private_key_file",
+        "saml_idp_certificate_file", "saml_issuer" and "saml_audience" (see
+        process_external_systems() and SAP.get_saml_assertion()). The key files are read
+        here - they are typically mounted from a Kubernetes secret into the customizer pod.
 
         Args:
             sap_external_system (dict):
-                SAP external system created before
+                SAP external system created before (payload item of "externalSystems").
             direct_application_server_login (bool, optional):
                 Flag to control whether we comminicate directly with
                 SAP application server or via a load balancer
@@ -20747,8 +20801,9 @@ class Payload:
         if not sap_external_system:
             return None
 
-        username = sap_external_system["username"]
-        password = sap_external_system["password"]
+        # SAP-OAuth external systems have no technical user (only OAuth client credentials):
+        username = sap_external_system.get("username") or ""
+        password = sap_external_system.get("password") or ""
         # "external_system_hostname" is extracted from as_url in process_external_systems()
         host = sap_external_system["external_system_hostname"]
         client = sap_external_system.get("client", "100")
@@ -20756,6 +20811,39 @@ class Payload:
         system_id = sap_external_system["external_system_name"]
         group = sap_external_system.get("group", "PUBLIC")
         destination = sap_external_system.get("destination", "")
+        # OData REST APIs:
+        base_url = sap_external_system.get("base_url", "")
+        # Principal propagation (pyxecm as SAML 2.0 identity provider, see SAP.get_saml_assertion())
+        # First priority is taking it from the external system payload - otherwise fall back to the global settings
+        saml_idp_private_key_file = (
+            sap_external_system.get("saml_idp_private_key_file") or Settings.sap.saml_idp_private_key_file
+        )
+        saml_idp_certificate_file = (
+            sap_external_system.get("saml_idp_certificate_file") or Settings.sap.saml_idp_certificate_file
+        )
+        saml_issuer = sap_external_system.get("saml_issuer") or Settings.sap.saml_issuer
+        saml_audience = sap_external_system.get("saml_audience") or Settings.sap.saml_audience
+        # Read the PEM files (typically mounted from a Kubernetes secret). The file names are
+        # not checked (e.g. a Kubernetes TLS secret mounts "tls.key" / "tls.crt") - SAP()
+        # validates the content and logs an error if it is not a matching PEM key pair:
+        pem_contents = {}
+        for pem_file_name in (saml_idp_private_key_file, saml_idp_certificate_file):
+            if not pem_file_name:
+                continue
+            try:
+                with open(pem_file_name, encoding="utf-8") as pem_file:
+                    pem_contents[pem_file_name] = pem_file.read()
+            except OSError as file_error:
+                # The SAP object is still created - it logs that principal propagation is disabled:
+                self.logger.warning(
+                    "PEM file -> '%s' for SAP principal propagation does not exist; error -> %s",
+                    pem_file_name,
+                    str(file_error),
+                )
+        if not saml_idp_private_key_file and (saml_idp_certificate_file or saml_issuer or saml_audience):
+            self.logger.warning(
+                "SAP principal propagation is configured incompletely - 'saml_idp_private_key_file' is missing!"
+            )
 
         self.logger.info("Connection parameters SAP:")
         self.logger.info("SAP Hostname             = %s", host)
@@ -20767,6 +20855,13 @@ class Payload:
             self.logger.info("SAP Group Name (for RFC) = %s", group)
         if destination:
             self.logger.info("SAP Destination          = %s", destination)
+        if base_url:
+            self.logger.info("SAP OData Base URL       = %s", base_url)
+        if saml_idp_private_key_file:
+            self.logger.info("SAP SAML Key File        = %s", saml_idp_private_key_file)
+            self.logger.info("SAP SAML Certificate     = %s", saml_idp_certificate_file)
+            self.logger.info("SAP SAML Issuer          = %s", saml_issuer)
+            self.logger.info("SAP SAML Audience        = %s", saml_audience)
 
         if direct_application_server_login:
             self.logger.info(
@@ -20780,6 +20875,11 @@ class Payload:
                 system_number=system_number,
                 system_id=system_id,
                 destination=destination,
+                base_url=base_url,
+                saml_idp_private_key=pem_contents.get(saml_idp_private_key_file),
+                saml_idp_certificate=pem_contents.get(saml_idp_certificate_file),
+                saml_issuer=saml_issuer,
+                saml_audience=saml_audience,
                 logger=self.logger,
             )
         else:
@@ -20795,6 +20895,11 @@ class Payload:
                 system_number=system_number,
                 system_id=system_id,
                 destination=destination,
+                base_url=base_url,
+                saml_idp_private_key=pem_contents.get(saml_idp_private_key_file),
+                saml_idp_certificate=pem_contents.get(saml_idp_certificate_file),
+                saml_issuer=saml_issuer,
+                saml_audience=saml_audience,
                 logger=self.logger,
             )
 
@@ -21042,7 +21147,7 @@ class Payload:
 
         self.logger.info("Connection parameters Salesforce:")
         self.logger.info("Salesforce base URL          = %s", base_url)
-        self.logger.info("Salesforce authorization URL = %s", base_url)
+        self.logger.info("Salesforce authorization URL = %s", authorization_url)
         self.logger.info("Salesforce username          = %s", username)
         self.logger.debug("Salesforce password          = %s", password)
         self.logger.info("Salesforce client ID         = %s", client_id)
@@ -22309,7 +22414,7 @@ class Payload:
 
         if not isinstance(root_folders, list):
             self.logger.warning(
-                "The payload for root folders of the 'filesytem' data source should be a list! You should adjust the 'root_folders' setting.",
+                "The payload for root folders of the 'filesystem' data source should be a list! You should adjust the 'root_folders' setting.",
             )
             root_folders: list = [root_folders]
 
@@ -22485,7 +22590,7 @@ class Payload:
             case "filesystem":
                 data = self.process_bulk_datasource_filesystem(data_source=data_source)
                 if data is None:
-                    self.logger.error("Failure during load of Web data source!")
+                    self.logger.error("Failure during load of filesystem data source!")
                     return None
             case _:
                 self.logger.error(
@@ -22781,7 +22886,7 @@ class Payload:
             # Load and prepare the data source for the bulk processing:
             if copy_data_source:
                 self.logger.info(
-                    "Take a copy of data source -> '%s' to avoid side-effects for repeative usage of the data source...",
+                    "Take a copy of data source -> '%s' to avoid side-effects for repetitive usage of the data source...",
                     data_source_name,
                 )
                 data = Data(
@@ -23609,7 +23714,7 @@ class Payload:
                     volume_type=self._otcs.VOLUME_TYPE_CLASSIFICATION_VOLUME,
                     path=classification,
                 )
-            elif isinstance(classification, string):
+            elif isinstance(classification, str):
                 nickname = self.replace_bulk_placeholders(
                     input_string=classification,
                     row=row,
@@ -24618,7 +24723,7 @@ class Payload:
                         or ("update" in row_operations and "members" in update_operations)
                     )
                 ):
-                    self.looger.info(
+                    self.logger.info(
                         "Update workspace role members for workspace -> '%s' (%s)...",
                         workspace_name,
                         workspace_id,
@@ -25179,7 +25284,7 @@ class Payload:
             # Load and prepare the data source for the bulk processing:
             if copy_data_source:
                 self.logger.info(
-                    "Take a copy of data source -> '%s' to avoid side-effects for repeative usage of the data source...",
+                    "Take a copy of data source -> '%s' to avoid side-effects for repetitive usage of the data source...",
                     bulk_workspace_relationship["data_source"],
                 )
                 data = Data(
@@ -25389,6 +25494,7 @@ class Payload:
                 ),
                 char="-",
             )
+        # end for bulk_workspace_relationship in self._bulk_workspace_relationships
 
         self.write_status_file(
             success=success,
@@ -26222,7 +26328,7 @@ class Payload:
         # Redo the test...
         if not response or not response["results"]:
             self.logger.warning(
-                "Source node with ID -> %s does not inherit categories but we have category payload! Processing without assiging category...",
+                "Source node with ID -> %s does not inherit categories but we have category payload! Processing without assigning category...",
                 source_node_id,
             )
         else:
@@ -26452,7 +26558,7 @@ class Payload:
             # Load and prepare the data source for the bulk processing:
             if copy_data_source:
                 self.logger.info(
-                    "Take a copy of data source -> %s to avoid side-effects for repeative usage of the data source...",
+                    "Take a copy of data source -> %s to avoid side-effects for repetitive usage of the data source...",
                     data_source_name,
                 )
                 data = Data(
@@ -27015,7 +27121,7 @@ class Payload:
                         ):
                             self.logger.debug(
                                 "Successfully downloaded from Content Server using URL -> %s with ID -> %s to local file -> '%s'",
-                                source_otcs.cs_public_url,
+                                source_otcs.cs_public_url(),
                                 cs_source_id,
                                 file_name,
                             )
@@ -27488,7 +27594,7 @@ class Payload:
             # if either of the two couldn't be determined we cannot create the sub-workspace
             if not sub_workspace_type_id or not sub_workspace_template_id:
                 self.logger.error(
-                    "Couldn't dertermine workspace template ID and workspace type ID of sub-workspace!",
+                    "Couldn't determine workspace template ID and workspace type ID of sub-workspace!",
                 )
                 success = False
                 return None, success
@@ -28809,7 +28915,7 @@ class Payload:
             # Load and prepare the data source for the bulk processing:
             if copy_data_source:
                 self.logger.info(
-                    "Take a copy of data source -> %s to avoid side-effects for repeative usage of the data source...",
+                    "Take a copy of data source -> %s to avoid side-effects for repetitive usage of the data source...",
                     data_source_name,
                 )
                 data = Data(
@@ -30757,7 +30863,7 @@ class Payload:
             # Load and prepare the data source for the bulk processing:
             if copy_data_source:
                 self.logger.info(
-                    "Take a copy of data source -> '%s' to avoid side-effects for repeative usage of the data source...",
+                    "Take a copy of data source -> '%s' to avoid side-effects for repetitive usage of the data source...",
                     data_source_name,
                 )
                 data = Data(
@@ -32018,7 +32124,7 @@ class Payload:
                     self.logger.error("Failed to upload new Nifi flow -> '%s' for Knowledge Discovery!", name)
                     success = False
                     continue
-                self.logger.info("Sucessfully uploaded new Nifi flow -> '%s' for Knowledge Discovery.", name)
+                self.logger.info("Successfully uploaded new Nifi flow -> '%s' for Knowledge Discovery.", name)
 
             for parameter in parameters:
                 component = parameter.get("component", None)

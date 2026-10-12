@@ -103,5 +103,7 @@ nav:
       - Microsoft 365: pyxecm-customizer/m365.md
       - Salesforce: pyxecm-customizer/salesforce.md
       - SAP: pyxecm-customizer/sap.md
+      - SAP Required APIs: pyxecm-customizer/sap-apis.md
+      - SAP Authentication / SSO: pyxecm-customizer/sap-authentication.md
       - SuccessFactors: pyxecm-customizer/successfactors.md
       - Translate: pyxecm-customizer/translate.md

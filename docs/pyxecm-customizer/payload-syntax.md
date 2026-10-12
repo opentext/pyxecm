@@ -196,16 +196,18 @@ In addition, each resource definition has a `name`, an optional `description`, a
 
     ```yaml
     resources:
-      - enabled: True
+      - enabled: true
         name: "Aviator Search"
         description: "Resource for Aviator Search"
         display_name: "Resource for Aviator Search"
-        allow_impersonation: True
-        activate: True
+        allow_impersonation: true
+        activate: true # if a secret is provided the resource will automatically be activated
         resource_id: "a331e5cb-68ef-4cb7-a8a0-037ba6b35522"
         secret: "0123456789012345678901==" # needs to end with ==
         additional_payload:
-        ...
+          pcCreatePermissionAllowed: true
+          pcModifyPermissionAllowed: true
+          pcDeletePermissionAllowed: false
     ```
 
 #### synchronized partition
@@ -1331,7 +1333,20 @@ In addition, each document generation setting has a `name`, `value` and an optio
 
 Each list element can include a switch called `enabled` to turn them on or off (the default is `true`). This switch can be controlled by a Terraform variable (or could just be `false` or `true`).
 
-In addition, the field `external_system_type` needs to have one of these values: `SAP`, `Salesforce`, `SuccessFactors`, `AppWorks Platform` or `Business Scenario Sample`. All other fields are dependent on the selection of the `external_system_type` value.
+In addition, the field `external_system_type` needs to have one of these values: `SAP`, `SAP-OAuth`, `Salesforce`, `SuccessFactors`, `Guidewire`, `AppWorks Platform` or `Business Scenario Sample`. All other fields are dependent on the selection of the `external_system_type` value.
+
+`SAP-OAuth` is an SAP system that OpenText Content Management connects to with OAuth instead of a technical user: it uses `oauth_client_id`, `oauth_client_secret`, `token_endpoint` and optionally `request_type` (`BASIC` or `HTTPBODY`) - `username` and `password` are not needed. `as_url_v4` (optional, all SAP types) is the URL of the S/4HANA OData V4 API server.
+
+For `SAP`, `base_url` also enables the OData REST APIs of pyxecm's SAP object. The optional `saml_*` fields enable principal propagation - pyxecm calls SAP as the individual user instead of the technical user (see [SAP Authentication / SSO](sap-authentication.md)):
+
+| Field                       | Meaning                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `saml_idp_private_key_file` | PEM private key of pyxecm's SAML 2.0 identity provider - a file in the customizer pod, e.g. mounted from a Kubernetes secret |
+| `saml_idp_certificate_file` | PEM certificate of that key - the SAP administrator trusts it in transaction `SAML2`                                         |
+| `saml_issuer`               | Entity ID of pyxecm's identity provider as registered in `SAML2`, e.g. `pyxecm-idp`                                          |
+| `saml_audience`             | Provider name of the SAP system's local SAML 2.0 provider (`SAML2`), e.g. `S4HCLNT100`                                       |
+
+Never put the key itself into the payload - only the file name.
 
 === "Terraform / HCL"
 
@@ -1340,19 +1355,24 @@ In addition, the field `external_system_type` needs to have one of these values:
       {
         enabled                  = var.enable_sap
         external_system_type     = "SAP"
-        external_system_name     = "TM6"
+        external_system_name     = "S4H"
         external_system_number   = var.sap_external_system_number
         description              = "SAP S/4HANA on-premise"
-        as_url                   = "https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding"
-        base_url                 = "https://tmcerp1.eimdemo.biz:8443"
+        as_url                   = "https://s4.example.com:44300/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding"
+        base_url                 = "https://s4.example.com:44300"
         client                   = var.sap_external_system_client
         username                 = "demo"
         password                 = local.password
-        certificate_file         = "/certificates/TM6.pse"
+        certificate_file         = "/certificates/S4H.pse"
         certificate_password     = "topsecret"
         destination              = var.sap_external_system_destination
         archive_logical_name     = var.sap_archive_logical_name
         archive_certificate_file = "/certificates/${var.sap_archive_certificate_file}"
+        # Optional - principal propagation (pyxecm as SAML 2.0 identity provider):
+        saml_idp_private_key_file = "/secrets/saml-idp.key"
+        saml_idp_certificate_file = "/secrets/saml-idp.crt"
+        saml_issuer               = "pyxecm-idp"
+        saml_audience             = "S4HCLNT100"
       },
       {
         enabled                = var.enable_salesforce
@@ -1391,17 +1411,21 @@ In addition, the field `external_system_type` needs to have one of these values:
     externalSystems:
     - archive_logical_name: ${var.sap_archive_logical_name}
       archive_certificate_file: "/certificates/${var.sap_archive_certificate_file}"
-      as_url: https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding
-      base_url: https://tmcerp1.eimdemo.biz:8443
-      certificate_file: /certificates/TM6.pse
+      as_url: https://s4.example.com:44300/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding
+      base_url: https://s4.example.com:44300
+      certificate_file: /certificates/S4H.pse
       certificate_password: topsecret
       client: ${var.sap_external_system_client}
       description: SAP S/4HANA on-premise
       destination: ${var.sap_external_system_destination}
       enabled: ${var.enable_sap}
-      external_system_name: TM6
+      external_system_name: S4H
       external_system_type: SAP
       password: ${local.password}
+      saml_audience: S4HCLNT100
+      saml_idp_certificate_file: /secrets/saml-idp.crt
+      saml_idp_private_key_file: /secrets/saml-idp.key
+      saml_issuer: pyxecm-idp
       username: demo
     - as_url: https://idea02dev-dev-ed.my.salesforce.com/services/Soap/c/48.0/
       authorization_endpoint: https://salesforce.com/services/oauth2/authorize

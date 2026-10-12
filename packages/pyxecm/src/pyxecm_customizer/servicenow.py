@@ -124,8 +124,7 @@ class ServiceNow:
         servicenow_config["password"] = password
         if not token_url:
             token_url = base_url + "/oauth_token.do"
-        else:
-            servicenow_config["tokenUrl"] = token_url
+        servicenow_config["tokenUrl"] = token_url
 
         servicenow_config["restUrl"] = servicenow_config["baseUrl"] + "/api/now/"
         servicenow_config["tableUrl"] = servicenow_config["restUrl"] + "table"
@@ -223,7 +222,7 @@ class ServiceNow:
         request_header = REQUEST_HEADERS
 
         if self.config()["authType"] == "oauth":
-            request_header["Authorization"] = ("Bearer {}".format(self._access_token),)
+            request_header["Authorization"] = "Bearer {}".format(self._access_token)
 
         if content_type:
             request_header["Content-Type"] = content_type
@@ -357,7 +356,7 @@ class ServiceNow:
 
         # Service now can either have a dict or a list structure
         # in "results":
-        if isinstance(values, list) and len(values) - 1 < index:
+        if isinstance(values, list) and len(values) > index:
             value = values[index][key]
         elif isinstance(values, dict) and key in values:
             value = values[key]
@@ -413,12 +412,12 @@ class ServiceNow:
 
         token_post_body = {
             "grant_type": "client_credentials",
-            "client_id": self.config()["client_id"],
-            "client_secret": self.config()["client_secret"],
+            "client_id": self.config()["clientId"],
+            "client_secret": self.config()["clientSecret"],
         }
 
         response = requests.post(
-            url=self.config()["token_url"],
+            url=self.config()["tokenUrl"],
             data=token_post_body,
             timeout=REQUEST_TIMEOUT,
         )
@@ -583,9 +582,9 @@ class ServiceNow:
                     return data.get("result", [])
                 elif response.status_code == 202:
                     self.logger.warning(
-                        "Service Now returned <202 Accepted> -> throtteling, retrying ...",
+                        "Service Now returned <202 Accepted> -> throttling, retrying ...",
                     )
-                    time.sleep(1000)
+                    time.sleep(5)
                 else:
                     return None
 

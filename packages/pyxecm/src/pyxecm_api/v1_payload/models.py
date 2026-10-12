@@ -55,3 +55,39 @@ class UpdatedPayloadListItem(BaseModel):
     message: str
     payload: PayloadListItem
     updated_fields: dict
+
+
+class PayloadLogInfo(BaseModel):
+    """Defines PayloadLogInfo Model: a payload log file and the progress of its line index."""
+
+    version: int
+    size: int
+    indexed_bytes: int
+    indexing: bool
+    lines: int
+    counts: dict[str, int]
+    running: bool
+
+
+class PayloadLogLine(BaseModel):
+    """Defines PayloadLogLine Model: one line of a payload log file."""
+
+    n: int
+    offset: int
+    level: str | None
+    text: str
+
+
+class PayloadLogLines(BaseModel):
+    """Defines PayloadLogLines Model: a window of lines of a payload log file."""
+
+    lines: list[PayloadLogLine]
+    matched: int
+    start: int
+    end: int
+    bof: bool
+    eof: bool
+    size: int
+    indexing: bool
+    indexed_bytes: int
+    running: bool

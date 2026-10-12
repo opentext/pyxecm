@@ -2632,7 +2632,7 @@ class CoreShare:
             )
             return True
 
-        self.logger.info("Inpersonate as user -> %s to cleanup files...", user_login)
+        self.logger.info("Impersonate as user -> %s to cleanup files...", user_login)
 
         # Save admin credentials the class has been initialized with:
         admin_credentials = self.credentials()
@@ -2711,7 +2711,7 @@ class CoreShare:
                         response = self.delete_document(item["id"])
                     else:
                         self.logger.error(
-                            "Unsupport resource type -> '%s'! Cannot remove this item from Core Share.",
+                            "Unsupported resource type -> '%s'! Cannot remove this item from Core Share.",
                             item["resourceType"],
                         )
                         response = None

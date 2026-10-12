@@ -1444,6 +1444,62 @@
   
   
     <li class="md-nav__item">
+      <a href="sap-apis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Required APIs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sap-authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Authentication / SSO
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="successfactors/" class="md-nav__link">
         
   
@@ -6124,7 +6180,7 @@ Defaults to True.</p>
 </span><span id="__span-0-1513"><a id="__codelineno-0-1513" name="__codelineno-0-1513"></a>    <span class="k">if</span> <span class="n">enable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">k8s</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
 </span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">log_header</span><span class="p">(</span><span class="s2">"Enable Maintenance Mode"</span><span class="p">)</span>
 </span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a>            <span class="s2">"Put OTCS frontends in Maitenance Mode by changing the Kubernetes Ingress backend service..."</span><span class="p">,</span>
+</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a>            <span class="s2">"Put OTCS frontends in Maintenance Mode by changing the Kubernetes Ingress backend service..."</span><span class="p">,</span>
 </span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a>        <span class="p">)</span>
 </span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">k8s_object</span><span class="o">.</span><span class="n">update_ingress_backend_services</span><span class="p">(</span>
 </span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">k8s</span><span class="o">.</span><span class="n">ingress_otxecm</span><span class="p">,</span>
@@ -6903,7 +6959,7 @@ Defaults to True.</p>
 </span><span id="__span-0-1808"><a id="__codelineno-0-1808" name="__codelineno-0-1808"></a>
 </span><span id="__span-0-1809"><a id="__codelineno-0-1809" name="__codelineno-0-1809"></a>            <span class="c1"># Now process the payload in the defined ordering:</span>
 </span><span id="__span-0-1810"><a id="__codelineno-0-1810" name="__codelineno-0-1810"></a>            <span class="n">payload_object</span><span class="o">.</span><span class="n">process_payload</span><span class="p">()</span>
-</span><span id="__span-0-1811"><a id="__codelineno-0-1811" name="__codelineno-0-1811"></a>            <span class="n">t</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="s2">"Payload processsed"</span><span class="p">,</span> <span class="n">timestamp</span><span class="o">=</span><span class="n">time</span><span class="o">.</span><span class="n">time_ns</span><span class="p">())</span>
+</span><span id="__span-0-1811"><a id="__codelineno-0-1811" name="__codelineno-0-1811"></a>            <span class="n">t</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="s2">"Payload processed"</span><span class="p">,</span> <span class="n">timestamp</span><span class="o">=</span><span class="n">time</span><span class="o">.</span><span class="n">time_ns</span><span class="p">())</span>
 </span><span id="__span-0-1812"><a id="__codelineno-0-1812" name="__codelineno-0-1812"></a>
 </span><span id="__span-0-1813"><a id="__codelineno-0-1813" name="__codelineno-0-1813"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">log_header</span><span class="p">(</span><span class="s2">"Consolidate OTDS Resources"</span><span class="p">)</span>
 </span><span id="__span-0-1814"><a id="__codelineno-0-1814" name="__codelineno-0-1814"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">consolidate_otds</span><span class="p">()</span>

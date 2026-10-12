@@ -1964,6 +1964,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../sap-apis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Required APIs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sap-authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Authentication / SSO
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../successfactors/" class="md-nav__link">
         
   
@@ -3122,16 +3178,18 @@ processed if it is listed in <code>payloadSections</code>; its position in that 
 </div>
 <div class="tabbed-block">
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">resources</span><span class="p">:</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"Aviator</span><span class="nv"> </span><span class="s">Search"</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Resource</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">Aviator</span><span class="nv"> </span><span class="s">Search"</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">display_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Resource</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">Aviator</span><span class="nv"> </span><span class="s">Search"</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">allow_impersonation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span><span class="nt">activate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">allow_impersonation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span><span class="nt">activate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w"> </span><span class="c1"># if a secret is provided the resource will automatically be activated</span>
 </span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">    </span><span class="nt">resource_id</span><span class="p">:</span><span class="w"> </span><span class="s">"a331e5cb-68ef-4cb7-a8a0-037ba6b35522"</span>
 </span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span><span class="nt">secret</span><span class="p">:</span><span class="w"> </span><span class="s">"0123456789012345678901=="</span><span class="w"> </span><span class="c1"># needs to end with ==</span>
 </span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">    </span><span class="nt">additional_payload</span><span class="p">:</span>
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">...</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">      </span><span class="nt">pcCreatePermissionAllowed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">      </span><span class="nt">pcModifyPermissionAllowed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">      </span><span class="nt">pcDeletePermissionAllowed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span></code></pre></div>
 </div>
 </div>
@@ -4183,7 +4241,36 @@ processed if it is listed in <code>payloadSections</code>; its position in that 
 <h4 id="externalsystems">externalSystems<a class="headerlink" href="#externalsystems" title="Permanent link">&para;</a></h4>
 <p><code>externalSystems</code> is a list of connections to external business applications such as SAP S/4HANA, Salesforce, or SuccessFactors. Some of the payload elements are common, some are specific for the type of the external system.</p>
 <p>Each list element can include a switch called <code>enabled</code> to turn them on or off (the default is <code>true</code>). This switch can be controlled by a Terraform variable (or could just be <code>false</code> or <code>true</code>).</p>
-<p>In addition, the field <code>external_system_type</code> needs to have one of these values: <code>SAP</code>, <code>Salesforce</code>, <code>SuccessFactors</code>, <code>AppWorks Platform</code> or <code>Business Scenario Sample</code>. All other fields are dependent on the selection of the <code>external_system_type</code> value.</p>
+<p>In addition, the field <code>external_system_type</code> needs to have one of these values: <code>SAP</code>, <code>SAP-OAuth</code>, <code>Salesforce</code>, <code>SuccessFactors</code>, <code>Guidewire</code>, <code>AppWorks Platform</code> or <code>Business Scenario Sample</code>. All other fields are dependent on the selection of the <code>external_system_type</code> value.</p>
+<p><code>SAP-OAuth</code> is an SAP system that OpenText Content Management connects to with OAuth instead of a technical user: it uses <code>oauth_client_id</code>, <code>oauth_client_secret</code>, <code>token_endpoint</code> and optionally <code>request_type</code> (<code>BASIC</code> or <code>HTTPBODY</code>) - <code>username</code> and <code>password</code> are not needed. <code>as_url_v4</code> (optional, all SAP types) is the URL of the S/4HANA OData V4 API server.</p>
+<p>For <code>SAP</code>, <code>base_url</code> also enables the OData REST APIs of pyxecm's SAP object. The optional <code>saml_*</code> fields enable principal propagation - pyxecm calls SAP as the individual user instead of the technical user (see <a href="../sap-authentication/">SAP Authentication / SSO</a>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>saml_idp_private_key_file</code></td>
+<td>PEM private key of pyxecm's SAML 2.0 identity provider - a file in the customizer pod, e.g. mounted from a Kubernetes secret</td>
+</tr>
+<tr>
+<td><code>saml_idp_certificate_file</code></td>
+<td>PEM certificate of that key - the SAP administrator trusts it in transaction <code>SAML2</code></td>
+</tr>
+<tr>
+<td><code>saml_issuer</code></td>
+<td>Entity ID of pyxecm's identity provider as registered in <code>SAML2</code>, e.g. <code>pyxecm-idp</code></td>
+</tr>
+<tr>
+<td><code>saml_audience</code></td>
+<td>Provider name of the SAP system's local SAML 2.0 provider (<code>SAML2</code>), e.g. <code>S4HCLNT100</code></td>
+</tr>
+</tbody>
+</table>
+<p>Never put the key itself into the payload - only the file name.</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="24:2"><input checked="checked" id="__tabbed_24_1" name="__tabbed_24" type="radio" /><input id="__tabbed_24_2" name="__tabbed_24" type="radio" /><div class="tabbed-labels"><label for="__tabbed_24_1">Terraform / HCL</label><label for="__tabbed_24_2">YAML</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
@@ -4191,91 +4278,100 @@ processed if it is listed in <code>payloadSections</code>; its position in that 
 </span><span id="__span-46-2"><a id="__codelineno-46-2" name="__codelineno-46-2" href="#__codelineno-46-2"></a><span class="w">  </span><span class="p">{</span>
 </span><span id="__span-46-3"><a id="__codelineno-46-3" name="__codelineno-46-3" href="#__codelineno-46-3"></a><span class="w">    </span><span class="na">enabled</span><span class="w">                  </span><span class="o">=</span><span class="w"> </span><span class="nv">var.enable_sap</span>
 </span><span id="__span-46-4"><a id="__codelineno-46-4" name="__codelineno-46-4" href="#__codelineno-46-4"></a><span class="w">    </span><span class="na">external_system_type</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"SAP"</span>
-</span><span id="__span-46-5"><a id="__codelineno-46-5" name="__codelineno-46-5" href="#__codelineno-46-5"></a><span class="w">    </span><span class="na">external_system_name</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"TM6"</span>
+</span><span id="__span-46-5"><a id="__codelineno-46-5" name="__codelineno-46-5" href="#__codelineno-46-5"></a><span class="w">    </span><span class="na">external_system_name</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"S4H"</span>
 </span><span id="__span-46-6"><a id="__codelineno-46-6" name="__codelineno-46-6" href="#__codelineno-46-6"></a><span class="w">    </span><span class="na">external_system_number</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="nv">var.sap_external_system_number</span>
 </span><span id="__span-46-7"><a id="__codelineno-46-7" name="__codelineno-46-7" href="#__codelineno-46-7"></a><span class="w">    </span><span class="na">description</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="s2">"SAP S/4HANA on-premise"</span>
-</span><span id="__span-46-8"><a id="__codelineno-46-8" name="__codelineno-46-8" href="#__codelineno-46-8"></a><span class="w">    </span><span class="na">as_url</span><span class="w">                   </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding"</span>
-</span><span id="__span-46-9"><a id="__codelineno-46-9" name="__codelineno-46-9" href="#__codelineno-46-9"></a><span class="w">    </span><span class="na">base_url</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://tmcerp1.eimdemo.biz:8443"</span>
+</span><span id="__span-46-8"><a id="__codelineno-46-8" name="__codelineno-46-8" href="#__codelineno-46-8"></a><span class="w">    </span><span class="na">as_url</span><span class="w">                   </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://s4.example.com:44300/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding"</span>
+</span><span id="__span-46-9"><a id="__codelineno-46-9" name="__codelineno-46-9" href="#__codelineno-46-9"></a><span class="w">    </span><span class="na">base_url</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://s4.example.com:44300"</span>
 </span><span id="__span-46-10"><a id="__codelineno-46-10" name="__codelineno-46-10" href="#__codelineno-46-10"></a><span class="w">    </span><span class="na">client</span><span class="w">                   </span><span class="o">=</span><span class="w"> </span><span class="nv">var.sap_external_system_client</span>
 </span><span id="__span-46-11"><a id="__codelineno-46-11" name="__codelineno-46-11" href="#__codelineno-46-11"></a><span class="w">    </span><span class="na">username</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="s2">"demo"</span>
 </span><span id="__span-46-12"><a id="__codelineno-46-12" name="__codelineno-46-12" href="#__codelineno-46-12"></a><span class="w">    </span><span class="na">password</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="nv">local.password</span>
-</span><span id="__span-46-13"><a id="__codelineno-46-13" name="__codelineno-46-13" href="#__codelineno-46-13"></a><span class="w">    </span><span class="na">certificate_file</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="s2">"/certificates/TM6.pse"</span>
+</span><span id="__span-46-13"><a id="__codelineno-46-13" name="__codelineno-46-13" href="#__codelineno-46-13"></a><span class="w">    </span><span class="na">certificate_file</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="s2">"/certificates/S4H.pse"</span>
 </span><span id="__span-46-14"><a id="__codelineno-46-14" name="__codelineno-46-14" href="#__codelineno-46-14"></a><span class="w">    </span><span class="na">certificate_password</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"topsecret"</span>
 </span><span id="__span-46-15"><a id="__codelineno-46-15" name="__codelineno-46-15" href="#__codelineno-46-15"></a><span class="w">    </span><span class="na">destination</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="nv">var.sap_external_system_destination</span>
 </span><span id="__span-46-16"><a id="__codelineno-46-16" name="__codelineno-46-16" href="#__codelineno-46-16"></a><span class="w">    </span><span class="na">archive_logical_name</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="nv">var.sap_archive_logical_name</span>
 </span><span id="__span-46-17"><a id="__codelineno-46-17" name="__codelineno-46-17" href="#__codelineno-46-17"></a><span class="w">    </span><span class="na">archive_certificate_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/certificates/${var.sap_archive_certificate_file}"</span>
-</span><span id="__span-46-18"><a id="__codelineno-46-18" name="__codelineno-46-18" href="#__codelineno-46-18"></a><span class="w">  </span><span class="p">},</span>
-</span><span id="__span-46-19"><a id="__codelineno-46-19" name="__codelineno-46-19" href="#__codelineno-46-19"></a><span class="w">  </span><span class="p">{</span>
-</span><span id="__span-46-20"><a id="__codelineno-46-20" name="__codelineno-46-20" href="#__codelineno-46-20"></a><span class="w">    </span><span class="na">enabled</span><span class="w">                </span><span class="o">=</span><span class="w"> </span><span class="nv">var.enable_salesforce</span>
-</span><span id="__span-46-21"><a id="__codelineno-46-21" name="__codelineno-46-21" href="#__codelineno-46-21"></a><span class="w">    </span><span class="na">external_system_type</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="s2">"Salesforce"</span>
-</span><span id="__span-46-22"><a id="__codelineno-46-22" name="__codelineno-46-22" href="#__codelineno-46-22"></a><span class="w">    </span><span class="na">external_system_name</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="s2">"SFDC-HTTP"</span>
-</span><span id="__span-46-23"><a id="__codelineno-46-23" name="__codelineno-46-23" href="#__codelineno-46-23"></a><span class="w">    </span><span class="na">description</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="s2">"Salesforce"</span>
-</span><span id="__span-46-24"><a id="__codelineno-46-24" name="__codelineno-46-24" href="#__codelineno-46-24"></a><span class="w">    </span><span class="na">as_url</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://idea02dev-dev-ed.my.salesforce.com/services/Soap/c/48.0/"</span>
-</span><span id="__span-46-25"><a id="__codelineno-46-25" name="__codelineno-46-25" href="#__codelineno-46-25"></a><span class="w">    </span><span class="na">base_url</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://idea02dev-dev-ed.my.salesforce.com"</span>
-</span><span id="__span-46-26"><a id="__codelineno-46-26" name="__codelineno-46-26" href="#__codelineno-46-26"></a><span class="w">    </span><span class="na">username</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"idea02a2dev@opentext.com"</span>
-</span><span id="__span-46-27"><a id="__codelineno-46-27" name="__codelineno-46-27" href="#__codelineno-46-27"></a><span class="w">    </span><span class="na">password</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="nv">local.password</span>
-</span><span id="__span-46-28"><a id="__codelineno-46-28" name="__codelineno-46-28" href="#__codelineno-46-28"></a><span class="w">    </span><span class="na">oauth_client_id</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
-</span><span id="__span-46-29"><a id="__codelineno-46-29" name="__codelineno-46-29" href="#__codelineno-46-29"></a><span class="w">    </span><span class="na">oauth_client_secret</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
-</span><span id="__span-46-30"><a id="__codelineno-46-30" name="__codelineno-46-30" href="#__codelineno-46-30"></a><span class="w">    </span><span class="na">authorization_endpoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://salesforce.com/services/oauth2/authorize"</span>
-</span><span id="__span-46-31"><a id="__codelineno-46-31" name="__codelineno-46-31" href="#__codelineno-46-31"></a><span class="w">    </span><span class="na">token_endpoint</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://salesforce.com/services/oauth2/token"</span>
-</span><span id="__span-46-32"><a id="__codelineno-46-32" name="__codelineno-46-32" href="#__codelineno-46-32"></a><span class="w">  </span><span class="p">},</span>
-</span><span id="__span-46-33"><a id="__codelineno-46-33" name="__codelineno-46-33" href="#__codelineno-46-33"></a><span class="w">  </span><span class="p">{</span>
-</span><span id="__span-46-34"><a id="__codelineno-46-34" name="__codelineno-46-34" href="#__codelineno-46-34"></a><span class="w">    </span><span class="na">enabled</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="nv">var.enable_successfactors</span>
-</span><span id="__span-46-35"><a id="__codelineno-46-35" name="__codelineno-46-35" href="#__codelineno-46-35"></a><span class="w">    </span><span class="na">external_system_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"SuccessFactors"</span>
-</span><span id="__span-46-36"><a id="__codelineno-46-36" name="__codelineno-46-36" href="#__codelineno-46-36"></a><span class="w">    </span><span class="na">external_system_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"SuccessFactors"</span>
-</span><span id="__span-46-37"><a id="__codelineno-46-37" name="__codelineno-46-37" href="#__codelineno-46-37"></a><span class="w">    </span><span class="na">description</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="s2">"SAP SuccessFactors"</span>
-</span><span id="__span-46-38"><a id="__codelineno-46-38" name="__codelineno-46-38" href="#__codelineno-46-38"></a><span class="w">    </span><span class="na">as_url</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://apisalesdemo8.successfactors.com/odata/v2"</span>
-</span><span id="__span-46-39"><a id="__codelineno-46-39" name="__codelineno-46-39" href="#__codelineno-46-39"></a><span class="w">    </span><span class="na">base_url</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://pmsalesdemo8.successfactors.com"</span>
-</span><span id="__span-46-40"><a id="__codelineno-46-40" name="__codelineno-46-40" href="#__codelineno-46-40"></a><span class="w">    </span><span class="na">username</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"sfadmin@SFPART035780"</span>
-</span><span id="__span-46-41"><a id="__codelineno-46-41" name="__codelineno-46-41" href="#__codelineno-46-41"></a><span class="w">    </span><span class="na">password</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="nv">local.password</span>
-</span><span id="__span-46-42"><a id="__codelineno-46-42" name="__codelineno-46-42" href="#__codelineno-46-42"></a><span class="w">    </span><span class="na">saml_url</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://salesdemo.successfactors.eu/idp/samlmetadata?company=SFSALES004711"</span>
-</span><span id="__span-46-43"><a id="__codelineno-46-43" name="__codelineno-46-43" href="#__codelineno-46-43"></a><span class="w">    </span><span class="na">otds_sp_endpoint</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://otds.xecm-cloud.com/otdsws"</span>
-</span><span id="__span-46-44"><a id="__codelineno-46-44" name="__codelineno-46-44" href="#__codelineno-46-44"></a><span class="w">    </span><span class="na">oauth_client_id</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
-</span><span id="__span-46-45"><a id="__codelineno-46-45" name="__codelineno-46-45" href="#__codelineno-46-45"></a><span class="w">    </span><span class="na">oauth_client_secret</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
-</span><span id="__span-46-46"><a id="__codelineno-46-46" name="__codelineno-46-46" href="#__codelineno-46-46"></a><span class="w">  </span><span class="p">}</span>
-</span><span id="__span-46-47"><a id="__codelineno-46-47" name="__codelineno-46-47" href="#__codelineno-46-47"></a><span class="p">]</span>
+</span><span id="__span-46-18"><a id="__codelineno-46-18" name="__codelineno-46-18" href="#__codelineno-46-18"></a><span class="c1">    # Optional - principal propagation (pyxecm as SAML 2.0 identity provider):</span>
+</span><span id="__span-46-19"><a id="__codelineno-46-19" name="__codelineno-46-19" href="#__codelineno-46-19"></a><span class="w">    </span><span class="na">saml_idp_private_key_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/secrets/saml-idp.key"</span>
+</span><span id="__span-46-20"><a id="__codelineno-46-20" name="__codelineno-46-20" href="#__codelineno-46-20"></a><span class="w">    </span><span class="na">saml_idp_certificate_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/secrets/saml-idp.crt"</span>
+</span><span id="__span-46-21"><a id="__codelineno-46-21" name="__codelineno-46-21" href="#__codelineno-46-21"></a><span class="w">    </span><span class="na">saml_issuer</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"pyxecm-idp"</span>
+</span><span id="__span-46-22"><a id="__codelineno-46-22" name="__codelineno-46-22" href="#__codelineno-46-22"></a><span class="w">    </span><span class="na">saml_audience</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"S4HCLNT100"</span>
+</span><span id="__span-46-23"><a id="__codelineno-46-23" name="__codelineno-46-23" href="#__codelineno-46-23"></a><span class="w">  </span><span class="p">},</span>
+</span><span id="__span-46-24"><a id="__codelineno-46-24" name="__codelineno-46-24" href="#__codelineno-46-24"></a><span class="w">  </span><span class="p">{</span>
+</span><span id="__span-46-25"><a id="__codelineno-46-25" name="__codelineno-46-25" href="#__codelineno-46-25"></a><span class="w">    </span><span class="na">enabled</span><span class="w">                </span><span class="o">=</span><span class="w"> </span><span class="nv">var.enable_salesforce</span>
+</span><span id="__span-46-26"><a id="__codelineno-46-26" name="__codelineno-46-26" href="#__codelineno-46-26"></a><span class="w">    </span><span class="na">external_system_type</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="s2">"Salesforce"</span>
+</span><span id="__span-46-27"><a id="__codelineno-46-27" name="__codelineno-46-27" href="#__codelineno-46-27"></a><span class="w">    </span><span class="na">external_system_name</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="s2">"SFDC-HTTP"</span>
+</span><span id="__span-46-28"><a id="__codelineno-46-28" name="__codelineno-46-28" href="#__codelineno-46-28"></a><span class="w">    </span><span class="na">description</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="s2">"Salesforce"</span>
+</span><span id="__span-46-29"><a id="__codelineno-46-29" name="__codelineno-46-29" href="#__codelineno-46-29"></a><span class="w">    </span><span class="na">as_url</span><span class="w">                 </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://idea02dev-dev-ed.my.salesforce.com/services/Soap/c/48.0/"</span>
+</span><span id="__span-46-30"><a id="__codelineno-46-30" name="__codelineno-46-30" href="#__codelineno-46-30"></a><span class="w">    </span><span class="na">base_url</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://idea02dev-dev-ed.my.salesforce.com"</span>
+</span><span id="__span-46-31"><a id="__codelineno-46-31" name="__codelineno-46-31" href="#__codelineno-46-31"></a><span class="w">    </span><span class="na">username</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"idea02a2dev@opentext.com"</span>
+</span><span id="__span-46-32"><a id="__codelineno-46-32" name="__codelineno-46-32" href="#__codelineno-46-32"></a><span class="w">    </span><span class="na">password</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="nv">local.password</span>
+</span><span id="__span-46-33"><a id="__codelineno-46-33" name="__codelineno-46-33" href="#__codelineno-46-33"></a><span class="w">    </span><span class="na">oauth_client_id</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
+</span><span id="__span-46-34"><a id="__codelineno-46-34" name="__codelineno-46-34" href="#__codelineno-46-34"></a><span class="w">    </span><span class="na">oauth_client_secret</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
+</span><span id="__span-46-35"><a id="__codelineno-46-35" name="__codelineno-46-35" href="#__codelineno-46-35"></a><span class="w">    </span><span class="na">authorization_endpoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://salesforce.com/services/oauth2/authorize"</span>
+</span><span id="__span-46-36"><a id="__codelineno-46-36" name="__codelineno-46-36" href="#__codelineno-46-36"></a><span class="w">    </span><span class="na">token_endpoint</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://salesforce.com/services/oauth2/token"</span>
+</span><span id="__span-46-37"><a id="__codelineno-46-37" name="__codelineno-46-37" href="#__codelineno-46-37"></a><span class="w">  </span><span class="p">},</span>
+</span><span id="__span-46-38"><a id="__codelineno-46-38" name="__codelineno-46-38" href="#__codelineno-46-38"></a><span class="w">  </span><span class="p">{</span>
+</span><span id="__span-46-39"><a id="__codelineno-46-39" name="__codelineno-46-39" href="#__codelineno-46-39"></a><span class="w">    </span><span class="na">enabled</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="nv">var.enable_successfactors</span>
+</span><span id="__span-46-40"><a id="__codelineno-46-40" name="__codelineno-46-40" href="#__codelineno-46-40"></a><span class="w">    </span><span class="na">external_system_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"SuccessFactors"</span>
+</span><span id="__span-46-41"><a id="__codelineno-46-41" name="__codelineno-46-41" href="#__codelineno-46-41"></a><span class="w">    </span><span class="na">external_system_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"SuccessFactors"</span>
+</span><span id="__span-46-42"><a id="__codelineno-46-42" name="__codelineno-46-42" href="#__codelineno-46-42"></a><span class="w">    </span><span class="na">description</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="s2">"SAP SuccessFactors"</span>
+</span><span id="__span-46-43"><a id="__codelineno-46-43" name="__codelineno-46-43" href="#__codelineno-46-43"></a><span class="w">    </span><span class="na">as_url</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://apisalesdemo8.successfactors.com/odata/v2"</span>
+</span><span id="__span-46-44"><a id="__codelineno-46-44" name="__codelineno-46-44" href="#__codelineno-46-44"></a><span class="w">    </span><span class="na">base_url</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://pmsalesdemo8.successfactors.com"</span>
+</span><span id="__span-46-45"><a id="__codelineno-46-45" name="__codelineno-46-45" href="#__codelineno-46-45"></a><span class="w">    </span><span class="na">username</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"sfadmin@SFPART035780"</span>
+</span><span id="__span-46-46"><a id="__codelineno-46-46" name="__codelineno-46-46" href="#__codelineno-46-46"></a><span class="w">    </span><span class="na">password</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="nv">local.password</span>
+</span><span id="__span-46-47"><a id="__codelineno-46-47" name="__codelineno-46-47" href="#__codelineno-46-47"></a><span class="w">    </span><span class="na">saml_url</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://salesdemo.successfactors.eu/idp/samlmetadata?company=SFSALES004711"</span>
+</span><span id="__span-46-48"><a id="__codelineno-46-48" name="__codelineno-46-48" href="#__codelineno-46-48"></a><span class="w">    </span><span class="na">otds_sp_endpoint</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://otds.xecm-cloud.com/otdsws"</span>
+</span><span id="__span-46-49"><a id="__codelineno-46-49" name="__codelineno-46-49" href="#__codelineno-46-49"></a><span class="w">    </span><span class="na">oauth_client_id</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
+</span><span id="__span-46-50"><a id="__codelineno-46-50" name="__codelineno-46-50" href="#__codelineno-46-50"></a><span class="w">    </span><span class="na">oauth_client_secret</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">"..."</span>
+</span><span id="__span-46-51"><a id="__codelineno-46-51" name="__codelineno-46-51" href="#__codelineno-46-51"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-46-52"><a id="__codelineno-46-52" name="__codelineno-46-52" href="#__codelineno-46-52"></a><span class="p">]</span>
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-47-1"><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">externalSystems</span><span class="p">:</span>
 </span><span id="__span-47-2"><a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">archive_logical_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.sap_archive_logical_name}</span>
 </span><span id="__span-47-3"><a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a><span class="w">  </span><span class="nt">archive_certificate_file</span><span class="p">:</span><span class="w"> </span><span class="s">"/certificates/${var.sap_archive_certificate_file}"</span>
-</span><span id="__span-47-4"><a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">  </span><span class="nt">as_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://tmcerp1.eimdemo.biz:8443/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding</span>
-</span><span id="__span-47-5"><a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://tmcerp1.eimdemo.biz:8443</span>
-</span><span id="__span-47-6"><a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a><span class="w">  </span><span class="nt">certificate_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/certificates/TM6.pse</span>
+</span><span id="__span-47-4"><a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">  </span><span class="nt">as_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://s4.example.com:44300/sap/bc/srt/xip/otx/ecmlinkservice/100/ecmlinkspiservice/basicauthbinding</span>
+</span><span id="__span-47-5"><a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://s4.example.com:44300</span>
+</span><span id="__span-47-6"><a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a><span class="w">  </span><span class="nt">certificate_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/certificates/S4H.pse</span>
 </span><span id="__span-47-7"><a id="__codelineno-47-7" name="__codelineno-47-7" href="#__codelineno-47-7"></a><span class="w">  </span><span class="nt">certificate_password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">topsecret</span>
 </span><span id="__span-47-8"><a id="__codelineno-47-8" name="__codelineno-47-8" href="#__codelineno-47-8"></a><span class="w">  </span><span class="nt">client</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.sap_external_system_client}</span>
 </span><span id="__span-47-9"><a id="__codelineno-47-9" name="__codelineno-47-9" href="#__codelineno-47-9"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SAP S/4HANA on-premise</span>
 </span><span id="__span-47-10"><a id="__codelineno-47-10" name="__codelineno-47-10" href="#__codelineno-47-10"></a><span class="w">  </span><span class="nt">destination</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.sap_external_system_destination}</span>
 </span><span id="__span-47-11"><a id="__codelineno-47-11" name="__codelineno-47-11" href="#__codelineno-47-11"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.enable_sap}</span>
-</span><span id="__span-47-12"><a id="__codelineno-47-12" name="__codelineno-47-12" href="#__codelineno-47-12"></a><span class="w">  </span><span class="nt">external_system_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TM6</span>
+</span><span id="__span-47-12"><a id="__codelineno-47-12" name="__codelineno-47-12" href="#__codelineno-47-12"></a><span class="w">  </span><span class="nt">external_system_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">S4H</span>
 </span><span id="__span-47-13"><a id="__codelineno-47-13" name="__codelineno-47-13" href="#__codelineno-47-13"></a><span class="w">  </span><span class="nt">external_system_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SAP</span>
 </span><span id="__span-47-14"><a id="__codelineno-47-14" name="__codelineno-47-14" href="#__codelineno-47-14"></a><span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${local.password}</span>
-</span><span id="__span-47-15"><a id="__codelineno-47-15" name="__codelineno-47-15" href="#__codelineno-47-15"></a><span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">demo</span>
-</span><span id="__span-47-16"><a id="__codelineno-47-16" name="__codelineno-47-16" href="#__codelineno-47-16"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">as_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://idea02dev-dev-ed.my.salesforce.com/services/Soap/c/48.0/</span>
-</span><span id="__span-47-17"><a id="__codelineno-47-17" name="__codelineno-47-17" href="#__codelineno-47-17"></a><span class="w">  </span><span class="nt">authorization_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://salesforce.com/services/oauth2/authorize</span>
-</span><span id="__span-47-18"><a id="__codelineno-47-18" name="__codelineno-47-18" href="#__codelineno-47-18"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://idea02dev-dev-ed.my.salesforce.com</span>
-</span><span id="__span-47-19"><a id="__codelineno-47-19" name="__codelineno-47-19" href="#__codelineno-47-19"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Salesforce</span>
-</span><span id="__span-47-20"><a id="__codelineno-47-20" name="__codelineno-47-20" href="#__codelineno-47-20"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.enable_salesforce}</span>
-</span><span id="__span-47-21"><a id="__codelineno-47-21" name="__codelineno-47-21" href="#__codelineno-47-21"></a><span class="w">  </span><span class="nt">external_system_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SFDC-HTTP</span>
-</span><span id="__span-47-22"><a id="__codelineno-47-22" name="__codelineno-47-22" href="#__codelineno-47-22"></a><span class="w">  </span><span class="nt">external_system_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Salesforce</span>
-</span><span id="__span-47-23"><a id="__codelineno-47-23" name="__codelineno-47-23" href="#__codelineno-47-23"></a><span class="w">  </span><span class="nt">oauth_client_id</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
-</span><span id="__span-47-24"><a id="__codelineno-47-24" name="__codelineno-47-24" href="#__codelineno-47-24"></a><span class="w">  </span><span class="nt">oauth_client_secret</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
-</span><span id="__span-47-25"><a id="__codelineno-47-25" name="__codelineno-47-25" href="#__codelineno-47-25"></a><span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${local.password}</span>
-</span><span id="__span-47-26"><a id="__codelineno-47-26" name="__codelineno-47-26" href="#__codelineno-47-26"></a><span class="w">  </span><span class="nt">token_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://salesforce.com/services/oauth2/token</span>
-</span><span id="__span-47-27"><a id="__codelineno-47-27" name="__codelineno-47-27" href="#__codelineno-47-27"></a><span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">idea02a2dev@opentext.com</span>
-</span><span id="__span-47-28"><a id="__codelineno-47-28" name="__codelineno-47-28" href="#__codelineno-47-28"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">as_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://apisalesdemo8.successfactors.com/odata/v2</span>
-</span><span id="__span-47-29"><a id="__codelineno-47-29" name="__codelineno-47-29" href="#__codelineno-47-29"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://pmsalesdemo8.successfactors.com</span>
-</span><span id="__span-47-30"><a id="__codelineno-47-30" name="__codelineno-47-30" href="#__codelineno-47-30"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SAP SuccessFactors</span>
-</span><span id="__span-47-31"><a id="__codelineno-47-31" name="__codelineno-47-31" href="#__codelineno-47-31"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.enable_successfactors}</span>
-</span><span id="__span-47-32"><a id="__codelineno-47-32" name="__codelineno-47-32" href="#__codelineno-47-32"></a><span class="w">  </span><span class="nt">external_system_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SuccessFactors</span>
-</span><span id="__span-47-33"><a id="__codelineno-47-33" name="__codelineno-47-33" href="#__codelineno-47-33"></a><span class="w">  </span><span class="nt">external_system_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SuccessFactors</span>
-</span><span id="__span-47-34"><a id="__codelineno-47-34" name="__codelineno-47-34" href="#__codelineno-47-34"></a><span class="w">  </span><span class="nt">oauth_client_id</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
-</span><span id="__span-47-35"><a id="__codelineno-47-35" name="__codelineno-47-35" href="#__codelineno-47-35"></a><span class="w">  </span><span class="nt">oauth_client_secret</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
-</span><span id="__span-47-36"><a id="__codelineno-47-36" name="__codelineno-47-36" href="#__codelineno-47-36"></a><span class="w">  </span><span class="nt">otds_sp_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://otds.xecm-cloud.com/otdsws</span>
-</span><span id="__span-47-37"><a id="__codelineno-47-37" name="__codelineno-47-37" href="#__codelineno-47-37"></a><span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${local.password}</span>
-</span><span id="__span-47-38"><a id="__codelineno-47-38" name="__codelineno-47-38" href="#__codelineno-47-38"></a><span class="w">  </span><span class="nt">saml_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://salesdemo.successfactors.eu/idp/samlmetadata?company=SFSALES004711</span>
-</span><span id="__span-47-39"><a id="__codelineno-47-39" name="__codelineno-47-39" href="#__codelineno-47-39"></a><span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sfadmin@SFPART035780</span>
+</span><span id="__span-47-15"><a id="__codelineno-47-15" name="__codelineno-47-15" href="#__codelineno-47-15"></a><span class="w">  </span><span class="nt">saml_audience</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">S4HCLNT100</span>
+</span><span id="__span-47-16"><a id="__codelineno-47-16" name="__codelineno-47-16" href="#__codelineno-47-16"></a><span class="w">  </span><span class="nt">saml_idp_certificate_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/secrets/saml-idp.crt</span>
+</span><span id="__span-47-17"><a id="__codelineno-47-17" name="__codelineno-47-17" href="#__codelineno-47-17"></a><span class="w">  </span><span class="nt">saml_idp_private_key_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/secrets/saml-idp.key</span>
+</span><span id="__span-47-18"><a id="__codelineno-47-18" name="__codelineno-47-18" href="#__codelineno-47-18"></a><span class="w">  </span><span class="nt">saml_issuer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pyxecm-idp</span>
+</span><span id="__span-47-19"><a id="__codelineno-47-19" name="__codelineno-47-19" href="#__codelineno-47-19"></a><span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">demo</span>
+</span><span id="__span-47-20"><a id="__codelineno-47-20" name="__codelineno-47-20" href="#__codelineno-47-20"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">as_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://idea02dev-dev-ed.my.salesforce.com/services/Soap/c/48.0/</span>
+</span><span id="__span-47-21"><a id="__codelineno-47-21" name="__codelineno-47-21" href="#__codelineno-47-21"></a><span class="w">  </span><span class="nt">authorization_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://salesforce.com/services/oauth2/authorize</span>
+</span><span id="__span-47-22"><a id="__codelineno-47-22" name="__codelineno-47-22" href="#__codelineno-47-22"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://idea02dev-dev-ed.my.salesforce.com</span>
+</span><span id="__span-47-23"><a id="__codelineno-47-23" name="__codelineno-47-23" href="#__codelineno-47-23"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Salesforce</span>
+</span><span id="__span-47-24"><a id="__codelineno-47-24" name="__codelineno-47-24" href="#__codelineno-47-24"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.enable_salesforce}</span>
+</span><span id="__span-47-25"><a id="__codelineno-47-25" name="__codelineno-47-25" href="#__codelineno-47-25"></a><span class="w">  </span><span class="nt">external_system_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SFDC-HTTP</span>
+</span><span id="__span-47-26"><a id="__codelineno-47-26" name="__codelineno-47-26" href="#__codelineno-47-26"></a><span class="w">  </span><span class="nt">external_system_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Salesforce</span>
+</span><span id="__span-47-27"><a id="__codelineno-47-27" name="__codelineno-47-27" href="#__codelineno-47-27"></a><span class="w">  </span><span class="nt">oauth_client_id</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
+</span><span id="__span-47-28"><a id="__codelineno-47-28" name="__codelineno-47-28" href="#__codelineno-47-28"></a><span class="w">  </span><span class="nt">oauth_client_secret</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
+</span><span id="__span-47-29"><a id="__codelineno-47-29" name="__codelineno-47-29" href="#__codelineno-47-29"></a><span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${local.password}</span>
+</span><span id="__span-47-30"><a id="__codelineno-47-30" name="__codelineno-47-30" href="#__codelineno-47-30"></a><span class="w">  </span><span class="nt">token_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://salesforce.com/services/oauth2/token</span>
+</span><span id="__span-47-31"><a id="__codelineno-47-31" name="__codelineno-47-31" href="#__codelineno-47-31"></a><span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">idea02a2dev@opentext.com</span>
+</span><span id="__span-47-32"><a id="__codelineno-47-32" name="__codelineno-47-32" href="#__codelineno-47-32"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">as_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://apisalesdemo8.successfactors.com/odata/v2</span>
+</span><span id="__span-47-33"><a id="__codelineno-47-33" name="__codelineno-47-33" href="#__codelineno-47-33"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://pmsalesdemo8.successfactors.com</span>
+</span><span id="__span-47-34"><a id="__codelineno-47-34" name="__codelineno-47-34" href="#__codelineno-47-34"></a><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SAP SuccessFactors</span>
+</span><span id="__span-47-35"><a id="__codelineno-47-35" name="__codelineno-47-35" href="#__codelineno-47-35"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${var.enable_successfactors}</span>
+</span><span id="__span-47-36"><a id="__codelineno-47-36" name="__codelineno-47-36" href="#__codelineno-47-36"></a><span class="w">  </span><span class="nt">external_system_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SuccessFactors</span>
+</span><span id="__span-47-37"><a id="__codelineno-47-37" name="__codelineno-47-37" href="#__codelineno-47-37"></a><span class="w">  </span><span class="nt">external_system_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SuccessFactors</span>
+</span><span id="__span-47-38"><a id="__codelineno-47-38" name="__codelineno-47-38" href="#__codelineno-47-38"></a><span class="w">  </span><span class="nt">oauth_client_id</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
+</span><span id="__span-47-39"><a id="__codelineno-47-39" name="__codelineno-47-39" href="#__codelineno-47-39"></a><span class="w">  </span><span class="nt">oauth_client_secret</span><span class="p">:</span><span class="w"> </span><span class="s">'...'</span>
+</span><span id="__span-47-40"><a id="__codelineno-47-40" name="__codelineno-47-40" href="#__codelineno-47-40"></a><span class="w">  </span><span class="nt">otds_sp_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://otds.xecm-cloud.com/otdsws</span>
+</span><span id="__span-47-41"><a id="__codelineno-47-41" name="__codelineno-47-41" href="#__codelineno-47-41"></a><span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${local.password}</span>
+</span><span id="__span-47-42"><a id="__codelineno-47-42" name="__codelineno-47-42" href="#__codelineno-47-42"></a><span class="w">  </span><span class="nt">saml_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://salesdemo.successfactors.eu/idp/samlmetadata?company=SFSALES004711</span>
+</span><span id="__span-47-43"><a id="__codelineno-47-43" name="__codelineno-47-43" href="#__codelineno-47-43"></a><span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sfadmin@SFPART035780</span>
 </span></code></pre></div>
 </div>
 </div>

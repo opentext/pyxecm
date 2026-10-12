@@ -1305,6 +1305,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../sap-apis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Required APIs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sap-authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Authentication / SSO
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../successfactors/" class="md-nav__link">
         
   
@@ -2897,7 +2953,7 @@ Defaults to None, which uses the default strategy "networkidle".</p>
 </span><span id="__span-0-354"><a id="__codelineno-0-354" name="__codelineno-0-354"></a>    <span class="p">)</span>
 </span><span id="__span-0-355"><a id="__codelineno-0-355" name="__codelineno-0-355"></a>    <span class="n">output</span><span class="p">,</span> <span class="n">error</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
 </span><span id="__span-0-356"><a id="__codelineno-0-356" name="__codelineno-0-356"></a>    <span class="k">if</span> <span class="n">process</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># 0 = success</span>
-</span><span id="__span-0-357"><a id="__codelineno-0-357" name="__codelineno-0-357"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Successfuly completed installation of browser -&gt; '</span><span class="si">%s</span><span class="s2">'."</span><span class="p">,</span> <span class="n">browser</span><span class="p">)</span>
+</span><span id="__span-0-357"><a id="__codelineno-0-357" name="__codelineno-0-357"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Successfully completed installation of browser -&gt; '</span><span class="si">%s</span><span class="s2">'."</span><span class="p">,</span> <span class="n">browser</span><span class="p">)</span>
 </span><span id="__span-0-358"><a id="__codelineno-0-358" name="__codelineno-0-358"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">output</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
 </span><span id="__span-0-359"><a id="__codelineno-0-359" name="__codelineno-0-359"></a>    <span class="k">else</span><span class="p">:</span>
 </span><span id="__span-0-360"><a id="__codelineno-0-360" name="__codelineno-0-360"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"Installation of browser -&gt; '</span><span class="si">%s</span><span class="s2">' failed! Error -&gt; </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">browser</span><span class="p">,</span> <span class="n">error</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
@@ -4627,7 +4683,7 @@ The web element or None in case an error occurred.</p>
 </span><span id="__span-0-733"><a id="__codelineno-0-733" name="__codelineno-0-733"></a><span class="sd">    """</span>
 </span><span id="__span-0-734"><a id="__codelineno-0-734" name="__codelineno-0-734"></a>
 </span><span id="__span-0-735"><a id="__codelineno-0-735" name="__codelineno-0-735"></a>    <span class="n">failure_message</span> <span class="o">=</span> <span class="s2">"Cannot find </span><span class="si">{}</span><span class="s2"> page element with selector -&gt; '</span><span class="si">{}</span><span class="s2">' (</span><span class="si">{}</span><span class="s2">)</span><span class="si">{}{}{}{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
-</span><span id="__span-0-736"><a id="__codelineno-0-736" name="__codelineno-0-736"></a>        <span class="s2">"occurence #</span><span class="si">{}</span><span class="s2"> of"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">occurrence</span><span class="p">)</span> <span class="k">if</span> <span class="n">occurrence</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">"any"</span><span class="p">,</span>
+</span><span id="__span-0-736"><a id="__codelineno-0-736" name="__codelineno-0-736"></a>        <span class="s2">"occurrence #</span><span class="si">{}</span><span class="s2"> of"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">occurrence</span><span class="p">)</span> <span class="k">if</span> <span class="n">occurrence</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">"any"</span><span class="p">,</span>
 </span><span id="__span-0-737"><a id="__codelineno-0-737" name="__codelineno-0-737"></a>        <span class="n">selector</span><span class="p">,</span>
 </span><span id="__span-0-738"><a id="__codelineno-0-738" name="__codelineno-0-738"></a>        <span class="n">selector_type</span><span class="p">,</span>
 </span><span id="__span-0-739"><a id="__codelineno-0-739" name="__codelineno-0-739"></a>        <span class="s2">" and role type -&gt; '</span><span class="si">{}</span><span class="s2">'"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">role_type</span><span class="p">)</span> <span class="k">if</span> <span class="n">role_type</span> <span class="k">else</span> <span class="s2">""</span><span class="p">,</span>
@@ -4636,7 +4692,7 @@ The web element or None in case an error occurred.</p>
 </span><span id="__span-0-742"><a id="__codelineno-0-742" name="__codelineno-0-742"></a>        <span class="s2">", waiting for state -&gt; '</span><span class="si">{}</span><span class="s2">'"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">wait_state</span><span class="p">),</span>
 </span><span id="__span-0-743"><a id="__codelineno-0-743" name="__codelineno-0-743"></a>    <span class="p">)</span>
 </span><span id="__span-0-744"><a id="__codelineno-0-744" name="__codelineno-0-744"></a>    <span class="n">success_message</span> <span class="o">=</span> <span class="s2">"Found </span><span class="si">{}</span><span class="s2"> page element with selector -&gt; '</span><span class="si">{}</span><span class="s2">' ('</span><span class="si">{}</span><span class="s2">')</span><span class="si">{}{}{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
-</span><span id="__span-0-745"><a id="__codelineno-0-745" name="__codelineno-0-745"></a>        <span class="s2">"occurence #</span><span class="si">{}</span><span class="s2"> of"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">occurrence</span><span class="p">)</span> <span class="k">if</span> <span class="n">occurrence</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">"a"</span><span class="p">,</span>
+</span><span id="__span-0-745"><a id="__codelineno-0-745" name="__codelineno-0-745"></a>        <span class="s2">"occurrence #</span><span class="si">{}</span><span class="s2"> of"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">occurrence</span><span class="p">)</span> <span class="k">if</span> <span class="n">occurrence</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">"a"</span><span class="p">,</span>
 </span><span id="__span-0-746"><a id="__codelineno-0-746" name="__codelineno-0-746"></a>        <span class="n">selector</span><span class="p">,</span>
 </span><span id="__span-0-747"><a id="__codelineno-0-747" name="__codelineno-0-747"></a>        <span class="n">selector_type</span><span class="p">,</span>
 </span><span id="__span-0-748"><a id="__codelineno-0-748" name="__codelineno-0-748"></a>        <span class="s2">" and role type -&gt; '</span><span class="si">{}</span><span class="s2">'"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">role_type</span><span class="p">)</span> <span class="k">if</span> <span class="n">role_type</span> <span class="k">else</span> <span class="s2">""</span><span class="p">,</span>

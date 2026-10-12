@@ -1624,6 +1624,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../pyxecm-customizer/sap-apis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Required APIs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../pyxecm-customizer/sap-authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAP Authentication / SSO
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../pyxecm-customizer/successfactors/" class="md-nav__link">
         
   
@@ -12775,7 +12831,7 @@ Response of the REST call or None in case of an error.</p>
 </span><span id="__span-0-2632"><a id="__codelineno-0-2632" name="__codelineno-0-2632"></a>        <span class="p">)</span>
 </span><span id="__span-0-2633"><a id="__codelineno-0-2633" name="__codelineno-0-2633"></a>        <span class="k">return</span> <span class="kc">True</span>
 </span><span id="__span-0-2634"><a id="__codelineno-0-2634" name="__codelineno-0-2634"></a>
-</span><span id="__span-0-2635"><a id="__codelineno-0-2635" name="__codelineno-0-2635"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Inpersonate as user -&gt; </span><span class="si">%s</span><span class="s2"> to cleanup files..."</span><span class="p">,</span> <span class="n">user_login</span><span class="p">)</span>
+</span><span id="__span-0-2635"><a id="__codelineno-0-2635" name="__codelineno-0-2635"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Impersonate as user -&gt; </span><span class="si">%s</span><span class="s2"> to cleanup files..."</span><span class="p">,</span> <span class="n">user_login</span><span class="p">)</span>
 </span><span id="__span-0-2636"><a id="__codelineno-0-2636" name="__codelineno-0-2636"></a>
 </span><span id="__span-0-2637"><a id="__codelineno-0-2637" name="__codelineno-0-2637"></a>    <span class="c1"># Save admin credentials the class has been initialized with:</span>
 </span><span id="__span-0-2638"><a id="__codelineno-0-2638" name="__codelineno-0-2638"></a>    <span class="n">admin_credentials</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">credentials</span><span class="p">()</span>
@@ -12854,7 +12910,7 @@ Response of the REST call or None in case of an error.</p>
 </span><span id="__span-0-2711"><a id="__codelineno-0-2711" name="__codelineno-0-2711"></a>                    <span class="n">response</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">delete_document</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="s2">"id"</span><span class="p">])</span>
 </span><span id="__span-0-2712"><a id="__codelineno-0-2712" name="__codelineno-0-2712"></a>                <span class="k">else</span><span class="p">:</span>
 </span><span id="__span-0-2713"><a id="__codelineno-0-2713" name="__codelineno-0-2713"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
-</span><span id="__span-0-2714"><a id="__codelineno-0-2714" name="__codelineno-0-2714"></a>                        <span class="s2">"Unsupport resource type -&gt; '</span><span class="si">%s</span><span class="s2">'! Cannot remove this item from Core Share."</span><span class="p">,</span>
+</span><span id="__span-0-2714"><a id="__codelineno-0-2714" name="__codelineno-0-2714"></a>                        <span class="s2">"Unsupported resource type -&gt; '</span><span class="si">%s</span><span class="s2">'! Cannot remove this item from Core Share."</span><span class="p">,</span>
 </span><span id="__span-0-2715"><a id="__codelineno-0-2715" name="__codelineno-0-2715"></a>                        <span class="n">item</span><span class="p">[</span><span class="s2">"resourceType"</span><span class="p">],</span>
 </span><span id="__span-0-2716"><a id="__codelineno-0-2716" name="__codelineno-0-2716"></a>                    <span class="p">)</span>
 </span><span id="__span-0-2717"><a id="__codelineno-0-2717" name="__codelineno-0-2717"></a>                    <span class="n">response</span> <span class="o">=</span> <span class="kc">None</span>

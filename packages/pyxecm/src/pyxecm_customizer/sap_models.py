@@ -1255,7 +1255,7 @@ class SAPMaintenanceOrderModel(SAPODataCreateModel):
     basic_start_datetime: ODataV2DateTime = Field(
         default=None,
         alias="MaintOrdBasicStartDateTime",
-        description="Basic start date and time of the order, ISO 8601, e.g. '2026-11-01T08:00:00Z'; without timezone treated as UTC.",
+        description="Basic start date and time of the order, ISO 8601, e.g. '2026-11-01T08:00:00Z'; without timezone treated as UTC. Defaults to now if neither start nor end is given.",
     )
     basic_end_datetime: ODataV2DateTime = Field(
         default=None,
@@ -1271,7 +1271,13 @@ class SAPMaintenanceOrderModel(SAPODataCreateModel):
 
     @model_validator(mode="after")
     def check_dates(self) -> Self:
-        """Validate that the basic end date is not before the basic start date."""
+        """Default the basic start date and validate that the basic end date is not before it."""
+
+        # The API does not default the basic dates - without them SAP rejects the order with
+        # IW/426 "Forward scheduling: Please enter start date". An end date alone is left
+        # as is (backward scheduling):
+        if self.basic_start_datetime is None and self.basic_end_datetime is None:
+            self.basic_start_datetime = datetime.now(tz=UTC).replace(microsecond=0)
 
         # Compare as UTC timestamps (naive datetimes are treated as UTC, see serialize_odata_datetime()):
         start, end = (

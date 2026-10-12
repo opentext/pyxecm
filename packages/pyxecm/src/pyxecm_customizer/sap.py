@@ -976,6 +976,24 @@ class SAP:
 
     # end method definition
 
+    def oauth_token_url(self) -> str:
+        """Return the URL of SAP's OAuth 2.0 token endpoint, including the SAP client.
+
+        SAP checks that the Recipient of a SAML bearer assertion is exactly the URL the
+        token request is sent to - including the sap-client query parameter. Both
+        get_saml_assertion() and get_oauth_access_token() therefore use this URL.
+
+        Returns:
+            str:
+                The token endpoint URL, e.g.
+                "https://s4.example.com:44300/sap/bc/sec/oauth2/token?sap-client=100".
+
+        """
+
+        return "{}{}?{}".format(self._base_url, OAUTH_TOKEN_PATH, urllib.parse.urlencode({"sap-client": self._client}))
+
+    # end method definition
+
     def get_saml_assertion(
         self,
         user_id: str,
@@ -1023,8 +1041,9 @@ class SAP:
                 Defaults to "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified".
             recipient (str | None, optional):
                 The token endpoint URL the assertion is posted to (SubjectConfirmationData
-                Recipient). Defaults to None = "<base_url>/sap/bc/sec/oauth2/token". Only
-                needed if SAP is reached via a different URL (e.g. a reverse proxy).
+                Recipient). Defaults to None = oauth_token_url(), i.e.
+                "<base_url>/sap/bc/sec/oauth2/token?sap-client=<client>". Only needed if SAP
+                sees the token request under a different URL (e.g. behind a reverse proxy).
             audience (str | None, optional):
                 The AudienceRestriction. Defaults to None = saml_audience of the constructor.
             validity_seconds (int, optional):
@@ -1073,7 +1092,7 @@ class SAP:
             )
             return None
 
-        recipient = recipient or (self._base_url + OAUTH_TOKEN_PATH)
+        recipient = recipient or self.oauth_token_url()
         audience = audience or self._saml_audience
 
         now = datetime.now(tz=UTC)
@@ -1167,7 +1186,7 @@ class SAP:
         ("Authorization: Bearer <access_token>", see the 'auth' parameter of the SAP class)
         run with the SAP user's own authorizations - no SAP password of the user is needed.
 
-        The request is sent as form data to <base_url>/sap/bc/sec/oauth2/token. It does
+        The request is sent as form data to oauth_token_url(). It does
         not use the session of this object (the token endpoint authenticates the OAuth
         client, not the technical user).
 
@@ -1219,7 +1238,8 @@ class SAP:
         if assertion.lstrip().startswith("<"):
             assertion = base64.urlsafe_b64encode(assertion.strip().encode("utf-8")).decode("ascii").rstrip("=")
 
-        token_url = self._base_url + OAUTH_TOKEN_PATH
+        # Same URL (incl. sap-client) as the default Recipient of the assertion - SAP compares both:
+        token_url = self.oauth_token_url()
         data = {"grant_type": OAUTH_SAML2_BEARER_GRANT_TYPE, "assertion": assertion, "client_id": client_id}
         if scope:
             data["scope"] = scope
@@ -1229,7 +1249,6 @@ class SAP:
         try:
             response = requests.post(
                 url=token_url,
-                params={"sap-client": self._client},
                 data=data,
                 auth=(client_id, client_secret),
                 headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -1278,6 +1297,7 @@ class SAP:
         client_secret: str,
         scope: str | None = None,
         nameid_format: str = SAML_NAMEID_FORMAT_UNSPECIFIED,
+        recipient: str | None = None,
     ) -> dict | None:
         """Get an SAP OAuth 2.0 access token for a user via principal propagation, in one call.
 
@@ -1302,6 +1322,9 @@ class SAP:
             nameid_format (str, optional):
                 The NameID format - must match transaction SAML2 (see get_saml_assertion()).
                 Defaults to "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified".
+            recipient (str | None, optional):
+                The Recipient of the assertion - only needed behind a reverse proxy (see
+                get_saml_assertion()). Defaults to None = oauth_token_url().
 
         Returns:
             dict | None:
@@ -1310,7 +1333,7 @@ class SAP:
 
         """
 
-        assertion = self.get_saml_assertion(user_id=user_id, nameid_format=nameid_format)
+        assertion = self.get_saml_assertion(user_id=user_id, nameid_format=nameid_format, recipient=recipient)
         if not assertion:
             return None
 

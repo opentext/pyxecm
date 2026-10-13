@@ -906,6 +906,10 @@ class SAPODataServiceModel(BaseModel):
             e.g. "/sap/opu/odata/sap/API_MAINTENANCEORDER".
         odata_version (int):
             OData protocol version of the service (2 or 4).
+        oauth_scope (str):
+            OAuth 2.0 scope ID of the service, e.g. "ZAPI_MAINTENANCEORDER_0002". SAP generates
+            it when OAuth is enabled for the service - it can differ between SAP systems.
+            Empty if the service has no scope.
         entity_sets (list[str]):
             Entity sets that must be exposed by the service. Used by check_odata_apis()
             to detect services that are active but do not expose what we need
@@ -918,6 +922,7 @@ class SAPODataServiceModel(BaseModel):
     name: str
     path: str
     odata_version: int = Field(default=2, ge=2, le=4)
+    oauth_scope: str = ""
     entity_sets: list[str] = Field(default_factory=list)
     description: str = ""
 
@@ -976,6 +981,57 @@ class SAPODataServiceStatusModel(BaseModel):
         """Return True if the service is active and exposes all expected entity sets."""
 
         return self.state == SAPODataServiceState.ACTIVE
+
+    # end method definition
+
+
+class SAPAuthCheckState(StrEnum):
+    """Possible results of an authentication / principal propagation health check."""
+
+    OK = "ok"  # the checked step succeeded
+    NOT_CONFIGURED = (
+        "not_configured"  # required constructor parameters are missing (e.g. base_url, saml_idp_private_key)
+    )
+    NOT_ACTIVATED = "not_activated"  # the SAP endpoint is not activated/provisioned (ICF node, SOAUTH2, SAML2)
+    REJECTED = "rejected"  # SAP rejected the request (wrong credentials, invalid client, invalid grant, ...)
+    UNREACHABLE = "unreachable"  # network / DNS / TLS / timeout problem
+    ERROR = "error"  # any other error
+
+
+class SAPAuthCheckStatusModel(BaseModel):
+    """Result of a single step of an authentication / principal propagation health check.
+
+    Used by SAP.check_oauth_token_endpoint() and SAP.check_principal_propagation() - see there for the
+    checks they perform.
+
+    Attributes:
+        name (str):
+            Short name of the checked step, e.g. "OAuth 2.0 token endpoint".
+        state (SAPAuthCheckState):
+            The result of the check.
+        http_status (int | None):
+            The HTTP status code of the check request, if one was sent.
+        message (str):
+            The (error) message returned by SAP or the request library.
+        hint (str):
+            A hint how to fix the problem (empty if the check succeeded).
+        ok (bool):
+            True if the check succeeded (computed - also included in model_dump() / model_dump_json()).
+
+    """
+
+    name: str
+    state: SAPAuthCheckState
+    http_status: int | None = None
+    message: str = ""
+    hint: str = ""
+
+    @computed_field
+    @property
+    def ok(self) -> bool:
+        """Return True if the check succeeded."""
+
+        return self.state == SAPAuthCheckState.OK
 
     # end method definition
 

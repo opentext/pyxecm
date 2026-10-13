@@ -1541,9 +1541,7 @@ class Guidewire:
         policies = response.get("data", [])
         if filter_field and filter_value is not None and isinstance(policies, list):
             response["data"] = [
-                policy
-                for policy in policies
-                if policy.get("attributes", {}).get(filter_field) == filter_value
+                policy for policy in policies if policy.get("attributes", {}).get(filter_field) == filter_value
             ]
             response["count"] = len(response["data"])
 

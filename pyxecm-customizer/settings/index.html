@@ -5195,7 +5195,7 @@ They can either be specified as environment variables, or as customizerSettings 
 </span><span id="__span-0-443"><a id="__codelineno-0-443" name="__codelineno-0-443" href="#__codelineno-0-443"></a># Password of the SU01 system user of oauth_client_id (SOAUTH2 client authentication 'Password'). It authenticates pyxecm as application - it is not an end user's password.
 </span><span id="__span-0-444"><a id="__codelineno-0-444" name="__codelineno-0-444" href="#__codelineno-0-444"></a># SAP__OAUTH_CLIENT_SECRET=
 </span><span id="__span-0-445"><a id="__codelineno-0-445" name="__codelineno-0-445" href="#__codelineno-0-445"></a>
-</span><span id="__span-0-446"><a id="__codelineno-0-446" name="__codelineno-0-446" href="#__codelineno-0-446"></a># Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. 'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001'. Empty = the default scopes of the OAuth client in SOAUTH2.
+</span><span id="__span-0-446"><a id="__codelineno-0-446" name="__codelineno-0-446" href="#__codelineno-0-446"></a># Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. 'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001'. Only required if the scope IDs of the SAP system differ from the ones in SAP_ODATA_SERVICES (sap.py). Empty = the scopes of all services in SAP_ODATA_SERVICES.
 </span><span id="__span-0-447"><a id="__codelineno-0-447" name="__codelineno-0-447" href="#__codelineno-0-447"></a># SAP__OAUTH_SCOPE=
 </span></code></pre></div>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
@@ -5646,7 +5646,7 @@ They can either be specified as environment variables, or as customizerSettings 
 <p>Password of the SU01 system user of oauth_client_id (SOAUTH2 client authentication 'Password'). It authenticates pyxecm as application - it is not an end user's password.</p>
 <h3 id="sap__oauth_scope"><code>SAP__OAUTH_SCOPE</code><a class="headerlink" href="#sap__oauth_scope" title="Permanent link">&para;</a></h3>
 <p><em>Optional</em>, default value: ``</p>
-<p>Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. 'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001'. Empty = the default scopes of the OAuth client in SOAUTH2.</p>
+<p>Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. 'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001'. Only required if the scope IDs of the SAP system differ from the ones in SAP_ODATA_SERVICES (sap.py). Empty = the scopes of all services in SAP_ODATA_SERVICES.</p>
 
 
 

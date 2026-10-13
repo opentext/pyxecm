@@ -1470,7 +1470,12 @@ class Guidewire:
 
     # end method definition
 
-    def search_policy(self, attributes: dict) -> dict:
+    def search_policy(
+        self,
+        attributes: dict,
+        filter_field: str | None = None,
+        filter_value: str | None = None,
+    ) -> dict:
         """Search a specific policy based on its attributes.
 
         See: https://docs.guidewire.com/cloud/pc/202407/apiref/generated/Policy%20API/search-policies--post
@@ -1488,6 +1493,10 @@ class Guidewire:
                 * "firstName" (str)
                 * "lastName" (str)
                 * "officialId" (str)
+            filter_field (str | None, optional):
+                Additional policy attribute used to filter the results.
+            filter_value (str | None, optional):
+                Value that filter_field must equal.
 
         Returns:
             dict:
@@ -1528,7 +1537,17 @@ class Guidewire:
 
         request_url = self.config()["policySearchUrl"]
 
-        return self.do_request(method="POST", json_data=body, url=request_url)
+        response = self.do_request(method="POST", json_data=body, url=request_url)
+        policies = response.get("data", [])
+        if filter_field and filter_value is not None and isinstance(policies, list):
+            response["data"] = [
+                policy
+                for policy in policies
+                if policy.get("attributes", {}).get(filter_field) == filter_value
+            ]
+            response["count"] = len(response["data"])
+
+        return response
 
     # end method definition
 

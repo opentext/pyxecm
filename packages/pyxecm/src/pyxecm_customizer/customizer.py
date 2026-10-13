@@ -1792,6 +1792,7 @@ class Customizer:
                     otca_object=self.otca_object,
                     otkd_object=self.otkd_object,
                     avts_object=self.avts_object,
+                    settings=self.settings,
                     logger=self.logger,
                 )
                 # Load the payload file and initialize the payload sections:

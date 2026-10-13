@@ -248,6 +248,7 @@ class Payload:
         otca_object: OTCA | None = None,
         otkd_object: OTKD | None = None,
         avts_object: AVTS | None = None,
+        settings: Settings | None = None,
         logger: logging.Logger = default_logger,
     ) -> None:
         """Initialize the Payload object.
@@ -306,6 +307,9 @@ class Payload:
                 An optional Knowledge Discovery object.
             avts_object (AVTS | None, optional):
                 An optional Aviator Search object.
+            settings (Settings | None, optional):
+                The customizer settings. They are the fallback for values that are
+                not defined in the payload. Defaults to the settings of the environment.
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
 
@@ -315,6 +319,7 @@ class Payload:
         for logfilter in logger.filters:
             self.logger.addFilter(logfilter)
 
+        self._settings = settings if settings is not None else Settings()
         self._stop_on_error = stop_on_error
         self._payload_source = payload_source
         self._k8s = k8s_object
@@ -12152,6 +12157,8 @@ class Payload:
         object_type: str,
         search_field: str,
         search_value: str,
+        filter_field: str | None = None,
+        filter_value: str | None = None,
     ) -> str | None:
         """Get the Guidewire ID (str) of a Guidewire object by querying the Guidewire API.
 
@@ -12165,6 +12172,10 @@ class Payload:
                 Search field to find business object in external system.
             search_value (str):
                 Search value to find business object in external system.
+            filter_field (str | None, optional):
+                Policy attribute used to filter the search results.
+            filter_value (str | None, optional):
+                Value that filter_field must equal.
 
         Returns:
             str | None:
@@ -12207,6 +12218,8 @@ class Payload:
             case "Policy" | "policy" | "gw.policy":
                 response = guidewire_object.search_policy(
                     attributes={search_field: search_value},
+                    filter_field=filter_field,
+                    filter_value=filter_value,
                 )
                 bo_id = guidewire_object.get_result_value(response=response, key="policyNumber")
             case "Claim" | "claim" | "gw.claim":
@@ -12718,6 +12731,8 @@ class Payload:
                 bo_id = business_object_data["bo_id"]
                 bo_search_field = None
                 bo_search_value = None
+                bo_filter_field = None
+                bo_filter_value = None
             elif "bo_search_field" not in business_object_data or "bo_search_value" not in business_object_data:
                 self.logger.error(
                     "Missing BO search fields (bo_search_field, bo_search_value) in Business Object payload without BO ID for workspace -> '%s'.",
@@ -12727,6 +12742,8 @@ class Payload:
             else:
                 bo_search_field = business_object_data["bo_search_field"]
                 bo_search_value = business_object_data["bo_search_value"]
+                bo_filter_field = business_object_data.get("bo_filter_field")
+                bo_filter_value = business_object_data.get("bo_filter_value")
                 bo_id = None
 
             # Lookup external system in this payload or a former processed payload:
@@ -12811,6 +12828,8 @@ class Payload:
                     object_type=bo_type,
                     search_field=bo_search_field,
                     search_value=bo_search_value,
+                    filter_field=bo_filter_field,
+                    filter_value=bo_filter_value,
                 )
                 if not bo_id:
                     self.logger.warning(
@@ -20816,13 +20835,13 @@ class Payload:
         # Principal propagation (pyxecm as SAML 2.0 identity provider, see SAP.get_saml_assertion())
         # First priority is taking it from the external system payload - otherwise fall back to the global settings
         saml_idp_private_key_file = (
-            sap_external_system.get("saml_idp_private_key_file") or Settings.sap.saml_idp_private_key_file
+            sap_external_system.get("saml_idp_private_key_file") or self._settings.sap.saml_idp_private_key_file
         )
         saml_idp_certificate_file = (
-            sap_external_system.get("saml_idp_certificate_file") or Settings.sap.saml_idp_certificate_file
+            sap_external_system.get("saml_idp_certificate_file") or self._settings.sap.saml_idp_certificate_file
         )
-        saml_issuer = sap_external_system.get("saml_issuer") or Settings.sap.saml_issuer
-        saml_audience = sap_external_system.get("saml_audience") or Settings.sap.saml_audience
+        saml_issuer = sap_external_system.get("saml_issuer") or self._settings.sap.saml_issuer
+        saml_audience = sap_external_system.get("saml_audience") or self._settings.sap.saml_audience
         # Read the PEM files (typically mounted from a Kubernetes secret). The file names are
         # not checked (e.g. a Kubernetes TLS secret mounts "tls.key" / "tls.crt") - SAP()
         # validates the content and logs an error if it is not a matching PEM key pair:

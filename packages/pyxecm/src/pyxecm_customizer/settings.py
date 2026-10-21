@@ -426,7 +426,13 @@ class CustomizerSettingsSAP(BaseModel):
     client: str = Field(default="100", description="SAP client ('Mandant'), used for RFC and OData")
     lang: str = Field(default="EN", description="Logon language as two-character ISO code, used for RFC and OData")
 
-    system_id: str = Field(default="", description="SAP system ID (RFC only)")
+    system_id: str = Field(
+        default="",
+        description=(
+            "SAP system ID, e.g. 'TE1'. Used for the RFC logon and - by convention - as the name of the "
+            "OTCS external system of this SAP system"
+        ),
+    )
     system_number: str = Field(default="00", description="SAP system number (RFC only)")
     ashost: str = Field(
         default="",

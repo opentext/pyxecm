@@ -1332,10 +1332,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#24-create-the-oauth-client-su01-soauth2" class="md-nav__link">
+  <a href="#24-enable-oauth-per-service-iwfndmaint_service" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2.4 Create the OAuth client (SU01, SOAUTH2)
+        2.4 Enable OAuth per service (/IWFND/MAINT_SERVICE)
       
     </span>
   </a>
@@ -1343,10 +1343,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#25-enable-oauth-per-service-iwfndmaint_service" class="md-nav__link">
+  <a href="#25-create-the-oauth-client-su01-soauth2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2.5 Enable OAuth per service (/IWFND/MAINT_SERVICE)
+        2.5 Create the OAuth client (SU01, SOAUTH2)
       
     </span>
   </a>
@@ -1377,6 +1377,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="3. Configure pyxecm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-sap-grants-scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How SAP grants scopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1773,10 +1790,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#24-create-the-oauth-client-su01-soauth2" class="md-nav__link">
+  <a href="#24-enable-oauth-per-service-iwfndmaint_service" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2.4 Create the OAuth client (SU01, SOAUTH2)
+        2.4 Enable OAuth per service (/IWFND/MAINT_SERVICE)
       
     </span>
   </a>
@@ -1784,10 +1801,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#25-enable-oauth-per-service-iwfndmaint_service" class="md-nav__link">
+  <a href="#25-create-the-oauth-client-su01-soauth2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2.5 Enable OAuth per service (/IWFND/MAINT_SERVICE)
+        2.5 Create the OAuth client (SU01, SOAUTH2)
       
     </span>
   </a>
@@ -1818,6 +1835,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="3. Configure pyxecm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-sap-grants-scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How SAP grants scopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -2025,7 +2059,7 @@ each other, and what <code>pyxecm</code> provides for it:</p>
 </tr>
 <tr>
 <td>OAuth 2.0 client</td>
-<td>The application that requests access tokens from SAP's OAuth 2.0 server - here pyxecm. It is registered in SAP S/4HANA transaction <code>SOAUTH2</code> and authenticates with a client ID and a client secret (<a href="#24-create-the-oauth-client-su01-soauth2">step 2.4</a>). Not to be confused with an <em>SAP client</em> (<code>sap-client</code>, e.g. <code>100</code>), the separate data area of an SAP system that all SAP-side settings belong to.</td>
+<td>The application that requests access tokens from SAP's OAuth 2.0 server - here pyxecm. It is registered in SAP S/4HANA transaction <code>SOAUTH2</code> and authenticates with a client ID and a client secret (<a href="#25-create-the-oauth-client-su01-soauth2">step 2.5</a>). Not to be confused with an <em>SAP client</em> (<code>sap-client</code>, e.g. <code>100</code>), the separate data area of an SAP system that all SAP-side settings belong to.</td>
 </tr>
 <tr>
 <td>System user</td>
@@ -2033,7 +2067,7 @@ each other, and what <code>pyxecm</code> provides for it:</p>
 </tr>
 <tr>
 <td>OAuth 2.0 scope</td>
-<td>A named permission an access token carries - in SAP one scope per OData service, e.g. <code>ZAPI_MAINTENANCEORDER_0002</code>, created by enabling OAuth for the service (<a href="#25-enable-oauth-per-service-iwfndmaint_service">step 2.5</a>). A token can only call the OData services whose scopes it was granted. SAP grants a scope only if it is assigned to the OAuth client (<code>SOAUTH2</code>) <strong>and</strong> the end user is authorized for it (authorization object <code>S_SCOPE</code>). pyxecm requests the scopes listed in <code>SAP__OAUTH_SCOPE</code>. Scopes limit what pyxecm can do with a token, on top of the end user's own authorizations.</td>
+<td>A named permission an access token carries - in SAP one scope per OData service, e.g. <code>ZAPI_MAINTENANCEORDER_0002</code>, created by enabling OAuth for the service (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>). A token can only call the OData services whose scopes it was granted. SAP grants a scope only if it is assigned to the OAuth client (<code>SOAUTH2</code>) <strong>and</strong> the end user is authorized for it (authorization object <code>S_SCOPE</code>). pyxecm requests the scopes listed in <code>SAP__OAUTH_SCOPE</code>. Scopes limit what pyxecm can do with a token, on top of the end user's own authorizations.</td>
 </tr>
 <tr>
 <td>Transaction <code>PFCG</code></td>
@@ -2087,15 +2121,16 @@ below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP admin
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Make sure the e-mail addresses are <strong>unique</strong> and end users <strong>cannot change</strong> their own
       address (<code>SU3</code>) - otherwise use an administrator-maintained alias (see
       <a href="#security-considerations">Security considerations</a>).</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>/IWFND/MAINT_SERVICE</code>: enable <strong>OAuth</strong> for every service of section A - this creates
+      the scope IDs for the OAuth client (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>). For OData V4 service groups, follow
+      SAP's documentation of your release.</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>SU01</code> + <code>SOAUTH2</code>: <a href="#terminology">system user</a> (user type <em>System</em>) and <strong>OAuth 2.0 client</strong> with grant type <em>SAML 2.0
       Bearer Assertion</em>, pyxecm as <em>Trusted OAuth 2.0 IdP</em>, and only the needed scopes
-      (<a href="#24-create-the-oauth-client-su01-soauth2">step 2.4</a>).</li>
+      (<a href="#25-create-the-oauth-client-su01-soauth2">step 2.5</a>).</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>SOAUTH2</code>: access token lifetime of <strong>at least 10 minutes</strong> - the Content Aviator
       plugin reuses a token for up to 5 minutes (see <a href="#operations">Operations</a>).</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>/IWFND/MAINT_SERVICE</code>: enable <strong>OAuth</strong> for every service of section A - this creates
-      the scope IDs for the OAuth client (<a href="#25-enable-oauth-per-service-iwfndmaint_service">step 2.5</a>). For OData V4 service groups, follow
-      SAP's documentation of your release.</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>PFCG</code>: the end users have <code>S_SERVICE</code> and the business authorizations (<a href="#26-authorize-the-end-users-pfcg">step 2.6</a>).</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>PFCG</code>: the end users have <code>S_SERVICE</code>, <code>S_SCOPE</code> (OAuth client + scope IDs) and the
+      business authorizations (<a href="#26-authorize-the-end-users-pfcg">step 2.6</a>).</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Verify step by step with <code>SAP.check_oauth_token_endpoint()</code> (endpoint activated, no client needed
       yet) and then <code>SAP.check_principal_propagation()</code> (full round trip for a test user) - see
       <a href="#testing-the-setup">Testing the setup</a>.</li>
@@ -2130,7 +2165,7 @@ below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP admin
 </tr>
 <tr>
 <td>Scope IDs</td>
-<td><code>SAP__OAUTH_SCOPE</code> (space-separated, optional)</td>
+<td><code>SAP__OAUTH_SCOPE</code> (space-separated, <strong>required</strong>)</td>
 </tr>
 </tbody>
 </table>
@@ -2488,7 +2523,15 @@ them, but they would need a matching user attribute on the pyxecm side.</p>
 out of reach. Mapping <code>unspecified</code> to the SAP user ID makes <strong>every</strong> SAP user reachable
 with pyxecm's key. The mapped attribute must be <strong>unique</strong> and <strong>not editable by the users
 themselves</strong> - on both sides (see <a href="#security-considerations">Security considerations</a>).</p>
-<h5 id="24-create-the-oauth-client-su01-soauth2">2.4 Create the OAuth client (<code>SU01</code>, <code>SOAUTH2</code>)<a class="headerlink" href="#24-create-the-oauth-client-su01-soauth2" title="Permanent link">&para;</a></h5>
+<h5 id="24-enable-oauth-per-service-iwfndmaint_service">2.4 Enable OAuth per service (<code>/IWFND/MAINT_SERVICE</code>)<a class="headerlink" href="#24-enable-oauth-per-service-iwfndmaint_service" title="Permanent link">&para;</a></h5>
+<p>Enable OAuth for every OData service
+pyxecm calls. This creates the scope IDs that the OAuth client gets in
+<a href="#25-create-the-oauth-client-su01-soauth2">step 2.5</a> - typically <code>&lt;service&gt;_&lt;version&gt;</code>
+(e.g. <code>API_MAINTENANCEORDER_0002</code>), but SAP may generate it with a customer namespace prefix
+instead (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code>) - note the actual IDs shown by SAP rather than
+assuming the pattern. A service without OAuth has no scope: calls to it with a user's token
+fail with <code>scope_check_impossible</code> (see <a href="#testing-the-setup">Testing the setup</a>).</p>
+<h5 id="25-create-the-oauth-client-su01-soauth2">2.5 Create the OAuth client (<code>SU01</code>, <code>SOAUTH2</code>)<a class="headerlink" href="#25-create-the-oauth-client-su01-soauth2" title="Permanent link">&para;</a></h5>
 <p><code>SOAUTH2</code> (the OAuth 2.0 Client Administration transaction) does not let you invent an
 arbitrary client ID/secret pair - an OAuth 2.0 client's identity in SAP must be backed by
 a real user record. So this step has two parts:</p>
@@ -2538,34 +2581,27 @@ slightly between SAP releases/Fiori apps; it has 5 steps):</p>
      Credentials Active</em> = leave unchecked - none of these apply to the bearer assertion
      flow pyxecm uses (no interactive browser login, no refresh tokens, no client-only
      tokens without a propagated user).</li>
-<li><strong>Scope Assignment</strong>: add the scope ID(s) of the OData service(s) pyxecm calls - the
-   exact ID is generated by SAP in <a href="#25-enable-oauth-per-service-iwfndmaint_service">step 2.5</a>
-   and may carry a customer namespace prefix (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code> rather than
-   <code>API_MAINTENANCEORDER_0002</code>) - pick it from the list shown here, don't type it from memory.<blockquote>
-<p><strong>Do <a href="#25-enable-oauth-per-service-iwfndmaint_service">step 2.5</a> before this screen</strong>,
-not after. The scope list here only offers scopes of services that already have OAuth
-enabled in SAP S/4HANA transaction <code>/IWFND/MAINT_SERVICE</code> - if step 2.5 has not been done yet for the needed
-OData services, this screen will only offer unrelated default scopes (e.g. <code>ADT_0001</code>
-- "Gateway service for ADT", for ABAP Development Tools) instead of the OData service
-scopes pyxecm actually needs. If you already finished the wizard before doing step
-2.5, re-open the client afterward and add the correct scopes here.</p>
-</blockquote>
-</li>
+<li><strong>Scope Assignment</strong>: add the scope ID(s) created in
+   <a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a> for the OData service(s) pyxecm
+   calls - they may carry a customer namespace prefix (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code> rather
+   than <code>API_MAINTENANCEORDER_0002</code>); pick them from the list shown here, don't type them from
+   memory. The list only offers scopes of services with OAuth enabled - if it shows only
+   unrelated default scopes (e.g. <code>ADT_0001</code> - "Gateway service for ADT", for ABAP Development
+   Tools), step 2.4 is missing for the needed services. When pyxecm later calls additional
+   services, enable OAuth for them (step 2.4) and add their scopes to the client here.</li>
 <li><strong>Summary</strong>: review all settings and <em>Finish</em>.</li>
 </ol>
-<h5 id="25-enable-oauth-per-service-iwfndmaint_service">2.5 Enable OAuth per service (<code>/IWFND/MAINT_SERVICE</code>)<a class="headerlink" href="#25-enable-oauth-per-service-iwfndmaint_service" title="Permanent link">&para;</a></h5>
-<p>Enable OAuth for every OData service
-pyxecm calls. This creates the scope IDs used in <a href="#24-create-the-oauth-client-su01-soauth2">step 2.4</a> -
-typically <code>&lt;service&gt;_&lt;version&gt;</code> (e.g. <code>API_MAINTENANCEORDER_0002</code>), but SAP may generate it
-with a customer namespace prefix instead (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code>) - read the
-actual ID back from the Scope Assignment list rather than assuming the pattern. Do this
-<strong>before</strong>
-finishing the Scope Assignment screen of the OAuth client wizard in step 2.4 - see the note
-there.</p>
 <h5 id="26-authorize-the-end-users-pfcg">2.6 Authorize the end users (<code>PFCG</code>)<a class="headerlink" href="#26-authorize-the-end-users-pfcg" title="Permanent link">&para;</a></h5>
 <p>In SAP S/4HANA transaction <code>PFCG</code> (role maintenance, see <a href="#terminology">Terminology</a>), give the propagated
 users the usual authorizations for the services (<code>S_SERVICE</code>) and the business
-transactions behind them.</p>
+transactions behind them - and authorization object <code>S_SCOPE</code> with the OAuth client ID
+(<code>OA2_CLIENT</code>, e.g. <code>PYXECM_OAUTH</code>) and the scope IDs (<code>OA2_SCOPE</code>). A user gets only the
+requested scopes that are in their <code>S_SCOPE</code> (see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>):
+without any <code>S_SCOPE</code> for the OAuth client the token request fails with <code>invalid_scope</code>
+("... not assigned to the current user or to the OAuth 2.0 client") although the scopes are
+assigned to the client; with only some of them the token lacks the others and calls to these
+services fail with HTTP <code>403</code>. If principal propagation works for one user but not for
+another, this is the typical cause (check with <code>SU53</code>).</p>
 <p>When all steps are done, hand back to the pyxecm team: the local provider name (<code>saml_audience</code>), the agreed NameID
 format, the OAuth client ID, the OAuth client secret (over a secure channel, see the
 <a href="#b-principal-propagation-saml-20--oauth-20">checklist</a>), and the scope IDs.</p>
@@ -2589,9 +2625,66 @@ variables of the <code>SAP</code> settings group (<code>CustomizerSettingsSAP</c
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nv">SAP__SAML_NAMEID_FORMAT</span><span class="o">=</span>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress<span class="w">  </span><span class="c1"># default</span>
 </span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nv">SAP__OAUTH_CLIENT_ID</span><span class="o">=</span>PYXECM_OAUTH<span class="w">                    </span><span class="c1"># SU01 system user of the SOAUTH2 client</span>
 </span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nv">SAP__OAUTH_CLIENT_SECRET</span><span class="o">=</span>...<span class="w">                         </span><span class="c1"># its password - from a secret store</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># Optional - only if the scope IDs of the SAP system differ from SAP_ODATA_SERVICES in sap.py:</span>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="nv">SAP__OAUTH_SCOPE</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="nv">SAP__OAUTH_SCOPE</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"</span>
 </span></code></pre></div>
+<p><code>SAP__OAUTH_SCOPE</code> is <strong>required</strong> for principal propagation: S/4HANA answers a token
+request without <code>scope</code> with <code>invalid_scope</code> - it does not fall back to the scopes assigned
+to the OAuth client. List one scope per OData service the token is used for; calls to a
+service whose scope is not granted fail (see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>).</p>
+<h5 id="how-sap-grants-scopes">How SAP grants scopes<a class="headerlink" href="#how-sap-grants-scopes" title="Permanent link">&para;</a></h5>
+<p>SAP grants the <strong>intersection</strong> of three scope sets - the token carries only the scopes that
+are in all of them:</p>
+<ol>
+<li>the scopes <strong>requested</strong> by pyxecm (<code>scope</code> parameter, <code>SAP__OAUTH_SCOPE</code>),</li>
+<li>the scopes <strong>assigned to the OAuth client</strong> (<code>SOAUTH2</code>, step 2.5), and</li>
+<li>the scopes <strong>the SAP user is authorized for</strong> (<code>S_SCOPE</code> in the user's roles, step 2.6).</li>
+</ol>
+<p>Example - pyxecm requests <code>API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001 API_SALES_ORDER_SRV_0001</code>,
+all three are assigned to the OAuth client:</p>
+<table>
+<thead>
+<tr>
+<th>The user's <code>S_SCOPE</code> covers</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All three scopes</td>
+<td>Token with all three scopes</td>
+</tr>
+<tr>
+<td><code>API_SALES_ORDER_SRV_0001</code> only</td>
+<td>Token with <code>API_SALES_ORDER_SRV_0001</code> - the other two are dropped silently</td>
+</tr>
+<tr>
+<td>None of them (or no <code>S_SCOPE</code> for the OAuth client)</td>
+<td>No token - <code>invalid_scope</code></td>
+</tr>
+</tbody>
+</table>
+<p>The same applies to requested scopes that are not assigned to the OAuth client or don't
+exist at all: they are dropped silently as long as at least one requested scope is granted.</p>
+<p>What this means:</p>
+<ul>
+<li><strong><code>invalid_scope</code> means the intersection is empty</strong> - none of the requested scopes can be
+  granted to this user with this OAuth client (or no <code>scope</code> was sent). It does <strong>not</strong> mean
+  that one of several requested scopes is missing.</li>
+<li><strong>A partly missing scope is not reported when the token is issued.</strong> The token is issued
+  with fewer scopes, and only calls to the services whose scopes are missing fail later -
+  with HTTP <code>403</code> (<code>insufficient_scope</code>, see <a href="#testing-the-setup">Testing the setup</a>).</li>
+<li><strong>One scope list fits all users.</strong> Request the scopes of all services pyxecm may call
+  (e.g. one <code>SAP__OAUTH_SCOPE</code> for all agents of the Content Aviator plugin); each user gets
+  the subset their roles allow - e.g. a sales user only the sales scopes. There is no need
+  to request user- or role-specific scopes.</li>
+<li><strong>Compare the granted scopes to find missing ones.</strong> The token response lists the granted
+  scopes (<code>scope</code>, space-separated). The difference to the requested scopes is exactly what
+  the SOAUTH2 client or the user's <code>S_SCOPE</code> lacks - one token request per user is enough
+  to check a user's setup.</li>
+<li><strong>A granted scope is not the whole authorization.</strong> The user still needs <code>S_SERVICE</code> for
+  the service (OData V4: the service group) and the business authorizations (e.g. sales
+  organization, plant). Without <code>S_SERVICE</code> the call fails with HTTP <code>403</code> despite the scope.</li>
+</ul>
 <p>Or directly (requires the <code>saml</code> extra: <code>pip install "pyxecm[saml]"</code>):</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
@@ -2767,6 +2860,51 @@ node <code>/sap/bc/sec/oauth2/token</code> is not active in <code>SICF</code>.</
 <code>not_configured</code> state therefore always means pyxecm's own identity provider settings, never
 the SAP side. Pass <code>recipient</code> if SAP is reached via a reverse proxy, exactly as for
 <code>get_oauth_access_token_for_user()</code>.</p>
+<p>A token from <code>check_principal_propagation()</code> only proves that SAP issues it - to verify that
+a user can actually call the OData services with it, run <code>check_odata_apis()</code> with the user's
+token (section A + B combined, read-only):</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">BearerAuth</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">token</span> <span class="o">=</span> <span class="n">identity_provider</span><span class="o">.</span><span class="n">get_oauth_access_token_for_user</span><span class="p">(</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">"jane.smith@example.com"</span><span class="p">,</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">nameid_format</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span><span class="p">,</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">"PYXECM_OAUTH"</span><span class="p">,</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="n">scope</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"</span><span class="p">,</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="p">)</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="n">user_sap</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="s2">"100"</span><span class="p">,</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>               <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">,</span> <span class="n">auth</span><span class="o">=</span><span class="n">BearerAuth</span><span class="p">(</span><span class="n">token</span><span class="p">[</span><span class="s2">"access_token"</span><span class="p">]))</span>
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">status</span> <span class="ow">in</span> <span class="n">user_sap</span><span class="o">.</span><span class="n">check_odata_apis</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="s2">"-&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">active</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
+</span></code></pre></div>
+<p>With a token, SAP answers OAuth problems with a generic HTML error page and names the actual
+cause in the <code>WWW-Authenticate</code> response header. <code>check_odata_apis()</code> evaluates it:</p>
+<table>
+<thead>
+<tr>
+<th><code>WWW-Authenticate</code> error</th>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope_check_impossible</code></td>
+<td><code>not_activated</code></td>
+<td>OAuth is not enabled for the service (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>) - it has no scope yet</td>
+</tr>
+<tr>
+<td><code>insufficient_scope</code></td>
+<td><code>forbidden</code></td>
+<td>The token does not carry the service's scope - add it to <code>SAP__OAUTH_SCOPE</code>, <code>SOAUTH2</code> and <code>S_SCOPE</code></td>
+</tr>
+<tr>
+<td><code>invalid_token</code></td>
+<td><code>unauthorized</code></td>
+<td>The token is invalid or expired - get a new one</td>
+</tr>
+</tbody>
+</table>
 <h3 id="operations">Operations<a class="headerlink" href="#operations" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Key or certificate change:</strong> the identity provider checks key and certificate once, in
@@ -2926,7 +3064,7 @@ user's authorizations and records it as the author of all changes.</p>
 </tr>
 <tr>
 <td><code>invalid_scope</code></td>
-<td>A requested scope is not assigned to the OAuth client, or OAuth is not enabled for the service (<code>/IWFND/MAINT_SERVICE</code>).</td>
+<td><strong>None</strong> of the requested scopes can be granted: the user has no <code>S_SCOPE</code> for the OAuth client, none of the scopes is assigned to the OAuth client, OAuth is not enabled for the services (<code>/IWFND/MAINT_SERVICE</code>), or no <code>scope</code> was sent. Scopes that are only partly missing don't cause this error - see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>.</td>
 </tr>
 </tbody>
 </table>

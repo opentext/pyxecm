@@ -1170,6 +1170,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#billing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Billing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#purchasing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1429,6 +1440,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#billing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Billing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#purchasing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1567,11 +1589,21 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <li>Save, then re-run <code>SAP.check_odata_apis()</code> to confirm the service moved to <code>active</code>.</li>
 </ol>
 <h2 id="odata-services">OData services<a class="headerlink" href="#odata-services" title="Permanent link">&para;</a></h2>
+<p>The <strong>BO Type</strong> column lists the SAP business object type (BOR object type, transaction
+<code>SWO1</code>) of the main entity of each service - e.g. the type to use for business workspaces
+and business object references in Extended ECM. All types were checked in the S/4HANA
+reference system; "-" means there is no BOR object type for the entity.</p>
+<p>The business object types that business workspaces are typically linked to are also available
+in code: <code>SAP_BUSINESS_OBJECT_TYPES</code> in <code>pyxecm_customizer.sap_models</code> (name and key structure),
+and <code>get_sap_key_fields()</code> converts a business object ID (SAP's internal format, e.g.
+<code>"49000001232026"</code>) into the key fields the OData APIs expect (e.g. <code>("4900000123", "2026")</code>).</p>
+<p>¹ <code>BUS0008001</code> is the BOR object type "Plant storage area" - the storage location of a plant.</p>
 <h3 id="plant-maintenance">Plant Maintenance<a class="headerlink" href="#plant-maintenance" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
 <th>Service</th>
+<th>BO Type</th>
 <th>Version</th>
 <th>Entity Sets</th>
 <th>Purpose</th>
@@ -1580,27 +1612,38 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <tbody>
 <tr>
 <td><code>API_MAINTENANCEORDER</code></td>
+<td><code>BUS2007</code></td>
 <td>V2 (<code>;v=0002</code>)</td>
 <td><code>MaintenanceOrder</code>, <code>MaintenanceOrderOperation</code></td>
 <td>Create / Read / Update maintenance orders</td>
 </tr>
 <tr>
 <td><code>API_MAINTNOTIFICATION</code></td>
+<td><code>BUS2038</code></td>
 <td>V2</td>
 <td><code>MaintenanceNotification</code>, <code>MaintenanceNotificationItem</code></td>
 <td>Create / Read / Update maintenance notifications</td>
 </tr>
 <tr>
 <td><code>API_MAINTORDERCONFIRMATION</code></td>
+<td><code>BUS2128</code></td>
 <td>V2</td>
 <td><code>MaintOrderConfirmation</code></td>
 <td>Create / Read / Cancel maintenance order confirmations</td>
 </tr>
 <tr>
 <td><code>API_MAINTENANCEPLAN</code></td>
+<td><code>BUS1020</code></td>
 <td>V2</td>
 <td><code>MaintenancePlan</code>, <code>MaintenancePlanCycle</code>, <code>MaintenanceItem</code></td>
 <td>Create / Read / Update / Schedule maintenance plans</td>
+</tr>
+<tr>
+<td><code>API_MAINTENANCETASKLIST</code></td>
+<td><code>BUS1019</code></td>
+<td>V4</td>
+<td><code>MaintenanceTaskList</code>, <code>MaintenanceTaskListOperation</code></td>
+<td>Create / Read / Update maintenance task lists</td>
 </tr>
 </tbody>
 </table>
@@ -1609,6 +1652,7 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <thead>
 <tr>
 <th>Service</th>
+<th>BO Type</th>
 <th>Version</th>
 <th>Entity Sets</th>
 <th>Purpose</th>
@@ -1617,15 +1661,66 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <tbody>
 <tr>
 <td><code>API_SALES_ORDER_SRV</code></td>
+<td><code>BUS2032</code></td>
 <td>V2</td>
 <td><code>A_SalesOrder</code>, <code>A_SalesOrderItem</code></td>
 <td>Create / Read / Update / Delete sales orders</td>
 </tr>
 <tr>
 <td><code>API_SALES_CONTRACT_SRV</code></td>
+<td><code>BUS2034</code></td>
 <td>V2</td>
 <td><code>A_SalesContract</code>, <code>A_SalesContractItem</code></td>
 <td>Create / Read / Update / Delete sales contracts</td>
+</tr>
+<tr>
+<td><code>API_CREDIT_MEMO_REQUEST_SRV</code></td>
+<td><code>BUS2094</code></td>
+<td>V2</td>
+<td><code>A_CreditMemoRequest</code>, <code>A_CreditMemoRequestItem</code></td>
+<td>Create / Read / Update / Delete / Approve credit memo requests</td>
+</tr>
+<tr>
+<td><code>API_DEBIT_MEMO_REQUEST_SRV</code></td>
+<td><code>BUS2096</code></td>
+<td>V2</td>
+<td><code>A_DebitMemoRequest</code>, <code>A_DebitMemoRequestItem</code></td>
+<td>Create / Read / Update / Delete debit memo requests</td>
+</tr>
+<tr>
+<td><code>API_OUTBOUND_DELIVERY_SRV</code></td>
+<td><code>LIKP</code></td>
+<td>V2 (<code>;v=0002</code>)</td>
+<td><code>A_OutbDeliveryHeader</code>, <code>A_OutbDeliveryItem</code></td>
+<td>Create / Read / Update / Delete outbound deliveries, picking, goods issue</td>
+</tr>
+</tbody>
+</table>
+<h3 id="billing">Billing<a class="headerlink" href="#billing" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>BO Type</th>
+<th>Version</th>
+<th>Entity Sets</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>API_BILLING_DOCUMENT_SRV</code></td>
+<td><code>VBRK</code> (abstract: <code>BUS2037</code>)</td>
+<td>V2</td>
+<td><code>A_BillingDocument</code>, <code>A_BillingDocumentItem</code></td>
+<td>Read / Cancel billing documents (customer invoices, credit / debit memos), get the PDF</td>
+</tr>
+<tr>
+<td><code>API_BILLING_DOCUMENT_REQUEST_SRV</code></td>
+<td>-</td>
+<td>V2</td>
+<td><code>A_BillingDocumentRequest</code>, <code>A_BillingDocumentRequestItem</code></td>
+<td>Read / Delete / Reject billing document requests (external billing)</td>
 </tr>
 </tbody>
 </table>
@@ -1634,6 +1729,7 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <thead>
 <tr>
 <th>Service</th>
+<th>BO Type</th>
 <th>Version</th>
 <th>Entity Sets</th>
 <th>Purpose</th>
@@ -1642,21 +1738,38 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <tbody>
 <tr>
 <td><code>API_PURCHASECONTRACT_PROCESS_SRV</code></td>
+<td><code>BUS2014</code></td>
 <td>V2</td>
 <td><code>A_PurchaseContract</code>, <code>A_PurchaseContractItem</code></td>
 <td>Create / Read / Update purchase contracts</td>
 </tr>
 <tr>
 <td><code>API_PURCHASEREQUISITION_2</code></td>
+<td><code>BUS2105</code> (item: <code>BUS2009</code>)</td>
 <td>V4</td>
 <td><code>PurchaseReqn</code>, <code>PurchaseReqnItem</code>, <code>PurchaseReqnAcctAssgmt</code></td>
 <td>Create / Read / Update purchase requisitions</td>
 </tr>
 <tr>
 <td><code>API_PURCHASEORDER_2</code></td>
+<td><code>BUS2012</code></td>
 <td>V4</td>
 <td><code>PurchaseOrder</code>, <code>PurchaseOrderItem</code>, <code>PurchaseOrderScheduleLine</code>, <code>PurchaseOrderAccountAssignment</code></td>
 <td>Create / Read / Update / Delete purchase orders</td>
+</tr>
+<tr>
+<td><code>API_SUPPLIERINVOICE_PROCESS_SRV</code></td>
+<td><code>BUS2081</code></td>
+<td>V2</td>
+<td><code>A_SupplierInvoice</code>, <code>A_SuplrInvcItemPurOrdRef</code>, <code>A_SupplierInvoiceItemGLAcct</code></td>
+<td>Create / Read / Delete / Cancel / Release supplier invoices</td>
+</tr>
+<tr>
+<td><code>API_INBOUND_DELIVERY_SRV</code></td>
+<td><code>BUS2015</code></td>
+<td>V2 (<code>;v=0002</code>)</td>
+<td><code>A_InbDeliveryHeader</code>, <code>A_InbDeliveryItem</code></td>
+<td>Create / Read / Update / Delete inbound deliveries, putaway, goods receipt</td>
 </tr>
 </tbody>
 </table>
@@ -1665,6 +1778,7 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <thead>
 <tr>
 <th>Service</th>
+<th>BO Type</th>
 <th>Version</th>
 <th>Entity Sets</th>
 <th>Purpose</th>
@@ -1673,6 +1787,7 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <tbody>
 <tr>
 <td><code>API_MATERIAL_DOCUMENT_SRV</code></td>
+<td><code>BUS2017</code></td>
 <td>V2</td>
 <td><code>A_MaterialDocumentHeader</code>, <code>A_MaterialDocumentItem</code></td>
 <td>Create / Read / Cancel goods movements (material documents)</td>
@@ -1684,6 +1799,7 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <thead>
 <tr>
 <th>Service</th>
+<th>BO Type</th>
 <th>Version</th>
 <th>Entity Sets</th>
 <th>Purpose</th>
@@ -1692,12 +1808,14 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <tbody>
 <tr>
 <td><code>API_PLANNEDORDER</code></td>
+<td><code>BUS2004</code></td>
 <td>V4</td>
 <td><code>PlannedOrderHeader</code></td>
 <td>Create / Read / Update / Delete / Schedule planned orders</td>
 </tr>
 <tr>
 <td><code>API_PRODUCTION_ORDER_2_SRV</code></td>
+<td><code>BUS2005</code></td>
 <td>V2</td>
 <td><code>A_ProductionOrder_2</code>, <code>A_ProductionOrderOperation_2</code>, <code>A_ProductionOrderStatus_2</code></td>
 <td>Create / Read / Update / Convert / Status of production orders</td>
@@ -1709,6 +1827,7 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <thead>
 <tr>
 <th>Service</th>
+<th>BO Type</th>
 <th>Version</th>
 <th>Entity Sets</th>
 <th>Purpose</th>
@@ -1717,84 +1836,98 @@ skips the alias assignment. To fix it in <code>/IWFND/MAINT_SERVICE</code>:</p>
 <tbody>
 <tr>
 <td><code>API_PLANT_2</code></td>
+<td><code>BUS0008</code></td>
 <td>V4</td>
 <td><code>Plant</code></td>
 <td>Plants</td>
 </tr>
 <tr>
 <td><code>API_STORAGELOCATION_SRV</code></td>
+<td><code>BUS0008001</code> ¹</td>
 <td>V2</td>
 <td><code>StorageLocation</code></td>
 <td>Storage locations</td>
 </tr>
 <tr>
 <td><code>API_PRODUCT_SRV</code></td>
+<td><code>BUS1001006</code> (generic: <code>BUS1001</code>)</td>
 <td>V2</td>
 <td><code>A_Product</code>, <code>A_ProductPlant</code>, <code>A_ProductDescription</code></td>
 <td>Products / materials</td>
 </tr>
 <tr>
 <td><code>API_PRODUCTION_VERSION</code></td>
+<td>-</td>
 <td>V4</td>
 <td><code>ProductionVersion</code></td>
 <td>Production versions</td>
 </tr>
 <tr>
 <td><code>API_WORK_CENTERS</code></td>
+<td><code>BUS0011</code></td>
 <td>V2</td>
 <td><code>A_WorkCenters</code></td>
 <td>Work centers</td>
 </tr>
 <tr>
 <td><code>API_EQUIPMENT</code></td>
+<td><code>EQUI</code></td>
 <td>V2</td>
 <td><code>Equipment</code></td>
 <td>Equipment master</td>
 </tr>
 <tr>
 <td><code>API_FUNCTIONALLOCATION</code></td>
+<td><code>BUS0010</code></td>
 <td>V2</td>
 <td><code>FunctionalLocation</code></td>
 <td>Functional location master</td>
 </tr>
 <tr>
 <td><code>API_BUSINESS_PARTNER</code></td>
+<td><code>BUS1006</code> (customer: <code>KNA1</code>, supplier: <code>LFA1</code>)</td>
 <td>V2</td>
 <td><code>A_BusinessPartner</code>, <code>A_BusinessPartnerRole</code></td>
 <td>Business partners</td>
 </tr>
 <tr>
 <td><code>API_COMPANYCODE_SRV</code></td>
+<td><code>BUS0002</code></td>
 <td>V2</td>
 <td><code>A_CompanyCode</code></td>
 <td>Company codes</td>
 </tr>
 <tr>
 <td><code>API_SALESORGANIZATION_SRV</code></td>
+<td><code>BUS0006</code></td>
 <td>V2</td>
 <td><code>A_SalesOrganization</code></td>
 <td>Sales organizations</td>
 </tr>
 <tr>
 <td><code>API_PURCHASINGORGANIZATION</code></td>
+<td><code>BUS0007</code></td>
 <td>V4</td>
 <td><code>A_PurchasingOrganization</code></td>
 <td>Purchasing organizations</td>
 </tr>
 <tr>
 <td><code>API_COSTCENTER_SRV</code></td>
+<td><code>BUS0012</code></td>
 <td>V2</td>
 <td><code>A_CostCenter</code></td>
 <td>Cost centers</td>
 </tr>
 <tr>
 <td><code>API_PROFITCENTER_SRV</code></td>
+<td><code>BUS0015</code></td>
 <td>V2</td>
 <td><code>A_ProfitCenter</code></td>
 <td>Profit centers</td>
 </tr>
 <tr>
 <td><code>API_GLACCOUNTINCHARTOFACCOUNTS_SRV</code></td>
+<td><code>BUS3006</code></td>
 <td>V2</td>
 <td><code>A_GLAccountInChartOfAccounts</code></td>
 <td>G/L accounts</td>

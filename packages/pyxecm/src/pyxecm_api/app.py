@@ -24,6 +24,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_fastapi_instrumentator import Instrumentator
+from pyxecm_customizer.log import LOG_DATE_FORMAT, LOG_FORMAT
 from pyxecm_customizer.version import customizer_version
 from pyxecm_maintenance_page import run_maintenance_page
 
@@ -31,6 +32,9 @@ from .auth.router import router as auth_router
 from .common.functions import PAYLOAD_LIST
 from .common.metrics import payload_logs_by_payload, payload_logs_total
 from .common.router import router as common_router
+from .config.router import router as config_router
+from .pods.router import LOG_SPOOL
+from .pods.router import router as pods_router
 from .settings import api_settings
 from .terminal.router import router as terminal_router
 from .v1_maintenance.router import router as v1_maintenance_router
@@ -95,6 +99,7 @@ async def lifespan(
 
     logger.info("Shutdown")
     PAYLOAD_LIST.stop_payload_processing()
+    LOG_SPOOL.close()
 
 
 # end function lifespan
@@ -124,6 +129,11 @@ app = FastAPI(
             "name": "maintenance",
             "description": "Enable, disable or alter the maintenance mode.",
         },
+        {
+            "name": "pods",
+            "description": "List the pods of the namespace, browse, download and upload their files and read their "
+            "logs. Only available when pod_access is on (it follows ws_terminal).",
+        },
     ],
 )
 
@@ -151,6 +161,10 @@ app.include_router(router=v1_payload_router)
 
 if api_settings.ws_terminal:
     app.include_router(router=terminal_router)
+
+if api_settings.pod_access:
+    app.include_router(router=pods_router)
+    app.include_router(router=config_router)
 
 ## Add Prometheus Instrumentator for /metrics,
 if api_settings.metrics:
@@ -183,15 +197,16 @@ def run_api() -> None:
     # Stdout
     log_config["formatters"]["standard"] = {
         "()": "uvicorn.logging.DefaultFormatter",
-        "fmt": "%(asctime)s %(levelprefix)s [%(name)s] [%(threadName)s] %(message)s",
-        "datefmt": "%d-%b-%Y %H:%M:%S",
+        # The log format with uvicorn's colored level name.
+        "fmt": LOG_FORMAT.replace("%(levelname)s", "%(levelprefix)s"),
+        "datefmt": LOG_DATE_FORMAT,
         "use_colors": True,
     }
 
     log_config["formatters"]["logfile"] = {
         "()": "uvicorn.logging.DefaultFormatter",
-        "fmt": "%(asctime)s %(levelname)s [%(name)s] [%(threadName)s] %(message)s",
-        "datefmt": "%d-%b-%Y %H:%M:%S",
+        "fmt": LOG_FORMAT,
+        "datefmt": LOG_DATE_FORMAT,
         "use_colors": True,
     }
 
@@ -205,7 +220,7 @@ def run_api() -> None:
     log_config["formatters"]["default"] = {
         "()": "uvicorn.logging.DefaultFormatter",
         "fmt": "%(asctime)s %(levelprefix)s %(message)s",
-        "datefmt": "%d-%b-%Y %H:%M:%S",
+        "datefmt": LOG_DATE_FORMAT,
         "use_colors": False,
     }
 

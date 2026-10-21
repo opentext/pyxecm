@@ -500,9 +500,10 @@ class CustomizerSettingsSAP(BaseModel):
         default="",
         description=(
             "Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. "
-            "'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001'. Only required if the scope IDs "
-            "of the SAP system differ from the ones in SAP_ODATA_SERVICES (sap.py). Empty = the "
-            "scopes of all services in SAP_ODATA_SERVICES."
+            "'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001' - one per OData service that is "
+            "called with the token. Required for principal propagation: S/4HANA answers a token "
+            "request without scope with 'invalid_scope' (it does not fall back to the scopes of "
+            "the OAuth client in SOAUTH2)."
         ),
     )
 

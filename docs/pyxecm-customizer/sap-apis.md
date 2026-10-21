@@ -47,61 +47,86 @@ skips the alias assignment. To fix it in `/IWFND/MAINT_SERVICE`:
 
 ## OData services
 
+The **BO Type** column lists the SAP business object type (BOR object type, transaction
+`SWO1`) of the main entity of each service - e.g. the type to use for business workspaces
+and business object references in Extended ECM. All types were checked in the S/4HANA
+reference system; "-" means there is no BOR object type for the entity.
+
+The business object types that business workspaces are typically linked to are also available
+in code: `SAP_BUSINESS_OBJECT_TYPES` in `pyxecm_customizer.sap_models` (name and key structure),
+and `get_sap_key_fields()` converts a business object ID (SAP's internal format, e.g.
+`"49000001232026"`) into the key fields the OData APIs expect (e.g. `("4900000123", "2026")`).
+
+¹ `BUS0008001` is the BOR object type "Plant storage area" - the storage location of a plant.
+
 ### Plant Maintenance
 
-| Service                      | Version        | Entity Sets                                                  | Purpose                                                |
-| ---------------------------- | -------------- | ------------------------------------------------------------ | ------------------------------------------------------ |
-| `API_MAINTENANCEORDER`       | V2 (`;v=0002`) | `MaintenanceOrder`, `MaintenanceOrderOperation`              | Create / Read / Update maintenance orders              |
-| `API_MAINTNOTIFICATION`      | V2             | `MaintenanceNotification`, `MaintenanceNotificationItem`     | Create / Read / Update maintenance notifications       |
-| `API_MAINTORDERCONFIRMATION` | V2             | `MaintOrderConfirmation`                                     | Create / Read / Cancel maintenance order confirmations |
-| `API_MAINTENANCEPLAN`        | V2             | `MaintenancePlan`, `MaintenancePlanCycle`, `MaintenanceItem` | Create / Read / Update / Schedule maintenance plans    |
+| Service                      | BO Type   | Version        | Entity Sets                                                  | Purpose                                                |
+| ---------------------------- | --------- | -------------- | ------------------------------------------------------------ | ------------------------------------------------------ |
+| `API_MAINTENANCEORDER`       | `BUS2007` | V2 (`;v=0002`) | `MaintenanceOrder`, `MaintenanceOrderOperation`              | Create / Read / Update maintenance orders              |
+| `API_MAINTNOTIFICATION`      | `BUS2038` | V2             | `MaintenanceNotification`, `MaintenanceNotificationItem`     | Create / Read / Update maintenance notifications       |
+| `API_MAINTORDERCONFIRMATION` | `BUS2128` | V2             | `MaintOrderConfirmation`                                     | Create / Read / Cancel maintenance order confirmations |
+| `API_MAINTENANCEPLAN`        | `BUS1020` | V2             | `MaintenancePlan`, `MaintenancePlanCycle`, `MaintenanceItem` | Create / Read / Update / Schedule maintenance plans    |
+| `API_MAINTENANCETASKLIST`    | `BUS1019` | V4             | `MaintenanceTaskList`, `MaintenanceTaskListOperation`        | Create / Read / Update maintenance task lists          |
 
 ### Sales
 
-| Service                  | Version | Entity Sets                              | Purpose                                         |
-| ------------------------ | ------- | ---------------------------------------- | ----------------------------------------------- |
-| `API_SALES_ORDER_SRV`    | V2      | `A_SalesOrder`, `A_SalesOrderItem`       | Create / Read / Update / Delete sales orders    |
-| `API_SALES_CONTRACT_SRV` | V2      | `A_SalesContract`, `A_SalesContractItem` | Create / Read / Update / Delete sales contracts |
+| Service                       | BO Type   | Version        | Entity Sets                                      | Purpose                                                                   |
+| ----------------------------- | --------- | -------------- | ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `API_SALES_ORDER_SRV`         | `BUS2032` | V2             | `A_SalesOrder`, `A_SalesOrderItem`               | Create / Read / Update / Delete sales orders                              |
+| `API_SALES_CONTRACT_SRV`      | `BUS2034` | V2             | `A_SalesContract`, `A_SalesContractItem`         | Create / Read / Update / Delete sales contracts                           |
+| `API_CREDIT_MEMO_REQUEST_SRV` | `BUS2094` | V2             | `A_CreditMemoRequest`, `A_CreditMemoRequestItem` | Create / Read / Update / Delete / Approve credit memo requests            |
+| `API_DEBIT_MEMO_REQUEST_SRV`  | `BUS2096` | V2             | `A_DebitMemoRequest`, `A_DebitMemoRequestItem`   | Create / Read / Update / Delete debit memo requests                       |
+| `API_OUTBOUND_DELIVERY_SRV`   | `LIKP`    | V2 (`;v=0002`) | `A_OutbDeliveryHeader`, `A_OutbDeliveryItem`     | Create / Read / Update / Delete outbound deliveries, picking, goods issue |
+
+### Billing
+
+| Service                            | BO Type                      | Version | Entity Sets                                                | Purpose                                                                                |
+| ---------------------------------- | ---------------------------- | ------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `API_BILLING_DOCUMENT_SRV`         | `VBRK` (abstract: `BUS2037`) | V2      | `A_BillingDocument`, `A_BillingDocumentItem`               | Read / Cancel billing documents (customer invoices, credit / debit memos), get the PDF |
+| `API_BILLING_DOCUMENT_REQUEST_SRV` | -                            | V2      | `A_BillingDocumentRequest`, `A_BillingDocumentRequestItem` | Read / Delete / Reject billing document requests (external billing)                    |
 
 ### Purchasing
 
-| Service                            | Version | Entity Sets                                                                                         | Purpose                                         |
-| ---------------------------------- | ------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `API_PURCHASECONTRACT_PROCESS_SRV` | V2      | `A_PurchaseContract`, `A_PurchaseContractItem`                                                      | Create / Read / Update purchase contracts       |
-| `API_PURCHASEREQUISITION_2`        | V4      | `PurchaseReqn`, `PurchaseReqnItem`, `PurchaseReqnAcctAssgmt`                                        | Create / Read / Update purchase requisitions    |
-| `API_PURCHASEORDER_2`              | V4      | `PurchaseOrder`, `PurchaseOrderItem`, `PurchaseOrderScheduleLine`, `PurchaseOrderAccountAssignment` | Create / Read / Update / Delete purchase orders |
+| Service                            | BO Type                     | Version        | Entity Sets                                                                                         | Purpose                                                                    |
+| ---------------------------------- | --------------------------- | -------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `API_PURCHASECONTRACT_PROCESS_SRV` | `BUS2014`                   | V2             | `A_PurchaseContract`, `A_PurchaseContractItem`                                                      | Create / Read / Update purchase contracts                                  |
+| `API_PURCHASEREQUISITION_2`        | `BUS2105` (item: `BUS2009`) | V4             | `PurchaseReqn`, `PurchaseReqnItem`, `PurchaseReqnAcctAssgmt`                                        | Create / Read / Update purchase requisitions                               |
+| `API_PURCHASEORDER_2`              | `BUS2012`                   | V4             | `PurchaseOrder`, `PurchaseOrderItem`, `PurchaseOrderScheduleLine`, `PurchaseOrderAccountAssignment` | Create / Read / Update / Delete purchase orders                            |
+| `API_SUPPLIERINVOICE_PROCESS_SRV`  | `BUS2081`                   | V2             | `A_SupplierInvoice`, `A_SuplrInvcItemPurOrdRef`, `A_SupplierInvoiceItemGLAcct`                      | Create / Read / Delete / Cancel / Release supplier invoices                |
+| `API_INBOUND_DELIVERY_SRV`         | `BUS2015`                   | V2 (`;v=0002`) | `A_InbDeliveryHeader`, `A_InbDeliveryItem`                                                          | Create / Read / Update / Delete inbound deliveries, putaway, goods receipt |
 
 ### Inventory Management
 
-| Service                     | Version | Entity Sets                                          | Purpose                                                     |
-| --------------------------- | ------- | ---------------------------------------------------- | ----------------------------------------------------------- |
-| `API_MATERIAL_DOCUMENT_SRV` | V2      | `A_MaterialDocumentHeader`, `A_MaterialDocumentItem` | Create / Read / Cancel goods movements (material documents) |
+| Service                     | BO Type   | Version | Entity Sets                                          | Purpose                                                     |
+| --------------------------- | --------- | ------- | ---------------------------------------------------- | ----------------------------------------------------------- |
+| `API_MATERIAL_DOCUMENT_SRV` | `BUS2017` | V2      | `A_MaterialDocumentHeader`, `A_MaterialDocumentItem` | Create / Read / Cancel goods movements (material documents) |
 
 ### Production
 
-| Service                      | Version | Entity Sets                                                                        | Purpose                                                        |
-| ---------------------------- | ------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `API_PLANNEDORDER`           | V4      | `PlannedOrderHeader`                                                               | Create / Read / Update / Delete / Schedule planned orders      |
-| `API_PRODUCTION_ORDER_2_SRV` | V2      | `A_ProductionOrder_2`, `A_ProductionOrderOperation_2`, `A_ProductionOrderStatus_2` | Create / Read / Update / Convert / Status of production orders |
+| Service                      | BO Type   | Version | Entity Sets                                                                        | Purpose                                                        |
+| ---------------------------- | --------- | ------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `API_PLANNEDORDER`           | `BUS2004` | V4      | `PlannedOrderHeader`                                                               | Create / Read / Update / Delete / Schedule planned orders      |
+| `API_PRODUCTION_ORDER_2_SRV` | `BUS2005` | V2      | `A_ProductionOrder_2`, `A_ProductionOrderOperation_2`, `A_ProductionOrderStatus_2` | Create / Read / Update / Convert / Status of production orders |
 
 ### Master Data (read-only)
 
-| Service                              | Version | Entity Sets                                           | Purpose                    |
-| ------------------------------------ | ------- | ----------------------------------------------------- | -------------------------- |
-| `API_PLANT_2`                        | V4      | `Plant`                                               | Plants                     |
-| `API_STORAGELOCATION_SRV`            | V2      | `StorageLocation`                                     | Storage locations          |
-| `API_PRODUCT_SRV`                    | V2      | `A_Product`, `A_ProductPlant`, `A_ProductDescription` | Products / materials       |
-| `API_PRODUCTION_VERSION`             | V4      | `ProductionVersion`                                   | Production versions        |
-| `API_WORK_CENTERS`                   | V2      | `A_WorkCenters`                                       | Work centers               |
-| `API_EQUIPMENT`                      | V2      | `Equipment`                                           | Equipment master           |
-| `API_FUNCTIONALLOCATION`             | V2      | `FunctionalLocation`                                  | Functional location master |
-| `API_BUSINESS_PARTNER`               | V2      | `A_BusinessPartner`, `A_BusinessPartnerRole`          | Business partners          |
-| `API_COMPANYCODE_SRV`                | V2      | `A_CompanyCode`                                       | Company codes              |
-| `API_SALESORGANIZATION_SRV`          | V2      | `A_SalesOrganization`                                 | Sales organizations        |
-| `API_PURCHASINGORGANIZATION`         | V4      | `A_PurchasingOrganization`                            | Purchasing organizations   |
-| `API_COSTCENTER_SRV`                 | V2      | `A_CostCenter`                                        | Cost centers               |
-| `API_PROFITCENTER_SRV`               | V2      | `A_ProfitCenter`                                      | Profit centers             |
-| `API_GLACCOUNTINCHARTOFACCOUNTS_SRV` | V2      | `A_GLAccountInChartOfAccounts`                        | G/L accounts               |
+| Service                              | BO Type                                        | Version | Entity Sets                                           | Purpose                    |
+| ------------------------------------ | ---------------------------------------------- | ------- | ----------------------------------------------------- | -------------------------- |
+| `API_PLANT_2`                        | `BUS0008`                                      | V4      | `Plant`                                               | Plants                     |
+| `API_STORAGELOCATION_SRV`            | `BUS0008001` ¹                                 | V2      | `StorageLocation`                                     | Storage locations          |
+| `API_PRODUCT_SRV`                    | `BUS1001006` (generic: `BUS1001`)              | V2      | `A_Product`, `A_ProductPlant`, `A_ProductDescription` | Products / materials       |
+| `API_PRODUCTION_VERSION`             | -                                              | V4      | `ProductionVersion`                                   | Production versions        |
+| `API_WORK_CENTERS`                   | `BUS0011`                                      | V2      | `A_WorkCenters`                                       | Work centers               |
+| `API_EQUIPMENT`                      | `EQUI`                                         | V2      | `Equipment`                                           | Equipment master           |
+| `API_FUNCTIONALLOCATION`             | `BUS0010`                                      | V2      | `FunctionalLocation`                                  | Functional location master |
+| `API_BUSINESS_PARTNER`               | `BUS1006` (customer: `KNA1`, supplier: `LFA1`) | V2      | `A_BusinessPartner`, `A_BusinessPartnerRole`          | Business partners          |
+| `API_COMPANYCODE_SRV`                | `BUS0002`                                      | V2      | `A_CompanyCode`                                       | Company codes              |
+| `API_SALESORGANIZATION_SRV`          | `BUS0006`                                      | V2      | `A_SalesOrganization`                                 | Sales organizations        |
+| `API_PURCHASINGORGANIZATION`         | `BUS0007`                                      | V4      | `A_PurchasingOrganization`                            | Purchasing organizations   |
+| `API_COSTCENTER_SRV`                 | `BUS0012`                                      | V2      | `A_CostCenter`                                        | Cost centers               |
+| `API_PROFITCENTER_SRV`               | `BUS0015`                                      | V2      | `A_ProfitCenter`                                      | Profit centers             |
+| `API_GLACCOUNTINCHARTOFACCOUNTS_SRV` | `BUS3006`                                      | V2      | `A_GLAccountInChartOfAccounts`                        | G/L accounts               |
 
 ## RFC channel (`SAP.call()`)
 

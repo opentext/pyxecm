@@ -11,6 +11,7 @@ import os
 import sys
 
 from .customizer import Customizer
+from .log import LOG_DATE_FORMAT, LOG_FORMAT
 from .payload import load_payload
 
 logger = logging.getLogger("customizer")
@@ -20,8 +21,8 @@ def main() -> int:
     """Start the Customizer."""
 
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        datefmt="%d-%b-%Y %H:%M:%S",
+        format=LOG_FORMAT,
+        datefmt=LOG_DATE_FORMAT,
         level=logging.INFO,
         handlers=[
             logging.StreamHandler(sys.stdout),

@@ -24,7 +24,7 @@ from pydantic import ValidationError
 # OpenText specific modules:
 from pyxecm_customizer.customizer import Customizer
 from pyxecm_customizer.exceptions import StopOnError
-from pyxecm_customizer.log import LogCountFilter
+from pyxecm_customizer.log import LOG_DATE_FORMAT, LOG_FORMAT, LogCountFilter
 from pyxecm_customizer.manager_push import ManagerPushClient
 from pyxecm_customizer.payload import load_payload
 
@@ -684,8 +684,8 @@ class PayloadList:
 
             # Create a formatter:
             formatter = logging.Formatter(
-                fmt="%(asctime)s %(levelname)s [%(name)s] [%(threadName)s] %(message)s",
-                datefmt="%d-%b-%Y %H:%M:%S",
+                fmt=LOG_FORMAT,
+                datefmt=LOG_DATE_FORMAT,
             )
             # Add the formatter to the handler
             handler.setFormatter(fmt=formatter)

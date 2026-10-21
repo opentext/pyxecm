@@ -122,6 +122,43 @@ class CustomizerAPISettings(BaseSettings):
         description="Enable the Websocket Terminal endpoint",
     )
 
+    pod_access: bool | None = Field(
+        default=None,
+        description="Enable the pod endpoints: list the pods of the namespace, browse, download and upload their "
+        "files and read their logs - and the ConfigMaps, Secrets and workloads of the namespace: show and change "
+        "them, restart workloads. Follows ws_terminal when not set.",
+    )
+
+    pod_upload_max_bytes: int = Field(
+        default=2 * 1024 * 1024 * 1024,
+        description="Largest file that can be uploaded into a pod (in bytes).",
+    )
+
+    pod_transfer_concurrency: int = Field(
+        default=4,
+        description="Number of downloads and uploads from and to pods that can run at the same time.",
+    )
+
+    pod_log_spool_dir: str = Field(
+        default=os.path.join(tempfile.gettempdir(), "podlogs"),
+        description="Folder for the copies of the pod logs that are looked at.",
+    )
+
+    pod_log_max_bytes: int = Field(
+        default=1024 * 1024 * 1024,
+        description="Largest copy of a pod log (in bytes). Following the log stops when it is reached.",
+    )
+
+    pod_log_idle_seconds: int = Field(
+        default=900,
+        description="A copy of a pod log that nobody read for this long (in seconds) is stopped and deleted.",
+    )
+
+    pod_log_max_sessions: int = Field(
+        default=20,
+        description="Number of pod logs that can be followed at the same time.",
+    )
+
     model_config = SettingsConfigDict(env_prefix="CUSTOMIZER_")
 
     def __init__(self, **data: any) -> None:
@@ -130,6 +167,8 @@ class CustomizerAPISettings(BaseSettings):
         super().__init__(**data)
         if self.otds_url is None:
             self.otds_url = f"{self.otds_protocol}://{self.otds_host}:{self.otds_port}"
+        if self.pod_access is None:
+            self.pod_access = self.ws_terminal
 
 
 # Create Instance of settings

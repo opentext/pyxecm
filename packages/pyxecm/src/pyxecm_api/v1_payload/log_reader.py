@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from itertools import accumulate
 from typing import BinaryIO
 
+from pyxecm_customizer.log import LOG_LEVEL_NAMES, record_start_pattern
+
 logger = logging.getLogger("pyxecm_api.v1_payload")
 
 # Version of the log reading contract reported by the info endpoint.
@@ -80,19 +82,33 @@ _LINE_FEED = 10
 _NON_ASCII = 128
 _WORD_BYTES = frozenset(b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
-# What JavaScript's \s matches (the manager UI classifies lines with a JavaScript regular
-# expression), as UTF-8 byte sequences and without the line feed, which never is part of a line.
-_SPACE = (
-    rb"(?:[ \t\v\f\r]|\xc2\xa0|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80|\xef\xbb\xbf)"
-)
 
-# The record start rule of the manager UI, \b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b(?=\s+\[),
-# for bytes. The leading \b is written as a look-behind after the first letter, which keeps the
-# fast literal scan of the regular expression engine. The rest of the line is consumed, so
-# consecutive matches are the first matches of their lines ("the first match in the line decides").
-RECORD_RE = re.compile(
-    rb"(D(?<!\wD)EBUG|I(?<!\wI)NFO|W(?<!\wW)ARNING|E(?<!\wE)RROR|C(?<!\wC)RITICAL)(?=" + _SPACE + rb"+\[)[^\n]*"
-)
+def _record_re(pattern: str) -> re.Pattern[bytes]:
+    """Compile the record start rule (see record_start_pattern()) for the index and the scans.
+
+    The rest of the line is consumed, so consecutive matches belong to different lines. Where the
+    part in front of the level name has a fixed width (as with the default log format), it is
+    checked by a look-behind after the first letter of the level name, which keeps the fast
+    literal scan of the regular expression engine.
+    """
+
+    rest = rb"[^\n]*"
+    head, _, tail = pattern.encode().partition(b"(" + b"|".join(name.encode() for name in LOG_LEVEL_NAMES) + b")")
+    try:
+        names = (
+            name[:1] + rb"(?<=" + head + name[:1] + rb")" + name[1:] for name in (n.encode() for n in LOG_LEVEL_NAMES)
+        )
+        return re.compile(rb"(" + rb"|".join(names) + rb")" + tail + rest, re.MULTILINE)
+    except re.error:
+        # Look-behinds need a fixed width.
+        return re.compile(pattern.encode() + rest, re.MULTILINE)
+
+
+# The record start rule, derived from the log format of the Customizer: the level is the first
+# word after the timestamp at the start of a line. The info endpoint hands the same rule to the
+# manager UI, so both always agree on what a record start is.
+RECORD_START_PATTERN = record_start_pattern()
+RECORD_RE = _record_re(RECORD_START_PATTERN)
 
 # Characters outside ASCII that Python's case-insensitive matching treats as equal to an ASCII
 # letter, with their UTF-8 encodings.
@@ -1429,6 +1445,7 @@ def read_log_info(path: str, running: bool, wait: float = INDEX_WAIT_SECONDS) ->
         "lines": lines,
         "counts": {name: counts[code] for name, code in sorted(FILTER_LEVELS.items(), key=lambda item: -item[1])},
         "running": running,
+        "record_start": RECORD_START_PATTERN,
     }
 
 

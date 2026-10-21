@@ -9333,7 +9333,8 @@ class OTCS:
 
         elif os.path.exists(path_or_url):
             self.logger.debug("Uploading local file -> '%s'", path_or_url)
-            file_content = open(file=path_or_url, mode="rb")  # noqa: SIM115
+            with open(file=path_or_url, mode="rb") as local_file:
+                file_content = local_file.read()
 
         else:
             self.logger.warning("Cannot access file -> '%s'", path_or_url)
@@ -9502,14 +9503,15 @@ class OTCS:
                 If True, automatically extract ZIP files and upload extracted directory. If False,
                 upload the unchanged Zip file.
             replace_existing (bool, optional):
-                If True, replaces an existing file with the same name in the target folder. If False,
-                the upload will fail if a file with the same name already exists.
+                If True, an existing document with the same name in the target folder gets the file
+                as a new version. If False, the upload will fail if a file with the same name already exists.
             show_error (bool, optional):
                 If True, treats the upload failure as an error. If False, no error is shown (useful if the file already exists).
 
         Returns:
             dict | None:
-                The response from the upload operation or None if the upload fails.
+                The response from the upload operation (or from add_document_version() if a new
+                version of an existing document has been added) or None if the upload fails.
 
         """
 
@@ -9604,7 +9606,8 @@ class OTCS:
 
             elif os.path.exists(file_url):
                 self.logger.debug("Uploading local file -> %s", file_url)
-                file_content = open(file=file_url, mode="rb")  # noqa: SIM115
+                with open(file=file_url, mode="rb") as local_file:
+                    file_content = local_file.read()
 
             else:
                 self.logger.warning("Cannot access file -> '%s'", file_url)
@@ -9651,6 +9654,27 @@ class OTCS:
 
         if not mime_type:
             mime_type = "application/octet-stream"  # Default to binary stream if mime type cannot be determined
+
+        # If a document with the same name exists already we add a new version instead
+        # (categories, classifications and external dates only apply to new documents):
+        if replace_existing:
+            response = self.get_node_by_parent_and_name(
+                parent_id=parent_id, name=file_name, fields="properties{id,name}"
+            )
+            existing_document_id = self.get_result_value(response=response, key="id")
+            if existing_document_id:
+                self.logger.debug(
+                    "Document -> '%s' does already exist in parent with ID -> %d. Adding a new version...",
+                    file_name,
+                    parent_id,
+                )
+                return self.add_document_version(
+                    node_id=int(existing_document_id),
+                    file_name=file_name,
+                    mime_type=mime_type,
+                    file_content=file_content if isinstance(file_content, bytes) else file_content.read(),
+                    description=description,
+                )
 
         upload_post_files = [("file", (f"{file_name}", file_content, mime_type))]
 
@@ -9997,7 +10021,8 @@ class OTCS:
 
             elif os.path.exists(file_url):
                 self.logger.debug("Upload local file -> '%s' as new version.", file_url)
-                file_content = open(file=file_url, mode="rb")  # noqa: SIM115
+                with open(file=file_url, mode="rb") as local_file:
+                    file_content = local_file.read()
 
             else:
                 self.logger.warning("Cannot access file -> '%s'", file_url)
@@ -10007,7 +10032,7 @@ class OTCS:
         upload_post_data = {"description": description}
 
         if not mime_type:
-            mime_type, _ = mimetypes.guess_type(file_url)
+            mime_type, _ = mimetypes.guess_type(file_name)
 
         if not mime_type and magic_installed and file_url:
             try:

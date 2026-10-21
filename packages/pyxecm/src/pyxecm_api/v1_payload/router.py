@@ -16,7 +16,7 @@ from http import HTTPStatus
 from typing import Annotated, Literal
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pyxecm_customizer.payload import load_payload
 
@@ -25,14 +25,14 @@ from pyxecm_api.auth.models import User
 from pyxecm_api.common.functions import PAYLOAD_LIST, get_settings
 from pyxecm_api.settings import CustomizerAPISettings
 
-from .functions import GrowingFileResponse, prepare_dependencies, run_log_read, tail_log
-from .log_reader import (
-    DEFAULT_LIMIT,
-    DEFAULT_MAX_BYTES,
-    build_lines_request,
-    read_log_info,
-    read_log_lines,
+from .functions import (
+    GrowingFileResponse,
+    lines_request_from_query,
+    prepare_dependencies,
+    run_log_read,
+    tail_log,
 )
+from .log_reader import LogLinesRequest, read_log_info, read_log_lines
 from .models import PayloadListItem, PayloadListItems, PayloadLogInfo, PayloadLogLines, UpdatedPayloadListItem
 
 router = APIRouter(prefix="/api/v1/payload", tags=["payload"])
@@ -574,42 +574,7 @@ async def get_payload_logfile_lines(
     request: Request,
     user: Annotated[User, Depends(get_authorized_user)],  # noqa: ARG001
     payload_id: int,
-    offset: Annotated[
-        int | None,
-        Query(description="Byte offset to start at. It is snapped back to the start of the line containing it."),
-    ] = None,
-    line: Annotated[
-        int | None,
-        Query(description="Line number (1-based) to start at. Alternative to the offset."),
-    ] = None,
-    direction: Annotated[
-        str,
-        Query(
-            description="'forward' returns the lines from the start position on, "
-            "'backward' the lines before it. Without start position, 'forward' starts "
-            "at the beginning of the logfile and 'backward' at its end.",
-        ),
-    ] = "forward",
-    limit: Annotated[int, Query(description="Maximum number of lines to return (0 to 5000).")] = DEFAULT_LIMIT,
-    max_bytes: Annotated[
-        int,
-        Query(description="Soft cap on the summed size of the returned lines. At most 4 MiB are used."),
-    ] = DEFAULT_MAX_BYTES,
-    levels: Annotated[
-        str | None,
-        Query(
-            description="Comma separated list of the levels to return (DEBUG, INFO, WARNING, ERROR). "
-            "Lines without a level are always returned. An empty value returns only those.",
-        ),
-    ] = None,
-    q: Annotated[str | None, Query(description="Text to search for. Only matching lines are returned.")] = None,
-    regex: Annotated[bool, Query(description="The search text is a regular expression (Python syntax).")] = False,
-    case: Annotated[bool, Query(description="Match the case of the search text.")] = False,
-    word: Annotated[bool, Query(description="Match whole words only.")] = False,
-    count_only: Annotated[
-        bool,
-        Query(description="Return no lines but count them. The limit and max_bytes are ignored."),
-    ] = False,
+    lines_request: Annotated[LogLinesRequest, Depends(lines_request_from_query)],
 ) -> PayloadLogLines:
     """Read a window of lines from the logfile of a payload, optionally filtered.
 
@@ -625,28 +590,9 @@ async def get_payload_logfile_lines(
         user: Annotated[User, Depends(get_authorized_user)]
         payload_id (int):
             The payload item ID.
-        offset (int | None, optional):
-            The byte offset to start at.
-        line (int | None, optional):
-            The line number to start at.
-        direction (str, optional):
-            The direction to read in: "forward" or "backward".
-        limit (int, optional):
-            The maximum number of lines to return.
-        max_bytes (int, optional):
-            The soft cap on the summed size of the returned lines.
-        levels (str | None, optional):
-            The comma separated levels to return.
-        q (str | None, optional):
-            The text to search for.
-        regex (bool, optional):
-            Whether the search text is a regular expression.
-        case (bool, optional):
-            Whether the case of the search text has to match.
-        word (bool, optional):
-            Whether only whole words match.
-        count_only (bool, optional):
-            Whether to count the lines instead of returning them.
+        lines_request (LogLinesRequest):
+            What to read: the query parameters offset, line, direction, limit, max_bytes,
+            levels, q, regex, case, word and count_only (see `lines_request_from_query`).
 
     Raises:
         HTTPException:
@@ -661,23 +607,6 @@ async def get_payload_logfile_lines(
     """
 
     filename, running = get_payload_logfile(payload_id)
-
-    try:
-        lines_request = build_lines_request(
-            offset=offset,
-            line=line,
-            direction=direction,
-            limit=limit,
-            max_bytes=max_bytes,
-            levels=levels,
-            q=q,
-            regex=regex,
-            case=case,
-            word=word,
-            count_only=count_only,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
 
     try:
         result = await run_log_read(request, read_log_lines, filename, running, lines_request)

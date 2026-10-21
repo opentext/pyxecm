@@ -67,6 +67,9 @@ class PayloadLogInfo(BaseModel):
     lines: int
     counts: dict[str, int]
     running: bool
+    # The regular expression of a record's first line (level name in group 1), derived from the
+    # log format. Clients apply it with the multiline flag.
+    record_start: str
 
 
 class PayloadLogLine(BaseModel):

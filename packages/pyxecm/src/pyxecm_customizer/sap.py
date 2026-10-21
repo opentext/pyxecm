@@ -119,60 +119,108 @@ from lxml import etree
 from pydantic import BaseModel, ValidationError
 
 from .sap_models import (
+    ODataCondition,
     SAPAuthCheckState,
     SAPAuthCheckStatusModel,
+    SAPBillingDocumentItemQueryModel,
+    SAPBillingDocumentItemResponseModel,
+    SAPBillingDocumentQueryModel,
+    SAPBillingDocumentRequestQueryModel,
+    SAPBillingDocumentRequestResponseModel,
+    SAPBillingDocumentResponseModel,
+    SAPBusinessPartnerModel,
     SAPBusinessPartnerQueryModel,
     SAPBusinessPartnerResponseModel,
     SAPCompanyCodeQueryModel,
     SAPCompanyCodeResponseModel,
     SAPCostCenterQueryModel,
     SAPCostCenterResponseModel,
+    SAPCreditMemoRequestAction,
+    SAPCreditMemoRequestModel,
+    SAPCreditMemoRequestQueryModel,
+    SAPCreditMemoRequestResponseModel,
     SAPCustomerQueryModel,
+    SAPDebitMemoRequestModel,
+    SAPDebitMemoRequestQueryModel,
+    SAPDebitMemoRequestResponseModel,
+    SAPEquipmentModel,
     SAPEquipmentQueryModel,
     SAPEquipmentResponseModel,
+    SAPFunctionalLocationModel,
     SAPFunctionalLocationQueryModel,
     SAPFunctionalLocationResponseModel,
     SAPGLAccountQueryModel,
     SAPGLAccountResponseModel,
+    SAPGoodsMovementItemQueryModel,
+    SAPGoodsMovementItemResponseModel,
     SAPGoodsMovementModel,
     SAPGoodsMovementQueryModel,
     SAPGoodsMovementResponseModel,
+    SAPInboundDeliveryAction,
+    SAPInboundDeliveryItemQueryModel,
+    SAPInboundDeliveryItemResponseModel,
+    SAPInboundDeliveryModel,
+    SAPInboundDeliveryQueryModel,
+    SAPInboundDeliveryResponseModel,
     SAPMaintenanceNotificationAction,
     SAPMaintenanceNotificationModel,
     SAPMaintenanceNotificationQueryModel,
     SAPMaintenanceNotificationResponseModel,
     SAPMaintenanceOrderAction,
+    SAPMaintenanceOrderComponentModel,
     SAPMaintenanceOrderConfirmationModel,
     SAPMaintenanceOrderConfirmationQueryModel,
     SAPMaintenanceOrderConfirmationResponseModel,
     SAPMaintenanceOrderModel,
+    SAPMaintenanceOrderOperationAction,
+    SAPMaintenanceOrderOperationModel,
     SAPMaintenanceOrderQueryModel,
     SAPMaintenanceOrderResponseModel,
     SAPMaintenancePlanAction,
+    SAPMaintenancePlanItemModel,
+    SAPMaintenancePlanItemQueryModel,
+    SAPMaintenancePlanItemResponseModel,
     SAPMaintenancePlanModel,
     SAPMaintenancePlanQueryModel,
     SAPMaintenancePlanResponseModel,
+    SAPMaterialBOMModel,
+    SAPMaterialBOMQueryModel,
+    SAPMaterialBOMResponseModel,
     SAPODataCreateModel,
     SAPODataErrorModel,
     SAPODataQueryModel,
     SAPODataServiceModel,
     SAPODataServiceState,
     SAPODataServiceStatusModel,
+    SAPODataTextQueryModel,
+    SAPODataTextResponseModel,
+    SAPOutboundDeliveryAction,
+    SAPOutboundDeliveryItemQueryModel,
+    SAPOutboundDeliveryItemResponseModel,
+    SAPOutboundDeliveryModel,
+    SAPOutboundDeliveryQueryModel,
+    SAPOutboundDeliveryResponseModel,
     SAPPlannedOrderModel,
     SAPPlannedOrderQueryModel,
     SAPPlannedOrderResponseModel,
     SAPPlantQueryModel,
     SAPPlantResponseModel,
+    SAPProductDescriptionModel,
     SAPProductionOrderAction,
     SAPProductionOrderModel,
     SAPProductionOrderQueryModel,
     SAPProductionOrderResponseModel,
     SAPProductionVersionQueryModel,
     SAPProductionVersionResponseModel,
+    SAPProductModel,
+    SAPProductPlantModel,
     SAPProductQueryModel,
     SAPProductResponseModel,
+    SAPProductStorageLocationModel,
+    SAPProductValuationModel,
     SAPProfitCenterQueryModel,
     SAPProfitCenterResponseModel,
+    SAPPurchaseContractItemModel,
     SAPPurchaseContractModel,
     SAPPurchaseContractQueryModel,
     SAPPurchaseContractResponseModel,
@@ -194,10 +242,18 @@ from .sap_models import (
     SAPSalesOrganizationResponseModel,
     SAPStorageLocationQueryModel,
     SAPStorageLocationResponseModel,
-    SAPVendorQueryModel,
+    SAPSupplierInvoiceModel,
+    SAPSupplierInvoiceQueryModel,
+    SAPSupplierInvoiceResponseModel,
+    SAPSupplierQueryModel,
+    SAPTaskListModel,
+    SAPTaskListQueryModel,
+    SAPTaskListResponseModel,
     SAPWorkCenterQueryModel,
     SAPWorkCenterResponseModel,
     odata_literal,
+    pad_number,
+    text_search_variants,
 )
 
 default_logger = logging.getLogger("pyxecm_customizer.sap")
@@ -315,7 +371,7 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_MAINTENANCEORDER_0002",
         entity_sets=["MaintenanceOrder", "MaintenanceOrderOperation"],
-        description="Plant Maintenance - Maintenance Order (Create, Read, Update)",
+        description="Plant Maintenance - Maintenance Order (Create, Read, Update, Operations)",
     ),
     # RAP based service, published as OData V2 (service binding API_MAINTNOTIFICATION, version 0001):
     "API_MAINTNOTIFICATION": SAPODataServiceModel(
@@ -342,6 +398,47 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         entity_sets=["A_SalesContract", "A_SalesContractItem"],
         description="Sales - Sales Contract (Create, Read, Update, Delete)",
     ),
+    "API_CREDIT_MEMO_REQUEST_SRV": SAPODataServiceModel(
+        name="API_CREDIT_MEMO_REQUEST_SRV",
+        path="/sap/opu/odata/sap/API_CREDIT_MEMO_REQUEST_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_CREDIT_MEMO_REQUEST_SRV_0001",
+        entity_sets=["A_CreditMemoRequest", "A_CreditMemoRequestItem"],
+        description="Sales - Credit Memo Request (Create, Read, Update, Delete, Approval)",
+    ),
+    "API_DEBIT_MEMO_REQUEST_SRV": SAPODataServiceModel(
+        name="API_DEBIT_MEMO_REQUEST_SRV",
+        path="/sap/opu/odata/sap/API_DEBIT_MEMO_REQUEST_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_DEBIT_MEMO_REQUEST_SRV_0001",
+        entity_sets=["A_DebitMemoRequest", "A_DebitMemoRequestItem"],
+        description="Sales - Debit Memo Request (Create, Read, Update, Delete)",
+    ),
+    "API_BILLING_DOCUMENT_REQUEST_SRV": SAPODataServiceModel(
+        name="API_BILLING_DOCUMENT_REQUEST_SRV",
+        path="/sap/opu/odata/sap/API_BILLING_DOCUMENT_REQUEST_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_BILLING_DOCUMENT_REQUEST_SRV_0001",
+        entity_sets=["A_BillingDocumentRequest", "A_BillingDocumentRequestItem"],
+        description="Billing - Billing Document Request (Read, Delete, Reject)",
+    ),
+    "API_BILLING_DOCUMENT_SRV": SAPODataServiceModel(
+        name="API_BILLING_DOCUMENT_SRV",
+        path="/sap/opu/odata/sap/API_BILLING_DOCUMENT_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_BILLING_DOCUMENT_SRV_0001",
+        entity_sets=["A_BillingDocument", "A_BillingDocumentItem"],
+        description="Billing - Billing Document / Customer Invoice (Read, Cancel, PDF)",
+    ),
+    # Version 0002 is the successor of the deprecated version 0001:
+    "API_OUTBOUND_DELIVERY_SRV": SAPODataServiceModel(
+        name="API_OUTBOUND_DELIVERY_SRV",
+        path="/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV;v=0002",
+        odata_version=2,
+        oauth_scope="ZAPI_OUTBOUND_DELIVERY_SRV_0002",
+        entity_sets=["A_OutbDeliveryHeader", "A_OutbDeliveryItem"],
+        description="Shipping - Outbound Delivery (Create, Read, Update, Delete, Picking, Goods Issue)",
+    ),
     # Version 0001 matches the published SAP metadata for this API. The system also has
     # version 0002 (";v=0002") - compare both with check_odata_apis() after activation:
     "API_PURCHASECONTRACT_PROCESS_SRV": SAPODataServiceModel(
@@ -350,7 +447,7 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_PURCHASECONTRACT_PROCESS_SRV_0001",
         entity_sets=["A_PurchaseContract", "A_PurchaseContractItem"],
-        description="Purchasing - Purchase Contract (Create, Read, Update)",
+        description="Purchasing - Purchase Contract (Create, Read, Update, Delete Items)",
     ),
     # OData V4 successor of the V2 API API_PURCHASEREQ_PROCESS_SRV (service group
     # API_PURCHASEREQUISITION_2, service "PurchaseRequisition", version 0001):
@@ -361,6 +458,23 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         oauth_scope="OV4:API_PURCHASEREQUISITION_2",
         entity_sets=["PurchaseReqn", "PurchaseReqnItem", "PurchaseReqnAcctAssgmt"],
         description="Purchasing - Purchase Requisition (Create, Read, Update)",
+    ),
+    "API_SUPPLIERINVOICE_PROCESS_SRV": SAPODataServiceModel(
+        name="API_SUPPLIERINVOICE_PROCESS_SRV",
+        path="/sap/opu/odata/sap/API_SUPPLIERINVOICE_PROCESS_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_SUPPLIERINVOICE_PROCESS_SRV_0001",
+        entity_sets=["A_SupplierInvoice", "A_SuplrInvcItemPurOrdRef", "A_SupplierInvoiceItemGLAcct"],
+        description="Purchasing - Supplier Invoice (Create, Park, Post, Read, Delete, Cancel, Release)",
+    ),
+    # Version 0002 is the successor of the deprecated version 0001:
+    "API_INBOUND_DELIVERY_SRV": SAPODataServiceModel(
+        name="API_INBOUND_DELIVERY_SRV",
+        path="/sap/opu/odata/sap/API_INBOUND_DELIVERY_SRV;v=0002",
+        odata_version=2,
+        oauth_scope="ZAPI_INBOUND_DELIVERY_SRV_0002",
+        entity_sets=["A_InbDeliveryHeader", "A_InbDeliveryItem"],
+        description="Purchasing - Inbound Delivery (Create, Read, Update, Delete, Putaway, Goods Receipt)",
     ),
     "API_MATERIAL_DOCUMENT_SRV": SAPODataServiceModel(
         name="API_MATERIAL_DOCUMENT_SRV",
@@ -386,6 +500,16 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         oauth_scope="ZAPI_MAINTENANCEPLAN_0001",
         entity_sets=["MaintenancePlan", "MaintenancePlanCycle", "MaintenanceItem"],
         description="Plant Maintenance - Maintenance Plan (Create, Read, Update, Scheduling)",
+    ),
+    # RAP based service (service group API_MAINTENANCETASKLIST, service "MaintenanceTaskList",
+    # version 0001). The service group must be published in /IWFND/V4_ADMIN:
+    "API_MAINTENANCETASKLIST": SAPODataServiceModel(
+        name="API_MAINTENANCETASKLIST",
+        path="/sap/opu/odata4/sap/api_maintenancetasklist/srvd_a2x/sap/maintenancetasklist/0001",
+        odata_version=4,
+        oauth_scope="OV4:API_MAINTENANCETASKLIST",
+        entity_sets=["MaintenanceTaskList", "MaintenanceTaskListOperation"],
+        description="Plant Maintenance - Maintenance Task List (Create, Read, Update)",
     ),
     # Successor of the V2 API API_PLANNED_ORDERS (service group API_PLANNEDORDER, service
     # "PlannedOrder", version 0001):
@@ -428,7 +552,16 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_PRODUCT_SRV_0001",
         entity_sets=["A_Product", "A_ProductPlant", "A_ProductDescription"],
-        description="Master Data - Product / Material (Read)",
+        description="Master Data - Product / Material (Create, Read)",
+    ),
+    # Version 0002 of the material BOM API (the successor of the deprecated version 0001):
+    "API_BILL_OF_MATERIAL_SRV": SAPODataServiceModel(
+        name="API_BILL_OF_MATERIAL_SRV",
+        path="/sap/opu/odata/sap/API_BILL_OF_MATERIAL_SRV;v=0002",
+        odata_version=2,
+        oauth_scope="ZAPI_BILL_OF_MATERIAL_SRV_0002",
+        entity_sets=["MaterialBOM", "MaterialBOMItem"],
+        description="Master Data - Material BOM (Create, Read)",
     ),
     "API_PRODUCTION_VERSION": SAPODataServiceModel(
         name="API_PRODUCTION_VERSION",
@@ -452,7 +585,7 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_EQUIPMENT_0001",
         entity_sets=["Equipment"],
-        description="Master Data - Equipment (Read)",
+        description="Master Data - Equipment (Create, Read)",
     ),
     "API_FUNCTIONALLOCATION": SAPODataServiceModel(
         name="API_FUNCTIONALLOCATION",
@@ -460,7 +593,7 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_FUNCTIONALLOCATION_0001",
         entity_sets=["FunctionalLocation"],
-        description="Master Data - Functional Location (Read)",
+        description="Master Data - Functional Location (Create, Read)",
     ),
     "API_BUSINESS_PARTNER": SAPODataServiceModel(
         name="API_BUSINESS_PARTNER",
@@ -468,7 +601,7 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_BUSINESS_PARTNER_0001",
         entity_sets=["A_BusinessPartner", "A_BusinessPartnerRole"],
-        description="Master Data - Business Partner (Read)",
+        description="Master Data - Business Partner (Read / Create)",
     ),
     "API_COMPANYCODE_SRV": SAPODataServiceModel(
         name="API_COMPANYCODE_SRV",
@@ -574,6 +707,17 @@ ODATA_V4_IEEE754_HEADERS = {
 PURCHASE_ORDER_EXPAND_ITEMS = "_PurchaseOrderItem($expand=_PurchaseOrderScheduleLineTP,_PurOrdAccountAssignment)"
 # $expand option to read purchase requisitions with their items and account assignments:
 PURCHASE_REQUISITION_EXPAND_ITEMS = "_PurchaseRequisitionItem($expand=_PurchaseReqnAcctAssgmt)"
+# $expand option to read a single business partner with its roles, addresses, supplier and customer data
+# (to_Supplier / to_Customer are null if the business partner is no supplier / customer):
+BUSINESS_PARTNER_DETAILS_EXPAND = (
+    "to_BusinessPartnerRole,"
+    "to_BusinessPartnerAddress,"
+    "to_Supplier/to_SupplierPurchasingOrg,"
+    "to_Supplier/to_SupplierCompany,"
+    "to_Customer/to_CustomerSalesArea/to_SalesAreaTax,"
+    "to_Customer/to_CustomerSalesArea/to_PartnerFunction,"
+    "to_Customer/to_CustomerCompany"
+)
 
 # Namespace of the bound actions of the OData V4 planned order API (RAP services use
 # "com.sap.gateway.srvd_a2x.<service definition>.v<version>"):
@@ -582,6 +726,13 @@ PLANNED_ORDER_ACTION_NAMESPACE = "com.sap.gateway.srvd_a2x.api_plannedorder.v000
 
 class _ODataReadError(Exception):
     """Internal signal that reading an OData collection failed (the error has been logged already)."""
+
+
+def _failed_odata_read() -> Iterator:
+    """Return the entities of a read that already failed - for a SAPODataIterator with 'failed' set on first use."""
+
+    raise _ODataReadError
+    yield  # pragma: no cover - makes this function a generator
 
 
 class SAPODataIterator[T: BaseModel](Iterator[T]):
@@ -638,6 +789,35 @@ class SAPODataIterator[T: BaseModel](Iterator[T]):
     # end method definition
 
 
+def parse_bearer_error(response: requests.Response) -> dict[str, str] | None:
+    """Parse the OAuth error of an SAP response from its WWW-Authenticate header (RFC 6750).
+
+    With an OAuth access token SAP names the actual problem of a 401 / 403 in this header -
+    the body is just a generic HTML error page then, e.g.:
+    Bearer realm="...", error="insufficient_scope", error_description="...", scope="ZAPI_SALES_ORDER_SRV_0001"
+
+    Args:
+        response (requests.Response):
+            The response of SAP.
+
+    Returns:
+        dict[str, str] | None:
+            The fields of the header (e.g. "error", "error_description", "scope") or None if the
+            response has no Bearer error.
+
+    """
+
+    header = response.headers.get("www-authenticate", "")
+    if not header.lower().startswith("bearer"):
+        return None
+    fields = dict(re.findall(r'(\w+)="([^"]*)"', header))
+
+    return fields if fields.get("error") else None
+
+
+# end function definition
+
+
 class BearerAuth(requests.auth.AuthBase):
     """Authenticate OData requests with an SAP OAuth 2.0 access token ("Authorization: Bearer").
 
@@ -646,7 +826,7 @@ class BearerAuth(requests.auth.AuthBase):
 
     Example:
         >>> token = idp_sap.get_oauth_access_token_for_user(user_id="jane.smith@example.com", ...)
-        >>> user_sap = SAP(username="", password="", system_id="S4H", base_url=..., auth=BearerAuth(token["access_token"]))
+        >>> user_sap = SAP(username="", password="", system_id="S4H", base_url=..., auth=BearerAuth(token["access_token"], token["scope"]))
 
     The token is not renewed - create a new SAP object (with a new token) before it expires
     ('expires_in' of the token response). Each user needs an SAP object of their own, as SAP
@@ -654,16 +834,21 @@ class BearerAuth(requests.auth.AuthBase):
 
     """
 
-    def __init__(self, access_token: str) -> None:
+    def __init__(self, access_token: str, scope: str | None = None) -> None:
         """Initialize the authentication with an SAP access token.
 
         Args:
             access_token (str):
                 The "access_token" of a token response of get_oauth_access_token().
+            scope (str | None, optional):
+                The "scope" of the token response - the space-separated scopes SAP granted (the
+                requested scopes the OAuth client and the user are authorized for). Defaults to
+                None (unknown).
 
         """
 
         self._access_token = access_token
+        self.scopes: set[str] | None = set(scope.split()) if scope is not None else None
 
     # end method definition
 
@@ -685,6 +870,11 @@ class BearerAuth(requests.auth.AuthBase):
         return request
 
     # end method definition
+
+
+# Maximum number of objects found by a text search (name / description) that are read - more
+# would make the $filter of the main query too long (see SAP._resolve_text_search()):
+TEXT_SEARCH_MAX_IDS = 100
 
 
 class SAP:
@@ -1267,8 +1457,10 @@ class SAP:
                 It authenticates pyxecm as the calling application - it is not the password
                 of the end user the token is issued for.
             scope (str | None, optional):
-                Space-separated scope IDs, e.g. "API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001".
-                Defaults to None (the default scopes of the OAuth client).
+                Space-separated scope IDs, e.g. "API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001" -
+                one per OData service that is called with the token. Defaults to None (no scope
+                parameter). S/4HANA does not fall back to the scopes of the OAuth client then, but
+                answers with "invalid_scope" - pass the scopes explicitly.
 
         Returns:
             dict | None:
@@ -1341,6 +1533,18 @@ class SAP:
             token.get("expires_in", "?"),
         )
 
+        # SAP grants the requested scopes that the OAuth client and the user are authorized for and
+        # silently drops the others - calls to their services fail later with 403 insufficient_scope:
+        missing_scopes = sorted(set((scope or "").split()) - set(token.get("scope", "").split()))
+        if missing_scopes and "scope" in token:
+            self.logger.warning(
+                "SAP did not grant %d of the requested scopes -> %s (missing in S_SCOPE of the user or in the "
+                "OAuth client -> '%s') - calls to their OData services will fail with HTTP 403!",
+                len(missing_scopes),
+                ", ".join(missing_scopes),
+                client_id,
+            )
+
         return token
 
     # end method definition
@@ -1372,8 +1576,9 @@ class SAP:
                 It authenticates pyxecm as the calling application - it is not the password
                 of the end user the token is issued for.
             scope (str | None, optional):
-                Space-separated scope IDs, e.g. "API_MAINTENANCEORDER_0002". Defaults to
-                None (the default scopes of the OAuth client).
+                Space-separated scope IDs, e.g. "API_MAINTENANCEORDER_0002". Defaults to None
+                (no scope parameter) - S/4HANA answers with "invalid_scope" then, see
+                get_oauth_access_token().
             nameid_format (str, optional):
                 The NameID format - must match transaction SAML2 (see get_saml_assertion()).
                 Defaults to "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified".
@@ -1421,6 +1626,49 @@ class SAP:
             )
 
         return self._base_url + service.path
+
+    # end method definition
+
+    def _service_name_of_url(self, url: str) -> str:
+        """Return the name of the OData service of a request URL (for error messages).
+
+        Args:
+            url (str):
+                The request URL, e.g. ".../sap/opu/odata/sap/API_SALES_ORDER_SRV/A_SalesOrder('413')".
+
+        Returns:
+            str:
+                The name in SAP_ODATA_SERVICES, e.g. "API_SALES_ORDER_SRV", or the URL path if the
+                service is not registered.
+
+        """
+
+        path = url.removeprefix(self._base_url).split("?")[0]
+        service = next(
+            (
+                service
+                for service in SAP_ODATA_SERVICES.values()
+                if path == service.path or path.startswith(service.path.rstrip("/") + "/")
+            ),
+            None,
+        )
+
+        return service.name if service else path
+
+    # end method definition
+
+    @property
+    def granted_scopes(self) -> set[str] | None:
+        """Return the OAuth scopes the access token of this SAP object was granted.
+
+        Returns:
+            set[str] | None:
+                The scopes (see BearerAuth) or None if the object does not use an access token
+                or the scopes are unknown.
+
+        """
+
+        return self._auth.scopes if isinstance(self._auth, BearerAuth) else None
 
     # end method definition
 
@@ -1768,7 +2016,29 @@ class SAP:
 
             # Permanent error:
             error = SAPODataErrorModel.from_response(response)
-            if response.status_code == HTTPStatus.UNAUTHORIZED:
+            bearer_error = parse_bearer_error(response)
+            if bearer_error and bearer_error["error"] == "insufficient_scope":
+                # SAP answers with an HTML page - say which scope is missing and where to add it:
+                error.message = (
+                    "No authorization for OData service -> '{}': the access token does not contain its scope -> "
+                    "'{}'. The scope is missing in the authorizations of the user (S_SCOPE, transaction PFCG) or "
+                    "in the OAuth client (transaction SOAUTH2).".format(
+                        self._service_name_of_url(url), bearer_error.get("scope", "?")
+                    )
+                )
+            elif bearer_error and bearer_error["error"] == "scope_check_impossible":
+                error.message = (
+                    "OAuth is not enabled for OData service -> '{}' (it has no scope) - enable OAuth for it in "
+                    "transaction /IWFND/MAINT_SERVICE.".format(self._service_name_of_url(url))
+                )
+            elif response.status_code == HTTPStatus.FORBIDDEN and error.message == "HTML error page returned":
+                error.message = (
+                    "No authorization for OData service -> '{}' (SAP returned an HTML error page) - check the "
+                    "authorizations of the user with transaction SU53, e.g. S_SERVICE.".format(
+                        self._service_name_of_url(url)
+                    )
+                )
+            elif response.status_code == HTTPStatus.UNAUTHORIZED:
                 # SAP answers 401 with an HTML page - say instead what was rejected and what to do:
                 error.message = (
                     "SAP rejected the access token (expired or revoked) - get a new token and create a new SAP object"
@@ -2011,6 +2281,54 @@ class SAP:
         error = SAPODataErrorModel.from_response(response)
         error_text = "{} {} {}".format(error.code, error.message, error.raw_text[:2000]).lower()
 
+        # With an OAuth access token (principal propagation) SAP names the actual problem in the
+        # WWW-Authenticate header (RFC 6750) - the body is just a generic HTML error page then:
+        bearer_error = parse_bearer_error(response)
+        if bearer_error:
+            bearer_error_code = bearer_error["error"]
+            message = "OAuth error -> {}{}".format(
+                bearer_error_code,
+                " - {}".format(bearer_error["error_description"]) if bearer_error.get("error_description") else "",
+            )
+            if bearer_error_code == "scope_check_impossible":
+                # SAP finds no scope for the service, i.e. OAuth has not been enabled for it:
+                state = SAPODataServiceState.NOT_ACTIVATED
+                hint = (
+                    "OAuth is not enabled for the service '{}'. Enable OAuth for it in transaction {} (this "
+                    "creates its scope ID), assign the scope to the OAuth client in SOAUTH2, authorize the users "
+                    "with S_SCOPE in PFCG and add the scope ID to SAP__OAUTH_SCOPE.".format(
+                        service.name,
+                        activation_transaction,
+                    )
+                )
+            elif bearer_error_code == "insufficient_scope":
+                state = SAPODataServiceState.FORBIDDEN
+                hint = (
+                    "The access token does not carry the scope of the service '{}'. Add its scope ID to "
+                    "SAP__OAUTH_SCOPE, assign it to the OAuth client in SOAUTH2 and authorize the users with "
+                    "S_SCOPE in PFCG.".format(service.name)
+                )
+            elif bearer_error_code == "invalid_token":
+                state = SAPODataServiceState.UNAUTHORIZED
+                hint = (
+                    "The access token is invalid or expired. Get a new token (get_oauth_access_token_for_user()) - "
+                    "tokens are only valid in the SAP client they were issued for."
+                )
+            else:
+                state = SAPODataServiceState.ERROR
+                hint = (
+                    "SAP rejected the OAuth access token. See SAP note 1688545 (OAuth 2.0 troubleshooting) and "
+                    "the security audit log (SM20)."
+                )
+            return SAPODataServiceStatusModel(
+                service=service,
+                url=url,
+                state=state,
+                http_status=status_code,
+                message=message,
+                hint=hint,
+            )
+
         if status_code == HTTPStatus.UNAUTHORIZED:
             state = SAPODataServiceState.UNAUTHORIZED
             hint = "Check user name, password and client. The user may also be locked (transaction SU01)."
@@ -2207,7 +2525,8 @@ class SAP:
                 The password of the SU01 system user behind that OAuth client.
             scope (str | None, optional):
                 Space-separated scope IDs to request, e.g. "API_MAINTENANCEORDER_0002".
-                Defaults to None (the default scopes of the OAuth client).
+                Defaults to None (no scope parameter) - S/4HANA answers with "invalid_scope"
+                then, see get_oauth_access_token().
             nameid_format (str, optional):
                 The NameID format - must match transaction SAML2. Defaults to
                 "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified".
@@ -2302,12 +2621,22 @@ class SAP:
                     "in transaction SOAUTH2."
                 ),
             )
+        elif "invalid_scope" in error_lower and not scope:
+            state, hint = (
+                SAPAuthCheckState.REJECTED,
+                (
+                    "No scope was requested - SAP does not fall back to the scopes of the OAuth client. Pass the "
+                    "scope IDs of the OData services (setting SAP__OAUTH_SCOPE)."
+                ),
+            )
         elif "invalid_scope" in error_lower:
             state, hint = (
                 SAPAuthCheckState.REJECTED,
                 (
-                    "The requested scope is not assigned to the OAuth client. Enable OAuth for the OData service(s) "
-                    "in /IWFND/MAINT_SERVICE and assign the scope(s) to the client in SOAUTH2."
+                    "The scope is not assigned to the OAuth client or the user is not authorized for it. Enable "
+                    "OAuth for the OData service(s) in /IWFND/MAINT_SERVICE and assign the scope(s) to the client "
+                    "in SOAUTH2 - and give the user authorization object S_SCOPE for client and scope(s) in PFCG "
+                    "(check with SU53). If it works for one user but not another, it is S_SCOPE."
                 ),
             )
         else:
@@ -2343,11 +2672,22 @@ class SAP:
 
     # end method definition
 
-    def _call_odata_function(self, service: str, function: str, parameters: dict, label: str) -> dict | None:
+    def _call_odata_function(
+        self,
+        service: str,
+        function: str,
+        parameters: dict,
+        label: str,
+        etag_entity_path: str | None = None,
+        etag: str | None = None,
+    ) -> dict | None:
         """Call a function import (action) of an OData V2 service.
 
         SAP implements actions in OData V2 services (e.g. "ReleaseOrder") as function
         imports that are called with POST and their parameters in the query string.
+        Some services require the current ETag of the entity the function changes (If-Match
+        header) - SAP answers "428 Precondition required" without it, also for services
+        without an ETag property in their $metadata (e.g. RAP based ones). "*" is not accepted.
 
         Args:
             service (str):
@@ -2358,6 +2698,13 @@ class SAP:
                 The parameters of the function import (None values are omitted).
             label (str):
                 Describes the call for log messages, e.g. "release production order -> '1000123'".
+            etag_entity_path (str | None, optional):
+                The path of the entity the function changes, relative to the service root, e.g.
+                "A_ProductionOrder_2('1000123')". If given, the entity is read first and its ETag is
+                sent in the If-Match header. Defaults to None (no If-Match header).
+            etag (str | None, optional):
+                The ETag for the If-Match header if the caller knows it already (e.g. the entity
+                cannot be read in this service). Defaults to None.
 
         Returns:
             dict | None:
@@ -2368,10 +2715,20 @@ class SAP:
         url = self.service_url(service) + "/" + function
         params = {name: odata_literal(value) for name, value in parameters.items() if value is not None}
 
+        headers = {"If-Match": etag} if etag else {}
+        if etag_entity_path and not etag:
+            exists, etag = self._get_odata_etag(
+                url=self.service_url(service) + "/" + etag_entity_path, headers=headers, label=label
+            )
+            if not exists:
+                return None
+            headers["If-Match"] = etag or "*"
+
         self.logger.info("Call SAP function -> '%s' to %s...", function, label)
         response = self.do_request(
             url=url,
             method="POST",
+            headers=headers,
             params=params,
             failure_message="Failed to {}".format(label),
             success_message="Successfully completed: {}.".format(label),
@@ -2393,6 +2750,10 @@ class SAP:
         label: str,
     ) -> dict | None:
         """Call a bound action of an OData V4 entity.
+
+        The entity is read first and its ETag is sent in the If-Match header - SAP's V4 services
+        declare optimistic concurrency (Core.OptimisticConcurrency) and answer "428 Precondition
+        required" without it.
 
         Args:
             service (str):
@@ -2416,12 +2777,20 @@ class SAP:
 
         url = "{}/{}/{}.{}".format(self.service_url(service), entity_path, namespace, action)
 
+        headers = dict(ODATA_V4_IEEE754_HEADERS)
+        exists, etag = self._get_odata_etag(
+            url="{}/{}".format(self.service_url(service), entity_path), headers=dict(headers), label=label
+        )
+        if not exists:
+            return None
+        headers["If-Match"] = etag or "*"
+
         self.logger.info("Call SAP action -> '%s' to %s...", action, label)
 
         return self.do_request(
             url=url,
             method="POST",
-            headers=ODATA_V4_IEEE754_HEADERS,
+            headers=headers,
             json_data=parameters or {},
             failure_message="Failed to {}".format(label),
             success_message="Successfully completed: {}.".format(label),
@@ -2653,6 +3022,79 @@ class SAP:
 
     # end method definition
 
+    def _resolve_text_search[Q: SAPODataQueryModel](self, service: str, query: Q, label: str) -> tuple[Q | None, bool]:
+        """Resolve the name / description criterion of a query via the text entity set (see ODataTextSearch).
+
+        The texts are searched (in all languages, case-insensitively via the common spellings of the
+        term, see text_search_variants()) and the query is restricted to the IDs of the objects found.
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            query (Q):
+                The query - unchanged if it has no text search or no search term.
+            label (str):
+                The (plural) name of the objects for log messages, e.g. "products".
+
+        Returns:
+            tuple[Q | None, bool]:
+                The query restricted to the IDs found (None if no object matches) and whether reading
+                the texts failed.
+
+        """
+
+        search = type(query).TEXT_SEARCH
+        term = getattr(query, search.field, None) if search else None
+        if not search or not term:
+            return query, False
+
+        odata_version = SAP_ODATA_SERVICES[service].odata_version
+        variants = text_search_variants(term)
+        conditions = [
+            " or ".join(
+                ODataCondition(text_property, operator="contains").to_filter(
+                    value=variants, odata_version=odata_version
+                )
+                for text_property in search.properties
+            )
+        ]
+        for field_name, text_property in search.scope:
+            value = getattr(query, field_name, None)
+            if value:
+                conditions.append(ODataCondition(text_property).to_filter(value=value, odata_version=odata_version))
+
+        texts = self._iter_odata_collection(
+            service=service,
+            entity_set=search.entity_set,
+            model=SAPODataTextResponseModel,
+            query=SAPODataTextQueryModel(conditions=conditions, order_by="{} asc".format(search.key)),
+            label="{} texts".format(label),
+        )
+        ids = list(dict.fromkeys(str((text.model_extra or {}).get(search.key, "")) for text in texts))
+        if texts.failed:
+            return None, True
+        ids = [object_id for object_id in ids if object_id]
+        # Combined with IDs given in the query, only the objects of both match:
+        given_ids = getattr(query, search.ids_field, None)
+        if given_ids:
+            ids = [object_id for object_id in ids if object_id in given_ids]
+        if not ids:
+            self.logger.info("No SAP %s with a name containing -> '%s'.", label, term)
+            return None, False
+        if len(ids) > TEXT_SEARCH_MAX_IDS:
+            self.logger.warning(
+                "%d SAP %s have a name containing -> '%s' - only the first %d are read.",
+                len(ids),
+                label,
+                term,
+                TEXT_SEARCH_MAX_IDS,
+            )
+            ids = ids[:TEXT_SEARCH_MAX_IDS]
+
+        return query.model_copy(update={search.ids_field: ids, search.field: None}), False
+
+    # end method definition
+
     def _get_odata_etag(self, url: str, headers: dict, label: str) -> tuple[bool, str | None]:
         """Get the ETag of an OData entity (needed for the If-Match header of updates and deletes).
 
@@ -2807,10 +3249,16 @@ class SAP:
     # end method definition
 
     def create_maintenance_order(self, order: SAPMaintenanceOrderModel | dict) -> dict | None:
-        """Create an SAP Plant Maintenance order (including its operations).
+        """Create an SAP Plant Maintenance order (including its operations and their components).
 
-        Uses the OData V2 API API_MAINTENANCEORDER with a deep insert, so the order
-        header and all operations are created (and committed) in one request.
+        Uses the OData V2 API API_MAINTENANCEORDER: the order header and all operations are
+        created (and committed) in one request (deep insert). SAP rejects components in this
+        request ("Error reading the order  in the document tables") - they are created for
+        the new order afterwards (see create_maintenance_order_component()).
+
+        With a task list reference (SAPMaintenanceOrderModel.task_list), the operations and
+        materials of the task list become the first operations and components of the order
+        (see expand_maintenance_order_task_list()) - the API cannot include a task list.
 
         Args:
             order (SAPMaintenanceOrderModel | dict):
@@ -2820,31 +3268,226 @@ class SAP:
 
         Returns:
             dict | None:
-                The created maintenance order as returned by SAP (including the
-                order number in "MaintenanceOrder") or None in case of an error.
+                The created order as returned by SAP (including "MaintenanceOrder") or None in
+                case of an error. If the order has been created but components could not be
+                created, the result has the key "ComponentErrors" with the error messages (and
+                last_error is set).
 
         Example:
             >>> sap.create_maintenance_order(
-            ...     {
-            ...         "order_type": "YA01",
-            ...         "description": "Replace pump seal",
-            ...         "planning_plant": "1010",
-            ...         "main_work_center": "RES-0100",
-            ...         "main_work_center_plant": "1010",
-            ...         "equipment": "210100001",
-            ...         "operations": [{"operation": "10", "description": "Replace seal", "control_key": "YBM1"}],
-            ...     }
+            ... {
+            ...     "order_type": "YA01",
+            ...     "description": "Replace pump seal",
+            ...     "planning_plant": "1010",
+            ...     "main_work_center": "RES-0100",
+            ...     "main_work_center_plant": "1010",
+            ...     "equipment": "210100001",
+            ...     "operations": [{"operation": "10", "description": "Replace seal", "control_key": "YBM1"}],
+            ...     "task_list": {"task_list_type": "A", "task_list_group": "17", "storage_location": "0001"},
+            ... }
             ... )
 
         """
 
-        return self._create_odata_entity(
+        if isinstance(order, dict):
+            try:
+                order = SAPMaintenanceOrderModel.model_validate(order)
+            except ValidationError as validation_error:
+                self.log_error("Invalid maintenance order data; error -> %s", str(validation_error))
+                return None
+        if order.task_list:
+            order = self.expand_maintenance_order_task_list(order)
+            if order is None:
+                return None
+
+        created = self._create_odata_entity(
             service="API_MAINTENANCEORDER",
             entity_set="MaintenanceOrder",
             model=SAPMaintenanceOrderModel,
             data=order,
             key_fields=["MaintenanceOrder"],
             label="maintenance order",
+        )
+        if created is None:
+            return None
+
+        # The components need the new order - SAP rejects them in the deep insert:
+        component_errors = [
+            error
+            for operation in order.operations
+            for component in operation.components
+            if (error := self._create_order_component(created["MaintenanceOrder"], operation, component))
+        ]
+        if component_errors:
+            self.log_error(
+                "Maintenance order -> %s has been created, but %d component(s) could not be created -> %s",
+                created["MaintenanceOrder"],
+                len(component_errors),
+                "; ".join(component_errors),
+            )
+            created["ComponentErrors"] = component_errors
+
+        return created
+
+    # end method definition
+
+    def _create_order_component(
+        self,
+        order_id: str,
+        operation: SAPMaintenanceOrderOperationModel,
+        component: SAPMaintenanceOrderComponentModel,
+    ) -> str | None:
+        """Create a component of an operation of a new maintenance order (see create_maintenance_order()).
+
+        Args:
+            order_id (str):
+                The number of the new maintenance order.
+            operation (SAPMaintenanceOrderOperationModel):
+                The operation the component belongs to - its plant is the default plant of the component.
+            component (SAPMaintenanceOrderComponentModel):
+                The component.
+
+        Returns:
+            str | None:
+                None if the component has been created, otherwise the error message.
+
+        """
+
+        created = self.create_maintenance_order_component(
+            order_id=order_id,
+            operation=operation.operation,
+            component=component.model_copy(update={"plant": component.plant or operation.plant}),
+        )
+        if created is not None:
+            return None
+
+        return "material -> '{}' of operation -> {}: {}".format(
+            component.material, operation.operation, self.last_error
+        )
+
+    # end method definition
+
+    def expand_maintenance_order_task_list(self, order: SAPMaintenanceOrderModel) -> SAPMaintenanceOrderModel | None:
+        """Take over the operations and materials of the task list referenced by a new maintenance order.
+
+        The operations of the task list (number, text, control key, work center, work and
+        number of people) become the first operations of the order, their materials the
+        components of these operations. Operations of the order itself follow - their
+        numbers must not clash with the ones of the task list.
+
+        Args:
+            order (SAPMaintenanceOrderModel):
+                The order with a task list reference (SAPMaintenanceOrderModel.task_list).
+
+        Returns:
+            SAPMaintenanceOrderModel | None:
+                A copy of the order with the operations of the task list (and without the task
+                list reference) or None in case of an error (e.g. the task list does not exist).
+
+        """
+
+        reference = order.task_list
+        if reference is None:
+            return order
+
+        task_list = self.get_task_list(
+            task_list_type=reference.task_list_type,
+            task_list_group=reference.task_list_group,
+            task_list_group_counter=reference.task_list_group_counter,
+            expand_items=True,
+        )
+        if task_list is None:
+            self.log_error(
+                "Cannot take over the operations of task list -> %s/%s/%s into the maintenance order; error -> %s",
+                reference.task_list_type,
+                reference.task_list_group,
+                reference.task_list_group_counter,
+                self.last_error,
+            )
+            return None
+
+        try:
+            operations = [
+                SAPMaintenanceOrderOperationModel(
+                    operation=operation.operation,
+                    description=operation.description,
+                    control_key=operation.control_key or None,
+                    work_center=operation.work_center or None,
+                    plant=operation.plant or None,
+                    planned_work=operation.work or None,
+                    planned_work_unit=operation.work_unit or None,
+                    number_of_capacities=operation.number_of_capacities or None,
+                    components=[
+                        SAPMaintenanceOrderComponentModel(
+                            material=material.material,
+                            quantity=material.quantity,
+                            unit=material.unit,
+                            plant=operation.plant or order.planning_plant,
+                            storage_location=reference.storage_location,
+                            item_category=material.item_category or "L",
+                        )
+                        for material in operation.materials or []
+                    ],
+                )
+                for operation in sorted(task_list.operations or [], key=lambda item: int(item.operation or 0))
+            ]
+            expanded = SAPMaintenanceOrderModel.model_validate(
+                {
+                    **order.model_dump(exclude={"operations", "task_list"}),
+                    "operations": [*operations, *order.operations],
+                }
+            )
+        except ValidationError as validation_error:
+            self.log_error(
+                "Cannot take over the operations of task list -> %s/%s/%s into the maintenance order; error -> %s",
+                reference.task_list_type,
+                reference.task_list_group,
+                reference.task_list_group_counter,
+                str(validation_error),
+            )
+            return None
+
+        return expanded
+
+    # end method definition
+
+    def create_maintenance_order_component(
+        self,
+        order_id: str,
+        operation: str,
+        component: SAPMaintenanceOrderComponentModel | dict,
+        sub_operation: str = "",
+    ) -> dict | None:
+        """Create a component (material) for an operation of an existing SAP maintenance order.
+
+        SAP reserves the material (stock item) for the operation.
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            operation (str):
+                The operation number, e.g. "0010".
+            component (SAPMaintenanceOrderComponentModel | dict):
+                The component (material, quantity, unit, plant, storage location, item category).
+            sub_operation (str, optional):
+                The sub-operation number. Defaults to "" (the operation itself).
+
+        Returns:
+            dict | None:
+                The created component as returned by SAP (including "Reservation") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_MAINTENANCEORDER",
+            entity_set="MaintenanceOrderOperation(MaintenanceOrder='{}',MaintenanceOrderOperation='{}',"
+            "MaintenanceOrderSubOperation='{}')/to_MaintOrderOpComponent_2".format(
+                self._quote_key(order_id), self._quote_key(operation.zfill(4)), self._quote_key(sub_operation)
+            ),
+            model=SAPMaintenanceOrderComponentModel,
+            data=component,
+            key_fields=["MaintOrderComponentInternalID"],
+            label="component of operation -> {} of maintenance order -> {}".format(operation, order_id),
         )
 
     # end method definition
@@ -2928,7 +3571,11 @@ class SAP:
 
         # Single quotes in OData key values are escaped by doubling them:
         url = self.service_url("API_MAINTENANCEORDER") + "/MaintenanceOrder('{}')".format(order_id.replace("'", "''"))
-        params = {"$expand": "to_MaintenanceOrderOperation"} if expand_operations else None
+        params = (
+            {"$expand": "to_MaintenanceOrderOperation,to_MaintenanceOrderOperation/to_MaintOrderOpComponent_2"}
+            if expand_operations
+            else None
+        )
 
         response = self.do_request(
             url=url,
@@ -3008,6 +3655,300 @@ class SAP:
             function=str(action),
             parameters={"MaintenanceOrder": order_id, **(parameters or {})},
             label="{} maintenance order -> '{}'".format(action.name.lower().replace("_", " "), order_id),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def get_maintenance_order_deletion_steps(self, order_id: str) -> list[SAPMaintenanceOrderAction] | None:
+        """Return the status actions needed to delete an SAP maintenance order (see delete_maintenance_order()).
+
+        SAP only accepts the deletion flag for closed orders - the order is closed first, depending on its status:
+        * Created (CRTD, not released): DO_NOT_EXECUTE - closes the order as not performed (CLSD NCMP).
+        * Released (REL): TECHNICALLY_COMPLETE (TECO) and CLOSE (CLSD).
+        * Technically completed (TECO): CLOSE.
+        * Closed (CLSD): nothing.
+        The last step is always MARK_FOR_DELETION.
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+
+        Returns:
+            list[SAPMaintenanceOrderAction] | None:
+                The status actions in their order - empty if the order already has the
+                deletion flag - or None if the order does not exist or in case of an error.
+
+        """
+
+        order = self.get_maintenance_order(order_id=order_id, expand_operations=False)
+        if order is None:
+            return None
+
+        statuses = set((order.system_status or "").split())
+        if "DLFL" in statuses:
+            return []
+
+        steps = []
+        if "CLSD" not in statuses:
+            if "REL" not in statuses and "TECO" not in statuses:
+                steps.append(SAPMaintenanceOrderAction.DO_NOT_EXECUTE)
+            else:
+                if "TECO" not in statuses:
+                    steps.append(SAPMaintenanceOrderAction.TECHNICALLY_COMPLETE)
+                steps.append(SAPMaintenanceOrderAction.CLOSE)
+        steps.append(SAPMaintenanceOrderAction.MARK_FOR_DELETION)
+
+        return steps
+
+    # end method definition
+
+    def delete_maintenance_order(
+        self,
+        order_id: str,
+        include_notification: bool = True,
+        steps: list[SAPMaintenanceOrderAction] | None = None,
+    ) -> bool:
+        """Delete an SAP maintenance order by setting its deletion flag (status DLFL).
+
+        API_MAINTENANCEORDER has no OData DELETE and SAP only accepts the deletion flag
+        for closed orders (otherwise: IW/875 "You cannot change the status of order").
+        This method closes the order first, depending on its status (see
+        get_maintenance_order_deletion_steps()):
+        * Created (CRTD, not released): "do not execute" - closes the order as not
+          performed (CLSD NCMP).
+        * Released (REL): technically complete (TECO) and close (CLSD). This needs a
+          settlement rule of the order - SAP rejects it otherwise with
+          "account assignment not maintained".
+        The deletion flag can be removed again with SAPMaintenanceOrderAction.RESET_MARKED_FOR_DELETION.
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            include_notification (bool, optional):
+                Whether the assigned maintenance notification is completed and gets the
+                deletion flag as well. Defaults to True.
+            steps (list[SAPMaintenanceOrderAction] | None, optional):
+                The status actions to do - e.g. the result of get_maintenance_order_deletion_steps()
+                the user has confirmed. Defaults to None = determine them from the current status.
+
+        Returns:
+            bool:
+                True if the order has the deletion flag, False in case of an error.
+
+        """
+
+        if steps is None:
+            steps = self.get_maintenance_order_deletion_steps(order_id=order_id)
+            if steps is None:
+                return False
+        if not steps:
+            self.logger.info("SAP maintenance order -> '%s' already has the deletion flag.", order_id)
+            return True
+
+        for action in steps:
+            if action == SAPMaintenanceOrderAction.MARK_FOR_DELETION:
+                parameters = {"AssgdMaintNotifIsToBeSetDel": include_notification}
+            else:
+                parameters = {"AssignedMaintNotifIsToBeClosed": include_notification}
+            # Stop at the first error - the next steps need the status of this one:
+            if not self.change_maintenance_order_status(order_id=order_id, action=action, parameters=parameters):
+                return False
+
+        return True
+
+    # end method definition
+
+    def _maintenance_order_operation_path(self, order_id: str, operation: str, sub_operation: str = "") -> str:
+        """Return the OData path of a maintenance order operation (its key has three parts).
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            operation (str):
+                The operation number, e.g. "10" or "0010" (padded to 4 digits).
+            sub_operation (str, optional):
+                The sub-operation number. Empty (default) for operations.
+
+        Returns:
+            str:
+                The path relative to the service root, e.g.
+                "MaintenanceOrderOperation(MaintenanceOrder='4000340',MaintenanceOrderOperation='0010',
+                MaintenanceOrderSubOperation='')".
+
+        Raises:
+            ValueError:
+                If the operation or sub-operation number is not numeric or too long.
+
+        """
+
+        return (
+            "MaintenanceOrderOperation(MaintenanceOrder='{}',MaintenanceOrderOperation='{}',"
+            "MaintenanceOrderSubOperation='{}')".format(
+                self._quote_key(order_id),
+                pad_number(operation, length=4),
+                pad_number(sub_operation, length=4) if sub_operation else "",
+            )
+        )
+
+    # end method definition
+
+    def create_maintenance_order_operation(
+        self,
+        order_id: str,
+        operation: SAPMaintenanceOrderOperationModel | dict,
+    ) -> dict | None:
+        """Add an operation (work step) to an existing SAP maintenance order.
+
+        The operation is created via the navigation property of the order (the entity set
+        MaintenanceOrderOperation itself does not allow creates).
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            operation (SAPMaintenanceOrderOperationModel | dict):
+                The new operation. The operation number must not exist in the order yet.
+
+        Returns:
+            dict | None:
+                The created operation as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_MAINTENANCEORDER",
+            entity_set="MaintenanceOrder('{}')/to_MaintenanceOrderOperation".format(self._quote_key(order_id)),
+            model=SAPMaintenanceOrderOperationModel,
+            data=operation,
+            key_fields=["MaintenanceOrder", "MaintenanceOrderOperation"],
+            label="operation of maintenance order -> '{}'".format(order_id),
+        )
+
+    # end method definition
+
+    def update_maintenance_order_operation(
+        self,
+        order_id: str,
+        operation: str,
+        changes: dict,
+        sub_operation: str = "",
+    ) -> bool:
+        """Update individual fields of an operation of an SAP maintenance order.
+
+        The changes are validated with the field definitions of SAPMaintenanceOrderOperationModel.
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            operation (str):
+                The operation number, e.g. "10" or "0010".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPMaintenanceOrderOperationModel
+                or OData property names, e.g. {"planned_work": 6, "planned_work_unit": "H"}.
+            sub_operation (str, optional):
+                The sub-operation number. Empty (default) for operations.
+
+        Returns:
+            bool:
+                True if the operation has been updated, False in case of an error.
+
+        """
+
+        label = "operation -> '{}' of maintenance order -> '{}'".format(operation, order_id)
+        try:
+            entity_path = self._maintenance_order_operation_path(order_id, operation, sub_operation)
+        except ValueError as value_error:
+            self.log_error("Invalid key of SAP %s; error -> %s", label, str(value_error))
+            return False
+
+        return self._update_odata_entity(
+            service="API_MAINTENANCEORDER",
+            entity_path=entity_path,
+            model=SAPMaintenanceOrderOperationModel,
+            changes=changes,
+            label=label,
+        )
+
+    # end method definition
+
+    def delete_maintenance_order_operation(self, order_id: str, operation: str, sub_operation: str = "") -> bool:
+        """Delete an operation of an SAP maintenance order.
+
+        Operations of orders that are not released yet (status CRTD) are removed. For
+        released orders SAP typically keeps the operation with its deletion flag
+        (IsMarkedForDeletion) - it is no longer planned or executed. Operations with
+        confirmations or follow-on documents (e.g. purchase requisitions) cannot be deleted.
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            operation (str):
+                The operation number, e.g. "10" or "0010".
+            sub_operation (str, optional):
+                The sub-operation number. Empty (default) for operations.
+
+        Returns:
+            bool:
+                True if the operation has been deleted, False in case of an error.
+
+        """
+
+        label = "operation -> '{}' of maintenance order -> '{}'".format(operation, order_id)
+        try:
+            entity_path = self._maintenance_order_operation_path(order_id, operation, sub_operation)
+        except ValueError as value_error:
+            self.log_error("Invalid key of SAP %s; error -> %s", label, str(value_error))
+            return False
+
+        return self._delete_odata_entity(service="API_MAINTENANCEORDER", entity_path=entity_path, label=label)
+
+    # end method definition
+
+    def change_maintenance_order_operation_status(
+        self,
+        order_id: str,
+        operation: str,
+        action: SAPMaintenanceOrderOperationAction,
+        sub_operation: str = "",
+    ) -> bool:
+        """Change the status of an operation of an SAP maintenance order (e.g. dispatch it).
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000340".
+            operation (str):
+                The operation number, e.g. "10" or "0010".
+            action (SAPMaintenanceOrderOperationAction):
+                The status action, e.g. SAPMaintenanceOrderOperationAction.DISPATCH.
+            sub_operation (str, optional):
+                The sub-operation number. Empty (default) for operations.
+
+        Returns:
+            bool:
+                True if the status has been changed, False in case of an error.
+
+        """
+
+        label = "{} operation -> '{}' of maintenance order -> '{}'".format(
+            action.name.lower().replace("_", " "), operation, order_id
+        )
+        try:
+            operation = pad_number(operation, length=4)
+            sub_operation = pad_number(sub_operation, length=4) if sub_operation else ""
+        except ValueError as value_error:
+            self.log_error("Cannot %s; error -> %s", label, str(value_error))
+            return False
+
+        result = self._call_odata_function(
+            service="API_MAINTENANCEORDER",
+            function=str(action),
+            parameters={
+                "MaintenanceOrder": order_id,
+                "MaintenanceOrderOperation": operation,
+                "MaintenanceOrderSubOperation": sub_operation,
+            },
+            label=label,
         )
 
         return result is not None
@@ -3423,6 +4364,8 @@ class SAP:
             function=str(action),
             parameters={"MaintenanceNotification": notification_id, **(parameters or {})},
             label="{} maintenance notification -> '{}'".format(action.name.lower().replace("_", " "), notification_id),
+            # RAP based service - its functions need the ETag of the notification (428 Precondition required otherwise):
+            etag_entity_path="MaintenanceNotification('{}')".format(self._quote_key(notification_id)),
         )
 
         return result is not None
@@ -3958,6 +4901,135 @@ class SAP:
 
     # end method definition
 
+    def update_purchase_contract(self, contract_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP purchase contract (header).
+
+        The changes are validated with the field definitions of SAPPurchaseContractModel (e.g. upper
+        case codes, lengths, date formats). Use update_purchase_contract_item() to change items.
+
+        Some S/4HANA releases reject header changes with "Purchase contract cannot be saved in
+        preparation" (versions 0001 and 0002 of the API) while item changes work.
+
+        Args:
+            contract_id (str):
+                The purchase contract number, e.g. "4600000070".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPPurchaseContractModel or OData
+                property names, e.g. {"validity_end_date": "2027-12-31"}.
+
+        Returns:
+            bool:
+                True if the purchase contract has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PURCHASECONTRACT_PROCESS_SRV",
+            entity_path="A_PurchaseContract('{}')".format(self._quote_key(contract_id)),
+            model=SAPPurchaseContractModel,
+            changes=changes,
+            label="purchase contract -> '{}'".format(contract_id),
+        )
+
+    # end method definition
+
+    def update_purchase_contract_item(self, contract_id: str, item: str, changes: dict) -> bool:
+        """Update individual fields of an item of an SAP purchase contract.
+
+        The changes are validated with the field definitions of SAPPurchaseContractItemModel.
+        The deletion indicator of the item can be changed with the OData property
+        "PurchasingContractDeletionCode" ("L" = deleted, "S" = blocked, "" = active).
+
+        Args:
+            contract_id (str):
+                The purchase contract number, e.g. "4600000070".
+            item (str):
+                The item number, e.g. "10" or "00010".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPPurchaseContractItemModel or
+                OData property names, e.g. {"net_price": 925.00}.
+
+        Returns:
+            bool:
+                True if the item has been updated, False in case of an error.
+
+        """
+
+        label = "item -> '{}' of purchase contract -> '{}'".format(item, contract_id)
+        try:
+            item = pad_number(item, length=5)
+        except ValueError as value_error:
+            self.log_error("Invalid key of SAP %s; error -> %s", label, str(value_error))
+            return False
+
+        return self._update_odata_entity(
+            service="API_PURCHASECONTRACT_PROCESS_SRV",
+            entity_path="A_PurchaseContractItem(PurchaseContract='{}',PurchaseContractItem='{}')".format(
+                self._quote_key(contract_id), item
+            ),
+            model=SAPPurchaseContractItemModel,
+            changes=changes,
+            label=label,
+        )
+
+    # end method definition
+
+    def delete_purchase_contract(self, contract_id: str, items: list[str] | None = None) -> bool:
+        """Delete an SAP purchase contract or some of its items (set their deletion indicator).
+
+        API_PURCHASECONTRACT_PROCESS_SRV does not allow DELETE - like in SAP GUI
+        (ME32K), contracts are deleted by setting the deletion indicator "L" of their
+        items. Deleted items can no longer be referenced by purchase orders. The
+        deletion can be undone per item with update_purchase_contract_item() and
+        {"PurchasingContractDeletionCode": ""}.
+
+        Args:
+            contract_id (str):
+                The purchase contract number, e.g. "4600000070".
+            items (list[str] | None, optional):
+                The item numbers to delete, e.g. ["10"]. Defaults to None = all items.
+
+        Returns:
+            bool:
+                True if all (given) items are deleted, False in case of an error.
+
+        """
+
+        contract = self.get_purchase_contract(contract_id=contract_id, expand_items=True)
+        if contract is None:
+            return False
+
+        try:
+            wanted = {pad_number(item, length=5) for item in items} if items is not None else None
+        except ValueError as value_error:
+            self.log_error("Invalid item of SAP purchase contract -> '%s'; error -> %s", contract_id, str(value_error))
+            return False
+
+        existing = {item.item: item for item in contract.items or []}
+        if wanted is not None and (unknown := wanted - existing.keys()):
+            self.log_error(
+                "SAP purchase contract -> '%s' has no item(s) -> %s!", contract_id, ", ".join(sorted(unknown))
+            )
+            return False
+        if not existing:
+            self.log_error("SAP purchase contract -> '%s' has no items to delete!", contract_id)
+            return False
+
+        for number, item in existing.items():
+            if (wanted is not None and number not in wanted) or item.deletion_code == "L":
+                continue
+            # Stop at the first error - a later successful request would reset last_error:
+            if not self.update_purchase_contract_item(
+                contract_id=contract_id,
+                item=number,
+                changes={"PurchasingContractDeletionCode": "L"},
+            ):
+                return False
+
+        return True
+
+    # end method definition
+
     def create_purchase_requisition(self, requisition: SAPPurchaseRequisitionModel | dict) -> dict | None:
         """Create an SAP purchase requisition including its items (and their account assignments).
 
@@ -4136,6 +5208,1538 @@ class SAP:
 
     # end method definition
 
+    def create_credit_memo_request(self, request: SAPCreditMemoRequestModel | dict) -> dict | None:
+        """Create an SAP credit memo request (including its items).
+
+        Uses the OData V2 API API_CREDIT_MEMO_REQUEST_SRV with a deep insert. SAP creates the
+        credit memo (a billing document) from the request - usually after an approval.
+
+        Args:
+            request (SAPCreditMemoRequestModel | dict):
+                The data. A dictionary is validated against the SAPCreditMemoRequestModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created credit memo request as returned by SAP (including the number in
+                "CreditMemoRequest") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_CREDIT_MEMO_REQUEST_SRV",
+            entity_set="A_CreditMemoRequest",
+            model=SAPCreditMemoRequestModel,
+            data=request,
+            key_fields=["CreditMemoRequest"],
+            label="credit memo request",
+        )
+
+    # end method definition
+
+    def iter_credit_memo_requests(
+        self, query: SAPCreditMemoRequestQueryModel | None = None
+    ) -> SAPODataIterator[SAPCreditMemoRequestResponseModel]:
+        """Iterate over SAP credit memo requests - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPCreditMemoRequestQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all credit memo requests).
+
+        Returns:
+            SAPODataIterator[SAPCreditMemoRequestResponseModel]:
+                The iterator over the credit memo requests.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_CREDIT_MEMO_REQUEST_SRV",
+            entity_set="A_CreditMemoRequest",
+            model=SAPCreditMemoRequestResponseModel,
+            query=query or SAPCreditMemoRequestQueryModel(),
+            label="credit memo requests",
+        )
+
+    # end method definition
+
+    def get_credit_memo_requests(
+        self, query: SAPCreditMemoRequestQueryModel | None = None
+    ) -> list[SAPCreditMemoRequestResponseModel] | None:
+        """Get SAP credit memo requests as a list.
+
+        All matching credit memo requests are read (page by page, see iter_credit_memo_requests()) and returned at once.
+        For very large result sets prefer iter_credit_memo_requests().
+
+        Args:
+            query (SAPCreditMemoRequestQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all credit memo requests).
+
+        Returns:
+            list[SAPCreditMemoRequestResponseModel] | None:
+                The credit memo requests (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_credit_memo_requests(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP credit memo requests.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_credit_memo_request(
+        self, request_id: str, expand_items: bool = True
+    ) -> SAPCreditMemoRequestResponseModel | None:
+        """Get a single SAP credit memo request.
+
+        Args:
+            request_id (str):
+                The credit memo request number, e.g. "60000012".
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPCreditMemoRequestResponseModel | None:
+                The credit memo request or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_CREDIT_MEMO_REQUEST_SRV",
+            entity_path="A_CreditMemoRequest('{}')".format(self._quote_key(request_id)),
+            model=SAPCreditMemoRequestResponseModel,
+            params={"$expand": "to_Item"} if expand_items else None,
+            label="credit memo request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def update_credit_memo_request(self, request_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP credit memo request.
+
+        The changes are validated with the field definitions of SAPCreditMemoRequestModel.
+        Items cannot be changed with this method.
+
+        Args:
+            request_id (str):
+                The credit memo request number, e.g. "60000012".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPCreditMemoRequestModel or OData
+                property names, e.g. {"billing_block": ""}.
+
+        Returns:
+            bool:
+                True if the credit memo request has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_CREDIT_MEMO_REQUEST_SRV",
+            entity_path="A_CreditMemoRequest('{}')".format(self._quote_key(request_id)),
+            model=SAPCreditMemoRequestModel,
+            changes=changes,
+            label="credit memo request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def delete_credit_memo_request(self, request_id: str) -> bool:
+        """Delete an SAP credit memo request.
+
+        Args:
+            request_id (str):
+                The credit memo request number, e.g. "60000012".
+
+        Returns:
+            bool:
+                True if the credit memo request has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_CREDIT_MEMO_REQUEST_SRV",
+            entity_path="A_CreditMemoRequest('{}')".format(self._quote_key(request_id)),
+            label="credit memo request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def change_credit_memo_request_status(self, request_id: str, action: SAPCreditMemoRequestAction) -> bool:
+        """Approve (release) or reject an SAP credit memo request that is in approval.
+
+        Args:
+            request_id (str):
+                The credit memo request number, e.g. "60000012".
+            action (SAPCreditMemoRequestAction):
+                The approval action, e.g. SAPCreditMemoRequestAction.RELEASE_APPROVAL_REQUEST.
+
+        Returns:
+            bool:
+                True if the status has been changed, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_CREDIT_MEMO_REQUEST_SRV",
+            function=str(action),
+            parameters={"CreditMemoRequest": request_id},
+            label="{} credit memo request -> '{}'".format(action.name.lower().replace("_", " "), request_id),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def create_debit_memo_request(self, request: SAPDebitMemoRequestModel | dict) -> dict | None:
+        """Create an SAP debit memo request (including its items).
+
+        Uses the OData V2 API API_DEBIT_MEMO_REQUEST_SRV with a deep insert. SAP creates the
+        debit memo (a billing document) from the request.
+
+        Args:
+            request (SAPDebitMemoRequestModel | dict):
+                The data. A dictionary is validated against the SAPDebitMemoRequestModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created debit memo request as returned by SAP (including the number in
+                "DebitMemoRequest") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_DEBIT_MEMO_REQUEST_SRV",
+            entity_set="A_DebitMemoRequest",
+            model=SAPDebitMemoRequestModel,
+            data=request,
+            key_fields=["DebitMemoRequest"],
+            label="debit memo request",
+        )
+
+    # end method definition
+
+    def iter_debit_memo_requests(
+        self, query: SAPDebitMemoRequestQueryModel | None = None
+    ) -> SAPODataIterator[SAPDebitMemoRequestResponseModel]:
+        """Iterate over SAP debit memo requests - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPDebitMemoRequestQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all debit memo requests).
+
+        Returns:
+            SAPODataIterator[SAPDebitMemoRequestResponseModel]:
+                The iterator over the debit memo requests.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_DEBIT_MEMO_REQUEST_SRV",
+            entity_set="A_DebitMemoRequest",
+            model=SAPDebitMemoRequestResponseModel,
+            query=query or SAPDebitMemoRequestQueryModel(),
+            label="debit memo requests",
+        )
+
+    # end method definition
+
+    def get_debit_memo_requests(
+        self, query: SAPDebitMemoRequestQueryModel | None = None
+    ) -> list[SAPDebitMemoRequestResponseModel] | None:
+        """Get SAP debit memo requests as a list.
+
+        All matching debit memo requests are read (page by page, see iter_debit_memo_requests()) and returned at once.
+        For very large result sets prefer iter_debit_memo_requests().
+
+        Args:
+            query (SAPDebitMemoRequestQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all debit memo requests).
+
+        Returns:
+            list[SAPDebitMemoRequestResponseModel] | None:
+                The debit memo requests (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_debit_memo_requests(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP debit memo requests.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_debit_memo_request(
+        self, request_id: str, expand_items: bool = True
+    ) -> SAPDebitMemoRequestResponseModel | None:
+        """Get a single SAP debit memo request.
+
+        Args:
+            request_id (str):
+                The debit memo request number, e.g. "70000012".
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPDebitMemoRequestResponseModel | None:
+                The debit memo request or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_DEBIT_MEMO_REQUEST_SRV",
+            entity_path="A_DebitMemoRequest('{}')".format(self._quote_key(request_id)),
+            model=SAPDebitMemoRequestResponseModel,
+            params={"$expand": "to_Item"} if expand_items else None,
+            label="debit memo request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def update_debit_memo_request(self, request_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP debit memo request.
+
+        The changes are validated with the field definitions of SAPDebitMemoRequestModel.
+        Items cannot be changed with this method.
+
+        Args:
+            request_id (str):
+                The debit memo request number, e.g. "70000012".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPDebitMemoRequestModel or OData
+                property names, e.g. {"billing_block": ""}.
+
+        Returns:
+            bool:
+                True if the debit memo request has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_DEBIT_MEMO_REQUEST_SRV",
+            entity_path="A_DebitMemoRequest('{}')".format(self._quote_key(request_id)),
+            model=SAPDebitMemoRequestModel,
+            changes=changes,
+            label="debit memo request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def delete_debit_memo_request(self, request_id: str) -> bool:
+        """Delete an SAP debit memo request.
+
+        Args:
+            request_id (str):
+                The debit memo request number, e.g. "70000012".
+
+        Returns:
+            bool:
+                True if the debit memo request has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_DEBIT_MEMO_REQUEST_SRV",
+            entity_path="A_DebitMemoRequest('{}')".format(self._quote_key(request_id)),
+            label="debit memo request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def iter_billing_document_requests(
+        self, query: SAPBillingDocumentRequestQueryModel | None = None
+    ) -> SAPODataIterator[SAPBillingDocumentRequestResponseModel]:
+        """Iterate over SAP billing document requests - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPBillingDocumentRequestQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all requests).
+
+        Returns:
+            SAPODataIterator[SAPBillingDocumentRequestResponseModel]:
+                The iterator over the billing document requests.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_BILLING_DOCUMENT_REQUEST_SRV",
+            entity_set="A_BillingDocumentRequest",
+            model=SAPBillingDocumentRequestResponseModel,
+            query=query or SAPBillingDocumentRequestQueryModel(),
+            label="billing document requests",
+        )
+
+    # end method definition
+
+    def get_billing_document_requests(
+        self, query: SAPBillingDocumentRequestQueryModel | None = None
+    ) -> list[SAPBillingDocumentRequestResponseModel] | None:
+        """Get SAP billing document requests as a list.
+
+        All matching requests are read (page by page, see iter_billing_document_requests()) and returned at once.
+        For very large result sets prefer iter_billing_document_requests().
+
+        Args:
+            query (SAPBillingDocumentRequestQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all requests).
+
+        Returns:
+            list[SAPBillingDocumentRequestResponseModel] | None:
+                The billing document requests (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_billing_document_requests(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP billing document requests.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_billing_document_request(
+        self, request_id: str, expand_items: bool = True
+    ) -> SAPBillingDocumentRequestResponseModel | None:
+        """Get a single SAP billing document request.
+
+        Args:
+            request_id (str):
+                The billing document request number.
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPBillingDocumentRequestResponseModel | None:
+                The billing document request or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_BILLING_DOCUMENT_REQUEST_SRV",
+            entity_path="A_BillingDocumentRequest('{}')".format(self._quote_key(request_id)),
+            model=SAPBillingDocumentRequestResponseModel,
+            params={"$expand": "to_Item"} if expand_items else None,
+            label="billing document request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def delete_billing_document_request(self, request_id: str) -> bool:
+        """Delete an SAP billing document request (that has not been billed yet).
+
+        Args:
+            request_id (str):
+                The billing document request number.
+
+        Returns:
+            bool:
+                True if the billing document request has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_BILLING_DOCUMENT_REQUEST_SRV",
+            entity_path="A_BillingDocumentRequest('{}')".format(self._quote_key(request_id)),
+            label="billing document request -> '{}'".format(request_id),
+        )
+
+    # end method definition
+
+    def reject_billing_document_request(self, request_id: str) -> bool:
+        """Reject an SAP billing document request - it will not be billed.
+
+        Args:
+            request_id (str):
+                The billing document request number.
+
+        Returns:
+            bool:
+                True if the billing document request has been rejected, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_BILLING_DOCUMENT_REQUEST_SRV",
+            function="Reject",
+            parameters={"BillingDocumentRequest": request_id},
+            label="reject billing document request -> '{}'".format(request_id),
+        )
+        if result is None:
+            return False
+
+        # SAP reports business errors in the result (HTTP 200) - e.g. if the request is already billed:
+        result = result.get("Reject", result)
+        if result.get("MessageType") in ("E", "A"):
+            self.log_error(
+                "Cannot reject SAP billing document request -> '%s'; message -> %s", request_id, result.get("Message")
+            )
+            return False
+
+        return True
+
+    # end method definition
+
+    def iter_billing_documents(
+        self, query: SAPBillingDocumentQueryModel | None = None
+    ) -> SAPODataIterator[SAPBillingDocumentResponseModel]:
+        """Iterate over SAP billing documents (customer invoices, credit / debit memos) - reading them page by page.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPBillingDocumentQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all billing documents).
+                The sales orders (an item property) are resolved via the billing document items first.
+
+        Returns:
+            SAPODataIterator[SAPBillingDocumentResponseModel]:
+                The iterator over the billing documents.
+
+        """
+
+        query = query or SAPBillingDocumentQueryModel()
+
+        if query.sales_orders:
+            # A_BillingDocument cannot be filtered by its items (OData V2 has no any()) - find the
+            # billing documents of the sales orders via their items, then read them by their IDs:
+            items = self.iter_billing_document_items(
+                query=SAPBillingDocumentItemQueryModel(
+                    sales_orders=query.sales_orders, billing_document_ids=query.billing_document_ids
+                )
+            )
+            billing_document_ids = list(dict.fromkeys(item.billing_document_id for item in items))
+            if items.failed:
+                return SAPODataIterator(_failed_odata_read())
+            if not billing_document_ids:
+                self.logger.info("No SAP billing documents for sales orders -> %s.", str(query.sales_orders))
+                return SAPODataIterator(iter([]))
+            query = query.model_copy(update={"billing_document_ids": billing_document_ids, "sales_orders": None})
+
+        return self._iter_odata_collection(
+            service="API_BILLING_DOCUMENT_SRV",
+            entity_set="A_BillingDocument",
+            model=SAPBillingDocumentResponseModel,
+            query=query,
+            label="billing documents",
+        )
+
+    # end method definition
+
+    def iter_billing_document_items(
+        self, query: SAPBillingDocumentItemQueryModel | None = None
+    ) -> SAPODataIterator[SAPBillingDocumentItemResponseModel]:
+        """Iterate over SAP billing document items - reading them page by page.
+
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPBillingDocumentItemQueryModel | None, optional):
+                The search criteria, e.g. the sales orders the items were billed for.
+                Defaults to None (all billing document items).
+
+        Returns:
+            SAPODataIterator[SAPBillingDocumentItemResponseModel]:
+                The iterator over the billing document items.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_BILLING_DOCUMENT_SRV",
+            entity_set="A_BillingDocumentItem",
+            model=SAPBillingDocumentItemResponseModel,
+            query=query or SAPBillingDocumentItemQueryModel(),
+            label="billing document items",
+        )
+
+    # end method definition
+
+    def get_billing_documents(
+        self, query: SAPBillingDocumentQueryModel | None = None
+    ) -> list[SAPBillingDocumentResponseModel] | None:
+        """Get SAP billing documents (customer invoices, credit / debit memos) as a list.
+
+        All matching billing documents are read (page by page, see iter_billing_documents()) and returned at once.
+        For very large result sets prefer iter_billing_documents().
+
+        Args:
+            query (SAPBillingDocumentQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all billing documents).
+
+        Returns:
+            list[SAPBillingDocumentResponseModel] | None:
+                The billing documents (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_billing_documents(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP billing documents.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_billing_document(
+        self, billing_document_id: str, expand_items: bool = True
+    ) -> SAPBillingDocumentResponseModel | None:
+        """Get a single SAP billing document (customer invoice, credit / debit memo).
+
+        Args:
+            billing_document_id (str):
+                The billing document number, e.g. "90000123".
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPBillingDocumentResponseModel | None:
+                The billing document or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_BILLING_DOCUMENT_SRV",
+            entity_path="A_BillingDocument('{}')".format(self._quote_key(billing_document_id)),
+            model=SAPBillingDocumentResponseModel,
+            params={"$expand": "to_Item"} if expand_items else None,
+            label="billing document -> '{}'".format(billing_document_id),
+        )
+
+    # end method definition
+
+    def cancel_billing_document(self, billing_document_id: str) -> dict | None:
+        """Cancel an SAP billing document - SAP creates a cancellation billing document.
+
+        Args:
+            billing_document_id (str):
+                The billing document number, e.g. "90000123".
+
+        Returns:
+            dict | None:
+                The result (including the cancellation document in "CancellationBillingDocument")
+                or None in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_BILLING_DOCUMENT_SRV",
+            function="Cancel",
+            parameters={"BillingDocument": billing_document_id},
+            label="cancel billing document -> '{}'".format(billing_document_id),
+            # Cancel needs the ETag of the billing document (428 Precondition required otherwise, SAP note 3101527):
+            etag_entity_path="A_BillingDocument('{}')".format(self._quote_key(billing_document_id)),
+        )
+        if result is None:
+            return None
+
+        # SAP returns a list of results and reports business errors in them (HTTP 200):
+        results = result.get("results", [result])
+        errors = [entry.get("SystemMessageText") for entry in results if entry.get("SystemMessageType") in ("E", "A")]
+        if errors or not results or not results[0].get("CancellationBillingDocument"):
+            self.log_error(
+                "Cannot cancel SAP billing document -> '%s'; messages -> %s",
+                billing_document_id,
+                str(errors or results),
+            )
+            return None
+
+        return results[0]
+
+    # end method definition
+
+    def get_billing_document_pdf(self, billing_document_id: str) -> bytes | None:
+        """Get the PDF (print form) of an SAP billing document - e.g. the invoice as sent to the customer.
+
+        Args:
+            billing_document_id (str):
+                The billing document number, e.g. "90000123".
+
+        Returns:
+            bytes | None:
+                The PDF document or None in case of an error (e.g. no output form configured).
+
+        """
+
+        # GetPDF is a function import that is called with GET (the parameters are in the query string):
+        response = self.do_request(
+            url=self.service_url("API_BILLING_DOCUMENT_SRV") + "/GetPDF",
+            params={"BillingDocument": odata_literal(billing_document_id)},
+            failure_message="Failed to get the PDF of SAP billing document -> '{}'".format(billing_document_id),
+        )
+        if response is None:
+            return None
+
+        data = response.get("d", response)
+        content = data.get("GetPDF", data).get("BillingDocumentBinary")
+        if not content:
+            self.log_error("SAP returned no PDF for billing document -> '%s'", billing_document_id)
+            return None
+
+        return base64.b64decode(content)
+
+    # end method definition
+
+    def create_outbound_delivery(self, delivery: SAPOutboundDeliveryModel | dict) -> dict | None:
+        """Create an SAP outbound delivery for sales order items.
+
+        Uses the OData V2 API API_OUTBOUND_DELIVERY_SRV (version 0002) with a deep insert.
+        Material, plant and customer are copied from the sales order.
+
+        Args:
+            delivery (SAPOutboundDeliveryModel | dict):
+                The data. A dictionary is validated against the SAPOutboundDeliveryModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created delivery as returned by SAP (including the number in "DeliveryDocument")
+                or None in case of an error.
+
+        Example:
+            >>> sap.create_outbound_delivery(
+            ...     {"shipping_point": "1010", "items": [{"reference_document": "413", "reference_document_item": "10"}]}
+            ... )
+
+        """
+
+        return self._create_odata_entity(
+            service="API_OUTBOUND_DELIVERY_SRV",
+            entity_set="A_OutbDeliveryHeader",
+            model=SAPOutboundDeliveryModel,
+            data=delivery,
+            key_fields=["DeliveryDocument"],
+            label="outbound delivery",
+        )
+
+    # end method definition
+
+    def iter_outbound_deliveries(
+        self, query: SAPOutboundDeliveryQueryModel | None = None
+    ) -> SAPODataIterator[SAPOutboundDeliveryResponseModel]:
+        """Iterate over SAP outbound deliveries - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPOutboundDeliveryQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all deliveries).
+
+        Returns:
+            SAPODataIterator[SAPOutboundDeliveryResponseModel]:
+                The iterator over the outbound deliveries.
+
+        """
+
+        query = query or SAPOutboundDeliveryQueryModel()
+
+        if query.has_item_criteria:
+            # A_OutbDeliveryHeader cannot be filtered by its items (OData V2 has no any()) - find the
+            # deliveries of the sales orders / materials via their items, then read them by their IDs:
+            items = self.iter_outbound_delivery_items(
+                query=SAPOutboundDeliveryItemQueryModel(
+                    sales_orders=query.sales_orders, materials=query.materials, delivery_ids=query.delivery_ids
+                )
+            )
+            delivery_ids = list(dict.fromkeys(item.delivery_id for item in items if item.delivery_id))
+            if items.failed:
+                return SAPODataIterator(_failed_odata_read())
+            if not delivery_ids:
+                self.logger.info(
+                    "No SAP outbound deliveries for sales orders -> %s / materials -> %s.",
+                    str(query.sales_orders),
+                    str(query.materials),
+                )
+                return SAPODataIterator(iter([]))
+            query = query.model_copy(update={"delivery_ids": delivery_ids, "sales_orders": None, "materials": None})
+
+        return self._iter_odata_collection(
+            service="API_OUTBOUND_DELIVERY_SRV",
+            entity_set="A_OutbDeliveryHeader",
+            model=SAPOutboundDeliveryResponseModel,
+            query=query,
+            label="outbound deliveries",
+        )
+
+    # end method definition
+
+    def iter_outbound_delivery_items(
+        self, query: SAPOutboundDeliveryItemQueryModel | None = None
+    ) -> SAPODataIterator[SAPOutboundDeliveryItemResponseModel]:
+        """Iterate over SAP outbound delivery items - reading them page by page.
+
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPOutboundDeliveryItemQueryModel | None, optional):
+                The search criteria, e.g. the sales orders of the items. Defaults to None (all items).
+
+        Returns:
+            SAPODataIterator[SAPOutboundDeliveryItemResponseModel]:
+                The iterator over the delivery items.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_OUTBOUND_DELIVERY_SRV",
+            entity_set="A_OutbDeliveryItem",
+            model=SAPOutboundDeliveryItemResponseModel,
+            query=query or SAPOutboundDeliveryItemQueryModel(),
+            label="outbound delivery items",
+        )
+
+    # end method definition
+
+    def get_outbound_deliveries(
+        self, query: SAPOutboundDeliveryQueryModel | None = None
+    ) -> list[SAPOutboundDeliveryResponseModel] | None:
+        """Get SAP outbound deliveries as a list.
+
+        All matching deliveries are read (page by page, see iter_outbound_deliveries()) and returned at once.
+        For very large result sets prefer iter_outbound_deliveries().
+
+        Args:
+            query (SAPOutboundDeliveryQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all deliveries).
+
+        Returns:
+            list[SAPOutboundDeliveryResponseModel] | None:
+                The outbound deliveries (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_outbound_deliveries(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP outbound deliveries.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_outbound_delivery(
+        self, delivery_id: str, expand_items: bool = True
+    ) -> SAPOutboundDeliveryResponseModel | None:
+        """Get a single SAP outbound delivery.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "80000123".
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPOutboundDeliveryResponseModel | None:
+                The outbound delivery or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_OUTBOUND_DELIVERY_SRV",
+            entity_path="A_OutbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            model=SAPOutboundDeliveryResponseModel,
+            params={"$expand": "to_DeliveryDocumentItem"} if expand_items else None,
+            label="outbound delivery -> '{}'".format(delivery_id),
+        )
+
+    # end method definition
+
+    def update_outbound_delivery(self, delivery_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP outbound delivery (header).
+
+        The changes are validated with the field definitions of SAPOutboundDeliveryModel.
+        Items cannot be changed with this method.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "80000123".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPOutboundDeliveryModel or OData
+                property names, e.g. {"bill_of_lading": "BOL-4711"}.
+
+        Returns:
+            bool:
+                True if the delivery has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_OUTBOUND_DELIVERY_SRV",
+            entity_path="A_OutbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            model=SAPOutboundDeliveryModel,
+            changes=changes,
+            label="outbound delivery -> '{}'".format(delivery_id),
+        )
+
+    # end method definition
+
+    def delete_outbound_delivery(self, delivery_id: str) -> bool:
+        """Delete an SAP outbound delivery (only possible before the goods issue).
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "80000123".
+
+        Returns:
+            bool:
+                True if the delivery has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_OUTBOUND_DELIVERY_SRV",
+            entity_path="A_OutbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            label="outbound delivery -> '{}'".format(delivery_id),
+        )
+
+    # end method definition
+
+    def change_outbound_delivery_status(
+        self,
+        delivery_id: str,
+        action: SAPOutboundDeliveryAction | str,
+        parameters: dict | None = None,
+    ) -> bool:
+        """Change the status of an SAP outbound delivery (e.g. pick all items or post the goods issue).
+
+        The delivery functions require the current ETag of the delivery (If-Match header),
+        so the delivery is read first.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "80000123".
+            action (SAPOutboundDeliveryAction | str):
+                The status action, e.g. SAPOutboundDeliveryAction.POST_GOODS_ISSUE - or the name of
+                another function of the API, e.g. "PickOneItem".
+            parameters (dict | None, optional):
+                Additional parameters of the action with their OData names, e.g.
+                {"ActualGoodsMovementDate": date(2026, 11, 2)} for ReverseGoodsIssue or
+                {"DeliveryDocumentItem": "000010"} for item actions. Defaults to None.
+
+        Returns:
+            bool:
+                True if the status has been changed, False in case of an error.
+
+        """
+
+        label = "{} outbound delivery -> '{}'".format(str(action), delivery_id)
+        headers = {}
+        exists, etag = self._get_odata_etag(
+            url=self.service_url("API_OUTBOUND_DELIVERY_SRV")
+            + "/A_OutbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            headers=headers,
+            label="outbound delivery -> '{}'".format(delivery_id),
+        )
+        if not exists:
+            return False
+        headers["If-Match"] = etag or "*"
+        params = {
+            name: odata_literal(value)
+            for name, value in {"DeliveryDocument": delivery_id, **(parameters or {})}.items()
+            if value is not None
+        }
+
+        self.logger.info("Call SAP function -> '%s' to %s...", str(action), label)
+        response = self.do_request(
+            url=self.service_url("API_OUTBOUND_DELIVERY_SRV") + "/" + str(action),
+            method="POST",
+            headers=headers,
+            params=params,
+            failure_message="Failed to {}".format(label),
+            success_message="Successfully completed: {}.".format(label),
+        )
+
+        return response is not None
+
+    # end method definition
+
+    def create_inbound_delivery(self, delivery: SAPInboundDeliveryModel | dict) -> dict | None:
+        """Create an SAP inbound delivery for purchase order items.
+
+        Uses the OData V2 API API_INBOUND_DELIVERY_SRV (version 0002) with a deep insert.
+
+        Args:
+            delivery (SAPInboundDeliveryModel | dict):
+                The data. A dictionary is validated against the SAPInboundDeliveryModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created delivery as returned by SAP (including the number in "DeliveryDocument")
+                or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_INBOUND_DELIVERY_SRV",
+            entity_set="A_InbDeliveryHeader",
+            model=SAPInboundDeliveryModel,
+            data=delivery,
+            key_fields=["DeliveryDocument"],
+            label="inbound delivery",
+        )
+
+    # end method definition
+
+    def iter_inbound_deliveries(
+        self, query: SAPInboundDeliveryQueryModel | None = None
+    ) -> SAPODataIterator[SAPInboundDeliveryResponseModel]:
+        """Iterate over SAP inbound deliveries - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPInboundDeliveryQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all deliveries).
+
+        Returns:
+            SAPODataIterator[SAPInboundDeliveryResponseModel]:
+                The iterator over the inbound deliveries.
+
+        """
+
+        query = query or SAPInboundDeliveryQueryModel()
+
+        if query.has_item_criteria:
+            # A_InbDeliveryHeader cannot be filtered by its items (OData V2 has no any()) - find the
+            # deliveries of the purchase orders / materials via their items, then read them by their IDs:
+            items = self.iter_inbound_delivery_items(
+                query=SAPInboundDeliveryItemQueryModel(
+                    purchase_orders=query.purchase_orders, materials=query.materials, delivery_ids=query.delivery_ids
+                )
+            )
+            delivery_ids = list(dict.fromkeys(item.delivery_id for item in items if item.delivery_id))
+            if items.failed:
+                return SAPODataIterator(_failed_odata_read())
+            if not delivery_ids:
+                self.logger.info(
+                    "No SAP inbound deliveries for purchase orders -> %s / materials -> %s.",
+                    str(query.purchase_orders),
+                    str(query.materials),
+                )
+                return SAPODataIterator(iter([]))
+            query = query.model_copy(update={"delivery_ids": delivery_ids, "purchase_orders": None, "materials": None})
+
+        return self._iter_odata_collection(
+            service="API_INBOUND_DELIVERY_SRV",
+            entity_set="A_InbDeliveryHeader",
+            model=SAPInboundDeliveryResponseModel,
+            query=query,
+            label="inbound deliveries",
+        )
+
+    # end method definition
+
+    def iter_inbound_delivery_items(
+        self, query: SAPInboundDeliveryItemQueryModel | None = None
+    ) -> SAPODataIterator[SAPInboundDeliveryItemResponseModel]:
+        """Iterate over SAP inbound delivery items - reading them page by page.
+
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPInboundDeliveryItemQueryModel | None, optional):
+                The search criteria, e.g. the purchase orders of the items. Defaults to None (all items).
+
+        Returns:
+            SAPODataIterator[SAPInboundDeliveryItemResponseModel]:
+                The iterator over the delivery items.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_INBOUND_DELIVERY_SRV",
+            entity_set="A_InbDeliveryItem",
+            model=SAPInboundDeliveryItemResponseModel,
+            query=query or SAPInboundDeliveryItemQueryModel(),
+            label="inbound delivery items",
+        )
+
+    # end method definition
+
+    def get_inbound_deliveries(
+        self, query: SAPInboundDeliveryQueryModel | None = None
+    ) -> list[SAPInboundDeliveryResponseModel] | None:
+        """Get SAP inbound deliveries as a list.
+
+        All matching deliveries are read (page by page, see iter_inbound_deliveries()) and returned at once.
+        For very large result sets prefer iter_inbound_deliveries().
+
+        Args:
+            query (SAPInboundDeliveryQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all deliveries).
+
+        Returns:
+            list[SAPInboundDeliveryResponseModel] | None:
+                The inbound deliveries (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_inbound_deliveries(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP inbound deliveries.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_inbound_delivery(
+        self, delivery_id: str, expand_items: bool = True
+    ) -> SAPInboundDeliveryResponseModel | None:
+        """Get a single SAP inbound delivery.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "180000123".
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPInboundDeliveryResponseModel | None:
+                The inbound delivery or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_INBOUND_DELIVERY_SRV",
+            entity_path="A_InbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            model=SAPInboundDeliveryResponseModel,
+            params={"$expand": "to_DeliveryDocumentItem"} if expand_items else None,
+            label="inbound delivery -> '{}'".format(delivery_id),
+        )
+
+    # end method definition
+
+    def update_inbound_delivery(self, delivery_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP inbound delivery (header).
+
+        The changes are validated with the field definitions of SAPInboundDeliveryModel.
+        Items cannot be changed with this method.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "180000123".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPInboundDeliveryModel or OData
+                property names, e.g. {"delivery_date": "2026-11-03"}.
+
+        Returns:
+            bool:
+                True if the delivery has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_INBOUND_DELIVERY_SRV",
+            entity_path="A_InbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            model=SAPInboundDeliveryModel,
+            changes=changes,
+            label="inbound delivery -> '{}'".format(delivery_id),
+        )
+
+    # end method definition
+
+    def delete_inbound_delivery(self, delivery_id: str) -> bool:
+        """Delete an SAP inbound delivery (only possible before the goods receipt).
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "180000123".
+
+        Returns:
+            bool:
+                True if the delivery has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_INBOUND_DELIVERY_SRV",
+            entity_path="A_InbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            label="inbound delivery -> '{}'".format(delivery_id),
+        )
+
+    # end method definition
+
+    def change_inbound_delivery_status(
+        self,
+        delivery_id: str,
+        action: SAPInboundDeliveryAction | str,
+        parameters: dict | None = None,
+    ) -> bool:
+        """Change the status of an SAP inbound delivery (e.g. put away all items or post the goods receipt).
+
+        The delivery functions require the current ETag of the delivery (If-Match header),
+        so the delivery is read first.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "180000123".
+            action (SAPInboundDeliveryAction | str):
+                The status action, e.g. SAPInboundDeliveryAction.POST_GOODS_RECEIPT - or the name of
+                another function of the API, e.g. "PutawayOneItem".
+            parameters (dict | None, optional):
+                Additional parameters of the action with their OData names, e.g.
+                {"ActualGoodsMovementDate": date(2026, 11, 2)} for ReverseGoodsReceipt or
+                {"DeliveryDocumentItem": "000010"} for item actions. Defaults to None.
+
+        Returns:
+            bool:
+                True if the status has been changed, False in case of an error.
+
+        """
+
+        label = "{} inbound delivery -> '{}'".format(str(action), delivery_id)
+        headers = {}
+        exists, etag = self._get_odata_etag(
+            url=self.service_url("API_INBOUND_DELIVERY_SRV")
+            + "/A_InbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
+            headers=headers,
+            label="inbound delivery -> '{}'".format(delivery_id),
+        )
+        if not exists:
+            return False
+        headers["If-Match"] = etag or "*"
+        params = {
+            name: odata_literal(value)
+            for name, value in {"DeliveryDocument": delivery_id, **(parameters or {})}.items()
+            if value is not None
+        }
+
+        self.logger.info("Call SAP function -> '%s' to %s...", str(action), label)
+        response = self.do_request(
+            url=self.service_url("API_INBOUND_DELIVERY_SRV") + "/" + str(action),
+            method="POST",
+            headers=headers,
+            params=params,
+            failure_message="Failed to {}".format(label),
+            success_message="Successfully completed: {}.".format(label),
+        )
+
+        return response is not None
+
+    # end method definition
+
+    def create_supplier_invoice(self, invoice: SAPSupplierInvoiceModel | dict) -> dict | None:
+        """Create (post or park) an SAP supplier invoice including its items.
+
+        Uses the OData V2 API API_SUPPLIERINVOICE_PROCESS_SRV with a deep insert (logistics
+        invoice verification, like transaction MIRO). The invoice is posted directly unless it
+        is parked (status "A") - a parked invoice is posted with post_supplier_invoice() or
+        deleted with delete_supplier_invoice().
+
+        Args:
+            invoice (SAPSupplierInvoiceModel | dict):
+                The data. A dictionary is validated against the SAPSupplierInvoiceModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created invoice as returned by SAP (including "SupplierInvoice" and "FiscalYear")
+                or None in case of an error.
+
+        Example:
+            >>> sap.create_supplier_invoice(
+            ... {
+            ...     "company_code": "1010",
+            ...     "document_date": "2026-11-02",
+            ...     "posting_date": "2026-11-02",
+            ...     "supplier_invoice_reference": "INV-2026-0815",
+            ...     "currency": "EUR",
+            ...     "gross_amount": "297.50",
+            ...     "tax_is_calculated_automatically": True,
+            ...     "purchase_order_items": [
+            ...         {"purchase_order": "4500001540", "purchase_order_item": "10", "amount": "250", "tax_code": "V1"},
+            ...     ],
+            ... }
+            ... )
+
+        """
+
+        return self._create_odata_entity(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            entity_set="A_SupplierInvoice",
+            model=SAPSupplierInvoiceModel,
+            data=invoice,
+            key_fields=["SupplierInvoice", "FiscalYear"],
+            label="supplier invoice",
+        )
+
+    # end method definition
+
+    def iter_supplier_invoices(
+        self, query: SAPSupplierInvoiceQueryModel | None = None
+    ) -> SAPODataIterator[SAPSupplierInvoiceResponseModel]:
+        """Iterate over SAP supplier invoices - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPSupplierInvoiceQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all invoices).
+
+        Returns:
+            SAPODataIterator[SAPSupplierInvoiceResponseModel]:
+                The iterator over the supplier invoices.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            entity_set="A_SupplierInvoice",
+            model=SAPSupplierInvoiceResponseModel,
+            query=query or SAPSupplierInvoiceQueryModel(),
+            label="supplier invoices",
+        )
+
+    # end method definition
+
+    def get_supplier_invoices(
+        self, query: SAPSupplierInvoiceQueryModel | None = None
+    ) -> list[SAPSupplierInvoiceResponseModel] | None:
+        """Get SAP supplier invoices as a list.
+
+        All matching invoices are read (page by page, see iter_supplier_invoices()) and returned at once.
+        For very large result sets prefer iter_supplier_invoices().
+
+        Args:
+            query (SAPSupplierInvoiceQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all invoices).
+
+        Returns:
+            list[SAPSupplierInvoiceResponseModel] | None:
+                The supplier invoices (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_supplier_invoices(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP supplier invoices.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_supplier_invoice(
+        self, invoice_id: str, fiscal_year: str, expand_items: bool = True
+    ) -> SAPSupplierInvoiceResponseModel | None:
+        """Get a single SAP supplier invoice.
+
+        Args:
+            invoice_id (str):
+                The supplier invoice number, e.g. "5105600123".
+            fiscal_year (str):
+                The fiscal year of the invoice, e.g. "2026".
+            expand_items (bool, optional):
+                Whether to read the purchase order and G/L account items as well. Defaults to True.
+
+        Returns:
+            SAPSupplierInvoiceResponseModel | None:
+                The supplier invoice or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            entity_path="A_SupplierInvoice(SupplierInvoice='{}',FiscalYear='{}')".format(
+                self._quote_key(invoice_id), self._quote_key(fiscal_year)
+            ),
+            model=SAPSupplierInvoiceResponseModel,
+            params={"$expand": SAPSupplierInvoiceQueryModel.EXPAND} if expand_items else None,
+            label="supplier invoice -> {}/{}".format(invoice_id, fiscal_year),
+        )
+
+    # end method definition
+
+    def delete_supplier_invoice(self, invoice_id: str, fiscal_year: str) -> bool:
+        """Delete an SAP supplier invoice - only parked or held invoices; posted ones are cancelled instead.
+
+        Args:
+            invoice_id (str):
+                The supplier invoice number, e.g. "5105600123".
+            fiscal_year (str):
+                The fiscal year of the invoice, e.g. "2026".
+
+        Returns:
+            bool:
+                True if the invoice has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            entity_path="A_SupplierInvoice(SupplierInvoice='{}',FiscalYear='{}')".format(
+                self._quote_key(invoice_id), self._quote_key(fiscal_year)
+            ),
+            label="supplier invoice -> {}/{}".format(invoice_id, fiscal_year),
+        )
+
+    # end method definition
+
+    def cancel_supplier_invoice(
+        self,
+        invoice_id: str,
+        fiscal_year: str,
+        reversal_reason: str = "01",
+        posting_date: date | None = None,
+    ) -> dict | None:
+        """Cancel (reverse) a posted SAP supplier invoice - SAP posts a reversal document.
+
+        Args:
+            invoice_id (str):
+                The supplier invoice number, e.g. "5105600123".
+            fiscal_year (str):
+                The fiscal year of the invoice, e.g. "2026".
+            reversal_reason (str, optional):
+                The reversal reason, e.g. "01" (reversal in current period, default) or "02"
+                (reversal in closed period) - system specific.
+            posting_date (date | None, optional):
+                The posting date of the reversal. Defaults to None (today).
+
+        Returns:
+            dict | None:
+                The result (including the reversal document in "ReverseDocument" and "FiscalYear")
+                or None in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            function="Cancel",
+            parameters={
+                "SupplierInvoice": invoice_id,
+                "FiscalYear": fiscal_year,
+                "ReversalReason": reversal_reason,
+                "PostingDate": posting_date or datetime.now(tz=UTC).date(),
+            },
+            label="cancel supplier invoice -> {}/{}".format(invoice_id, fiscal_year),
+        )
+        if result is None:
+            return None
+
+        result = result.get("Cancel", result)
+        if result.get("Success") is False or not result.get("ReverseDocument"):
+            self.log_error(
+                "SAP did not cancel the supplier invoice -> %s/%s; result -> %s", invoice_id, fiscal_year, str(result)
+            )
+            return None
+
+        return result
+
+    # end method definition
+
+    def release_supplier_invoice(self, invoice_id: str, fiscal_year: str, shift_discount_days: bool = False) -> bool:
+        """Release an SAP supplier invoice that is blocked for payment.
+
+        Args:
+            invoice_id (str):
+                The supplier invoice number, e.g. "5105600123".
+            fiscal_year (str):
+                The fiscal year of the invoice, e.g. "2026".
+            shift_discount_days (bool, optional):
+                Whether the cash discount days are shifted by the time the invoice was blocked. Defaults to False.
+
+        Returns:
+            bool:
+                True if the invoice has been released, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            function="Release",
+            parameters={
+                "SupplierInvoice": invoice_id,
+                "FiscalYear": fiscal_year,
+                "DiscountDaysHaveToBeShifted": shift_discount_days,
+            },
+            label="release supplier invoice -> {}/{}".format(invoice_id, fiscal_year),
+        )
+        if result is None:
+            return False
+
+        if result.get("Release", result).get("Success") is False:
+            self.log_error("SAP did not release the supplier invoice -> %s/%s", invoice_id, fiscal_year)
+            return False
+
+        return True
+
+    # end method definition
+
+    def post_supplier_invoice(self, invoice_id: str, fiscal_year: str) -> bool:
+        """Post a parked SAP supplier invoice (see SAPSupplierInvoiceModel.status).
+
+        Args:
+            invoice_id (str):
+                The supplier invoice number, e.g. "5105600123".
+            fiscal_year (str):
+                The fiscal year of the invoice, e.g. "2026".
+
+        Returns:
+            bool:
+                True if the invoice has been posted, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            function="Post",
+            parameters={"SupplierInvoice": invoice_id, "FiscalYear": fiscal_year},
+            label="post supplier invoice -> {}/{}".format(invoice_id, fiscal_year),
+        )
+        if result is None:
+            return False
+
+        if result.get("Post", result).get("Success") is False:
+            self.log_error("SAP did not post the supplier invoice -> %s/%s", invoice_id, fiscal_year)
+            return False
+
+        return True
+
+    # end method definition
+
     def create_goods_movement(self, movement: SAPGoodsMovementModel | dict) -> dict | None:
         """Post an SAP goods movement (material document with its items) - e.g. a goods receipt for a purchase order.
 
@@ -4180,12 +6784,91 @@ class SAP:
 
         """
 
-        return self._iter_odata_collection(
+        query = query or SAPGoodsMovementQueryModel()
+        keys = None
+
+        if query.has_item_criteria:
+            # A_MaterialDocumentHeader cannot be filtered by its items (OData V2 has no any()) - find the
+            # material documents via their items, then read them by their keys (number and year):
+            item_criteria = {
+                "purchase_orders": query.purchase_orders,
+                "production_orders": query.production_orders,
+                "materials": query.materials,
+                "plants": query.plants,
+                "movement_types": query.movement_types,
+            }
+            items = self.iter_goods_movement_items(
+                query=SAPGoodsMovementItemQueryModel(
+                    **item_criteria, document_year=query.document_year, documents=query.documents
+                )
+            )
+            keys = list(dict.fromkeys((item.document, item.document_year) for item in items))
+            if items.failed:
+                return SAPODataIterator(_failed_odata_read())
+            if not keys:
+                self.logger.info(
+                    "No SAP material documents with items matching -> %s.",
+                    str({name: value for name, value in item_criteria.items() if value}),
+                )
+                return SAPODataIterator(iter([]))
+            years = {year for _, year in keys}
+            query = query.model_copy(
+                update={
+                    "documents": list(dict.fromkeys(document for document, _ in keys)),
+                    "document_year": years.pop() if len(years) == 1 else query.document_year,
+                }
+                | dict.fromkeys(item_criteria)
+            )
+
+        movements = self._iter_odata_collection(
             service="API_MATERIAL_DOCUMENT_SRV",
             entity_set="A_MaterialDocumentHeader",
             model=SAPGoodsMovementResponseModel,
-            query=query or SAPGoodsMovementQueryModel(),
+            query=query,
             label="goods movements",
+        )
+        if keys is None or query.document_year:
+            return movements
+
+        # Material document numbers are only unique per year - with matches in several years, the
+        # headers are read by number and only the documents of the matching (number, year) pairs kept:
+        wanted = set(keys)
+
+        def matching_movements() -> Iterator[SAPGoodsMovementResponseModel]:
+            for movement in movements:
+                if (movement.document, movement.document_year) in wanted:
+                    yield movement
+            if movements.failed:
+                raise _ODataReadError
+
+        return SAPODataIterator(matching_movements())
+
+    # end method definition
+
+    def iter_goods_movement_items(
+        self, query: SAPGoodsMovementItemQueryModel | None = None
+    ) -> SAPODataIterator[SAPGoodsMovementItemResponseModel]:
+        """Iterate over SAP material document items - reading them page by page.
+
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPGoodsMovementItemQueryModel | None, optional):
+                The search criteria, e.g. the purchase orders of the items. Defaults to None (all items).
+
+        Returns:
+            SAPODataIterator[SAPGoodsMovementItemResponseModel]:
+                The iterator over the material document items.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_MATERIAL_DOCUMENT_SRV",
+            entity_set="A_MaterialDocumentItem",
+            model=SAPGoodsMovementItemResponseModel,
+            query=query or SAPGoodsMovementItemQueryModel(),
+            label="material document items",
         )
 
     # end method definition
@@ -4477,6 +7160,8 @@ class SAP:
         Args:
             query (SAPMaintenancePlanQueryModel | None, optional):
                 The search criteria (filters, sort order, limit, page size). Defaults to None (all maintenance plans).
+                The planning plants, functional locations and equipments (item properties) are
+                resolved via the maintenance items first.
 
         Returns:
             SAPODataIterator[SAPMaintenancePlanResponseModel]:
@@ -4484,12 +7169,66 @@ class SAP:
 
         """
 
+        query = query or SAPMaintenancePlanQueryModel()
+
+        if query.has_item_criteria:
+            # MaintenancePlan cannot be filtered by its items (OData V2 has no any()) - find the
+            # maintenance plans via their items, then read them by their IDs:
+            item_criteria = {
+                "planning_plants": query.planning_plants,
+                "functional_location_ids": query.functional_location_ids,
+                "functional_location_labels": query.functional_location_labels,
+                "equipment_ids": query.equipment_ids,
+            }
+            items = self.iter_maintenance_plan_items(
+                query=SAPMaintenancePlanItemQueryModel(**item_criteria, plan_ids=query.plan_ids)
+            )
+            plan_ids = list(dict.fromkeys(item.plan_id for item in items if item.plan_id))
+            if items.failed:
+                return SAPODataIterator(_failed_odata_read())
+            if not plan_ids:
+                self.logger.info(
+                    "No SAP maintenance plans with items matching -> %s.",
+                    str({name: value for name, value in item_criteria.items() if value}),
+                )
+                return SAPODataIterator(iter([]))
+            query = query.model_copy(update={"plan_ids": plan_ids} | dict.fromkeys(item_criteria))
+
         return self._iter_odata_collection(
             service="API_MAINTENANCEPLAN",
             entity_set="MaintenancePlan",
             model=SAPMaintenancePlanResponseModel,
-            query=query or SAPMaintenancePlanQueryModel(),
+            query=query,
             label="maintenance plans",
+        )
+
+    # end method definition
+
+    def iter_maintenance_plan_items(
+        self, query: SAPMaintenancePlanItemQueryModel | None = None
+    ) -> SAPODataIterator[SAPMaintenancePlanItemResponseModel]:
+        """Iterate over SAP maintenance items (of maintenance plans) - reading them page by page.
+
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPMaintenancePlanItemQueryModel | None, optional):
+                The search criteria, e.g. the planning plants of the items.
+                Defaults to None (all maintenance items).
+
+        Returns:
+            SAPODataIterator[SAPMaintenancePlanItemResponseModel]:
+                The iterator over the maintenance items.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_MAINTENANCEPLAN",
+            entity_set="MaintenanceItem",
+            model=SAPMaintenancePlanItemResponseModel,
+            query=query or SAPMaintenancePlanItemQueryModel(),
+            label="maintenance items",
         )
 
     # end method definition
@@ -4548,29 +7287,108 @@ class SAP:
 
     # end method definition
 
-    def update_maintenance_plan(self, plan_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP maintenance plan.
+    def update_maintenance_plan(
+        self, plan_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP maintenance plan and of its maintenance items.
 
-        The changes are validated with the field definitions of SAPMaintenancePlanModel. Cycles and items cannot be changed with this method.
+        The header changes are validated with the field definitions of SAPMaintenancePlanModel,
+        the item changes with those of SAPMaintenancePlanItemModel - all of them before anything
+        is changed. The items must belong to the plan. Header and items are separate entities in
+        SAP (one request each): if a request fails, the changes before it remain. Cycles cannot
+        be changed with this method.
 
         Args:
             plan_id (str):
                 The maintenance plan number, e.g. "10".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPMaintenancePlanModel or OData property names.
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPMaintenancePlanModel or
+                OData property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per maintenance item number (MaintenanceItem - unique in the SAP system, not the
+                position in the plan), e.g. {"142": {"functional_location": "CW"}}
+                (snake case attribute names of SAPMaintenancePlanItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the maintenance plan has been updated, False in case of an error.
+                True if the maintenance plan (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        if not changes and not item_changes:
+            self.log_error("No changes given for SAP maintenance plan -> '%s'!", plan_id)
+            return False
+
+        # Check all changes first - an invalid item change must not leave the plan half changed:
+        try:
+            if changes:
+                SAPMaintenancePlanModel.to_odata_update(changes)
+            for item_change in (item_changes or {}).values():
+                SAPMaintenancePlanItemModel.to_odata_update(item_change)
+        except ValueError as value_error:
+            self.log_error("Invalid changes for SAP maintenance plan -> '%s'; error -> %s", plan_id, str(value_error))
+            return False
+
+        if item_changes:
+            plan = self.get_maintenance_plan(plan_id=plan_id, expand_items=True)
+            if plan is None:
+                return False
+            # SAP returns the item numbers without leading zeros:
+            existing = {item.item_id.lstrip("0") for item in plan.items or []}
+            if unknown := sorted(item_id for item_id in item_changes if item_id.lstrip("0") not in existing):
+                # List the items of the plan - item numbers are unique in SAP, not positions in the plan:
+                self.log_error(
+                    "SAP maintenance plan -> '%s' has no item(s) -> %s! Its items are -> %s",
+                    plan_id,
+                    ", ".join(unknown),
+                    "; ".join("{} '{}'".format(item.item_id, item.description or "") for item in plan.items or [])
+                    or "none",
+                )
+                return False
+
+        if changes and not self._update_odata_entity(
             service="API_MAINTENANCEPLAN",
             entity_path="MaintenancePlan('{}')".format(plan_id.replace("'", "''")),
             model=SAPMaintenancePlanModel,
             changes=changes,
             label="maintenance plan -> '{}'".format(plan_id),
+        ):
+            return False
+
+        # Stop at the first error - a later successful request would reset last_error:
+        return all(
+            self.update_maintenance_plan_item(item_id=item_id, changes=item_change)
+            for item_id, item_change in (item_changes or {}).items()
+        )
+
+    # end method definition
+
+    def update_maintenance_plan_item(self, item_id: str, changes: dict) -> bool:
+        """Update individual fields of a maintenance item of an SAP maintenance plan.
+
+        The changes are validated with the field definitions of SAPMaintenancePlanItemModel, e.g. to
+        set the technical object (functional location or equipment), the task list or the work center.
+
+        Args:
+            item_id (str):
+                The maintenance item number (MaintenanceItem), e.g. "142" - unique in the SAP system, not the
+                position in the plan (see the items of get_maintenance_plan()).
+            changes (dict):
+                The fields to change - snake case attribute names of SAPMaintenancePlanItemModel or OData property names.
+
+        Returns:
+            bool:
+                True if the maintenance item has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_MAINTENANCEPLAN",
+            entity_path="MaintenanceItem('{}')".format(item_id.replace("'", "''")),
+            model=SAPMaintenancePlanItemModel,
+            changes=changes,
+            label="maintenance item -> '{}'".format(item_id),
         )
 
     # end method definition
@@ -4602,9 +7420,211 @@ class SAP:
             function=str(action),
             parameters={"MaintenancePlan": plan_id, **(parameters or {})},
             label="{} maintenance plan -> '{}'".format(action.name.lower().replace("_", " "), plan_id),
+            # RAP based service - its functions need the ETag of the plan (428 Precondition required otherwise):
+            etag_entity_path="MaintenancePlan('{}')".format(self._quote_key(plan_id)),
         )
 
         return result is not None
+
+    # end method definition
+
+    def create_task_list(self, task_list: SAPTaskListModel | dict) -> dict | None:
+        """Create an SAP maintenance task list including its operations.
+
+        Uses the OData V4 API API_MAINTENANCETASKLIST with a deep create, so the whole task list
+        is created (and committed) in one request.
+
+        Args:
+            task_list (SAPTaskListModel | dict):
+                The data. A dictionary is validated against the SAPTaskListModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created task list as returned by SAP (including "TaskListGroup" and
+                "TaskListGroupCounter") or None in case of an error.
+
+        Example:
+            >>> sap.create_task_list(
+            ... {
+            ...     "task_list_type": "A",
+            ...     "description": "Quarterly pump inspection",
+            ...     "planning_plant": "1010",
+            ...     "operations": [
+            ...         {"description": "Check pump seal", "control_key": "PM01", "work": 2, "work_unit": "H"},
+            ...     ],
+            ... }
+            ... )
+
+        """
+
+        return self._create_odata_entity(
+            service="API_MAINTENANCETASKLIST",
+            entity_set="MaintenanceTaskList",
+            model=SAPTaskListModel,
+            data=task_list,
+            key_fields=["TaskListType", "TaskListGroup", "TaskListGroupCounter"],
+            label="maintenance task list",
+        )
+
+    # end method definition
+
+    def iter_task_lists(self, query: SAPTaskListQueryModel | None = None) -> SAPODataIterator[SAPTaskListResponseModel]:
+        """Iterate over SAP maintenance task lists - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPTaskListQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all task lists).
+
+        Returns:
+            SAPODataIterator[SAPTaskListResponseModel]:
+                The iterator over the task lists.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_MAINTENANCETASKLIST",
+            entity_set="MaintenanceTaskList",
+            model=SAPTaskListResponseModel,
+            query=query or SAPTaskListQueryModel(),
+            label="maintenance task lists",
+        )
+
+    # end method definition
+
+    def get_task_lists(self, query: SAPTaskListQueryModel | None = None) -> list[SAPTaskListResponseModel] | None:
+        """Get SAP maintenance task lists as a list.
+
+        All matching task lists are read (page by page, see iter_task_lists()) and returned at once.
+        For very large result sets prefer iter_task_lists().
+
+        Args:
+            query (SAPTaskListQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all task lists).
+
+        Returns:
+            list[SAPTaskListResponseModel] | None:
+                The task lists (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_task_lists(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP maintenance task lists.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_task_list(
+        self,
+        task_list_type: str,
+        task_list_group: str,
+        task_list_group_counter: str,
+        expand_items: bool = True,
+    ) -> SAPTaskListResponseModel | None:
+        """Get a single SAP maintenance task list.
+
+        Task lists with change numbers can have several versions - the latest version is returned.
+
+        Args:
+            task_list_type (str):
+                The task list type, e.g. "A" (general), "E" (equipment) or "T" (functional location).
+            task_list_group (str):
+                The task list group, e.g. "PUMP-01".
+            task_list_group_counter (str):
+                The task list group counter, e.g. "1".
+            expand_items (bool, optional):
+                Whether to read the operations as well. Defaults to True.
+
+        Returns:
+            SAPTaskListResponseModel | None:
+                The task list or None if it does not exist or in case of an error.
+
+        """
+
+        # Sorted with the latest version first:
+        entries = self.iter_task_lists(
+            query=SAPTaskListQueryModel(
+                task_list_types=[task_list_type],
+                task_list_groups=[task_list_group],
+                task_list_group_counters=[task_list_group_counter],
+                expand_items=expand_items,
+                limit=1,
+            )
+        )
+        entry = next(entries, None)
+        if entry is None and not entries.failed:
+            self.logger.warning(
+                "Cannot find SAP maintenance task list -> %s/%s/%s",
+                task_list_type,
+                task_list_group,
+                task_list_group_counter,
+            )
+
+        return entry
+
+    # end method definition
+
+    def update_task_list(
+        self,
+        task_list_type: str,
+        task_list_group: str,
+        task_list_group_counter: str,
+        changes: dict,
+    ) -> bool:
+        """Update individual fields of an SAP maintenance task list (its latest version).
+
+        The changes are validated with the field definitions of SAPTaskListModel.
+        Operations cannot be changed with this method.
+
+        Args:
+            task_list_type (str):
+                The task list type, e.g. "A" (general), "E" (equipment) or "T" (functional location).
+            task_list_group (str):
+                The task list group, e.g. "PUMP-01".
+            task_list_group_counter (str):
+                The task list group counter, e.g. "1".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPTaskListModel or OData
+                property names, e.g. {"description": "Monthly pump inspection"}.
+
+        Returns:
+            bool:
+                True if the task list has been updated, False in case of an error.
+
+        """
+
+        # The version counter is part of the key - read the latest version first:
+        task_list = self.get_task_list(
+            task_list_type=task_list_type,
+            task_list_group=task_list_group,
+            task_list_group_counter=task_list_group_counter,
+            expand_items=False,
+        )
+        if task_list is None:
+            return False
+
+        return self._update_odata_entity(
+            service="API_MAINTENANCETASKLIST",
+            entity_path="MaintenanceTaskList(TaskListType='{}',TaskListGroup='{}',TaskListGroupCounter='{}',"
+            "TaskListVersionCounter='{}')".format(
+                self._quote_key(task_list.task_list_type),
+                self._quote_key(task_list.task_list_group),
+                self._quote_key(task_list.task_list_group_counter),
+                self._quote_key(task_list.version_counter or ""),
+            ),
+            model=SAPTaskListModel,
+            changes=changes,
+            label="maintenance task list -> {}/{}/{}".format(task_list_type, task_list_group, task_list_group_counter),
+        )
 
     # end method definition
 
@@ -4853,6 +7873,20 @@ class SAP:
 
         """
 
+        # The conversion needs the ETag of the planned order (428 Precondition required otherwise). This
+        # service has no entity set for planned orders - its ETag is the time stamp of the last change
+        # (ABAP format YYYYMMDDhhmmss in UTC), read from API_PLANNEDORDER:
+        planned_order = self.get_planned_order(planned_order_id=planned_order_id)
+        if planned_order is None:
+            if not self.last_error:
+                self.log_error("Cannot convert SAP planned order -> '%s' - it does not exist!", planned_order_id)
+            return None
+        etag = (
+            "W/\"'{}'\"".format(planned_order.last_change_datetime.astimezone(UTC).strftime("%Y%m%d%H%M%S"))
+            if planned_order.last_change_datetime
+            else None
+        )
+
         result = self._call_odata_function(
             service="API_PRODUCTION_ORDER_2_SRV",
             function="ConvertPlndOrder",
@@ -4862,6 +7896,7 @@ class SAP:
                 "ManufacturingOrder": production_order_id,
             },
             label="convert planned order -> '{}' into a production order".format(planned_order_id),
+            etag=etag,
         )
         if result is None:
             return None
@@ -5065,6 +8100,8 @@ class SAP:
             function=str(action),
             parameters={"ManufacturingOrder": order_id, **(parameters or {})},
             label="{} production order -> '{}'".format(action.name.lower().replace("_", " "), order_id),
+            # The status functions need the ETag of the order (428 Precondition required otherwise):
+            etag_entity_path="A_ProductionOrder_2('{}')".format(self._quote_key(order_id)),
         )
 
         return result is not None
@@ -5233,6 +8270,31 @@ class SAP:
 
     # end method definition
 
+    def create_product(self, product: SAPProductModel | dict) -> dict | None:
+        """Create an SAP product / material with its descriptions and plant data.
+
+        Args:
+            product (SAPProductModel | dict):
+                The data. A dictionary is validated against the SAPProductModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created product as returned by SAP (including "Product") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_set="A_Product",
+            model=SAPProductModel,
+            data=product,
+            key_fields=["Product"],
+            label="product",
+        )
+
+    # end method definition
+
     def iter_products(self, query: SAPProductQueryModel | None = None) -> SAPODataIterator[SAPProductResponseModel]:
         """Iterate over SAP products - reading them page by page from SAP.
 
@@ -5250,11 +8312,19 @@ class SAP:
 
         """
 
+        query, failed = self._resolve_text_search(
+            service="API_PRODUCT_SRV", query=query or SAPProductQueryModel(), label="products"
+        )
+        if failed:
+            return SAPODataIterator(_failed_odata_read())
+        if query is None:
+            return SAPODataIterator(iter([]))
+
         return self._iter_odata_collection(
             service="API_PRODUCT_SRV",
             entity_set="A_Product",
             model=SAPProductResponseModel,
-            query=query or SAPProductQueryModel(),
+            query=query,
             label="products",
         )
 
@@ -5294,7 +8364,8 @@ class SAP:
             product_id (str):
                 The product (material) number, e.g. "P-100".
             expand_items (bool, optional):
-                Whether to read the descriptions and plant data as well. Defaults to True.
+                Whether to read the descriptions, plant data (with storage locations) and
+                valuation data as well. Defaults to True.
 
         Returns:
             SAPProductResponseModel | None:
@@ -5306,9 +8377,353 @@ class SAP:
             service="API_PRODUCT_SRV",
             entity_path="A_Product('{}')".format(self._quote_key(product_id)),
             model=SAPProductResponseModel,
-            params={"$expand": "to_Description,to_Plant"} if expand_items else None,
+            params={"$expand": "to_Description,to_Plant/to_StorageLocation,to_Valuation"} if expand_items else None,
             label="product -> '{}'".format(product_id),
         )
+
+    # end method definition
+
+    def update_product(self, product_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP product (material) on client level.
+
+        The changes are validated with the field definitions of SAPProductModel (e.g. upper
+        case codes, lengths). The product number and the product type cannot be changed.
+        Descriptions and plant data are changed with update_product_description() and
+        update_product_plant().
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "FG126".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPProductModel or OData
+                property names, e.g. {"product_group": "L001", "GrossWeight": "12.5"}.
+
+        Returns:
+            bool:
+                True if the product has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_path="A_Product('{}')".format(self._quote_key(product_id)),
+            model=SAPProductModel,
+            changes=changes,
+            label="product -> '{}'".format(product_id),
+        )
+
+    # end method definition
+
+    def update_product_description(self, product_id: str, language: str, description: str) -> bool:
+        """Change the description of an SAP product (material) in one language.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "FG126".
+            language (str):
+                The language key of the (existing) description, e.g. "EN".
+            description (str):
+                The new description, e.g. "Pump seal 50 mm".
+
+        Returns:
+            bool:
+                True if the description has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_path="A_ProductDescription(Product='{}',Language='{}')".format(
+                self._quote_key(product_id), self._quote_key(language.upper())
+            ),
+            model=SAPProductDescriptionModel,
+            changes={"description": description},
+            label="description -> '{}' of product -> '{}'".format(language, product_id),
+        )
+
+    # end method definition
+
+    def update_product_plant(self, product_id: str, plant: str, changes: dict) -> bool:
+        """Update individual fields of the plant data of an SAP product (material).
+
+        The product must already be extended to the plant. The changes are validated with the
+        field definitions of SAPProductPlantModel.
+
+        Changes of fields that belong to a view which is not maintained for the plant may be
+        ignored by SAP without an error (e.g. the purchasing group without a purchasing view).
+        Setting a field of another view can also add that view (e.g. the MRP view with the
+        MRP type) - its required fields can then not be cleared any more.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "FG126".
+            plant (str):
+                The plant, e.g. "1010".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPProductPlantModel or OData
+                property names, e.g. {"mrp_type": "PD", "purchasing_group": "001"}.
+
+        Returns:
+            bool:
+                True if the plant data has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_path="A_ProductPlant(Product='{}',Plant='{}')".format(
+                self._quote_key(product_id), self._quote_key(plant)
+            ),
+            model=SAPProductPlantModel,
+            changes=changes,
+            label="plant data -> '{}' of product -> '{}'".format(plant, product_id),
+        )
+
+    # end method definition
+
+    def create_product_plant(self, product_id: str, plant: SAPProductPlantModel | dict) -> dict | None:
+        """Extend an existing SAP product (material) to a plant - with its storage locations in the plant.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "KT-4402".
+            plant (SAPProductPlantModel | dict):
+                The plant data (incl. storage locations). A dictionary is validated against the
+                SAPProductPlantModel and can use either the snake case attribute names or the OData
+                property names.
+
+        Returns:
+            dict | None:
+                The created plant data as returned by SAP or None in case of an error.
+
+        """
+
+        if isinstance(plant, dict):
+            try:
+                plant = SAPProductPlantModel.model_validate(plant)
+            except ValidationError as validation_error:
+                self.log_error("Invalid plant data of product -> '%s'; error -> %s", product_id, str(validation_error))
+                return None
+        # The product is given by the URL - SAP needs it in the payload of the plant and its storage locations:
+        plant = plant.model_copy(deep=True, update={"product_id": product_id})
+        for storage_location in plant.storage_locations:
+            storage_location.product_id = product_id
+            storage_location.plant = plant.plant
+
+        return self._create_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_set="A_Product('{}')/to_Plant".format(self._quote_key(product_id)),
+            model=SAPProductPlantModel,
+            data=plant,
+            key_fields=["Plant"],
+            label="plant data -> '{}' of product -> '{}'".format(plant.plant, product_id),
+        )
+
+    # end method definition
+
+    def create_product_storage_location(
+        self, product_id: str, plant: str, storage_location: SAPProductStorageLocationModel | dict
+    ) -> dict | None:
+        """Extend an SAP product (material) that is already extended to the plant to a storage location.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "EP-300".
+            plant (str):
+                The plant the product is extended to, e.g. "3000".
+            storage_location (SAPProductStorageLocationModel | dict):
+                The storage location data, e.g. {"StorageLocation": "0001"}.
+
+        Returns:
+            dict | None:
+                The created storage location data as returned by SAP or None in case of an error.
+
+        """
+
+        # The product and plant are given by the URL - SAP needs them in the payload as well (also for models):
+        if isinstance(storage_location, dict):
+            storage_location = {**storage_location, "Product": product_id, "Plant": plant}
+        else:
+            storage_location = storage_location.model_copy(update={"product_id": product_id, "plant": plant})
+
+        return self._create_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_set="A_ProductPlant(Product='{}',Plant='{}')/to_StorageLocation".format(
+                self._quote_key(product_id), self._quote_key(plant)
+            ),
+            model=SAPProductStorageLocationModel,
+            data=storage_location,
+            key_fields=["StorageLocation"],
+            label="storage location data of product -> '{}' in plant -> '{}'".format(product_id, plant),
+        )
+
+    # end method definition
+
+    def create_product_valuation(self, product_id: str, valuation: SAPProductValuationModel | dict) -> dict | None:
+        """Create the valuation data of an SAP product (material) in a valuation area (plant).
+
+        The valuation data is needed to post stock of the product (goods receipts and issues).
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "KT-4402".
+            valuation (SAPProductValuationModel | dict):
+                The valuation data (valuation area, valuation class, price control and price).
+
+        Returns:
+            dict | None:
+                The created valuation data as returned by SAP or None in case of an error.
+
+        """
+
+        # The product is given by the URL - SAP needs it in the payload as well (also for models):
+        if isinstance(valuation, dict):
+            valuation = {**valuation, "Product": product_id}
+        else:
+            valuation = valuation.model_copy(update={"product_id": product_id})
+
+        return self._create_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_set="A_Product('{}')/to_Valuation".format(self._quote_key(product_id)),
+            model=SAPProductValuationModel,
+            data=valuation,
+            key_fields=["ValuationArea"],
+            label="valuation data of product -> '{}'".format(product_id),
+        )
+
+    # end method definition
+
+    def delete_product(self, product_id: str) -> bool:
+        """Delete an SAP product (material) by setting its deletion flag (can be reset in SAP).
+
+        SAP does not delete master data physically - the deletion flag (on client level)
+        marks the product for archiving.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "FG126".
+
+        Returns:
+            bool:
+                True if the deletion flag has been set, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_path="A_Product('{}')".format(self._quote_key(product_id)),
+            model=SAPProductModel,
+            changes={"IsMarkedForDeletion": True},
+            label="product -> '{}'".format(product_id),
+        )
+
+    # end method definition
+
+    def undelete_product(self, product_id: str) -> bool:
+        """Remove the deletion flag of an SAP product (material) - the reverse of delete_product().
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "FG126".
+
+        Returns:
+            bool:
+                True if the deletion flag has been removed, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PRODUCT_SRV",
+            entity_path="A_Product('{}')".format(self._quote_key(product_id)),
+            model=SAPProductModel,
+            changes={"IsMarkedForDeletion": False},
+            label="product -> '{}'".format(product_id),
+        )
+
+    # end method definition
+
+    def create_material_bom(self, bom: SAPMaterialBOMModel | dict) -> dict | None:
+        """Create a material BOM (bill of material) of a product in a plant with its items.
+
+        With the usage "4" (plant maintenance) the BOM is the spare parts list of all
+        equipment with this product as construction type.
+
+        Args:
+            bom (SAPMaterialBOMModel | dict):
+                The data. A dictionary is validated against the SAPMaterialBOMModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created BOM as returned by SAP (including "BillOfMaterial") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BILL_OF_MATERIAL_SRV",
+            entity_set="MaterialBOM",
+            model=SAPMaterialBOMModel,
+            data=bom,
+            key_fields=["BillOfMaterial"],
+            label="material BOM",
+        )
+
+    # end method definition
+
+    def iter_material_boms(
+        self, query: SAPMaterialBOMQueryModel | None = None
+    ) -> SAPODataIterator[SAPMaterialBOMResponseModel]:
+        """Iterate over material BOMs - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPMaterialBOMQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all BOMs).
+
+        Returns:
+            SAPODataIterator[SAPMaterialBOMResponseModel]:
+                The iterator over the BOMs.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_BILL_OF_MATERIAL_SRV",
+            entity_set="MaterialBOM",
+            model=SAPMaterialBOMResponseModel,
+            query=query or SAPMaterialBOMQueryModel(),
+            label="material BOMs",
+        )
+
+    # end method definition
+
+    def get_material_boms(
+        self, query: SAPMaterialBOMQueryModel | None = None
+    ) -> list[SAPMaterialBOMResponseModel] | None:
+        """Get material BOMs as a list - e.g. the spare parts list (usage "4") of a product.
+
+        All matching BOMs are read (page by page, see iter_material_boms()) and returned at once.
+
+        Args:
+            query (SAPMaterialBOMQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all BOMs).
+
+        Returns:
+            list[SAPMaterialBOMResponseModel] | None:
+                The BOMs (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_material_boms(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP material BOMs.", len(results))
+
+        return results
 
     # end method definition
 
@@ -5485,6 +8900,31 @@ class SAP:
 
     # end method definition
 
+    def create_equipment(self, equipment: SAPEquipmentModel | dict) -> dict | None:
+        """Create an SAP equipment (master data).
+
+        Args:
+            equipment (SAPEquipmentModel | dict):
+                The data. A dictionary is validated against the SAPEquipmentModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created equipment as returned by SAP (including "Equipment") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_EQUIPMENT",
+            entity_set="Equipment",
+            model=SAPEquipmentModel,
+            data=equipment,
+            key_fields=["Equipment"],
+            label="equipment",
+        )
+
+    # end method definition
+
     def iter_equipments(
         self, query: SAPEquipmentQueryModel | None = None
     ) -> SAPODataIterator[SAPEquipmentResponseModel]:
@@ -5563,6 +9003,150 @@ class SAP:
             self.logger.warning("Cannot find SAP equipment -> '%s'", equipment_id)
 
         return entry
+
+    # end method definition
+
+    def update_equipment(self, equipment_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP equipment.
+
+        The changes are validated with the field definitions of SAPEquipmentModel. The equipment
+        number, the category and the installation location (functional location, superordinate
+        equipment) cannot be changed. Equipment data is time dependent: the currently valid time
+        segment is changed.
+
+        SAP ignores changes of an equipment with a deletion flag (without an error) - remove the
+        flag with undelete_equipment() first.
+
+        Args:
+            equipment_id (str):
+                The equipment number, e.g. "210100001".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPEquipmentModel or OData
+                property names, e.g. {"name": "Centrifugal pump P-100", "construction_year": "2019"}.
+
+        Returns:
+            bool:
+                True if the equipment has been updated, False in case of an error.
+
+        """
+
+        equipment = self.get_equipment(equipment_id=equipment_id)
+        if equipment is None:
+            if not self.last_error:
+                self.log_error("Cannot update SAP equipment -> '%s' - it does not exist!", equipment_id)
+            return False
+        if equipment.is_marked_for_deletion:
+            self.log_error(
+                "Cannot update SAP equipment -> '%s' - it is marked for deletion (remove the deletion flag first)!",
+                equipment_id,
+            )
+            return False
+
+        return self._update_odata_entity(
+            service="API_EQUIPMENT",
+            entity_path="Equipment(Equipment='{}',ValidityEndDate={})".format(
+                self._quote_key(equipment_id), odata_literal(equipment.validity_end_date)
+            ),
+            model=SAPEquipmentModel,
+            changes=changes,
+            label="equipment -> '{}'".format(equipment_id),
+        )
+
+    # end method definition
+
+    def delete_equipment(self, equipment_id: str) -> bool:
+        """Delete an SAP equipment by setting its deletion flag (can be reset in SAP).
+
+        SAP does not delete master data physically - the deletion flag marks it for archiving.
+        Equipment data is time dependent: the flag is set for the currently valid time segment.
+
+        Args:
+            equipment_id (str):
+                The equipment number, e.g. "210100001".
+
+        Returns:
+            bool:
+                True if the deletion flag has been set, False in case of an error.
+
+        """
+
+        equipment = self.get_equipment(equipment_id=equipment_id)
+        if equipment is None:
+            if not self.last_error:
+                self.log_error("Cannot delete SAP equipment -> '%s' - it does not exist!", equipment_id)
+            return False
+
+        # The function needs the time segment (part of the key) and the ETag of the equipment:
+        result = self._call_odata_function(
+            service="API_EQUIPMENT",
+            function="SetEquipToMarkedForDeletion",
+            parameters={"Equipment": equipment_id, "ValidityEndDate": equipment.validity_end_date},
+            label="set the deletion flag of equipment -> '{}'".format(equipment_id),
+            etag_entity_path="Equipment(Equipment='{}',ValidityEndDate={})".format(
+                self._quote_key(equipment_id), odata_literal(equipment.validity_end_date)
+            ),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def undelete_equipment(self, equipment_id: str) -> bool:
+        """Remove the deletion flag of an SAP equipment - the reverse of delete_equipment().
+
+        Args:
+            equipment_id (str):
+                The equipment number, e.g. "210100001".
+
+        Returns:
+            bool:
+                True if the deletion flag has been removed, False in case of an error.
+
+        """
+
+        equipment = self.get_equipment(equipment_id=equipment_id)
+        if equipment is None:
+            if not self.last_error:
+                self.log_error("Cannot undelete SAP equipment -> '%s' - it does not exist!", equipment_id)
+            return False
+
+        result = self._call_odata_function(
+            service="API_EQUIPMENT",
+            function="RsetEquipFromMarkedForDeletion",
+            parameters={"Equipment": equipment_id, "ValidityEndDate": equipment.validity_end_date},
+            label="remove the deletion flag of equipment -> '{}'".format(equipment_id),
+            etag_entity_path="Equipment(Equipment='{}',ValidityEndDate={})".format(
+                self._quote_key(equipment_id), odata_literal(equipment.validity_end_date)
+            ),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def create_functional_location(self, functional_location: SAPFunctionalLocationModel | dict) -> dict | None:
+        """Create an SAP functional location (master data).
+
+        Args:
+            functional_location (SAPFunctionalLocationModel | dict):
+                The data. A dictionary is validated against the SAPFunctionalLocationModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created functional location as returned by SAP (including the internal ID
+                "FunctionalLocation") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_FUNCTIONALLOCATION",
+            entity_set="FunctionalLocation",
+            model=SAPFunctionalLocationModel,
+            data=functional_location,
+            key_fields=["FunctionalLocation"],
+            label="functional location",
+        )
 
     # end method definition
 
@@ -5648,6 +9232,121 @@ class SAP:
 
     # end method definition
 
+    def update_functional_location(self, functional_location_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP functional location.
+
+        The changes are validated with the field definitions of SAPFunctionalLocationModel. The
+        label (the key) cannot be changed. SAP rejects changes of a functional location with a
+        deletion flag - remove the flag with undelete_functional_location() first.
+
+        Args:
+            functional_location_id (str):
+                The internal functional location ID, e.g. "1010-SP-PMP".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPFunctionalLocationModel or
+                OData property names, e.g. {"name": "Pump station 1", "main_work_center": "RES-0100"}.
+
+        Returns:
+            bool:
+                True if the functional location has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_FUNCTIONALLOCATION",
+            entity_path="FunctionalLocation('{}')".format(self._quote_key(functional_location_id)),
+            model=SAPFunctionalLocationModel,
+            changes=changes,
+            label="functional location -> '{}'".format(functional_location_id),
+        )
+
+    # end method definition
+
+    def delete_functional_location(self, functional_location_id: str) -> bool:
+        """Delete an SAP functional location by setting its deletion flag (can be reset in SAP).
+
+        SAP does not delete master data physically - the deletion flag marks it for archiving.
+
+        Args:
+            functional_location_id (str):
+                The internal functional location ID, e.g. "1010-SP-PMP".
+
+        Returns:
+            bool:
+                True if the deletion flag has been set, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_FUNCTIONALLOCATION",
+            function="SetFuncLocToMarkedForDeletion",
+            parameters={"FunctionalLocation": functional_location_id},
+            label="set the deletion flag of functional location -> '{}'".format(functional_location_id),
+            # The function needs the ETag of the functional location (428 Precondition required otherwise):
+            etag_entity_path="FunctionalLocation('{}')".format(self._quote_key(functional_location_id)),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def undelete_functional_location(self, functional_location_id: str) -> bool:
+        """Remove the deletion flag of an SAP functional location - the reverse of delete_functional_location().
+
+        Args:
+            functional_location_id (str):
+                The internal functional location ID, e.g. "1010-SP-PMP".
+
+        Returns:
+            bool:
+                True if the deletion flag has been removed, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_FUNCTIONALLOCATION",
+            function="RsetFuncLocFromMrkdForDeletion",
+            parameters={"FunctionalLocation": functional_location_id},
+            label="remove the deletion flag of functional location -> '{}'".format(functional_location_id),
+            etag_entity_path="FunctionalLocation('{}')".format(self._quote_key(functional_location_id)),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def create_business_partner(self, business_partner: SAPBusinessPartnerModel | dict) -> dict | None:
+        """Create an SAP business partner (organization) with its addresses, roles and supplier / customer data.
+
+        With a supplier or customer role (e.g. FLVN00 / FLCU00) SAP also creates the
+        supplier / customer - depending on the customizing of the grouping. The purchasing
+        organization data (role FLVN01) and company code data of the supplier and the sales
+        area data (role FLCU01) and company code data of the customer can be created in the
+        same request. Business partners cannot be deleted with the API.
+
+        Args:
+            business_partner (SAPBusinessPartnerModel | dict):
+                The data. A dictionary is validated against the SAPBusinessPartnerModel and can use
+                either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created business partner as returned by SAP (including "BusinessPartner")
+                or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_BusinessPartner",
+            model=SAPBusinessPartnerModel,
+            data=business_partner,
+            key_fields=["BusinessPartner"],
+            label="business partner",
+        )
+
+    # end method definition
+
     def iter_business_partners(
         self, query: SAPBusinessPartnerQueryModel | None = None
     ) -> SAPODataIterator[SAPBusinessPartnerResponseModel]:
@@ -5715,7 +9414,9 @@ class SAP:
             business_partner_id (str):
                 The business partner number, e.g. "10300001".
             expand_items (bool, optional):
-                Whether to read the roles as well. Defaults to True.
+                Whether to read the roles, addresses, supplier data (purchasing organizations,
+                company codes) and customer data (sales areas, company codes) as well.
+                Defaults to True.
 
         Returns:
             SAPBusinessPartnerResponseModel | None:
@@ -5727,7 +9428,7 @@ class SAP:
             service="API_BUSINESS_PARTNER",
             entity_path="A_BusinessPartner('{}')".format(self._quote_key(business_partner_id)),
             model=SAPBusinessPartnerResponseModel,
-            params={"$expand": "to_BusinessPartnerRole"} if expand_items else None,
+            params={"$expand": BUSINESS_PARTNER_DETAILS_EXPAND} if expand_items else None,
             label="business partner -> '{}'".format(business_partner_id),
         )
 
@@ -5801,7 +9502,9 @@ class SAP:
             customer_id (str):
                 The customer number, e.g. "17100001".
             expand_items (bool, optional):
-                Whether to read the roles as well. Defaults to True.
+                Whether to read the roles, addresses, supplier data (purchasing organizations,
+                company codes) and customer data (sales areas, company codes) as well - see
+                get_business_partner(). Defaults to True.
 
         Returns:
             SAPBusinessPartnerResponseModel | None:
@@ -5810,9 +9513,7 @@ class SAP:
         """
 
         # Two entries to detect ambiguous assignments (there should be exactly one business partner):
-        entries = self.get_customers(
-            query=SAPCustomerQueryModel(customer_ids=[customer_id], limit=2, expand_items=expand_items)
-        )
+        entries = self.get_customers(query=SAPCustomerQueryModel(customer_ids=[customer_id], limit=2))
         if entries is None:
             return None
         if len(entries) > 1:
@@ -5825,27 +9526,30 @@ class SAP:
         if not entries:
             self.logger.warning("Cannot find SAP customer -> '%s'", customer_id)
             return None
+        if not expand_items:
+            return entries[0]
 
-        return entries[0]
+        # The collection only expands the roles - the business partner itself has all details (e.g. addresses):
+        return self.get_business_partner(business_partner_id=entries[0].business_partner_id, expand_items=True)
 
     # end method definition
 
-    def iter_vendors(
-        self, query: SAPVendorQueryModel | None = None
+    def iter_suppliers(
+        self, query: SAPSupplierQueryModel | None = None
     ) -> SAPODataIterator[SAPBusinessPartnerResponseModel]:
-        """Iterate over SAP vendors - reading them page by page from SAP.
+        """Iterate over SAP suppliers - reading them page by page from SAP.
 
         Use this for large result sets: only one page is held in memory at a time.
         Errors are logged and end the iteration (check the 'failed' attribute of the
         returned iterator afterwards).
 
         Args:
-            query (SAPVendorQueryModel | None, optional):
-                The search criteria (filters, sort order, limit, page size). Defaults to None (all vendors).
+            query (SAPSupplierQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all suppliers).
 
         Returns:
             SAPODataIterator[SAPBusinessPartnerResponseModel]:
-                The iterator over the vendors.
+                The iterator over the suppliers.
 
         """
 
@@ -5853,52 +9557,54 @@ class SAP:
             service="API_BUSINESS_PARTNER",
             entity_set="A_BusinessPartner",
             model=SAPBusinessPartnerResponseModel,
-            query=query or SAPVendorQueryModel(),
-            label="vendors",
+            query=query or SAPSupplierQueryModel(),
+            label="suppliers",
         )
 
     # end method definition
 
-    def get_vendors(self, query: SAPVendorQueryModel | None = None) -> list[SAPBusinessPartnerResponseModel] | None:
-        """Get SAP vendors as a list.
+    def get_suppliers(self, query: SAPSupplierQueryModel | None = None) -> list[SAPBusinessPartnerResponseModel] | None:
+        """Get SAP suppliers as a list.
 
-        All matching vendors are read (page by page, see iter_vendors()) and returned at once.
-        For very large result sets prefer iter_vendors().
+        All matching suppliers are read (page by page, see iter_suppliers()) and returned at once.
+        For very large result sets prefer iter_suppliers().
 
         Args:
-            query (SAPVendorQueryModel | None, optional):
-                The search criteria (filters, sort order, limit, page size). Defaults to None (all vendors).
+            query (SAPSupplierQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all suppliers).
 
         Returns:
             list[SAPBusinessPartnerResponseModel] | None:
-                The vendors (an empty list if none match) or None in case of an error.
+                The suppliers (an empty list if none match) or None in case of an error.
 
         """
 
-        entries = self.iter_vendors(query=query)
+        entries = self.iter_suppliers(query=query)
         results = list(entries)
         if entries.failed:
             return None
 
-        self.logger.info("Got %d SAP vendors.", len(results))
+        self.logger.info("Got %d SAP suppliers.", len(results))
 
         return results
 
     # end method definition
 
-    def get_vendor(self, vendor_id: str, expand_items: bool = True) -> SAPBusinessPartnerResponseModel | None:
-        """Get the business partner of a vendor number (master data).
+    def get_supplier(self, supplier_id: str, expand_items: bool = True) -> SAPBusinessPartnerResponseModel | None:
+        """Get the business partner of a supplier number (master data).
 
-        In S/4HANA vendors are business partners with the vendor role (customer / vendor
-        integration). The vendor number (as used in business documents and as business object
+        In S/4HANA suppliers are business partners with the supplier role (customer / vendor
+        integration). The supplier (vendor) number (as used in business documents and as business object
         ID of LFA1 business workspaces) is not necessarily the business partner number, so
         the business partner is looked up by its "Supplier" property.
 
         Args:
-            vendor_id (str):
-                The vendor number, e.g. "17300001".
+            supplier_id (str):
+                The supplier number, e.g. "17300001".
             expand_items (bool, optional):
-                Whether to read the roles as well. Defaults to True.
+                Whether to read the roles, addresses, supplier data (purchasing organizations,
+                company codes) and customer data (sales areas, company codes) as well - see
+                get_business_partner(). Defaults to True.
 
         Returns:
             SAPBusinessPartnerResponseModel | None:
@@ -5907,23 +9613,24 @@ class SAP:
         """
 
         # Two entries to detect ambiguous assignments (there should be exactly one business partner):
-        entries = self.get_vendors(
-            query=SAPVendorQueryModel(vendor_ids=[vendor_id], limit=2, expand_items=expand_items)
-        )
+        entries = self.get_suppliers(query=SAPSupplierQueryModel(supplier_ids=[supplier_id], limit=2))
         if entries is None:
             return None
         if len(entries) > 1:
             self.log_error(
-                "SAP vendor -> '%s' is assigned to several business partners -> %s",
-                vendor_id,
+                "SAP supplier -> '%s' is assigned to several business partners -> %s",
+                supplier_id,
                 ", ".join(entry.business_partner_id for entry in entries),
             )
             return None
         if not entries:
-            self.logger.warning("Cannot find SAP vendor -> '%s'", vendor_id)
+            self.logger.warning("Cannot find SAP supplier -> '%s'", supplier_id)
             return None
+        if not expand_items:
+            return entries[0]
 
-        return entries[0]
+        # The collection only expands the roles - the business partner itself has all details (e.g. addresses):
+        return self.get_business_partner(business_partner_id=entries[0].business_partner_id, expand_items=True)
 
     # end method definition
 
@@ -6027,11 +9734,21 @@ class SAP:
 
         """
 
+        query, failed = self._resolve_text_search(
+            service="API_SALESORGANIZATION_SRV",
+            query=query or SAPSalesOrganizationQueryModel(),
+            label="sales organizations",
+        )
+        if failed:
+            return SAPODataIterator(_failed_odata_read())
+        if query is None:
+            return SAPODataIterator(iter([]))
+
         return self._iter_odata_collection(
             service="API_SALESORGANIZATION_SRV",
             entity_set="A_SalesOrganization",
             model=SAPSalesOrganizationResponseModel,
-            query=query or SAPSalesOrganizationQueryModel(),
+            query=query,
             label="sales organizations",
         )
 
@@ -6195,11 +9912,19 @@ class SAP:
 
         """
 
+        query, failed = self._resolve_text_search(
+            service="API_COSTCENTER_SRV", query=query or SAPCostCenterQueryModel(), label="cost centers"
+        )
+        if failed:
+            return SAPODataIterator(_failed_odata_read())
+        if query is None:
+            return SAPODataIterator(iter([]))
+
         return self._iter_odata_collection(
             service="API_COSTCENTER_SRV",
             entity_set="A_CostCenter",
             model=SAPCostCenterResponseModel,
-            query=query or SAPCostCenterQueryModel(),
+            query=query,
             label="cost centers",
         )
 
@@ -6286,11 +10011,19 @@ class SAP:
 
         """
 
+        query, failed = self._resolve_text_search(
+            service="API_PROFITCENTER_SRV", query=query or SAPProfitCenterQueryModel(), label="profit centers"
+        )
+        if failed:
+            return SAPODataIterator(_failed_odata_read())
+        if query is None:
+            return SAPODataIterator(iter([]))
+
         return self._iter_odata_collection(
             service="API_PROFITCENTER_SRV",
             entity_set="A_ProfitCenter",
             model=SAPProfitCenterResponseModel,
-            query=query or SAPProfitCenterQueryModel(),
+            query=query,
             label="profit centers",
         )
 
@@ -6379,11 +10112,19 @@ class SAP:
 
         """
 
+        query, failed = self._resolve_text_search(
+            service="API_GLACCOUNTINCHARTOFACCOUNTS_SRV", query=query or SAPGLAccountQueryModel(), label="G/L accounts"
+        )
+        if failed:
+            return SAPODataIterator(_failed_odata_read())
+        if query is None:
+            return SAPODataIterator(iter([]))
+
         return self._iter_odata_collection(
             service="API_GLACCOUNTINCHARTOFACCOUNTS_SRV",
             entity_set="A_GLAccountInChartOfAccounts",
             model=SAPGLAccountResponseModel,
-            query=query or SAPGLAccountQueryModel(),
+            query=query,
             label="G/L accounts",
         )
 

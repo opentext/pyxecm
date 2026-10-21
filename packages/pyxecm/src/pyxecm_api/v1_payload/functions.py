@@ -11,11 +11,12 @@ import logging
 import os
 import threading
 from collections.abc import AsyncGenerator, Callable
-from typing import Any
+from http import HTTPStatus
+from typing import Annotated, Any
 
 import anyio
 from anyio.lowlevel import RunVar
-from fastapi import Request
+from fastapi import HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from opentelemetry import trace
 from pyxecm_customizer.exceptions import PayloadImportError
@@ -24,6 +25,8 @@ from starlette.types import Message, Receive, Scope, Send
 
 from pyxecm_api.common.functions import PAYLOAD_LIST
 from pyxecm_api.settings import api_settings
+
+from .log_reader import DEFAULT_LIMIT, DEFAULT_MAX_BYTES, LogLinesRequest, build_lines_request
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger("pyxecm_api.v1_payload")
@@ -317,3 +320,73 @@ async def run_log_read(request: Request | None, function: Callable[..., Any], *a
     if error is not None:
         raise error
     return result
+
+
+def lines_request_from_query(
+    offset: Annotated[
+        int | None,
+        Query(description="Byte offset to start at. It is snapped back to the start of the line containing it."),
+    ] = None,
+    line: Annotated[
+        int | None,
+        Query(description="Line number (1-based) to start at. Alternative to the offset."),
+    ] = None,
+    direction: Annotated[
+        str,
+        Query(
+            description="'forward' returns the lines from the start position on, "
+            "'backward' the lines before it. Without start position, 'forward' starts "
+            "at the beginning of the logfile and 'backward' at its end.",
+        ),
+    ] = "forward",
+    limit: Annotated[int, Query(description="Maximum number of lines to return (0 to 5000).")] = DEFAULT_LIMIT,
+    max_bytes: Annotated[
+        int,
+        Query(description="Soft cap on the summed size of the returned lines. At most 4 MiB are used."),
+    ] = DEFAULT_MAX_BYTES,
+    levels: Annotated[
+        str | None,
+        Query(
+            description="Comma separated list of the levels to return (DEBUG, INFO, WARNING, ERROR). "
+            "Lines without a level are always returned. An empty value returns only those.",
+        ),
+    ] = None,
+    q: Annotated[str | None, Query(description="Text to search for. Only matching lines are returned.")] = None,
+    regex: Annotated[bool, Query(description="The search text is a regular expression (Python syntax).")] = False,
+    case: Annotated[bool, Query(description="Match the case of the search text.")] = False,
+    word: Annotated[bool, Query(description="Match whole words only.")] = False,
+    count_only: Annotated[
+        bool,
+        Query(description="Return no lines but count them. The limit and max_bytes are ignored."),
+    ] = False,
+) -> LogLinesRequest:
+    """Read the query parameters of a request for log lines (a dependency of the `/lines` endpoints).
+
+    The payload logs and the pod logs are read with the same parameters (see `build_lines_request`).
+
+    Raises:
+        HTTPException:
+            A parameter is invalid (400).
+
+    Returns:
+        LogLinesRequest:
+            The request.
+
+    """
+
+    try:
+        return build_lines_request(
+            offset=offset,
+            line=line,
+            direction=direction,
+            limit=limit,
+            max_bytes=max_bytes,
+            levels=levels,
+            q=q,
+            regex=regex,
+            case=case,
+            word=word,
+            count_only=count_only,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc

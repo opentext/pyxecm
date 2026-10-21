@@ -110,13 +110,22 @@ import time
 import urllib.parse
 import uuid
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from http import HTTPStatus
 from importlib.metadata import version
+from typing import ClassVar
 
 import requests
 from lxml import etree
 from pydantic import BaseModel, ValidationError
+from pyxecm.errors import (
+    ErrorCategory,
+    PyxecmError,
+    ReportingLoggerAttribute,
+    record_error,
+    request_error_severity,
+)
 
 from .sap_models import (
     ODataCondition,
@@ -877,10 +886,19 @@ class BearerAuth(requests.auth.AuthBase):
 TEXT_SEARCH_MAX_IDS = 100
 
 
+@dataclass(frozen=True)
+class SAPError(PyxecmError):
+    """An error recorded by the SAP module (SAP class) for pyxecm.capture_errors()."""
+
+    source: ClassVar[str] = "sap"
+
+
 class SAP:
     """Implement Remote Function Calls (RFC) and OData REST API calls to SAP S/4HANA."""
 
-    logger: logging.Logger = default_logger
+    # Every assigned logger is wrapped in a ReportingLogger, so that
+    # self.logger.error(..., report=True) records the error for capture_errors():
+    logger = ReportingLoggerAttribute(default_logger, error_class=SAPError)
 
     def __init__(
         self,
@@ -1145,6 +1163,7 @@ class SAP:
                 "Failed to call RFC -> '%s'; error -> %s",
                 rfc_name,
                 str(sap_error),
+                report=True,
             )
             return None
 
@@ -1216,7 +1235,7 @@ class SAP:
         """
 
         text = message % args if args else message
-        self.logger.error(text)
+        self.logger.error(text, report=True)
         self._thread_local.last_error = text
 
     # end method definition
@@ -1783,6 +1802,56 @@ class SAP:
 
     # end method definition
 
+    def _record_request_error(
+        self,
+        message: str,
+        method: str,
+        url: str,
+        status_code: int | None = None,
+        server_message: str | None = None,
+        category: ErrorCategory | None = None,
+        show_error: bool = True,
+        show_warning: bool = False,
+    ) -> None:
+        """Record a failed OData request for an active pyxecm.capture_errors() block.
+
+        Unlike the generic pyxecm.errors.record_request_error() this takes the server
+        message as it is - SAP's error is parsed (and partly rewritten to actionable hints)
+        by do_request() already.
+
+        Args:
+            message (str):
+                Description of the failed operation (typically the failure message).
+            method (str):
+                The HTTP method of the request.
+            url (str):
+                The URL of the request. Query string and fragment are removed.
+            status_code (int | None, optional):
+                The HTTP status code (if SAP answered).
+            server_message (str | None, optional):
+                The (readable) error returned by SAP.
+            category (ErrorCategory | None, optional):
+                The error category. If None, it is determined from status code and server message.
+            show_error (bool, optional):
+                The show_error parameter of do_request() (determines the severity).
+            show_warning (bool, optional):
+                The show_warning parameter of do_request() (determines the severity).
+
+        """
+
+        record_error(
+            message,
+            category=category,
+            severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+            error_class=SAPError,
+            status_code=status_code,
+            server_message=server_message,
+            method=method,
+            url=url,
+        )
+
+    # end method definition
+
     def do_request(
         self,
         url: str,
@@ -1866,6 +1935,9 @@ class SAP:
                 url,
             )
             self._thread_local.last_error = "SAP OData is not configured (no base URL)."
+            self._record_request_error(
+                message=self._thread_local.last_error, method=method, url=url, category=ErrorCategory.VALIDATION
+            )
             return None
 
         method = method.upper()
@@ -1921,6 +1993,12 @@ class SAP:
             except requests.exceptions.RequestException as request_error:
                 self.logger.error("%s; request error -> %s", failure_message, str(request_error))
                 self._thread_local.last_error = "Request error -> {}".format(request_error)
+                self._record_request_error(
+                    message="{}; request error -> {}".format(failure_message, request_error),
+                    method=method,
+                    url=url,
+                    category=ErrorCategory.CONNECTION,
+                )
                 return None
             else:
                 error_text = ""
@@ -1951,6 +2029,12 @@ class SAP:
                 else:
                     self.logger.error("%s; %s. Giving up after %d retries.", failure_message, error_text, retries)
                 self._thread_local.last_error = "SAP is not reachable ({}).".format(error_text)
+                self._record_request_error(
+                    message="{}; SAP is not reachable ({})".format(failure_message, error_text),
+                    method=method,
+                    url=url,
+                    category=ErrorCategory.TIMEOUT if "timeout" in error_text else ErrorCategory.CONNECTION,
+                )
                 return None
 
             # SAP may return additional (warning / info) messages in the 'sap-message' header:
@@ -2017,6 +2101,9 @@ class SAP:
             # Permanent error:
             error = SAPODataErrorModel.from_response(response)
             bearer_error = parse_bearer_error(response)
+            # The authorization errors below are rewritten to readable messages - their
+            # category is clear (the text of the messages would not tell it reliably):
+            category = None
             if bearer_error and bearer_error["error"] == "insufficient_scope":
                 # SAP answers with an HTML page - say which scope is missing and where to add it:
                 error.message = (
@@ -2026,12 +2113,15 @@ class SAP:
                         self._service_name_of_url(url), bearer_error.get("scope", "?")
                     )
                 )
+                category = ErrorCategory.PERMISSION_DENIED
             elif bearer_error and bearer_error["error"] == "scope_check_impossible":
+                category = ErrorCategory.PERMISSION_DENIED
                 error.message = (
                     "OAuth is not enabled for OData service -> '{}' (it has no scope) - enable OAuth for it in "
                     "transaction /IWFND/MAINT_SERVICE.".format(self._service_name_of_url(url))
                 )
             elif response.status_code == HTTPStatus.FORBIDDEN and error.message == "HTML error page returned":
+                category = ErrorCategory.PERMISSION_DENIED
                 error.message = (
                     "No authorization for OData service -> '{}' (SAP returned an HTML error page) - check the "
                     "authorizations of the user with transaction SU53, e.g. S_SERVICE.".format(
@@ -2072,6 +2162,16 @@ class SAP:
                     str(error),
                 )
             self.logger.debug("Full error response -> %s", response.text)
+            self._record_request_error(
+                message=failure_message if show_error else (warning_message or failure_message),
+                method=method,
+                url=url,
+                status_code=response.status_code,
+                server_message=str(error),
+                category=category,
+                show_error=show_error,
+                show_warning=show_warning,
+            )
 
             return error.model_dump() if parse_error_response else None
 
@@ -2120,7 +2220,9 @@ class SAP:
         """
 
         if not self._base_url:
-            self.logger.error("Cannot check SAP OData APIs - the SAP object has been initialized without a base URL!")
+            self.logger.error(
+                "Cannot check SAP OData APIs - the SAP object has been initialized without a base URL!", report=True
+            )
             return {}
 
         if services is None:
@@ -9524,7 +9626,7 @@ class SAP:
             )
             return None
         if not entries:
-            self.logger.warning("Cannot find SAP customer -> '%s'", customer_id)
+            self.logger.warning("Cannot find SAP customer -> '%s'", customer_id, report=True)
             return None
         if not expand_items:
             return entries[0]
@@ -9624,7 +9726,7 @@ class SAP:
             )
             return None
         if not entries:
-            self.logger.warning("Cannot find SAP supplier -> '%s'", supplier_id)
+            self.logger.warning("Cannot find SAP supplier -> '%s'", supplier_id, report=True)
             return None
         if not expand_items:
             return entries[0]

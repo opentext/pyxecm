@@ -21,6 +21,13 @@ from importlib.metadata import version
 
 import requests
 
+from pyxecm.errors import (
+    ErrorCategory,
+    OTCAError,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
 from pyxecm.otcs import OTCS
 
 APP_NAME = "pyxecm"
@@ -53,7 +60,7 @@ class OTCA:
     AGENT = "ai"  # name of the agent role (used in messages)
     USER = "user"  # name of the user role (used in messages)
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTCAError)
 
     def __init__(
         self,
@@ -377,6 +384,14 @@ class OTCA:
                             response.text,
                         )
 
+                    record_request_error(
+                        error_class=OTCAError,
+                        message=failure_message,
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error),
+                    )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries or max_retries < 0:
@@ -390,6 +405,13 @@ class OTCA:
                     self.logger.error(
                         "%s; timeout error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTCAError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -412,6 +434,13 @@ class OTCA:
                     self.logger.error(
                         "%s; connection error!",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTCAError,
+                        message="{}; connection error".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -520,7 +549,7 @@ class OTCA:
                 if result:
                     token = result.get("otcsticket")
                 else:
-                    self.logger.error("Authentication failed via /auth endpoint -> %s", url)
+                    self.logger.error("Authentication failed via /auth endpoint -> %s", url, report=True)
                     return None
 
         if isinstance(token, dict) and "otcsticket" in token:
@@ -546,7 +575,7 @@ class OTCA:
             return self._chat_token
 
         else:
-            self.logger.error("Authentication failed. Token not found.")
+            self.logger.error("Authentication failed. Token not found.", report=True)
 
             return None
 
@@ -583,7 +612,10 @@ class OTCA:
             return self._embed_token
         else:
             self.logger.error(
-                "Authentication failed with client ID -> '%s' against -> %s", self.config()["clientId"], url
+                "Authentication failed with client ID -> '%s' against -> %s",
+                self.config()["clientId"],
+                url,
+                report=True,
             )
             return None
 
@@ -761,7 +793,7 @@ class OTCA:
         """
 
         if rating not in ("UP", "DOWN"):
-            self.logger.error("Invalid feedback rating -> '%s'. Must be 'UP' or 'DOWN'.", rating)
+            self.logger.error("Invalid feedback rating -> '%s'. Must be 'UP' or 'DOWN'.", rating, report=True)
             return None
 
         request_url = self.config()["feedbackUrl"]
@@ -941,10 +973,10 @@ class OTCA:
 
         # Validations:
         if operation not in ["add", "update", "delete"]:
-            self.logger.error("Illegal embed operation -> '%s'!", operation)
+            self.logger.error("Illegal embed operation -> '%s'!", operation, report=True)
             return None
         if operation != "delete" and not content:
-            self.logger.error("Add or update operation require content to embed!")
+            self.logger.error("Add or update operation require content to embed!", report=True)
             return None
 
         request_url = self.config()["embedUrl"]
@@ -1007,7 +1039,7 @@ class OTCA:
         """
 
         if operation not in ("add", "update", "delete"):
-            self.logger.error("Illegal metadata operation -> '%s'!", operation)
+            self.logger.error("Illegal metadata operation -> '%s'!", operation, report=True)
             return None
 
         request_url = self.config()["metadataUrl"]

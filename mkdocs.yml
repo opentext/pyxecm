@@ -84,6 +84,7 @@ nav:
       - Content Server (OTCS): pyxecm/otcs.md
       - Core Share: pyxecm/coreshare.md
       - Directory Services (OTDS): pyxecm/otds.md
+      - Error Capture: pyxecm/errors.md
       - Intelligent Viewing (OTIV): pyxecm/otiv.md
       - Media Management (OTMM): pyxecm/otmm.md
       - PowerDocs (OTPD): pyxecm/otpd.md

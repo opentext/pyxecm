@@ -18,6 +18,13 @@ from importlib.metadata import version
 
 import requests
 
+from pyxecm.errors import (
+    ErrorCategory,
+    OTAWPError,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
 from pyxecm.helper.xml import XML
 from pyxecm.otds import OTDS
 
@@ -68,7 +75,7 @@ class OTAWP:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTAWPError)
 
     @classmethod
     def resource_payload(
@@ -931,6 +938,15 @@ class OTAWP:
                     failure_message or "Request to -> %s failed",
                     str(req_exception),
                 )
+                record_request_error(
+                    error_class=OTAWPError,
+                    message="{}; error -> {}".format(failure_message or "Request failed", str(req_exception)),
+                    method=method,
+                    url=url,
+                    category=ErrorCategory.TIMEOUT
+                    if isinstance(req_exception, requests.Timeout)
+                    else ErrorCategory.CONNECTION,
+                )
                 return None
 
             if response.ok:
@@ -962,6 +978,14 @@ class OTAWP:
                     HTTPStatus(response.status_code).phrase,
                     response.text,
                 )
+            record_request_error(
+                error_class=OTAWPError,
+                message=failure_message if show_error else (warning_message or failure_message),
+                method=method,
+                url=url,
+                response=response,
+                severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+            )
             return None
         # end while True
 
@@ -1328,6 +1352,7 @@ class OTAWP:
                     self.logger.error(
                         "Cannot retrieve OTAWP ticket! Received corrupt authentication data -> %s",
                         response.text,
+                        report=True,
                     )
                     return None
             else:
@@ -1336,6 +1361,7 @@ class OTAWP:
                     self.credential_url(),
                     self.config()["username"],
                     " Reason -> '{}'".format(response.reason) if response.reason else "",
+                    report=True,
                 )
                 return None
 
@@ -1343,6 +1369,7 @@ class OTAWP:
             "Authentication at AppWorks platform failed after %d retries. %sBailing out.",
             REQUEST_MAX_RETRIES,
             "{}. ".format(response.text) if response and response.text else "",
+            report=True,
         )
         return None
 
@@ -1539,11 +1566,13 @@ class OTAWP:
             self.logger.error(
                 "Max retries reached for workspace -> '%s', unable to create workspace.",
                 workspace_name,
+                report=True,
             )
         else:
             self.logger.warning(
                 "Max retries reached for workspace -> '%s', unable to create workspace.",
                 workspace_name,
+                report=True,
             )
 
         return (None, False)
@@ -1569,6 +1598,7 @@ class OTAWP:
             self.logger.error(
                 "Cannot synchronize workspace%s without a workspace ID!",
                 " -> '{}'".format(workspace_name) if workspace_name else "",
+                report=True,
             )
             return None
 
@@ -1651,6 +1681,7 @@ class OTAWP:
             "Synchronization failed for workspace -> '%s' after %d retries.",
             workspace_name,
             retries,
+            report=True,
         )
         return None
 
@@ -1703,6 +1734,7 @@ class OTAWP:
                     "Cannot publish project%s without a %s!",
                     " -> '{}'".format(project_name) if project_name else "",
                     name,
+                    report=True,
                 )
                 return False
 
@@ -1787,6 +1819,7 @@ class OTAWP:
             "Max retries reached. Failed to publish project -> '%s' in workspace -> '%s'.",
             project_name,
             workspace_name,
+            report=True,
         )
 
         return False
@@ -1824,7 +1857,7 @@ class OTAWP:
 
         # Sanity checks as the parameters come directly from payload:
         if not name:
-            self.logger.error("Cannot create a priority without a name!")
+            self.logger.error("Cannot create a priority without a name!", report=True)
             return None
 
         create_priority_data = {
@@ -1971,7 +2004,7 @@ class OTAWP:
 
         # Sanity checks as the parameters come directly from payload:
         if not customer_name:
-            self.logger.error("Cannot create a customer without a name!")
+            self.logger.error("Cannot create a customer without a name!", report=True)
             return None
 
         create_customer_data = {
@@ -2108,7 +2141,7 @@ class OTAWP:
 
         # Sanity checks as the parameters come directly from payload:
         if not name:
-            self.logger.error("Cannot create a case type without a name!")
+            self.logger.error("Cannot create a case type without a name!", report=True)
             return None
 
         create_case_type_data = {
@@ -2261,7 +2294,7 @@ class OTAWP:
 
         # Sanity checks as the parameters come directly from payload:
         if not name:
-            self.logger.error("Cannot create a category without a name!")
+            self.logger.error("Cannot create a category without a name!", report=True)
             return None
 
         create_category_data = {
@@ -2427,10 +2460,10 @@ class OTAWP:
 
         # Sanity checks as the parameters come directly from payload:
         if not name:
-            self.logger.error("Cannot create a sub-category without a name!")
+            self.logger.error("Cannot create a sub-category without a name!", report=True)
             return None
         if not parent_id:
-            self.logger.error("Cannot create a sub-category -> '%s' without a parent category ID!", name)
+            self.logger.error("Cannot create a sub-category -> '%s' without a parent category ID!", name, report=True)
             return None
 
         create_sub_category_data = {
@@ -2619,7 +2652,7 @@ class OTAWP:
 
         for name, value in required_fields.items():
             if not value:
-                self.logger.error("Cannot create a case without a %s!", name)
+                self.logger.error("Cannot create a case without a %s!", name, report=True)
                 return None
 
         create_case_data = f"""
@@ -2686,6 +2719,7 @@ class OTAWP:
                     "Request to create case with subject -> '%s' failed with error -> %s",
                     subject,
                     str(req_exception),
+                    report=True,
                 )
                 return None
 
@@ -2972,7 +3006,7 @@ class OTAWP:
         # end while retries < REQUEST_MAX_RETRIES:
 
         # Log when retries are exhausted
-        self.logger.error("Retry limit exceeded. CWS config creation failed.")
+        self.logger.error("Retry limit exceeded. CWS config creation failed.", report=True)
         return None
 
     # end method definition
@@ -3075,7 +3109,7 @@ class OTAWP:
             self.logger.info("Retrying... Attempt %d/%d", retries, REQUEST_MAX_RETRIES)
 
         # Log when retries are exhausted
-        self.logger.error("Retry limit exceeded. User role verification failed.")
+        self.logger.error("Retry limit exceeded. User role verification failed.", report=True)
 
         return False  # Return False if the retries limit is exceeded
 
@@ -3221,7 +3255,7 @@ class OTAWP:
             self.logger.info("Retrying... Attempt %d/%d", retries, REQUEST_MAX_RETRIES)
             time.sleep(REQUEST_RETRY_DELAY)
 
-        self.logger.error("Retry limit exceeded. Role assignment failed for user '%s'.", user_name)
+        self.logger.error("Retry limit exceeded. Role assignment failed for user '%s'.", user_name, report=True)
         return False
 
         # end method definition

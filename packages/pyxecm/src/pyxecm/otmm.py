@@ -10,6 +10,7 @@ __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
+import contextvars
 import json
 import logging
 import os
@@ -27,6 +28,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError, RequestException
 
+from pyxecm.errors import (
+    OTMMError,
+    ReportingLoggerAttribute,
+)
 from pyxecm.helper import Data
 
 APP_NAME = "pyxecm"
@@ -64,7 +69,7 @@ class OTMM:
     PRODUCT_NEW_METADATA_TABLE = "OTMM.FIELD.PRODUCT_NEW.TAB"
     PRODUCT_NEW_METADATA_FIELD = "OTMM.COLUMN.PRODUCT_NEW.TAB"
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTMMError)
 
     def __init__(
         self,
@@ -261,16 +266,16 @@ class OTMM:
             self.logger.debug("HTTP request header -> %s", str(REQUEST_HEADERS))
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error requesting -> %s", request_url)
+            self.logger.error("Connection error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error requesting -> %s", request_url)
+            self.logger.error("Timeout error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.RequestException:
-            self.logger.error("Request error requesting -> %s", request_url)
+            self.logger.error("Request error requesting -> %s", request_url, report=True)
             return None
         except Exception:
-            self.logger.error("Unexpected error requesting -> %s", request_url)
+            self.logger.error("Unexpected error requesting -> %s", request_url, report=True)
             return None
 
         return self._access_token
@@ -318,19 +323,19 @@ class OTMM:
             response.raise_for_status()
 
         except requests.exceptions.HTTPError as http_error:
-            self.logger.error("HTTP error requesting -> %s; error -> %s", request_url, str(http_error))
+            self.logger.error("HTTP error requesting -> %s; error -> %s", request_url, str(http_error), report=True)
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error requesting -> %s", request_url)
+            self.logger.error("Connection error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error requesting -> %s", request_url)
+            self.logger.error("Timeout error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.RequestException:
-            self.logger.error("Request error requesting -> %s", request_url)
+            self.logger.error("Request error requesting -> %s", request_url, report=True)
             return None
         except Exception:
-            self.logger.error("Unexpected error requesting -> %s", request_url)
+            self.logger.error("Unexpected error requesting -> %s", request_url, report=True)
             return None
 
         return response.json()
@@ -386,19 +391,19 @@ class OTMM:
             response.raise_for_status()
 
         except requests.exceptions.HTTPError as http_error:
-            self.logger.error("HTTP error requesting -> %s; error -> %s", request_url, str(http_error))
+            self.logger.error("HTTP error requesting -> %s; error -> %s", request_url, str(http_error), report=True)
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error requesting -> %s", request_url)
+            self.logger.error("Connection error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error requesting -> %s", request_url)
+            self.logger.error("Timeout error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.RequestException:
-            self.logger.error("Request error requesting -> %s", request_url)
+            self.logger.error("Request error requesting -> %s", request_url, report=True)
             return None
         except Exception:
-            self.logger.error("Unexpected error requesting -> %s", request_url)
+            self.logger.error("Unexpected error requesting -> %s", request_url, report=True)
             return None
 
         return response.json()
@@ -423,6 +428,7 @@ class OTMM:
             self.logger.error(
                 "Cannot get lookup domain values for domain -> '%s'",
                 domain,
+                report=True,
             )
             return None
 
@@ -596,16 +602,16 @@ class OTMM:
             self.logger.debug("HTTP request header -> %s", str(REQUEST_HEADERS))
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error requesting -> %s", request_url)
+            self.logger.error("Connection error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error requesting -> %s", request_url)
+            self.logger.error("Timeout error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.RequestException:
-            self.logger.error("Request error requesting -> %s", request_url)
+            self.logger.error("Request error requesting -> %s", request_url, report=True)
             return None
         except Exception:
-            self.logger.error("Unexpected error requesting -> %s", request_url)
+            self.logger.error("Unexpected error requesting -> %s", request_url, report=True)
             return None
 
         return response.json()
@@ -695,6 +701,7 @@ class OTMM:
             self.logger.error(
                 "No assets found via search for business unit with ID -> '%s'!",
                 bu_id,
+                report=True,
             )
             return None
         search_result = search_result.get("search_result_resource")
@@ -800,7 +807,7 @@ class OTMM:
         search_result = self.search_assets(payload=flattened_data)
 
         if not search_result or "search_result_resource" not in search_result:
-            self.logger.error("No assets found via search!")
+            self.logger.error("No assets found via search!", report=True)
             return None
         search_result = search_result.get("search_result_resource")
 
@@ -1078,16 +1085,16 @@ class OTMM:
             self.logger.debug("HTTP request header -> %s", str(REQUEST_HEADERS))
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error requesting -> %s", request_url)
+            self.logger.error("Connection error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error requesting -> %s", request_url)
+            self.logger.error("Timeout error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.RequestException:
-            self.logger.error("Request error requesting -> %s", request_url)
+            self.logger.error("Request error requesting -> %s", request_url, report=True)
             return None
         except Exception:
-            self.logger.error("Unexpected error requesting -> %s", request_url)
+            self.logger.error("Unexpected error requesting -> %s", request_url, report=True)
             return None
 
         return response.json()
@@ -1278,16 +1285,16 @@ class OTMM:
             self.logger.debug("HTTP request header -> %s", str(REQUEST_HEADERS))
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error requesting -> %s", request_url)
+            self.logger.error("Connection error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error requesting -> %s", request_url)
+            self.logger.error("Timeout error requesting -> %s", request_url, report=True)
             return None
         except requests.exceptions.RequestException:
-            self.logger.error("Request error requesting -> %s", request_url)
+            self.logger.error("Request error requesting -> %s", request_url, report=True)
             return None
         except Exception:
-            self.logger.error("Unexpected error requesting -> %s", request_url)
+            self.logger.error("Unexpected error requesting -> %s", request_url, report=True)
             return None
 
         return response.json()
@@ -1359,6 +1366,7 @@ class OTMM:
                 self.logger.error(
                     "Cannot get asset details for asset with ID -> %s",
                     asset_id,
+                    report=True,
                 )
                 return {}
 
@@ -1372,6 +1380,7 @@ class OTMM:
             self.logger.error(
                 "The provided data for asset with ID -> '%s' was retrieved without metadata - cannot prepare metadata fields.",
                 asset_id,
+                report=True,
             )
             return {}
 
@@ -1399,12 +1408,14 @@ class OTMM:
             self.logger.error(
                 "Cannot decode JSON response for asset with ID -> %s",
                 asset_id,
+                report=True,
             )
             return {}
         except IndexError:
             self.logger.error(
                 "Cannot find metadata in asset with ID -> %s",
                 asset_id,
+                report=True,
             )
             return {}
 
@@ -1747,10 +1758,12 @@ class OTMM:
             if remainder > 0:
                 remainder -= 1
 
+            # Copy the context so errors of the threads reach an active capture_errors() block:
             thread = threading.Thread(
                 name=f"load_assets_{index + 1:02}",
-                target=self.thread_wrapper,
+                target=contextvars.copy_context().run,
                 args=(
+                    self.thread_wrapper,
                     self.load_assets_worker,
                     asset_list,
                     partition_size + extra,

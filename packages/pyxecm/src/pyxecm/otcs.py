@@ -14,6 +14,7 @@ __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
 import asyncio
+import contextvars
 import hashlib
 import html
 import io
@@ -50,6 +51,14 @@ from zeep import Client, xsd
 from zeep.helpers import serialize_object
 from zeep.transports import Transport
 
+from pyxecm.errors import (
+    ErrorCategory,
+    ErrorSeverity,
+    OTCSError,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
 from pyxecm.helper import XML, Data
 from pyxecm.otds import OTDS
 
@@ -146,7 +155,9 @@ class OTCS:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    # Every assigned logger is wrapped in a ReportingLogger, so that
+    # self.logger.error(..., report=True) records the error for capture_errors():
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTCSError)
 
     VOLUME_TYPE_BOT_CONFIGURATION = 898
     VOLUME_TYPE_BUSINESS_WORKSPACES = 862
@@ -1216,7 +1227,7 @@ class OTCS:
         """
 
         if not self._workspace_ontology:
-            self.logger.error("The workspace ontology is empty! Cannot save it.")
+            self.logger.error("The workspace ontology is empty! Cannot save it.", report=True)
             return False
 
         #
@@ -1276,6 +1287,7 @@ class OTCS:
         self.logger.error(
             "Failed to write ontology file -> '%s' to Personal Workspace of admin user!",
             self.ONTOLOGY_FILE_NAME,
+            report=True,
         )
 
         return False
@@ -1313,14 +1325,17 @@ class OTCS:
             )
         document_id = self.get_result_value(response=response, key="id")
         if not document_id:
-            self.logger.warning("Ontology file not found - cannot load the ontology.")
+            self.logger.warning("Ontology file not found - cannot load the ontology.", report=True)
             return False
 
         try:
             self._workspace_ontology = self.get_json_document(node_id=int(document_id))
             if not self._workspace_ontology:
                 self.logger.error(
-                    "Cannot load ontology from JSON document -> %s (%s)", self.ONTOLOGY_FILE_NAME, document_id
+                    "Cannot load ontology from JSON document -> %s (%s)",
+                    self.ONTOLOGY_FILE_NAME,
+                    document_id,
+                    report=True,
                 )
                 return False
         except Exception as json_error:
@@ -1329,6 +1344,7 @@ class OTCS:
                 self.ONTOLOGY_FILE_NAME,
                 document_id,
                 json_error,
+                report=True,
             )
             return False
 
@@ -1513,6 +1529,13 @@ class OTCS:
                     with self._session_lock:
                         if not self.cookie():
                             self.logger.error("Cannot call -> %s - user is not authenticated!", url)
+                            record_request_error(
+                                error_class=OTCSError,
+                                message=failure_message or "Cannot call REST API - user is not authenticated",
+                                method=method,
+                                url=url,
+                                category=ErrorCategory.AUTHENTICATION,
+                            )
                             return None
                         # IMPORTANT: this needs to be a copy - dicts are mutable and
                         # we need to preserve the old value to detect in reauthenticate()
@@ -1545,6 +1568,16 @@ class OTCS:
                         if parsed_response is None:
                             retries += 1
                             if retries > max_retries and not retry_forever:
+                                record_request_error(
+                                    error_class=OTCSError,
+                                    message="{}; the response could not be parsed".format(
+                                        failure_message or "Request failed"
+                                    ),
+                                    method=method,
+                                    url=url,
+                                    response=response,
+                                    category=ErrorCategory.SERVER,
+                                )
                                 return None
                             backoff_delay = min(REQUEST_RETRY_BACKOFF * 2 ** (retries - 1), REQUEST_RETRY_DELAY)
                             time.sleep(backoff_delay)  # exponential backoff before retrying
@@ -1588,6 +1621,15 @@ class OTCS:
                                 response.text,
                             )
                         ),
+                    )
+                    record_request_error(
+                        error_class=OTCSError,
+                        message=warning_message or failure_message,
+                        method=method,
+                        url=url,
+                        response=response,
+                        category=ErrorCategory.ALREADY_EXISTS,
+                        severity=ErrorSeverity.WARNING,
                     )
                     if parse_error_response:
                         return self.parse_error_response(response_object=response)
@@ -1655,6 +1697,14 @@ class OTCS:
                             HTTPStatus(response.status_code).phrase,
                             response.text,
                         )
+                    record_request_error(
+                        error_class=OTCSError,
+                        message=failure_message if show_error else (warning_message or failure_message),
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+                    )
                     if parse_error_response:
                         return self.parse_error_response(response_object=response)
                     else:
@@ -1677,6 +1727,13 @@ class OTCS:
                     self.logger.error(
                         "%s; timeout error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTCSError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -1711,6 +1768,15 @@ class OTCS:
                         "%s; connection error -> %s",
                         failure_message,
                         str(connection_error),
+                    )
+                    record_request_error(
+                        error_class=OTCSError,
+                        message="{}; connection error -> {}".format(
+                            failure_message or "Request failed", str(connection_error)
+                        ),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries
@@ -2524,6 +2590,7 @@ class OTCS:
         ):
             self.logger.error(
                 "No OTDS token, no OTDS ticket, no OTDS object, nor a username/password available for authentication! Cannot authenticate with OTCS.",
+                report=True,
             )
             return None
 
@@ -2570,6 +2637,7 @@ class OTCS:
                     "Unable to connect to -> %s; error -> %s",
                     request_url,
                     str(exception),
+                    report=True,
                 )
                 return None
         # end if self._otds_token
@@ -2604,6 +2672,7 @@ class OTCS:
                     "Unable to connect to -> %s; error -> %s",
                     request_url,
                     str(exception),
+                    report=True,
                 )
                 return None
         # end if self._otds_ticket
@@ -2616,10 +2685,13 @@ class OTCS:
                 # a failed OTDS based authentication (ticket or token) above:
                 if self._otds_ticket or self._otds_token:
                     self.logger.warning(
-                        "Cannot fallback to basic authentication at OTCS after OTDS based authentication failed as no username or password are provided."
+                        "Cannot fallback to basic authentication at OTCS after OTDS based authentication failed as no username or password are provided.",
+                        report=True,
                     )
                 else:
-                    self.logger.error("Missing username or password for authentication! Cannot authenticate at OTCS.")
+                    self.logger.error(
+                        "Missing username or password for authentication! Cannot authenticate at OTCS.", report=True
+                    )
                 return None
 
             self.logger.debug(
@@ -2641,7 +2713,7 @@ class OTCS:
                     request_url,
                     str(exception),
                 )
-                self.logger.warning("OTCS service may not be ready yet.")
+                self.logger.warning("OTCS service may not be ready yet.", report=True)
                 return None
 
             if response.ok:
@@ -2659,6 +2731,7 @@ class OTCS:
                 self.logger.error(
                     "Failed to request an OTCS ticket; error -> %s",
                     response.text,
+                    report=True,
                 )
                 return None
         # end if not otcs_ticket
@@ -3005,6 +3078,7 @@ class OTCS:
                 "The admin settings file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(xml_file_path),
+                report=True,
             )
             return None
 
@@ -3480,6 +3554,7 @@ class OTCS:
                 self.logger.warning(
                     "Failed to retrieve users (page -> %d)",
                     page,
+                    report=True,
                 )
                 return
 
@@ -3787,6 +3862,7 @@ class OTCS:
         if user_id is None and not any([name, first_name, last_name, business_email, title]):
             self.logger.error(
                 "No user name, first name, last name, business email, title, or ID provided. Cannot find user!",
+                report=True,
             )
             return None
 
@@ -3809,9 +3885,9 @@ class OTCS:
             if not response or not response.get("results"):
                 message = "Couldn't find user with title -> '{}'".format(title)
                 if show_error:
-                    self.logger.error(message)
+                    self.logger.error(message, report=True)
                 else:
-                    self.logger.warning(message)
+                    self.logger.warning(message, report=True)
                 return None
 
             return response
@@ -5323,6 +5399,7 @@ class OTCS:
                 self.logger.warning(
                     "Failed to retrieve groups (page -> %d)",
                     page,
+                    report=True,
                 )
                 return
 
@@ -5491,7 +5568,7 @@ class OTCS:
         """
 
         if group_id is None and name is None:
-            self.logger.error("No group name or ID provided. Cannot find group!")
+            self.logger.error("No group name or ID provided. Cannot find group!", report=True)
             return None
 
         if group_id is None:
@@ -5554,6 +5631,7 @@ class OTCS:
                 "Signing Groups (type 101) and other special types must be created via the Content Server admin UI.",
                 name,
                 group_type,
+                report=True,
             )
             return None
 
@@ -5628,7 +5706,7 @@ class OTCS:
             )
             form_response.raise_for_status()
         except requests.exceptions.RequestException:
-            self.logger.error("Failed to load signing group create form from -> %s", form_url)
+            self.logger.error("Failed to load signing group create form from -> %s", form_url, report=True)
             return None
 
         # Extract the secureRequestToken from the form HTML
@@ -5646,7 +5724,8 @@ class OTCS:
             self.logger.error(
                 "Failed to extract secureRequestToken from create group form. "
                 "This may indicate insufficient privileges. Ensure the session is impersonated "
-                "as a user with Signing Authority Admin privileges (see start_impersonation())."
+                "as a user with Signing Authority Admin privileges (see start_impersonation()).",
+                report=True,
             )
             return None
 
@@ -5679,7 +5758,7 @@ class OTCS:
                 allow_redirects=True,
             )
         except requests.exceptions.RequestException:
-            self.logger.error("Failed to create signing group -> '%s'", name)
+            self.logger.error("Failed to create signing group -> '%s'", name, report=True)
             return None
 
         # The classic UI returns an HTML page - check for errors
@@ -5689,6 +5768,7 @@ class OTCS:
                 name,
                 response.status_code,
                 HTTPStatus(response.status_code).phrase,
+                report=True,
             )
             return None
 
@@ -5703,7 +5783,7 @@ class OTCS:
             error_detail = error_match.group(1).strip() if error_match else "Unknown error"
             # Strip HTML tags from error detail
             error_detail = re.sub(r"<[^>]+>", " ", error_detail).strip()
-            self.logger.error("Failed to create signing group -> '%s'; error -> %s", name, error_detail)
+            self.logger.error("Failed to create signing group -> '%s'; error -> %s", name, error_detail, report=True)
             return None
 
         self.logger.debug("Successfully created signing group -> '%s'", name)
@@ -5951,6 +6031,7 @@ class OTCS:
                     "Failed to retrieve members for group with ID -> %d (page -> %d)",
                     group,
                     page,
+                    report=True,
                 )
                 return
 
@@ -6269,7 +6350,7 @@ class OTCS:
         """
 
         if not usage_id and not usage_name:
-            self.logger.error("Get privilege failed - either usage_id or usage_name need to be specified")
+            self.logger.error("Get privilege failed - either usage_id or usage_name need to be specified", report=True)
             return None
 
         if update_cache:
@@ -6344,6 +6425,7 @@ class OTCS:
                 "Privilege -> '%s' could not be found. Cannot assign privilege to member -> %s.",
                 usage_privilege,
                 member_id,
+                report=True,
             )
 
             return None
@@ -6372,6 +6454,7 @@ class OTCS:
             "Cannot add member with ID -> %d to usage privilege -> '%s'. Usage is likely unrestricted.",
             member_id,
             usage_privilege,
+            report=True,
         )
         return None
 
@@ -6527,6 +6610,7 @@ class OTCS:
                 "Object Type privilege -> '%s' could not be found. Cannot assign privilege to member -> %s.",
                 object_type,
                 member_id,
+                report=True,
             )
 
             return None
@@ -6555,6 +6639,7 @@ class OTCS:
             "Cannot add member with ID -> %d to object privilege -> '%s'. Object Type is likely unrestricted.",
             member_id,
             object_type,
+            report=True,
         )
         return None
 
@@ -7081,7 +7166,7 @@ class OTCS:
         # (root volume and Transport Packages)
         response = self.get_volume(volume_type)
         if not response:
-            self.logger.error("Volume type -> %s not found!", str(volume_type))
+            self.logger.error("Volume type -> %s not found!", str(volume_type), report=True)
             return None
 
         volume_id = self.get_result_value(response=response, key="id")
@@ -7578,6 +7663,7 @@ class OTCS:
                     "Failed to retrieve sub nodes for parent node ID -> %d (page -> %d)",
                     parent_node_id,
                     page,
+                    report=True,
                 )
                 return None
 
@@ -8104,6 +8190,7 @@ class OTCS:
             "Couldn't find a node under parent with node ID -> %d that has a name matching any of these regular expressions -> %s",
             parent_node_id,
             str(regex_list),
+            report=True,
         )
 
         return None
@@ -9087,6 +9174,7 @@ class OTCS:
                     "Failed to retrieve audit for node ID -> %d (page -> %d)",
                     node_id,
                     page,
+                    report=True,
                 )
                 return None
 
@@ -9297,7 +9385,7 @@ class OTCS:
         """
 
         if not file_name:
-            self.logger.error("Missing file name! Cannot upload file.")
+            self.logger.error("Missing file name! Cannot upload file.", report=True)
             return None
 
         # Make sure we don't have leading or trailing whitespace:
@@ -9312,16 +9400,16 @@ class OTCS:
                 package = requests.get(url=path_or_url, headers=self.request_download_header(), timeout=1200)
                 package.raise_for_status()
             except requests.exceptions.HTTPError as http_error:
-                self.logger.error("HTTP error requesting -> %s; error -> %s", path_or_url, str(http_error))
+                self.logger.error("HTTP error requesting -> %s; error -> %s", path_or_url, str(http_error), report=True)
                 return None
             except requests.exceptions.ConnectionError:
-                self.logger.error("Connection error requesting -> %s", path_or_url)
+                self.logger.error("Connection error requesting -> %s", path_or_url, report=True)
                 return None
             except requests.exceptions.Timeout:
-                self.logger.error("Timeout error requesting -> %s", path_or_url)
+                self.logger.error("Timeout error requesting -> %s", path_or_url, report=True)
                 return None
             except requests.exceptions.RequestException:
-                self.logger.error("Request error requesting -> %s", path_or_url)
+                self.logger.error("Request error requesting -> %s", path_or_url, report=True)
                 return None
 
             self.logger.debug(
@@ -9337,7 +9425,9 @@ class OTCS:
                 file_content = local_file.read()
 
         else:
-            self.logger.warning("Cannot access file -> '%s'", path_or_url)
+            self.logger.warning(
+                "Cannot access file -> '%s'", path_or_url, category=ErrorCategory.NOT_FOUND, report=True
+            )
             return None
 
         upload_post_data = {"type": str(volume_type), "name": file_name}
@@ -9517,16 +9607,16 @@ class OTCS:
 
         # Validate mutually exclusive inputs:
         if file_content is not None and file_url is not None:
-            self.logger.error("Provide either file URL or file content for uploading files, not both.")
+            self.logger.error("Provide either file URL or file content for uploading files, not both.", report=True)
             return None
         if file_content is None and file_url is None:
-            self.logger.error("Provide either file URL or file content for uploading files.")
+            self.logger.error("Provide either file URL or file content for uploading files.", report=True)
             return None
 
         # Handle in-memory file content:
         if file_content is not None:
             if not file_name:
-                self.logger.error("Missing file name! Cannot upload in-memory file without a file name.")
+                self.logger.error("Missing file name! Cannot upload in-memory file without a file name.", report=True)
                 return None
 
             # Make sure we don't have leading or trailing whitespace:
@@ -9540,7 +9630,7 @@ class OTCS:
             elif isinstance(file_content, bytes):
                 file_bytes = file_content
             else:
-                self.logger.error("File content must be of type str or bytes! Cannot upload file.")
+                self.logger.error("File content must be of type str or bytes! Cannot upload file.", report=True)
                 return None
 
             # Use an in-memory byte stream instead of a filesystem file
@@ -9549,7 +9639,7 @@ class OTCS:
         # Handle file provided via URL or local filesystem
         else:
             if not file_url:
-                self.logger.error("Missing file URL! Cannot upload file.")
+                self.logger.error("Missing file URL! Cannot upload file.", report=True)
                 return None
 
             if not file_name:
@@ -9558,7 +9648,7 @@ class OTCS:
                 file_name = os.path.basename(file_url)
 
             if not file_name:
-                self.logger.error("Missing file name! Cannot upload file.")
+                self.logger.error("Missing file name! Cannot upload file.", report=True)
                 return None
 
             # Make sure we don't have leading or trailing whitespace:
@@ -9573,16 +9663,16 @@ class OTCS:
                     response = requests.get(url=file_url, headers=self.request_download_header(), timeout=1200)
                     response.raise_for_status()
                 except requests.exceptions.HTTPError:
-                    self.logger.error("HTTP error with -> %s", file_url)
+                    self.logger.error("HTTP error with -> %s", file_url, report=True)
                     return None
                 except requests.exceptions.ConnectionError:
-                    self.logger.error("Connection error with -> %s", file_url)
+                    self.logger.error("Connection error with -> %s", file_url, report=True)
                     return None
                 except requests.exceptions.Timeout:
-                    self.logger.error("Timeout error with -> %s", file_url)
+                    self.logger.error("Timeout error with -> %s", file_url, report=True)
                     return None
                 except requests.exceptions.RequestException:
-                    self.logger.error("Request error with -> %s", file_url)
+                    self.logger.error("Request error with -> %s", file_url, report=True)
                     return None
 
                 self.logger.debug(
@@ -9610,7 +9700,9 @@ class OTCS:
                     file_content = local_file.read()
 
             else:
-                self.logger.warning("Cannot access file -> '%s'", file_url)
+                self.logger.warning(
+                    "Cannot access file -> '%s'", file_url, category=ErrorCategory.NOT_FOUND, report=True
+                )
                 return None
 
         # Prepare upload payload:
@@ -9765,12 +9857,14 @@ class OTCS:
                 self.logger.error(
                     "Failed to extract zip file -> '%s'",
                     file_path,
+                    report=True,
                 )
                 return None
             except OSError:
                 self.logger.error(
                     "OS error occurred while trying to extract zip file -> '%s'",
                     file_path,
+                    report=True,
                 )
                 return None
         # end os.path.isfile(file_path)
@@ -9940,16 +10034,16 @@ class OTCS:
 
         # Validate mutually exclusive inputs:
         if file_content is not None and file_url is not None:
-            self.logger.error("Provide either file URL or file content for uploading files, not both.")
+            self.logger.error("Provide either file URL or file content for uploading files, not both.", report=True)
             return None
         if file_content is None and file_url is None:
-            self.logger.error("Provide either file URL or file content for uploading files.")
+            self.logger.error("Provide either file URL or file content for uploading files.", report=True)
             return None
 
         # Handle in-memory file content:
         if file_content is not None:
             if not file_name:
-                self.logger.error("Missing file name! Cannot upload in-memory file without a file name.")
+                self.logger.error("Missing file name! Cannot upload in-memory file without a file name.", report=True)
                 return None
 
             # Make sure we don't have leading or trailing whitespace:
@@ -9963,7 +10057,7 @@ class OTCS:
             elif isinstance(file_content, bytes):
                 file_bytes = file_content
             else:
-                self.logger.error("File content must be of type str or bytes! Cannot upload file.")
+                self.logger.error("File content must be of type str or bytes! Cannot upload file.", report=True)
                 return None
 
             # Use an in-memory byte stream instead of a filesystem file
@@ -9972,7 +10066,7 @@ class OTCS:
         # Handle file provided via URL or local filesystem
         else:
             if not file_url:
-                self.logger.error("Missing file URL! Cannot upload file.")
+                self.logger.error("Missing file URL! Cannot upload file.", report=True)
                 return None
 
             if not file_name:
@@ -9981,7 +10075,7 @@ class OTCS:
                 file_name = os.path.basename(file_url)
 
             if not file_name:
-                self.logger.error("Missing file name! Cannot upload document version.")
+                self.logger.error("Missing file name! Cannot upload document version.", report=True)
                 return None
 
             # Make sure we don't have leading or trailing whitespace:
@@ -10000,16 +10094,16 @@ class OTCS:
                     )
                     response.raise_for_status()
                 except requests.exceptions.HTTPError:
-                    self.logger.error("HTTP error with -> %s", file_url)
+                    self.logger.error("HTTP error with -> %s", file_url, report=True)
                     return None
                 except requests.exceptions.ConnectionError:
-                    self.logger.error("Connection error with -> %s", file_url)
+                    self.logger.error("Connection error with -> %s", file_url, report=True)
                     return None
                 except requests.exceptions.Timeout:
-                    self.logger.error("Timeout error with -> %s", file_url)
+                    self.logger.error("Timeout error with -> %s", file_url, report=True)
                     return None
                 except requests.exceptions.RequestException:
-                    self.logger.error("Request error -> %s", file_url)
+                    self.logger.error("Request error -> %s", file_url, report=True)
                     return None
 
                 self.logger.debug(
@@ -10025,7 +10119,9 @@ class OTCS:
                     file_content = local_file.read()
 
             else:
-                self.logger.warning("Cannot access file -> '%s'", file_url)
+                self.logger.warning(
+                    "Cannot access file -> '%s'", file_url, category=ErrorCategory.NOT_FOUND, report=True
+                )
                 return None
 
         # Prepare add version payload:
@@ -10300,7 +10396,9 @@ class OTCS:
         # Sanity check:
         if versions_to_keep < 1:
             self.logger.error(
-                "Purging to less than 1 version is not possible. The value -> %d is not valid!", versions_to_keep
+                "Purging to less than 1 version is not possible. The value -> %d is not valid!",
+                versions_to_keep,
+                report=True,
             )
             return None
 
@@ -10366,6 +10464,7 @@ class OTCS:
                 self.logger.error(
                     "Cannot get latest version of document with ID -> %d",
                     node_id,
+                    report=True,
                 )
                 return None
             version_number = response["data"]["version_number"]
@@ -10520,6 +10619,7 @@ class OTCS:
             self.logger.warning(
                 "File -> '%s' already exists and overwrite is set to False, not downloading document.",
                 file_path,
+                report=True,
             )
             return False
 
@@ -10545,6 +10645,7 @@ class OTCS:
                 file_path,
                 bytes_downloaded,
                 str(e),
+                report=True,
             )
             return False
 
@@ -10557,6 +10658,7 @@ class OTCS:
                 bytes_downloaded,
                 total_size,
                 file_path,
+                report=True,
             )
             return False
 
@@ -10608,16 +10710,16 @@ class OTCS:
             )
             response.raise_for_status()
         except requests.exceptions.HTTPError:
-            self.logger.error("HTTP error with -> %s", request_url)
+            self.logger.error("HTTP error with -> %s", request_url, report=True)
             return False
         except requests.exceptions.ConnectionError:
-            self.logger.error("Connection error with -> %s", request_url)
+            self.logger.error("Connection error with -> %s", request_url, report=True)
             return False
         except requests.exceptions.Timeout:
-            self.logger.error("Timeout error with -> %s", request_url)
+            self.logger.error("Timeout error with -> %s", request_url, report=True)
             return False
         except requests.exceptions.RequestException:
-            self.logger.error("Request error with -> %s", request_url)
+            self.logger.error("Request error with -> %s", request_url, report=True)
             return False
 
         content = response.content
@@ -11672,7 +11774,7 @@ class OTCS:
         response = self.get_volume(volume_type=self.VOLUME_TYPE_TRANSPORT_WAREHOUSE)
         transport_root_volume_id = self.get_result_value(response=response, key="id")
         if not transport_root_volume_id:
-            self.logger.error("Failed to retrieve transport root volume!")
+            self.logger.error("Failed to retrieve transport root volume!", report=True)
             return None
         self.logger.debug(
             "Transport root volume ID -> %d",
@@ -11685,7 +11787,7 @@ class OTCS:
         )
         transport_package_volume_id = self.get_result_value(response=response, key="id")
         if not transport_package_volume_id:
-            self.logger.error("Failed to retrieve transport package volume!")
+            self.logger.error("Failed to retrieve transport package volume!", report=True)
             return None
         self.logger.debug(
             "Transport package volume ID -> %d",
@@ -11756,6 +11858,7 @@ class OTCS:
                 self.logger.error(
                     "Failed to upload transport package -> '%s'!",
                     package_url,
+                    report=True,
                 )
                 return None
             self.logger.debug(
@@ -11810,6 +11913,7 @@ class OTCS:
                     self.logger.error(
                         "Failed to create workbench -> '%s'",
                         workbench_name,
+                        report=True,
                     )
                     return None
                 self.logger.debug(
@@ -11834,6 +11938,7 @@ class OTCS:
             self.logger.error(
                 "Failed to unpack the transport package -> '%s'!",
                 package_name,
+                report=True,
             )
             return None
         self.logger.debug(
@@ -11857,6 +11962,7 @@ class OTCS:
                 " {} error{} occurred during deployment.".format(errors, "s" if errors > 1 else "")
                 if errors > 0
                 else "",
+                report=True,
             )
             return None
 
@@ -11901,7 +12007,7 @@ class OTCS:
         """
 
         if not os.path.isfile(zip_file_path):
-            self.logger.error("Zip file -> '%s' not found.", zip_file_path)
+            self.logger.error("Zip file -> '%s' not found.", zip_file_path, report=True)
             return False
 
         # Extract the zip file to a temporary directory
@@ -11993,6 +12099,7 @@ class OTCS:
             self.logger.warning(
                 "None of the specified replacements have been found in transport package -> %s. No need to create a new transport package.",
                 zip_file_folder,
+                report=True,
             )
             return False
 
@@ -12055,7 +12162,7 @@ class OTCS:
         """
 
         if not os.path.isfile(zip_file_path):
-            self.logger.error("Zip file -> '%s' not found!", zip_file_path)
+            self.logger.error("Zip file -> '%s' not found!", zip_file_path, report=True)
             return False
 
         # Extract the zip file to a temporary directory
@@ -12597,11 +12704,13 @@ class OTCS:
         """
 
         if not type_name and not type_id:
-            self.logger.error("Either type name or type ID needs to be provided. Cannot get business objects.")
+            self.logger.error(
+                "Either type name or type ID needs to be provided. Cannot get business objects.", report=True
+            )
             return None
 
         if not external_system_id:
-            self.logger.error("External system ID needs to be provided. Cannot get business objects.")
+            self.logger.error("External system ID needs to be provided. Cannot get business objects.", report=True)
             return None
 
         query = {
@@ -12837,13 +12946,14 @@ class OTCS:
 
         if not type_name and not type_id:
             self.logger.error(
-                "Either type name or type ID needs to be provided. Cannot get business object search form."
+                "Either type name or type ID needs to be provided. Cannot get business object search form.", report=True
             )
             return None
 
         if type_name and not external_system_id:
             self.logger.error(
-                "External system ID needs to be provided when type name is used. Cannot get business object search form."
+                "External system ID needs to be provided when type name is used. Cannot get business object search form.",
+                report=True,
             )
             return None
 
@@ -13329,7 +13439,9 @@ class OTCS:
         """
 
         if not smart_document_type_id:
-            self.logger.error("Smart Document Type ID needs to be provided. Cannot get Smart Document Type details.")
+            self.logger.error(
+                "Smart Document Type ID needs to be provided. Cannot get Smart Document Type details.", report=True
+            )
             return None
 
         request_url = self.config()["smartDocumentTypesUrl"] + "/smartdocumenttypedetails"
@@ -13630,15 +13742,19 @@ class OTCS:
         """
 
         if not smart_document_type_id:
-            self.logger.error("Smart Document Type ID needs to be provided. Cannot create Smart Document Type rule.")
+            self.logger.error(
+                "Smart Document Type ID needs to be provided. Cannot create Smart Document Type rule.", report=True
+            )
             return None
 
         if not classification_id:
-            self.logger.error("Classification ID needs to be provided. Cannot create Smart Document Type rule.")
+            self.logger.error(
+                "Classification ID needs to be provided. Cannot create Smart Document Type rule.", report=True
+            )
             return None
 
         if not template_id:
-            self.logger.error("Template ID needs to be provided. Cannot create Smart Document Type rule.")
+            self.logger.error("Template ID needs to be provided. Cannot create Smart Document Type rule.", report=True)
             return None
 
         request_url = self.config()["smartDocumentTypesUrl"] + "/rules"
@@ -13692,7 +13808,8 @@ class OTCS:
 
         if not smart_document_type_rule_id:
             self.logger.error(
-                "Failed to retrieve Smart Document Type rule ID from response. Cannot update bots for the created rule."
+                "Failed to retrieve Smart Document Type rule ID from response. Cannot update bots for the created rule.",
+                report=True,
             )
             return None
 
@@ -14274,7 +14391,7 @@ class OTCS:
         query = {"expand_templates": expand_templates, "expand_wksp_info": expand_workspace_info}
 
         if (ext_system_id is not None and bo_type is None) or (ext_system_id is None and bo_type is not None):
-            self.logger.error("Both ext_system_id and bo_type must be provided together.")
+            self.logger.error("Both ext_system_id and bo_type must be provided together.", report=True)
             return None
 
         if ext_system_id is not None:
@@ -14332,7 +14449,7 @@ class OTCS:
             expand_workspace_info=expand_workspace_info, expand_templates=expand_templates, show_error=show_error
         )
         if not response or "results" not in response:
-            self.logger.warning("Failed to get workspace types or no results found.")
+            self.logger.warning("Failed to get workspace types or no results found.", report=True)
             return
 
         yield from response["results"]
@@ -14656,6 +14773,7 @@ class OTCS:
                 "(available types -> %s). Falling back to client-side filtering.",
                 unresolved_names,
                 sorted(name_to_id.keys()),
+                report=True,
             )
             return None
 
@@ -14719,7 +14837,9 @@ class OTCS:
         otcs_version = float(self.get_server_version())
 
         if otcs_version < 26.2:
-            self.logger.warning("Workspace type ontology updates are not supported in OTCM versions below 26.2.")
+            self.logger.warning(
+                "Workspace type ontology updates are not supported in OTCM versions below 26.2.", report=True
+            )
             return None
 
         workspace_type_put_body = {}
@@ -14772,7 +14892,7 @@ class OTCS:
         """
 
         if not type_id and not type_name:
-            self.logger.error("No workspace type ID or name provided. Cannot get workspace templates.")
+            self.logger.error("No workspace type ID or name provided. Cannot get workspace templates.", report=True)
             return (None, None)
 
         response = self.get_workspace_types(expand_workspace_info=True, expand_templates=True)
@@ -15538,6 +15658,7 @@ class OTCS:
         if not type_name and not type_id:
             self.logger.error(
                 "No workspace type specified - neither by type name nor type ID. Cannot lookup workspace(s)!",
+                report=True,
             )
             return None
 
@@ -15547,7 +15668,7 @@ class OTCS:
             response = self.get_workspace_type_by_name(type_name=type_name)
             type_id = self.get_result_value(response=response, key="wksp_type_id")
             if not type_id:
-                self.logger.error("Cannot determine workspace type ID for type name -> '%s'", type_name)
+                self.logger.error("Cannot determine workspace type ID for type name -> '%s'", type_name, report=True)
                 return None
 
         # Add query parameters (these are NOT passed via JSon body!)
@@ -15944,6 +16065,7 @@ class OTCS:
                 category,
                 attribute,
                 value,
+                report=True,
             )
             return None
 
@@ -16043,6 +16165,7 @@ class OTCS:
         if not external_system_id or not bo_type or not bo_id:
             self.logger.error(
                 "Cannot update workspace reference - required Business Object information is missing!",
+                report=True,
             )
             return None
 
@@ -16119,6 +16242,7 @@ class OTCS:
         if not external_system_id or not bo_type or not bo_id:
             self.logger.error(
                 "Cannot update workspace reference - required Business Object information is missing!",
+                report=True,
             )
             return None
 
@@ -16508,6 +16632,7 @@ class OTCS:
             self.logger.error(
                 "Illegal relationship type -> '%s'! Must be either 'parent' or 'child'.",
                 relationship_type,
+                report=True,
             )
             return None
 
@@ -16711,6 +16836,7 @@ class OTCS:
         if fields is not None and not isinstance(fields, str):
             self.logger.error(
                 "Illegal data type for fields parameter! Must be a string for this REST API endpoint.",
+                report=True,
             )
             return None
 
@@ -16726,12 +16852,14 @@ class OTCS:
                     self.logger.error(
                         "Illegal relationship type for related workspace type! Must be either 'parent' or 'child'. -> %s",
                         relationship_type,
+                        report=True,
                     )
                     return None
                 query["where_rel_types"] = "{'" + ("','").join(relationship_type) + "'}"
             else:
                 self.logger.error(
                     "Illegal relationship type for related workspace type!",
+                    report=True,
                 )
                 return None
 
@@ -16746,7 +16874,7 @@ class OTCS:
                     "{" + ",".join(str(type_id) for type_id in related_workspace_type_id) + "}"
                 )
             else:
-                self.logger.error("Illegal data type for related workspace type!")
+                self.logger.error("Illegal data type for related workspace type!", report=True)
                 return None
 
         query["page"] = page if page is not None else 1
@@ -17065,6 +17193,7 @@ class OTCS:
                     relationship_type,
                     workspace_id,
                     related_workspace_id,
+                    report=True,
                 )
                 return False
 
@@ -17504,7 +17633,7 @@ class OTCS:
         """
 
         if not os.path.exists(file_path):
-            self.logger.error("Workspace icon file does not exist -> %s", file_path)
+            self.logger.error("Workspace icon file does not exist -> %s", file_path, report=True)
             return None
 
         update_workspace_icon_post_body = {
@@ -17801,7 +17930,7 @@ class OTCS:
         """
 
         if not names:
-            self.logger.error("Missing unique names!")
+            self.logger.error("Missing unique names!", report=True)
             return None
 
         # Add query parameters (these are NOT passed via JSon body!)
@@ -18348,7 +18477,7 @@ class OTCS:
         if category_id is None:
             category_ids = self.get_node_category_ids(node_id=node_id)
             if not category_ids or not isinstance(category_ids, list):
-                self.logger.error("Cannot get category IDs for node with ID -> %s", str(node_id))
+                self.logger.error("Cannot get category IDs for node with ID -> %s", str(node_id), report=True)
                 return None
             category_id = category_ids[0]
 
@@ -18926,7 +19055,7 @@ class OTCS:
 
         for permission in permissions:
             if not conversion.get(permission):
-                self.logger.error("Illegal permission value -> %s", str(permission))
+                self.logger.error("Illegal permission value -> %s", str(permission), report=True)
                 return 0
             permission_value += conversion[permission]
 
@@ -19028,11 +19157,13 @@ class OTCS:
 
         if not assignee_type or assignee_type not in OTCS.PERMISSION_ASSIGNEE_TYPES:
             self.logger.error(
-                "Missing or wrong assignee type. Needs to be one of %s!", str(OTCS.PERMISSION_ASSIGNEE_TYPES)
+                "Missing or wrong assignee type. Needs to be one of %s!",
+                str(OTCS.PERMISSION_ASSIGNEE_TYPES),
+                report=True,
             )
             return None
         if assignee_type == "custom" and not assignee:
-            self.logger.error("Assignee type is 'custom' but permission assignee is missing!")
+            self.logger.error("Assignee type is 'custom' but permission assignee is missing!", report=True)
             return None
 
         if any(permission not in OTCS.PERMISSION_TYPES for permission in permissions):
@@ -19043,6 +19174,7 @@ class OTCS:
                 str(illegal_permissions),
                 str(OTCS.PERMISSION_TYPES),
                 node_id,
+                report=True,
             )
             return None
 
@@ -19178,11 +19310,13 @@ class OTCS:
 
         if not assignee_type or assignee_type not in OTCS.PERMISSION_ASSIGNEE_TYPES:
             self.logger.error(
-                "Missing or wrong assignee type. Needs to be one of %s!", str(OTCS.PERMISSION_ASSIGNEE_TYPES)
+                "Missing or wrong assignee type. Needs to be one of %s!",
+                str(OTCS.PERMISSION_ASSIGNEE_TYPES),
+                report=True,
             )
             return None
         if assignee_type == "custom" and not assignee:
-            self.logger.error("Assignee type is 'custom' but permission assignee is missing!")
+            self.logger.error("Assignee type is 'custom' but permission assignee is missing!", report=True)
             return None
 
         permission_delete_data = {
@@ -19338,7 +19472,9 @@ class OTCS:
         """
 
         if float(self.get_server_version()) < 25.4:
-            self.logger.warning("The get_node_context method is only available for OTCS version 25.4 and higher.")
+            self.logger.warning(
+                "The get_node_context method is only available for OTCS version 25.4 and higher.", report=True
+            )
             return None
 
         request_url = self.config()["aiUrl"] + "/nodecontext"
@@ -19820,7 +19956,7 @@ class OTCS:
             self._soap_transport = Transport(session=session)
             self._soap_docman_client = Client(wsdl=wsdl_url, transport=self._soap_transport)
         except Exception:
-            self.logger.error("Failed to initialize SOAP client with WSDL -> %s", wsdl_url)
+            self.logger.error("Failed to initialize SOAP client with WSDL -> %s", wsdl_url, report=True)
             return None
         else:
             return self._soap_docman_client
@@ -19838,7 +19974,7 @@ class OTCS:
 
         auth_token = self.otcs_ticket()
         if not auth_token:
-            self.logger.error("Cannot build SOAP header because OTCS ticket is missing.")
+            self.logger.error("Cannot build SOAP header because OTCS ticket is missing.", report=True)
             return None
 
         header = xsd.Element(
@@ -20090,7 +20226,7 @@ class OTCS:
         """
 
         if not category_id and not category_name:
-            self.logger.error("Either category ID or category name must be provided!")
+            self.logger.error("Either category ID or category name must be provided!", report=True)
             return None
 
         if not category_id:
@@ -20344,6 +20480,7 @@ class OTCS:
             self.logger.warning(
                 "No categories are assigned to node with ID -> %d",
                 node_id,
+                report=True,
             )
             return None
 
@@ -20580,7 +20717,9 @@ class OTCS:
             )
 
         if not category_id:
-            self.logger.error("Category ID is not specified! Cannot set category values on node with ID -> %d", node_id)
+            self.logger.error(
+                "Category ID is not specified! Cannot set category values on node with ID -> %d", node_id, report=True
+            )
             return None
 
         if not category_data:
@@ -20588,6 +20727,7 @@ class OTCS:
                 "No category data provided! Cannot set values for category ID -> %d on node with ID -> %d",
                 int(category_id),
                 int(node_id),
+                report=True,
             )
             return None
 
@@ -20638,7 +20778,9 @@ class OTCS:
 
         if not category_id:
             self.logger.error(
-                "Category ID is not specified! Cannot set category inheritance on node with ID -> %s", str(node_id)
+                "Category ID is not specified! Cannot set category inheritance on node with ID -> %s",
+                str(node_id),
+                report=True,
             )
             return None
 
@@ -20814,7 +20956,7 @@ class OTCS:
         # Start of main method body:
 
         if not node:
-            self.logger.error("Cannot extract category data. No node data provided!")
+            self.logger.error("Cannot extract category data. No node data provided!", report=True)
             return None
 
         if "results" not in node:
@@ -20834,7 +20976,9 @@ class OTCS:
             node["results"] = node["results"][0]
 
         if "metadata" not in node["results"]:
-            self.logger.error("Cannot extract category data. Method was called without the '&metadata' parameter!")
+            self.logger.error(
+                "Cannot extract category data. Method was called without the '&metadata' parameter!", report=True
+            )
             return None
 
         #
@@ -20843,7 +20987,8 @@ class OTCS:
         metadata = node["results"]["metadata"]
         if "categories" not in metadata:
             self.logger.error(
-                "Cannot extract category data. No category data found in node response! Use 'categories' value for 'fields' parameter in the node call!"
+                "Cannot extract category data. No category data found in node response! Use 'categories' value for 'fields' parameter in the node call!",
+                report=True,
             )
             return None
         category_schemas = metadata["categories"]
@@ -20933,7 +21078,7 @@ class OTCS:
                 # end for attribute_key, attribute_schema in category_schema.items():
             # end for category_key, category_schema in category_schemas.items():
         except Exception as e:
-            self.logger.error("Something went wrong with getting the data schema! Error -> %s", str(e))
+            self.logger.error("Something went wrong with getting the data schema! Error -> %s", str(e), report=True)
             return None
 
         #
@@ -20987,7 +21132,7 @@ class OTCS:
                 # end for attribute_key, value in category_data.items():
             # end for for category_data in category_datas.values():
         except Exception as e:
-            self.logger.error("Something went wrong while filling the data! Error -> %s", str(e))
+            self.logger.error("Something went wrong while filling the data! Error -> %s", str(e), report=True)
             return None
 
         return result_dict
@@ -21021,7 +21166,7 @@ class OTCS:
         """
 
         if operation not in ["add", "remove"]:
-            self.logger.error("Illegal collection operation -> '%s'!")
+            self.logger.error("Illegal collection operation -> '%s'!", report=True)
             return None
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(collection_id) + "/collection"
@@ -22094,6 +22239,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -22163,6 +22309,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -22238,6 +22385,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -22299,6 +22447,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -22367,6 +22516,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -22428,6 +22578,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -22496,6 +22647,7 @@ class OTCS:
                 "The file -> '%s' does not exist in path -> '%s'!",
                 filename,
                 os.path.dirname(file_path),
+                report=True,
             )
             return False
 
@@ -23439,6 +23591,7 @@ class OTCS:
         if "definition" not in results:
             self.logger.error(
                 "Workflow definition is missing 'results' data structure!",
+                report=True,
             )
             return None
 
@@ -23448,7 +23601,7 @@ class OTCS:
         # in particular we want to lookup a specific data package
         # that includes the attribute definitions:
         if "data_packages" not in definition:
-            self.logger.error("Workflow definition does not have data packages!")
+            self.logger.error("Workflow definition does not have data packages!", report=True)
             return None
 
         # Initialize the result dictionary:
@@ -24417,6 +24570,7 @@ class OTCS:
         if not action and not custom_action:
             self.logger.error(
                 "Either 'action' or 'custom_action' is required for updating a process task!",
+                report=True,
             )
             return None
 
@@ -24768,7 +24922,7 @@ class OTCS:
         request_header = self.request_form_header()
 
         if not query:
-            self.logger.error("Query text is required for getting context from Content Aviator!")
+            self.logger.error("Query text is required for getting context from Content Aviator!", report=True)
             return None
 
         context_post_body = {
@@ -24855,7 +25009,7 @@ class OTCS:
             node_id = node
             node = self.get_node(node_id=node_id)
         else:
-            self.logger.error("Illegal type of node object. Expect 'int' or 'dict'! Cannot traverse node.")
+            self.logger.error("Illegal type of node object. Expect 'int' or 'dict'! Cannot traverse node.", report=True)
             return None
 
         # Run executables:
@@ -25075,7 +25229,8 @@ class OTCS:
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
             for i in range(workers):
                 self.logger.debug("Starting worker -> %d...", i)
-                executor.submit(traverse_node_worker)
+                # Copy the context so errors of the workers reach an active capture_errors() block:
+                executor.submit(contextvars.copy_context().run, traverse_node_worker)
 
             # Wait for all tasks to complete
             task_queue.join()
@@ -25116,10 +25271,10 @@ class OTCS:
         simulate = kwargs.get("simulate", False)
 
         if not translator:
-            self.logger.error("Missing 'translator' parameter (object)!")
+            self.logger.error("Missing 'translator' parameter (object)!", report=True)
             return False
         if not languages:
-            self.logger.error("Missing or empty 'languages' parameter (list)!")
+            self.logger.error("Missing or empty 'languages' parameter (list)!", report=True)
             return False
 
         if isinstance(node, dict):
@@ -26233,7 +26388,12 @@ class OTCS:
         #
 
         # Start thread that populates the task queue
-        init_thread = threading.Thread(target=init_traversal_queue_guarded, name="TraversalQueueInitializer")
+        # Copy the context so errors of the threads reach an active capture_errors() block:
+        init_thread = threading.Thread(
+            target=contextvars.copy_context().run,
+            args=(init_traversal_queue_guarded,),
+            name="TraversalQueueInitializer",
+        )
         init_thread.start()
 
         # Start the lightweight progress monitor (logs a snapshot every 15 seconds):
@@ -26244,7 +26404,7 @@ class OTCS:
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=workers_name) as executor:
             for i in range(workers):
                 self.logger.debug("Starting workspace traversal worker -> %d...", i)
-                executor.submit(traverse_workspace_worker)
+                executor.submit(contextvars.copy_context().run, traverse_workspace_worker)
 
             # Wait for the initializer BEFORE waiting on the queue: task_queue.join()
             # returns as soon as the unfinished task count is 0, which is trivially the
@@ -26317,6 +26477,7 @@ class OTCS:
                     "Failed to rename file -> '%s' to '%s'!",
                     file_path,
                     file_with_ext,
+                    report=True,
                 )
                 return
 
@@ -26419,7 +26580,7 @@ class OTCS:
         """
 
         if not node or "type" not in node or "id" not in node:
-            self.logger.error("Illegal node - cannot apply filter!")
+            self.logger.error("Illegal node - cannot apply filter!", report=True)
             return False
 
         if filter_subtypes is not None and node["type"] not in filter_subtypes:
@@ -26891,21 +27052,24 @@ class OTCS:
 
             if not traversal_data:
                 self.logger.error(
-                    "Missing keyword argument 'traversal_data' for executable 'check_node_workspace' in node traversal!"
+                    "Missing keyword argument 'traversal_data' for executable 'check_node_workspace' in node traversal!",
+                    report=True,
                 )
                 # Success = False, Traverse = False
                 return (False, False)
 
             if not filter_workspace_data:
                 self.logger.error(
-                    "Missing keyword argument 'filter_workspace_data' for executable 'check_node_workspace' in node traversal!"
+                    "Missing keyword argument 'filter_workspace_data' for executable 'check_node_workspace' in node traversal!",
+                    report=True,
                 )
                 # Success = False, Traverse = False
                 return (False, False)
 
             if not control_flags:
                 self.logger.error(
-                    "Missing keyword argument 'control_flags' for executable 'check_node_workspace' in node traversal!"
+                    "Missing keyword argument 'control_flags' for executable 'check_node_workspace' in node traversal!",
+                    report=True,
                 )
                 # Success = False, Traverse = False
                 return (False, False)
@@ -27039,15 +27203,21 @@ class OTCS:
             control_flags = kwargs.get("control_flags")
 
             if not traversal_data:
-                self.logger.error("Missing keyword argument 'traversal_data' for executable in node item traversal!")
+                self.logger.error(
+                    "Missing keyword argument 'traversal_data' for executable in node item traversal!", report=True
+                )
                 return (False, False)
 
             if not filter_item_data:
-                self.logger.error("Missing keyword argument 'filter_item_data' for executable in node item traversal!")
+                self.logger.error(
+                    "Missing keyword argument 'filter_item_data' for executable in node item traversal!", report=True
+                )
                 return (False, False)
 
             if not control_flags:
-                self.logger.error("Missing keyword argument 'control_flags' for executable in node item traversal!")
+                self.logger.error(
+                    "Missing keyword argument 'control_flags' for executable in node item traversal!", report=True
+                )
                 return (False, False)
 
             node_id = self.get_result_value(response=node, key="id")
@@ -27156,8 +27326,8 @@ class OTCS:
                     # Start asynchronous Download Thread:
                     #
                     thread = threading.Thread(
-                        target=self.download_document_multi_threading,
-                        args=(node_id, file_path, extract_after_download),
+                        target=contextvars.copy_context().run,
+                        args=(self.download_document_multi_threading, node_id, file_path, extract_after_download),
                         name="download_document_node_{}".format(node_id),
                     )
                     thread.start()
@@ -27273,7 +27443,7 @@ class OTCS:
         if items:
             executables.append(check_node_item)
         if not executables:
-            self.logger.error("Neither workspaces nor items are requested to be loaded. Nothing to do!")
+            self.logger.error("Neither workspaces nor items are requested to be loaded. Nothing to do!", report=True)
             return None
 
         #
@@ -27449,6 +27619,7 @@ class OTCS:
             self.logger.error(
                 "Cannot get node with ID -> %d, skipping FEME embedding!",
                 node_id,
+                report=True,
             )
             return False
         try:
@@ -27457,6 +27628,7 @@ class OTCS:
             self.logger.error(
                 "Cannot decode data for node with ID -> %d, skipping embedding with FEME.",
                 node_id,
+                report=True,
             )
             return False
 
@@ -27539,6 +27711,7 @@ class OTCS:
             self.logger.error(
                 "Cannot get node actions for workspace with ID -> %d",
                 workspace_id,
+                report=True,
             )
             return None
         else:
@@ -27602,6 +27775,7 @@ class OTCS:
             self.logger.error(
                 "No known document template action found for workspace with ID -> %d",
                 workspace_id,
+                report=True,
             )
             return None
 
@@ -27613,7 +27787,8 @@ class OTCS:
             text = response.text
             if text and "User is not authorized" in text:
                 self.logger.error(
-                    "The current user is not authorized to retrieve document templates for document generation!"
+                    "The current user is not authorized to retrieve document templates for document generation!",
+                    report=True,
                 )
                 return None
             match = re.search(r'<textarea[^>]*name=["\']documentgeneration["\'][^>]*>(.*?)</textarea>', text, re.DOTALL)
@@ -27630,6 +27805,7 @@ class OTCS:
                 "Cannot parse document template XML payload for workspace with ID -> %d! Error -> %s",
                 workspace_id,
                 exc,
+                report=True,
             )
             return None
         else:
@@ -27659,6 +27835,7 @@ class OTCS:
                 self.logger.error(
                     "Cannot get document templates for workspace with ID -> %d",
                     workspace_id,
+                    report=True,
                 )
                 return None
         template_names = [
@@ -27698,6 +27875,7 @@ class OTCS:
             self.logger.error(
                 "Cannot get document template for workspace with ID -> %d",
                 workspace_id,
+                report=True,
             )
             return None
 
@@ -27709,6 +27887,7 @@ class OTCS:
                 template_name,
                 workspace_id,
                 ", ".join(template_names),
+                report=True,
             )
             return None
 
@@ -28092,6 +28271,7 @@ class OTCS:
             "Reminder type with name -> '%s'%s  does not exist.",
             type_name,
             " for client -> '{}'".format(client_name) if client_name else "",
+            report=True,
         )
 
         return None
@@ -28970,6 +29150,7 @@ class OTCS:
                     "Cannot determine current status for reminder with ID -> %d and node with ID -> %d. Cannot validate reminder update parameters.",
                     reminder_id,
                     node_id,
+                    report=True,
                 )
                 return None
         else:
@@ -28983,7 +29164,8 @@ class OTCS:
         valid_reminder_type_ids = self.get_valid_reminder_type_ids()
         if not valid_reminder_type_ids:
             self.logger.error(
-                "No valid reminder types found. There may not be any reminder type configured or the user does not have access to any. Cannot create or update reminder."
+                "No valid reminder types found. There may not be any reminder type configured or the user does not have access to any. Cannot create or update reminder.",
+                report=True,
             )
             return None
         if reminder_type not in valid_reminder_type_ids:
@@ -28991,6 +29173,7 @@ class OTCS:
                 "Invalid reminder type ID -> '%s'. Cannot create or update reminder. Valid IDs -> %s",
                 reminder_type,
                 str(valid_reminder_type_ids),
+                report=True,
             )
             return None
 
@@ -29001,6 +29184,7 @@ class OTCS:
                 "Invalid activation unit -> '%s'. Valid units -> %s",
                 activation_unit,
                 str(valid_units),
+                report=True,
             )
             return None
         if due_in_unit is not None and due_in_unit not in self.REMINDER_UNIT_MAP:
@@ -29008,6 +29192,7 @@ class OTCS:
                 "Invalid due in unit -> '%s'. Valid units -> %s",
                 due_in_unit,
                 str(valid_units),
+                report=True,
             )
             return None
         if escalation and escalation_unit is not None and escalation_unit not in self.REMINDER_UNIT_MAP:
@@ -29015,6 +29200,7 @@ class OTCS:
                 "Invalid escalation unit -> '%s'. Valid units -> %s",
                 escalation_unit,
                 str(valid_units),
+                report=True,
             )
             return None
         if escalation and escalation_when is not None and escalation_when not in self.REMINDER_ESCALATION_WHEN_MAP:
@@ -29022,6 +29208,7 @@ class OTCS:
                 "Invalid escalation_when -> %s. Valid values -> %s",
                 str(escalation_when),
                 str(list(self.REMINDER_ESCALATION_WHEN_MAP)),
+                report=True,
             )
             return None
 
@@ -29033,6 +29220,7 @@ class OTCS:
                     "Invalid reminder priority -> '%s'. Valid priorities -> %s",
                     priority,
                     str(list(self.REMINDER_PRIORITY_MAP)),
+                    report=True,
                 )
                 return None
             priority_value = self.REMINDER_PRIORITY_MAP[priority]
@@ -29045,6 +29233,7 @@ class OTCS:
                 self.logger.error(
                     "Invalid reminder date -> '%s'. Expected OTCS format ('D/YYYY/M/D:0:0:0') or ISO date string.",
                     due_date,
+                    report=True,
                 )
                 return None
         else:
@@ -29054,7 +29243,7 @@ class OTCS:
         if recurring:
             reminder_rule = self.REMINDER_RULE_MAP["recurring"]
             if not recurring_start_date:
-                self.logger.error("A start date is required for configuration of recurring reminders!")
+                self.logger.error("A start date is required for configuration of recurring reminders!", report=True)
                 return None
         elif due_date_formatted is not None:
             reminder_rule = self.REMINDER_RULE_MAP["due date"]
@@ -29064,12 +29253,14 @@ class OTCS:
             if due_in_unit is None and initial_status:
                 self.logger.error(
                     "A unit (day, week, month, year) is required for reminders with relative due dates.",
+                    report=True,
                 )
                 return None
             # if we are "in progress" state due in is not required:
             if due_in_value is None and initial_status:
                 self.logger.error(
                     "A value (# of days, # of months, etc.) is required for reminders with relative due dates.",
+                    report=True,
                 )
                 return None
 
@@ -29135,6 +29326,7 @@ class OTCS:
                     "Invalid reminder status -> %s. Expected one of -> %s",
                     str(reminder_status),
                     str(list(self.REMINDER_STATUS_MAP)),
+                    report=True,
                 )
                 return None
 
@@ -29149,6 +29341,7 @@ class OTCS:
                         normalized_reminder_status,
                         current_status,
                         ", ".join(allowed) if allowed else "none",
+                        report=True,
                     )
                     return None
 
@@ -29241,6 +29434,7 @@ class OTCS:
                     str(value),
                     field,
                     str(list(names.values())),
+                    report=True,
                 )
                 return
             data[field] = names[value]
@@ -29534,7 +29728,7 @@ class OTCS:
             return None
 
         if "recipients" not in post_data:
-            self.logger.error("Recipients are required for adding a reminder.")
+            self.logger.error("Recipients are required for adding a reminder.", report=True)
             return None
 
         request_url = self.config()["resubmissionUrl"] + "/" + str(node_id) + "/addreminder"
@@ -29617,6 +29811,7 @@ class OTCS:
                 "Invalid reminder status -> %s. Expected one of -> %s",
                 str(status),
                 str(list(self.REMINDER_STATUS_MAP)),
+                report=True,
             )
             return None
         status_value = self.REMINDER_STATUS_MAP[normalized_status]
@@ -29628,6 +29823,7 @@ class OTCS:
                     "'{}' -> {}".format(current, ", ".join("'{}'".format(t) for t in targets if t != current))
                     for current, targets in self.REMINDER_STATUS_TRANSITIONS.items()
                 ),
+                report=True,
             )
             return None
 

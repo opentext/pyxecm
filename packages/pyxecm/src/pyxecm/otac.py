@@ -18,6 +18,11 @@ import requests
 from suds import WebFault
 from suds.client import Client
 
+from pyxecm.errors import (
+    OTACError,
+    ReportingLoggerAttribute,
+)
+
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".otac"
@@ -53,7 +58,7 @@ class OTAC:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTACError)
 
     def __init__(
         self,
@@ -405,7 +410,7 @@ class OTAC:
                 request_url,
                 str(exception),
             )
-            self.logger.warning("OTAC service may not be ready yet.")
+            self.logger.warning("OTAC service may not be ready yet.", report=True)
             return None
 
         if response.ok:
@@ -424,6 +429,7 @@ class OTAC:
             self.logger.error(
                 "Failed to request an OTAC ticket; error -> %s",
                 response.text,
+                report=True,
             )
             return None
 
@@ -524,7 +530,7 @@ class OTAC:
 
         # Check if the certificate file exists
         if not os.path.isfile(cert_path):
-            self.logger.error("Certificate file -> '%s' not found!", cert_path)
+            self.logger.error("Certificate file -> '%s' not found!", cert_path, report=True)
             return None
 
         with open(file=cert_path, encoding="utf-8") as cert_file:
@@ -547,6 +553,7 @@ class OTAC:
             self.logger.error(
                 "Certificate file -> '%s' is not in the right format",
                 cert_path,
+                report=True,
             )
             return None
 
@@ -641,6 +648,7 @@ class OTAC:
                     "Failed to activate Archive Center certificate for Client -> %s on Archive -> '%s'!",
                     auth_id,
                     logical_archive,
+                    report=True,
                 )
                 return False
 
@@ -649,6 +657,7 @@ class OTAC:
                 "Failed to execute SetCertificateFlags for Client -> %s on Archive -> '%s'",
                 auth_id,
                 logical_archive,
+                report=True,
             )
             return False
 
@@ -730,6 +739,7 @@ class OTAC:
                     cert_name,
                     response.status_code,
                     response.text,
+                    report=True,
                 )
                 return None
 

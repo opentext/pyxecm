@@ -8,6 +8,23 @@ __email__ = "mdiefenb@opentext.com"
 
 from .avts import AVTS
 from .coreshare import CoreShare
+from .errors import (
+    AVTSError,
+    CoreShareError,
+    ErrorCategory,
+    ErrorCollector,
+    ErrorSeverity,
+    OTACError,
+    OTAWPError,
+    OTCAError,
+    OTCSError,
+    OTDSError,
+    OTKDError,
+    OTMMError,
+    OTPDError,
+    PyxecmError,
+    capture_errors,
+)
 from .otac import OTAC
 from .otawp import OTAWP
 from .otca import OTCA
@@ -18,4 +35,31 @@ from .otkd import OTKD
 from .otmm import OTMM
 from .otpd import OTPD
 
-__all__ = ["AVTS", "OTAC", "OTAWP", "OTCA", "OTCS", "OTDS", "OTIV", "OTKD", "OTMM", "OTPD", "CoreShare"]
+__all__ = [
+    "AVTS",
+    "OTAC",
+    "OTAWP",
+    "OTCA",
+    "OTCS",
+    "OTDS",
+    "OTIV",
+    "OTKD",
+    "OTMM",
+    "OTPD",
+    "AVTSError",
+    "CoreShare",
+    "CoreShareError",
+    "ErrorCategory",
+    "ErrorCollector",
+    "ErrorSeverity",
+    "OTACError",
+    "OTAWPError",
+    "OTCAError",
+    "OTCSError",
+    "OTDSError",
+    "OTKDError",
+    "OTMMError",
+    "OTPDError",
+    "PyxecmError",
+    "capture_errors",
+]

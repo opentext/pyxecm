@@ -20,6 +20,14 @@ from importlib.metadata import version
 
 import requests
 
+from pyxecm.errors import (
+    ErrorCategory,
+    OTKDError,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
+
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".otkd"
@@ -62,7 +70,7 @@ class OTKD:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTKDError)
 
     def __init__(
         self,
@@ -406,6 +414,14 @@ class OTKD:
                             HTTPStatus(response.status_code).phrase,
                             response.text,
                         )
+                    record_request_error(
+                        error_class=OTKDError,
+                        message=failure_message if show_error else (warning_message or failure_message),
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+                    )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
@@ -419,6 +435,13 @@ class OTKD:
                     self.logger.error(
                         "%s; timeout error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTKDError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -438,6 +461,13 @@ class OTKD:
                     self.logger.error(
                         "%s; connection error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTKDError,
+                        message="{}; connection error".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -551,7 +581,7 @@ class OTKD:
                 request_url,
                 str(exception),
             )
-            self.logger.warning("Nifi service may not be ready yet.")
+            self.logger.warning("Nifi service may not be ready yet.", report=True)
             return None
 
         if response.ok:
@@ -564,6 +594,7 @@ class OTKD:
                 "Failed to request an NiFi access token; status -> %s, error -> %s",
                 response.status_code,
                 response.text,
+                report=True,
             )
             return None
 
@@ -854,7 +885,7 @@ class OTKD:
         )
 
         if group_exists:
-            self.logger.warning("Process group -> '%s' already exists!", name)
+            self.logger.warning("Process group -> '%s' already exists!", name, report=True)
             return None
 
         request_url = self.config()["restUrl"] + "/process-groups/" + root_process_group_id + "/process-groups/upload"
@@ -885,6 +916,7 @@ class OTKD:
         self.logger.error(
             "The process group -> '%s' could not be uploaded!",
             name,
+            report=True,
         )
 
         return None
@@ -1017,7 +1049,7 @@ class OTKD:
         )
 
         if not parameter_context:
-            self.logger.error("Cannot find parameter context with name -> '%s'!", name)
+            self.logger.error("Cannot find parameter context with name -> '%s'!", name, report=True)
             return None
 
         return parameter_context
@@ -1111,6 +1143,7 @@ class OTKD:
                 "Parameter -> '%s' could not be updated because the parameter context -> '%s' was not found!",
                 parameter,
                 component,
+                report=True,
             )
             return None
 
@@ -1154,6 +1187,7 @@ class OTKD:
         self.logger.error(
             "Parameter -> '%s' could not be updated!",
             parameter,
+            report=True,
         )
 
         return None
@@ -1175,7 +1209,7 @@ class OTKD:
 
         process_group = self.get_process_group_by_name(name=name)
         if not process_group:
-            self.logger.error("Cannot find process group -> '%s' to start!", name)
+            self.logger.error("Cannot find process group -> '%s' to start!", name, report=True)
             return None
 
         process_group_id = process_group["id"]
@@ -1194,6 +1228,7 @@ class OTKD:
         self.logger.error(
             "Processors in process-group -> '%s' failed to start!",
             name,
+            report=True,
         )
 
         return None
@@ -1352,6 +1387,7 @@ class OTKD:
                 "Cannot find process group -> '%s' to %s controller service for!",
                 name,
                 "enable" if state == "ENABLED" else "disable",
+                report=True,
             )
             return None
 

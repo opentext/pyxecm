@@ -19,6 +19,14 @@ import requests
 from requests.auth import HTTPBasicAuth
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
+from pyxecm.errors import (
+    ErrorCategory,
+    OTPDError,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
+
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".otpd"
@@ -63,7 +71,7 @@ class OTPD:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTPDError)
 
     def __init__(
         self,
@@ -333,6 +341,7 @@ class OTPD:
                     "Fetching session id from -> %s failed! Response -> %s",
                     auth_url,
                     session_response.text,
+                    report=True,
                 )
                 return None
         else:
@@ -362,6 +371,7 @@ class OTPD:
             self.logger.error(
                 "Cannot import PowerDocs database from non-existent file -> %s",
                 file_path,
+                report=True,
             )
             return None
 
@@ -383,7 +393,7 @@ class OTPD:
                 request_url = self.config().get("importDatabaseUrl")
 
                 if not request_url:
-                    self.logger.error("Import database URL is not configured.")
+                    self.logger.error("Import database URL is not configured.", report=True)
                     return None
 
                 self.logger.info(
@@ -410,6 +420,7 @@ class OTPD:
                         file_path,
                         request_url,
                         response.text,
+                        report=True,
                     )
                     return None
 
@@ -497,7 +508,7 @@ class OTPD:
                 )
                 if retries > REQUEST_MAX_RETRIES:
                     message += "; maximum retries reached - aborting!"
-                    self.logger.error(message)
+                    self.logger.error(message, report=True)
                     return None
                 else:
                     message += "; retrying..."
@@ -627,6 +638,14 @@ class OTPD:
                             HTTPStatus(response.status_code).phrase,
                             response.text,
                         )
+                    record_request_error(
+                        error_class=OTPDError,
+                        message=failure_message if show_error else (warning_message or failure_message),
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+                    )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
@@ -640,6 +659,13 @@ class OTPD:
                     self.logger.error(
                         "%s; timeout error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTPDError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -659,6 +685,13 @@ class OTPD:
                     self.logger.error(
                         "%s; connection error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTPDError,
+                        message="{}; connection error".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -692,7 +725,7 @@ class OTPD:
         """
 
         if not payload:
-            self.logger.error("Cannot generate PowerDocs document from empty payload!")
+            self.logger.error("Cannot generate PowerDocs document from empty payload!", report=True)
             return None
 
         url = self.config()["documentGenerationUrl"]

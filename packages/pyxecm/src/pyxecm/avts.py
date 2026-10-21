@@ -17,6 +17,14 @@ from importlib.metadata import version
 
 import requests
 
+from pyxecm.errors import (
+    AVTSError,
+    ErrorCategory,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
+
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".avts"
@@ -45,7 +53,7 @@ class AVTS:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=AVTSError)
 
     def __init__(
         self,
@@ -257,6 +265,14 @@ class AVTS:
                             response.text,
                         )
 
+                    record_request_error(
+                        error_class=AVTSError,
+                        message=failure_message,
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error),
+                    )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
@@ -270,6 +286,13 @@ class AVTS:
                     self.logger.error(
                         "%s; timeout error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=AVTSError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -289,6 +312,13 @@ class AVTS:
                     self.logger.error(
                         "%s; connection error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=AVTSError,
+                        message="{}; connection error".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -922,7 +952,7 @@ class AVTS:
         )
 
         if response is None:
-            self.logger.error("Failed to create repository -> '%s'", name)
+            self.logger.error("Failed to create repository -> '%s'", name, report=True)
             return None
 
         self.repo_admin_consent(response["id"])
@@ -1304,7 +1334,7 @@ class AVTS:
         )
 
         if response is None:
-            self.logger.error("Failed to create repository -> '%s'!", name)
+            self.logger.error("Failed to create repository -> '%s'!", name, report=True)
             return None
 
         self.repo_admin_consent(response["id"])

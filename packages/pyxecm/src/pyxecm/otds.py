@@ -32,6 +32,14 @@ from importlib.metadata import version
 import requests
 from opentelemetry import trace
 
+from pyxecm.errors import (
+    ErrorCategory,
+    OTDSError,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
+
 tracer = trace.get_tracer(__name__)
 
 APP_NAME = "pyxecm"
@@ -73,7 +81,7 @@ class OTDS:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=OTDSError)
 
     def __init__(
         self,
@@ -395,7 +403,7 @@ class OTDS:
         if token is None:
             token = self._token
         if not token:
-            self.logger.error("Cannot revoke OAuth token - no token given or configured!")
+            self.logger.error("Cannot revoke OAuth token - no token given or configured!", report=True)
             return False
 
         request_url = "{}/{}".format(self.config()["revokeTokenUrl"], token)
@@ -951,6 +959,14 @@ class OTDS:
                             HTTPStatus(response.status_code).phrase,
                             response.text,
                         )
+                    record_request_error(
+                        error_class=OTDSError,
+                        message=failure_message if show_error else (warning_message or failure_message),
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+                    )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
@@ -964,6 +980,13 @@ class OTDS:
                     self.logger.error(
                         "%s; timeout error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTDSError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -986,6 +1009,13 @@ class OTDS:
                     self.logger.error(
                         "%s; connection error.",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=OTDSError,
+                        message="{}; connection error".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -1106,7 +1136,8 @@ class OTDS:
                 grant_type = "client_credentials"
             else:
                 self.logger.error(
-                    "Cannot determine grant type automatically - please provide username/password or client_id/client_secret for authentication."
+                    "Cannot determine grant type automatically - please provide username/password or client_id/client_secret for authentication.",
+                    report=True,
                 )
                 return None
 
@@ -1124,7 +1155,7 @@ class OTDS:
                 json_data = self.credentials()
                 result_value = "ticket"
             else:
-                self.logger.error("Unsupported grant type -> '%s' - exit", grant_type)
+                self.logger.error("Unsupported grant type -> '%s' - exit", grant_type, report=True)
                 return None
             response = requests.post(
                 url=request_url,
@@ -1138,6 +1169,7 @@ class OTDS:
                 "Unable to connect to OTDS authentication endpoint -> %s%s. OTDS service may not be ready yet.",
                 self.credential_url(),
                 "; error -> {}".format(str(exception)) if str(exception) else "",
+                report=True,
             )
             return None
 
@@ -1153,11 +1185,13 @@ class OTDS:
                 self.logger.error(
                     "Failed to request an OTDS ticket / access token; error -> %s",
                     response.text,
+                    report=True,
                 )
             else:
                 self.logger.warning(
                     "Failed to request an OTDS ticket / access token; warning -> %s",
                     response.text,
+                    report=True,
                 )
             return None
 
@@ -1241,6 +1275,7 @@ class OTDS:
                 "Unable to connect to OTDS token endpoint -> %s; error -> %s",
                 request_url,
                 str(exception),
+                report=True,
             )
             return None
 
@@ -1249,6 +1284,7 @@ class OTDS:
                 "Failed to request user access token for -> '%s'; error -> %s",
                 username,
                 response.text,
+                report=True,
             )
             return None
 
@@ -1261,6 +1297,7 @@ class OTDS:
             self.logger.error(
                 "OTDS token response for user -> '%s' did not contain an access_token",
                 username,
+                report=True,
             )
             return None
 
@@ -1512,6 +1549,7 @@ class OTDS:
                 user_id,
                 user_partition,
                 role_name,
+                report=True,
             )
             return False
 
@@ -1519,7 +1557,9 @@ class OTDS:
         if role:
             role_location = role.get("location")
         else:
-            self.logger.warning("Cannot find application role -> '%s' in partition -> '%s'!", role_name, role_partition)
+            self.logger.warning(
+                "Cannot find application role -> '%s' in partition -> '%s'!", role_name, role_partition, report=True
+            )
             return False
 
         role_post_body_json = {
@@ -1594,7 +1634,10 @@ class OTDS:
             group_location = group["location"]
         else:
             self.logger.error(
-                "Cannot find group -> '%s'! Cannot assign group to application role -> '%s'.", group_id, role_name
+                "Cannot find group -> '%s'! Cannot assign group to application role -> '%s'.",
+                group_id,
+                role_name,
+                report=True,
             )
             return False
 
@@ -1602,7 +1645,9 @@ class OTDS:
         if role:
             role_location = role.get("location")
         else:
-            self.logger.warning("Cannot find application role -> '%s' in partition -> '%s'!", role_name, role_partition)
+            self.logger.warning(
+                "Cannot find application role -> '%s' in partition -> '%s'!", role_name, role_partition, report=True
+            )
             return False
 
         role_post_body_json = {
@@ -2706,6 +2751,7 @@ class OTDS:
         if resource_id and not secret:
             self.logger.error(
                 "A resource ID can only be specified if a secret value is also provided!",
+                report=True,
             )
             return None
 
@@ -3380,7 +3426,7 @@ class OTDS:
         # create payload for REST call:
         access_role = self.get_access_role(name)
         if not access_role:
-            self.logger.error("Failed to get access role -> '%s'! Cannot update its attributes.", name)
+            self.logger.error("Failed to get access role -> '%s'! Cannot update its attributes.", name, report=True)
             return None
 
         access_role_put_body_json = {"attributes": attribute_list}
@@ -3441,6 +3487,7 @@ class OTDS:
             self.logger.error(
                 "Error opening license file -> '%s'!",
                 path_to_license_file,
+                report=True,
             )
             return None
 
@@ -3648,6 +3695,7 @@ class OTDS:
             self.logger.error(
                 "Resource with ID -> '%s' does not exist or has no licenses!",
                 resource_id,
+                report=True,
             )
             return False
 
@@ -3660,6 +3708,7 @@ class OTDS:
                 "Cannot find license -> '%s' for resource with ID -> '%s'!",
                 license_name,
                 resource_id,
+                report=True,
             )
             return False
 
@@ -3667,7 +3716,7 @@ class OTDS:
         if user:
             user_location = user["location"]
         else:
-            self.logger.error("Cannot find location for user -> '%s'!", user_id)
+            self.logger.error("Cannot find location for user -> '%s'!", user_id, report=True)
             return False
 
         license_post_body_json = {
@@ -3760,6 +3809,7 @@ class OTDS:
             self.logger.error(
                 "Resource with ID -> '%s' does not exist or has no licenses!",
                 resource_id,
+                report=True,
             )
             return False
 
@@ -3772,6 +3822,7 @@ class OTDS:
                 "Cannot find license -> %s for resource -> %s",
                 license_name,
                 resource_id,
+                report=True,
             )
             return False
 
@@ -3889,6 +3940,7 @@ class OTDS:
             self.logger.error(
                 "Resource with ID -> '%s' does not exist or has no licenses!",
                 resource_id,
+                report=True,
             )
             return False
 
@@ -3901,6 +3953,7 @@ class OTDS:
                 "Cannot find license -> %s for resource -> %s",
                 license_name,
                 resource_id,
+                report=True,
             )
             return False
 
@@ -4817,6 +4870,7 @@ class OTDS:
                 self.logger.error(
                     "OAuthClients partition already added to role -> '%s'!",
                     access_role_name,
+                    report=True,
                 )
                 return None
 
@@ -5414,12 +5468,14 @@ class OTDS:
                     self.logger.error(
                         "No data in certificate file -> '%s'!",
                         certificate_file,
+                        report=True,
                     )
                     return None
         except OSError:
             self.logger.error(
                 "Unable to open certificate file -> '%s'!",
                 certificate_file,
+                report=True,
             )
             return None
 
@@ -5460,6 +5516,7 @@ class OTDS:
                 self.logger.error(
                     "Failed writing to file -> '%s'!",
                     certificate_file,
+                    report=True,
                 )
                 return None
 
@@ -5506,6 +5563,7 @@ class OTDS:
                 name,
                 response.text,
                 response.status_code,
+                report=True,
             )
             return None
 
@@ -5951,12 +6009,13 @@ class OTDS:
             self.logger.error(
                 "Resource -> '%s' not found - cannot consolidate!",
                 resource_name,
+                report=True,
             )
             return False
 
         resource_dn = resource["resourceDN"]
         if not resource_dn:
-            self.logger.error("Resource DN is empty - cannot consolidate!")
+            self.logger.error("Resource DN is empty - cannot consolidate!", report=True)
             return False
 
         consolidation_post_body_json = {

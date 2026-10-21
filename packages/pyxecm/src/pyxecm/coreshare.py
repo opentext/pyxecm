@@ -31,6 +31,14 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
+from pyxecm.errors import (
+    CoreShareError,
+    ErrorCategory,
+    ReportingLoggerAttribute,
+    record_request_error,
+    request_error_severity,
+)
+
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".coreshare"
@@ -66,7 +74,7 @@ class CoreShare:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger: logging.Logger = default_logger
+    logger = ReportingLoggerAttribute(default_logger, error_class=CoreShareError)
 
     def __init__(
         self,
@@ -369,6 +377,8 @@ class CoreShare:
         if headers is None:
             self.logger.error(
                 "Missing request header. Cannot send request to Core Share!",
+                report=True,
+                category=ErrorCategory.AUTHENTICATION,
             )
             return None
 
@@ -452,6 +462,14 @@ class CoreShare:
                             HTTPStatus(response.status_code).phrase,
                             response.text,
                         )
+                    record_request_error(
+                        error_class=CoreShareError,
+                        message=failure_message if show_error else (warning_message or failure_message),
+                        method=method,
+                        url=url,
+                        response=response,
+                        severity=request_error_severity(show_error=show_error, show_warning=show_warning),
+                    )
                     return None
             except requests.exceptions.Timeout:
                 if retries <= max_retries:
@@ -465,6 +483,13 @@ class CoreShare:
                     self.logger.error(
                         "%s; timeout error!",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=CoreShareError,
+                        message="{}; the request timed out".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.TIMEOUT,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -484,6 +509,13 @@ class CoreShare:
                     self.logger.error(
                         "%s; connection error!",
                         failure_message,
+                    )
+                    record_request_error(
+                        error_class=CoreShareError,
+                        message="{}; connection error".format(failure_message or "Request failed"),
+                        method=method,
+                        url=url,
+                        category=ErrorCategory.CONNECTION,
                     )
                     if retry_forever:
                         # If it fails after REQUEST_MAX_RETRIES retries we let it wait forever
@@ -750,6 +782,7 @@ class CoreShare:
                 "Unable to connect to -> %s : %s",
                 request_url,
                 exception,
+                report=True,
             )
             return None
 
@@ -779,6 +812,7 @@ class CoreShare:
             self.logger.error(
                 "Failed to request a Core Share Tenant Admin Access Token; error -> %s",
                 response.text,
+                report=True,
             )
             return None
 
@@ -848,6 +882,7 @@ class CoreShare:
                 "Unable to connect to -> %s : %s",
                 request_url,
                 exception,
+                report=True,
             )
             return None
 
@@ -866,6 +901,7 @@ class CoreShare:
             self.logger.error(
                 "Failed to request a Core Share Tenant Service User Access Token; error -> %s",
                 response.text,
+                report=True,
             )
             return None
 
@@ -2205,7 +2241,9 @@ class CoreShare:
 
         # Check if the photo file exists
         if not os.path.isfile(photo_path):
-            self.logger.error("Photo file -> '%s' not found for Core Share user with ID -> %s!", photo_path, user_id)
+            self.logger.error(
+                "Photo file -> '%s' not found for Core Share user with ID -> %s!", photo_path, user_id, report=True
+            )
             return None
 
         try:
@@ -2215,7 +2253,10 @@ class CoreShare:
         except OSError:
             # Handle any errors that occurred while reading the photo file
             self.logger.error(
-                "Error reading photo file -> '%s' for Core Share user with ID -> '%s'!", photo_path, user_id
+                "Error reading photo file -> '%s' for Core Share user with ID -> '%s'!",
+                photo_path,
+                user_id,
+                report=True,
             )
             return None
 

@@ -30,10 +30,13 @@ __credits__ = ["Kai-Philip Gatzweiler"]
 __maintainer__ = "Dr. Marc Diefenbruch"
 __email__ = "mdiefenb@opentext.com"
 
+import contextlib
 import json
 import logging
+import os
 import threading
 import urllib.parse
+import warnings
 from collections import deque
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager, suppress
@@ -714,6 +717,40 @@ def record_error(
         return None
 
     return record
+
+
+# end function definition
+
+
+# The warning should point to the code that called pyxecm - not to the pyxecm
+# method that passes the parameter on (e.g. OTCS.create_item() -> OTCS.do_request())
+# or to the wrapper of the @tracer.start_as_current_span decorator (in contextlib).
+# The contextlib entry has no ".py" extension: CPython does not compare the last
+# character of the file name, so a prefix that is the complete file name never matches.
+_PYXECM_PACKAGE_DIRS = (
+    *(
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), package) + os.sep
+        for package in ("pyxecm", "pyxecm_customizer")
+    ),
+    os.path.splitext(contextlib.__file__)[0],
+)
+
+
+def warn_parse_error_response_deprecated() -> None:
+    """Warn that the parse_error_response parameter is deprecated.
+
+    The error details are available via capture_errors() for all pyxecm calls,
+    so the parameter will be removed in a future version.
+    """
+
+    warnings.warn(
+        message=(
+            "The parameter parse_error_response is deprecated and will be removed in a future version. "
+            "Use capture_errors() to get the error details instead, e.g. errors.root_cause.server_message."
+        ),
+        category=DeprecationWarning,
+        skip_file_prefixes=_PYXECM_PACKAGE_DIRS,
+    )
 
 
 # end function definition

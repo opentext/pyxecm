@@ -47,6 +47,7 @@ class ManagerPushClient:
         self._worker: threading.Thread | None = None
         self.session: requests.Session | None = None
         self._run_id = self.settings.run_id or (str(uuid.uuid4()) if self.settings.enabled else "")
+        self._artifacts: dict[str, str] | None = None
 
         if self.settings.enabled:
             self.logger.info(
@@ -98,6 +99,9 @@ class ManagerPushClient:
             "finished_at": self._timestamp(finished_at),
             "customizer_version": self._version(),
         }
+        artifacts = self._artifacts_version()
+        if artifacts:
+            payload["artifacts_version"] = artifacts
         self._enqueue("run", payload)
 
     def push_payload_result(self, payload_row: pd.Series) -> None:
@@ -259,3 +263,26 @@ class ManagerPushClient:
     @staticmethod
     def _version() -> str:
         return customizer_version()
+
+    def _artifacts_version(self) -> dict[str, str] | None:
+        """Return which commit of the payload content the deployment runs ({"commit", "branch", ...}).
+
+        Read once from the payload image (customizer-artifacts serves its build's version.json); None
+        while it cannot be read - an image built before version.json, or the service not up yet.
+        """
+
+        if self._artifacts is not None or not self.settings.artifacts_version_url:
+            return self._artifacts
+        try:
+            # Its own session: the service is in the cluster, not behind the manager's proxy.
+            with requests.Session() as session:
+                session.trust_env = False
+                response = session.get(self.settings.artifacts_version_url, timeout=3)
+            data = response.json() if response.ok else None
+        except (requests.RequestException, ValueError):
+            return None
+        if isinstance(data, dict) and data.get("commit") and data["commit"] != "unknown":
+            self._artifacts = {
+                key: str(value) for key, value in data.items() if key in ("commit", "branch", "pipeline_id")
+            }
+        return self._artifacts

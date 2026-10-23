@@ -58,6 +58,7 @@ from pyxecm.errors import (
     ReportingLoggerAttribute,
     record_request_error,
     request_error_severity,
+    warn_parse_error_response_deprecated,
 )
 from pyxecm.helper import XML, Data
 from pyxecm.otds import OTDS
@@ -1505,6 +1506,7 @@ class OTCS:
                 Enable stream for response content (e.g. for downloading large files). Defaults to False.
             parse_error_response (bool, optional):
                 Whether the error response text should be interpreted as JSON and loaded. Defaults to False.
+                Deprecated: use capture_errors() to get the error details instead.
             authentication_required (bool, optional):
                 Whether authentication is required for the request. Defaults to True.
 
@@ -1513,6 +1515,9 @@ class OTCS:
                 Response of Content Server REST API or None in case of an error.
 
         """
+
+        if parse_error_response:
+            warn_parse_error_response_deprecated()
 
         # In case of an expired session we reauthenticate and
         # try 1 more time. Session expiration should not happen
@@ -8720,6 +8725,7 @@ class OTCS:
                 The multi-lingual descriptions.
             parse_error_response (bool | None, optional):
                 Whether to parse the request response or not. Defaults to False.
+                Deprecated: use capture_errors() to get the error details instead.
 
         Returns:
             dict | None:
@@ -14277,8 +14283,18 @@ class OTCS:
     ) -> dict | None:
         """Get all workspace types configured in OTCS.
 
-        This REST API is very limited. It does not return all workspace type properties
-        you can see in OTCS business admin page.
+        The returned properties depend heavily on the OTCM version:
+        * OTCM 25.4 returns only a very limited set of properties per workspace type:
+          'aviator_enabled', 'rm_enabled', 'wksp_type_id', 'wksp_type_name' and (if
+          expand_templates=True) 'templates'. 'wksp_info' (if expand_workspace_info=True)
+          only has 'wksp_type_icon'. There are NO multilingual names ('wksp_type_names').
+        * OTCM 26.4 returns most of the workspace type configuration you can
+          see on the OTCS business admin page (creation location, name generation,
+          relations, classification, indexing, multilingual names, alias names, key aspects, ...).
+          'wksp_info' also includes 'in_use', 'indexing_status', 'modified' and 'perspective_folder_id'.
+
+        In both versions 'templates' is only included if expand_templates=True and 'wksp_info'
+        is only included if expand_workspace_info=True.
 
         This endpoint may throw an HTTP 500 error if no workspace types are in OTCS.
 
@@ -14308,7 +14324,7 @@ class OTCS:
             dict | None:
                 Workspace Types or None if the request fails.
 
-        Example:
+        Example (OTCM < 26.2 - expand_templates=True, expand_workspace_info=True):
             ```json
             {
                 'links': {
@@ -14316,7 +14332,43 @@ class OTCS:
                         'self': {
                             'body': '',
                             'content_type': '',
-                            'href': '/api/v2/businessworkspacetypes?bo_type=KNA1&expand_templates=true&expand_wksp_info=true&ext_system_id=TE1',
+                            'href': '/api/v2/businessworkspacetypes?expand_templates=true&expand_wksp_info=true',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'aviator_enabled': True,
+                                'rm_enabled': True,
+                                'templates': [
+                                    {'id': 27113, 'name': 'Customer', 'subtype': 848}
+                                ],
+                                'wksp_type_id': 16,
+                                'wksp_type_name': 'Customer'
+                            },
+                            'wksp_info': {
+                                'wksp_type_icon': '/appimg/ot_bws/icons/20124%2Esvg?v=161902_71628'
+                            }
+                        }
+                    },
+                    ...
+                ]
+            }
+            ```
+
+        Example (OTCM 26.4 - expand_templates=True, expand_workspace_info=True):
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspacetypes?expand_templates=true&expand_wksp_info=true',
                             'method': 'GET',
                             'name': ''
                         }
@@ -14330,35 +14382,46 @@ class OTCS:
                                 'aviator_enabled': True,
                                 'classification': {
                                     'location': 'StaticNodeId',
-                                    'location_value': '30020'
+                                    'location_value': '28864'
                                 },
-                                'config_node_id': 39309,
+                                'config_node_id': 36419,
                                 'external_document_storage': {
-                                    'rm_classification': {...},
-                                    'sub_location_path': {...}
+                                    'rm_classification': {'location': 'None', 'location_value': None},
+                                    'sub_location_path': {'location': 'None', 'location_value': None}
                                 },
                                 'indexing': {
                                     'enabled': True,
-                                    'sub_types': [...]
+                                    'sub_types': [0, 1, 2, 140, 144, 204, 749, 848]
                                 },
-                                'relations': [{...}, {...}, {...}],
+                                'relations': [
+                                    {
+                                        'predicates': [
+                                            {'ar': '', 'de': '', 'en': 'has', 'es': '', 'fr': '', 'it': '', 'iw': '', 'ja': '', 'nl': ''},
+                                            {'ar': '', 'de': '', 'en': 'pursues', 'es': '', 'fr': '', 'it': '', 'iw': '', 'ja': '', 'nl': ''}
+                                        ],
+                                        'rel_type': 'Child',
+                                        'target_wksp_type_id': 31
+                                    },
+                                    ...
+                                ],
                                 'rm_enabled': True,
                                 'search': {
                                     'follow_related_wksp': 'AlwaysEnabled',
                                     'max_number_of_followed_wksp': 50
                                 },
-                                'simplify_business_workspace_creation': False,
-                                'templates': [{...}],
+                                'templates': [
+                                    {'id': 39693, 'name': 'Customer', 'subtype': 848}
+                                ],
                                 'widget_icon': {
-                                    'url': '/appimg/ot_bws/icons/39309.svg?v=162061_17502'
+                                    'url': '/appimg/ot_bws/icons/36419.svg?v=162171_68272'
                                 },
                                 'wksp_copy_enabled': True,
                                 'wksp_creation': {
                                     'create_wksp_with_fast_bulk_method': False,
                                     'directly_open_created_wksp': True,
                                     'location': 'StaticNodeId',
-                                    'location_value': '34962',
-                                    'sub_location_path': {...},
+                                    'location_value': '33797',
+                                    'sub_location_path': {'location': 'None', 'location_value': None},
                                     'use_also_for_manual_creation': True
                                 },
                                 'wksp_creation_enabled': True,
@@ -14366,22 +14429,38 @@ class OTCS:
                                 'wksp_icon': 'otsapxecm/wksp_customer.png',
                                 'wksp_name_generation': {
                                     'use_also_for_wksp_without_bo': False,
-                                    'wksp_names': {...}
+                                    'wksp_names': {
+                                        'ar': '', 'de': '', 'en': '[25486:Name] ([25486:Customer Number])', 'es': '',
+                                        'fr': '', 'it': '', 'iw': '', 'ja': '', 'nl': ''
+                                    }
                                 },
                                 'wksp_policies_enabled': False,
+                                'wksp_type_alias_names': {
+                                    'ar': [], 'de': [], 'en': ['Account', 'Client'], 'es': [],
+                                    'fr': [], 'it': [], 'iw': [], 'ja': [], 'nl': []
+                                },
                                 'wksp_type_id': 16,
+                                'wksp_type_key_aspects': {
+                                    'ar': [], 'de': [],
+                                    'en': ['NDA', 'address', 'classification', 'conditions', 'contacts', 'contracts', 'disputes'],
+                                    'es': [], 'fr': [], 'it': [], 'iw': [], 'ja': [], 'nl': []
+                                },
                                 'wksp_type_name': 'Customer',
-                                'wksp_type_names': {'ar': '', 'de': 'Kunde', 'en': 'Customer', 'es': '', 'fr': 'Client', 'it': 'Cliente', 'iw': '', 'ja': 'お客様', 'nl': ''}
+                                'wksp_type_names': {
+                                    'ar': '', 'de': 'Kunde', 'en': 'Customer', 'es': '', 'fr': 'Client',
+                                    'it': 'Cliente', 'iw': '', 'ja': 'お客様', 'nl': ''
+                                }
                             },
                             'wksp_info': {
                                 'in_use': True,
                                 'indexing_status': 'UpToDate',
-                                'modified': '2026-06-30T01:32:24',
-                                'perspective_folder_id': 39316,
-                                'wksp_type_icon': '/appimg/ot_bws/icons/39309.svg?v=162061_17502'
+                                'modified': '2026-10-18T15:41:07',
+                                'perspective_folder_id': 36424,
+                                'wksp_type_icon': '/appimg/ot_bws/icons/36419.svg?v=162171_68272'
                             }
                         }
-                    }
+                    },
+                    ...
                 ]
             }
             ```
@@ -14501,7 +14580,6 @@ class OTCS:
 
     # end method definition
 
-    @cache
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type")
     def get_workspace_type(
         self,
@@ -14513,20 +14591,28 @@ class OTCS:
         It is a V1 API. Thus the response cannot be processed by the get_result_value()
         method. There's also a get_workspace_type_by_name() below.
 
+        The result is deliberately not cached - each call asks OTCS. A cache would return
+        outdated names (e.g. of renamed types, also for get_workspace_type_name(renew=True)),
+        keep failed lookups (None), and keep the OTCS object referenced. For a cached lookup of
+        the type name use get_workspace_type_name().
+
         Args:
             type_id (int):
                 The workspace type ID.
 
         Returns:
             dict | None:
-                Workspace Types or None if the request fails.
+                Workspace Type or None if the request fails (e.g. HTTP 404
+                if no workspace type with the given ID exists).
 
-        Example:
+        Example (identical format for OTCM 25.4 and OTCM 26.4):
+            ```json
             {
-                'icon_url': '/cssupport/otsapxecm/wksp_contract_cust.png',
+                'icon_url': '/cssupport/otsapxecm/wksp_customer.png',
                 'is_policies_enabled': False,
-                'workspace_type': 'Sales Contract'
+                'workspace_type': 'Customer'
             }
+            ```
 
         """
 
@@ -14922,6 +15008,7 @@ class OTCS:
         bo_type: str | None = None,
         bo_id: str | None = None,
         parent_id: int | None = None,
+        show_error: bool = True,
     ) -> dict | None:
         """Get the Workspace create form.
 
@@ -14938,6 +15025,8 @@ class OTCS:
                 Parent ID of the workspaces. Needs only be specified in special
                 cases where workspace location cannot be derived from workspace
                 type definition, e.g. sub-workspace
+            show_error (bool, optional):
+                Log an error if the request fails. Otherwise log a warning.
 
         Returns:
             dict | None:
@@ -14986,6 +15075,7 @@ class OTCS:
             headers=request_header,
             timeout=None,
             failure_message=failure_message,
+            show_error=show_error,
         )
 
     # end method definition
@@ -16350,6 +16440,7 @@ class OTCS:
                 True is the default.
             parse_error_response (bool, optional):
                 Whether to parse the request response or not. Defaults to False.
+                Deprecated: use capture_errors() to get the error details instead.
 
         Returns:
             dict | None:
@@ -18022,6 +18113,7 @@ class OTCS:
                 Log an error if item creation fails. Otherwise log a warning.
             parse_error_response (bool | None, optional):
                 Whether to parse the request response or not. Defaults to False.
+                Deprecated: use capture_errors() to get the error details instead.
             **kwargs (dict):
                 Add additional attributes to the body of the POST request
 
@@ -18160,6 +18252,7 @@ class OTCS:
                 The name of the item to create.
             parse_error_response (bool, optional):
                 Whether the error response text should be interpreted as JSON and loaded. Defaults to False.
+                Deprecated: use capture_errors() to get the error details instead.
 
         Returns:
             dict | None:
@@ -25813,6 +25906,10 @@ class OTCS:
                 and must return a (success, traverse) tuple.
             relationship_types (list | None, optional):
                 The default that will be established if None is provided is ["child", "parent"].
+                The related workspaces of all given types are retrieved with a single REST call
+                per workspace (and result page). With more than one type, the direction of each
+                related workspace is taken from its "rel_type" field and passed as `rel_type`
+                ("child" or "parent") to the relationship executables.
             workers (int, optional):
                 Number of parallel workers. Defaults to 3.
             workers_name (str, optional):
@@ -25863,6 +25960,8 @@ class OTCS:
                 inclusion list every related workspace is filtered out and, when
                 filter_at_traversal is True, the traversal stops after the root
                 workspaces while still reporting them as successfully processed.
+                With more than one relationship type, "rel_type" is added to a narrowed
+                field list automatically for the relationship requests (see `relationship_types`).
             metadata (bool, optional):
                 Whether to include metadata in the traversal results. Default is False.
             business_objects (bool, optional):
@@ -25898,6 +25997,13 @@ class OTCS:
         # Establish the default for relationship types which is both "child" and "parent":
         if relationship_types is None:
             relationship_types = ["child", "parent"]
+
+        # All relationship types of a workspace are retrieved with a single REST call (one call
+        # per page). With more than one type the direction of each related workspace is then taken
+        # from its "rel_type" field - so a narrowed field list must include it:
+        relationship_fields = fields
+        if len(relationship_types) > 1 and fields.startswith("properties{") and "rel_type" not in fields:
+            relationship_fields = fields.replace("}", ", rel_type}", 1)
 
         # Unify data types to make filtering easier:
         if workspace_type_exclusions is None:
@@ -26220,119 +26326,138 @@ class OTCS:
                     # indicated that further traversal is required. All configured
                     # relationship types are followed:
                     if traverse:
-                        for rel_type in relationship_types:
-                            # Get related workspaces of the current workspace and the current relationship type:
-                            workspace_relationships = self.get_workspace_relationships_iterator(
-                                workspace_id=workspace_id,
-                                relationship_type=rel_type,
-                                related_workspace_type_id=related_type_id_filter,
-                                fields=fields,
-                                metadata=False,  # this is not categories but field schema information
-                                # Bound each relationship request so one slow/hung node cannot
-                                # block a worker forever (which would starve the whole pool):
-                                timeout=REQUEST_TIMEOUT,
+                        # Get the related workspaces of all configured relationship types with a single
+                        # REST call (per page) instead of one call per relationship type:
+                        workspace_relationships = self.get_workspace_relationships_iterator(
+                            workspace_id=workspace_id,
+                            relationship_type=relationship_types[0]
+                            if len(relationship_types) == 1
+                            else relationship_types,
+                            related_workspace_type_id=related_type_id_filter,
+                            fields=relationship_fields,
+                            metadata=False,  # this is not categories but field schema information
+                            # Bound each relationship request so one slow/hung node cannot
+                            # block a worker forever (which would starve the whole pool):
+                            timeout=REQUEST_TIMEOUT,
+                        )
+
+                        # Traverse all related workspaces:
+                        for related_workspace in workspace_relationships:
+                            # The relationship type is the only configured one, or (with several configured
+                            # types) the direction of this related workspace as delivered by the REST API.
+                            # Relationships created by a leading application have a 'BO_' prefix (e.g. 'BO_Child'):
+                            if len(relationship_types) == 1:
+                                rel_type = relationship_types[0]
+                            else:
+                                rel_type = (
+                                    str(self.get_result_value(response=related_workspace, key="rel_type") or "")
+                                    .lower()
+                                    .removeprefix("bo_")
+                                )
+                                if rel_type not in relationship_types:
+                                    self.logger.warning(
+                                        "Skipping related workspace with unexpected relationship type -> '%s' (expected one of %s).",
+                                        rel_type,
+                                        relationship_types,
+                                    )
+                                    continue
+                            related_workspace_id = self.get_result_value(response=related_workspace, key="id")
+                            related_workspace_name = self.get_result_value(response=related_workspace, key="name")
+                            related_workspace_type_id = self.get_result_value(
+                                response=related_workspace, key="wnf_wksp_type_id"
+                            )
+                            # Determine the name of the workspace type with the help of the
+                            # lookup dictionary created in init_traversal_queue():
+                            related_workspace_type_name = self.get_workspace_type_name(
+                                type_id=related_workspace_type_id
+                            )
+                            # Does the related workspace's type pass the inclusion/exclusion
+                            # filter? This answers two questions at once and the filter is
+                            # pure, so we evaluate it once per relationship: it decides
+                            # whether we follow the relationship at all (only when
+                            # filter_at_traversal is set) and, further below, whether the
+                            # related workspace is a traversal root (which fixes its depth):
+                            is_root_type = self._check_filter(
+                                workspace_type_name=related_workspace_type_name,
+                                workspace_type_id=related_workspace_type_id,
+                                workspace_type_exclusions=workspace_type_exclusions,
+                                workspace_type_inclusions=workspace_type_inclusions,
                             )
 
-                            # Traverse all related workspaces:
-                            for related_workspace in workspace_relationships:
-                                related_workspace_id = self.get_result_value(response=related_workspace, key="id")
-                                related_workspace_name = self.get_result_value(response=related_workspace, key="name")
-                                related_workspace_type_id = self.get_result_value(
-                                    response=related_workspace, key="wnf_wksp_type_id"
-                                )
-                                # Determine the name of the workspace type with the help of the
-                                # lookup dictionary created in init_traversal_queue():
-                                related_workspace_type_name = self.get_workspace_type_name(
-                                    type_id=related_workspace_type_id
-                                )
-                                # Does the related workspace's type pass the inclusion/exclusion
-                                # filter? This answers two questions at once and the filter is
-                                # pure, so we evaluate it once per relationship: it decides
-                                # whether we follow the relationship at all (only when
-                                # filter_at_traversal is set) and, further below, whether the
-                                # related workspace is a traversal root (which fixes its depth):
-                                is_root_type = self._check_filter(
-                                    workspace_type_name=related_workspace_type_name,
-                                    workspace_type_id=related_workspace_type_id,
-                                    workspace_type_exclusions=workspace_type_exclusions,
-                                    workspace_type_inclusions=workspace_type_inclusions,
-                                )
-
-                                if filter_at_traversal and not is_root_type:
-                                    self.logger.debug(
-                                        "Skipping traversal of related %s workspace as its type %s does not match filter.",
-                                        rel_type,
-                                        "-> '{}' ({})".format(related_workspace_type_name, related_workspace_type_id)
-                                        if related_workspace_type_name
-                                        else "ID -> {}".format(related_workspace_type_id),
-                                    )
-                                    continue  # the for loop
+                            if filter_at_traversal and not is_root_type:
                                 self.logger.debug(
-                                    "Traversing related %s workspace -> '%s' (%d) of type %s in depth -> %d",
+                                    "Skipping traversal of related %s workspace as its type %s does not match filter.",
                                     rel_type,
-                                    related_workspace_name,
-                                    related_workspace_id,
                                     "-> '{}' ({})".format(related_workspace_type_name, related_workspace_type_id)
                                     if related_workspace_type_name
                                     else "ID -> {}".format(related_workspace_type_id),
-                                    current_depth,
                                 )
+                                continue  # the for loop
+                            self.logger.debug(
+                                "Traversing related %s workspace -> '%s' (%d) of type %s in depth -> %d",
+                                rel_type,
+                                related_workspace_name,
+                                related_workspace_id,
+                                "-> '{}' ({})".format(related_workspace_type_name, related_workspace_type_id)
+                                if related_workspace_type_name
+                                else "ID -> {}".format(related_workspace_type_id),
+                                current_depth,
+                            )
 
-                                # Run all executables for the workspace relationship:
-                                for executable in relationship_executables or []:
-                                    try:
-                                        result_success, result_traverse = executable(
-                                            workspace_node_from=workspace_node,
-                                            workspace_node_to=related_workspace,
-                                            rel_type=rel_type,
-                                            **kwargs,
-                                        )
-                                        if result_traverse:
-                                            traverse = True
-                                        if not result_success:
-                                            break
-                                    except Exception as e:
-                                        self.logger.error(
-                                            "Failed to run workspace relationship executable on workspace -> '%s' (%d) and related workspace -> '%s' (%d), error -> %s",
-                                            workspace_name,
-                                            workspace_id,
-                                            related_workspace_name,
-                                            related_workspace_id,
-                                            str(e),
-                                        )
-                                # end executable in relationship_executables or []
+                            # Run all executables for the workspace relationship:
+                            for executable in relationship_executables or []:
+                                try:
+                                    result_success, result_traverse = executable(
+                                        workspace_node_from=workspace_node,
+                                        workspace_node_to=related_workspace,
+                                        rel_type=rel_type,
+                                        **kwargs,
+                                    )
+                                    if result_traverse:
+                                        traverse = True
+                                    if not result_success:
+                                        break
+                                except Exception as e:
+                                    self.logger.error(
+                                        "Failed to run workspace relationship executable on workspace -> '%s' (%d) and related workspace -> '%s' (%d), error -> %s",
+                                        workspace_name,
+                                        workspace_id,
+                                        related_workspace_name,
+                                        related_workspace_id,
+                                        str(e),
+                                    )
+                            # end executable in relationship_executables or []
 
-                                # Count the edge as traversed regardless of whether we
-                                # (re-)queue its target below:
-                                with lock:
-                                    results["traversed"] += 1
+                            # Count the edge as traversed regardless of whether we
+                            # (re-)queue its target below:
+                            with lock:
+                                results["traversed"] += 1
 
-                                # A related workspace whose type passes the filter (is_root_type,
-                                # computed above) is itself a traversal root: the initializer
-                                # enqueues every instance of that type at depth 0. Record it at
-                                # depth 0 here too - its depth is then deterministic no matter who
-                                # reaches it first, and coverage no longer depends on the
-                                # initializer's offset pagination getting there (the REST API stops
-                                # serving pages past its deep-offset result window, so a worker may
-                                # be holding a root the initializer can never enumerate).
-                                #
-                                # De-duplicate and enforce max_depth *before* putting the related
-                                # workspace in the queue so duplicate or too-deep nodes never occupy
-                                # the queue (and thus memory):
-                                next_depth = 0 if is_root_type else current_depth + 1
-                                if max_depth is not None and next_depth > max_depth:
+                            # A related workspace whose type passes the filter (is_root_type,
+                            # computed above) is itself a traversal root: the initializer
+                            # enqueues every instance of that type at depth 0. Record it at
+                            # depth 0 here too - its depth is then deterministic no matter who
+                            # reaches it first, and coverage no longer depends on the
+                            # initializer's offset pagination getting there (the REST API stops
+                            # serving pages past its deep-offset result window, so a worker may
+                            # be holding a root the initializer can never enumerate).
+                            #
+                            # De-duplicate and enforce max_depth *before* putting the related
+                            # workspace in the queue so duplicate or too-deep nodes never occupy
+                            # the queue (and thus memory):
+                            next_depth = 0 if is_root_type else current_depth + 1
+                            if max_depth is not None and next_depth > max_depth:
+                                continue
+                            with lock:
+                                if related_workspace_id in enqueued_workspace_ids:
                                     continue
-                                with lock:
-                                    if related_workspace_id in enqueued_workspace_ids:
-                                        continue
-                                    enqueued_workspace_ids.add(related_workspace_id)
+                                enqueued_workspace_ids.add(related_workspace_id)
 
-                                # Drop the large, unused "actions" sub-dictionary before queuing:
-                                related_workspace.pop("actions", None)
-                                # Put related workspace into the queue for traversal:
-                                task_queue.put((related_workspace, next_depth))
-                            # end for related_workspace in workspace_relationships
-                        # end for rel_type in relationship_types:
+                            # Drop the large, unused "actions" sub-dictionary before queuing:
+                            related_workspace.pop("actions", None)
+                            # Put related workspace into the queue for traversal:
+                            task_queue.put((related_workspace, next_depth))
+                        # end for related_workspace in workspace_relationships
                     # end if traverse:
 
                 except Exception as worker_error:

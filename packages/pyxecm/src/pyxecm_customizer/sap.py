@@ -118,6 +118,7 @@ from typing import ClassVar
 
 import requests
 from lxml import etree
+from opentelemetry import trace
 from pydantic import BaseModel, ValidationError
 from pyxecm.errors import (
     ErrorCategory,
@@ -125,8 +126,10 @@ from pyxecm.errors import (
     ReportingLoggerAttribute,
     record_error,
     request_error_severity,
+    warn_parse_error_response_deprecated,
 )
 
+from .sap_metadata import ODataEntityType, parse_odata_metadata, to_odata_value
 from .sap_models import (
     ODataCondition,
     SAPAuthCheckState,
@@ -137,6 +140,7 @@ from .sap_models import (
     SAPBillingDocumentRequestQueryModel,
     SAPBillingDocumentRequestResponseModel,
     SAPBillingDocumentResponseModel,
+    SAPBusinessObjectType,
     SAPBusinessPartnerModel,
     SAPBusinessPartnerQueryModel,
     SAPBusinessPartnerResponseModel,
@@ -145,10 +149,12 @@ from .sap_models import (
     SAPCostCenterQueryModel,
     SAPCostCenterResponseModel,
     SAPCreditMemoRequestAction,
+    SAPCreditMemoRequestItemModel,
     SAPCreditMemoRequestModel,
     SAPCreditMemoRequestQueryModel,
     SAPCreditMemoRequestResponseModel,
     SAPCustomerQueryModel,
+    SAPDebitMemoRequestItemModel,
     SAPDebitMemoRequestModel,
     SAPDebitMemoRequestQueryModel,
     SAPDebitMemoRequestResponseModel,
@@ -166,12 +172,14 @@ from .sap_models import (
     SAPGoodsMovementQueryModel,
     SAPGoodsMovementResponseModel,
     SAPInboundDeliveryAction,
+    SAPInboundDeliveryItemModel,
     SAPInboundDeliveryItemQueryModel,
     SAPInboundDeliveryItemResponseModel,
     SAPInboundDeliveryModel,
     SAPInboundDeliveryQueryModel,
     SAPInboundDeliveryResponseModel,
     SAPMaintenanceNotificationAction,
+    SAPMaintenanceNotificationItemModel,
     SAPMaintenanceNotificationModel,
     SAPMaintenanceNotificationQueryModel,
     SAPMaintenanceNotificationResponseModel,
@@ -192,11 +200,13 @@ from .sap_models import (
     SAPMaintenancePlanModel,
     SAPMaintenancePlanQueryModel,
     SAPMaintenancePlanResponseModel,
+    SAPMaterialBOMItemModel,
     SAPMaterialBOMModel,
     SAPMaterialBOMQueryModel,
     SAPMaterialBOMResponseModel,
     SAPODataCreateModel,
     SAPODataErrorModel,
+    SAPODataModel,
     SAPODataQueryModel,
     SAPODataServiceModel,
     SAPODataServiceState,
@@ -204,11 +214,13 @@ from .sap_models import (
     SAPODataTextQueryModel,
     SAPODataTextResponseModel,
     SAPOutboundDeliveryAction,
+    SAPOutboundDeliveryItemModel,
     SAPOutboundDeliveryItemQueryModel,
     SAPOutboundDeliveryItemResponseModel,
     SAPOutboundDeliveryModel,
     SAPOutboundDeliveryQueryModel,
     SAPOutboundDeliveryResponseModel,
+    SAPPlannedOrderComponentModel,
     SAPPlannedOrderModel,
     SAPPlannedOrderQueryModel,
     SAPPlannedOrderResponseModel,
@@ -217,6 +229,7 @@ from .sap_models import (
     SAPProductDescriptionModel,
     SAPProductionOrderAction,
     SAPProductionOrderModel,
+    SAPProductionOrderOperationModel,
     SAPProductionOrderQueryModel,
     SAPProductionOrderResponseModel,
     SAPProductionVersionQueryModel,
@@ -233,17 +246,21 @@ from .sap_models import (
     SAPPurchaseContractModel,
     SAPPurchaseContractQueryModel,
     SAPPurchaseContractResponseModel,
+    SAPPurchaseOrderItemModel,
     SAPPurchaseOrderModel,
     SAPPurchaseOrderQueryModel,
     SAPPurchaseOrderResponseModel,
+    SAPPurchaseRequisitionItemModel,
     SAPPurchaseRequisitionModel,
     SAPPurchaseRequisitionQueryModel,
     SAPPurchaseRequisitionResponseModel,
     SAPPurchasingOrganizationQueryModel,
     SAPPurchasingOrganizationResponseModel,
+    SAPSalesContractItemModel,
     SAPSalesContractModel,
     SAPSalesContractQueryModel,
     SAPSalesContractResponseModel,
+    SAPSalesOrderItemModel,
     SAPSalesOrderModel,
     SAPSalesOrderQueryModel,
     SAPSalesOrderResponseModel,
@@ -256,6 +273,7 @@ from .sap_models import (
     SAPSupplierInvoiceResponseModel,
     SAPSupplierQueryModel,
     SAPTaskListModel,
+    SAPTaskListOperationModel,
     SAPTaskListQueryModel,
     SAPTaskListResponseModel,
     SAPWorkCenterQueryModel,
@@ -266,6 +284,8 @@ from .sap_models import (
 )
 
 default_logger = logging.getLogger("pyxecm_customizer.sap")
+tracer = trace.get_tracer(__name__)
+OTEL_TRACING_ATTRIBUTES = {"class": "sap"}
 
 try:
     import pyrfc
@@ -731,6 +751,45 @@ BUSINESS_PARTNER_DETAILS_EXPAND = (
 # Namespace of the bound actions of the OData V4 planned order API (RAP services use
 # "com.sap.gateway.srvd_a2x.<service definition>.v<version>"):
 PLANNED_ORDER_ACTION_NAMESPACE = "com.sap.gateway.srvd_a2x.api_plannedorder.v0001"
+
+
+@dataclass(frozen=True)
+class SAPODataItemSet:
+    """The items of an SAP document (e.g. the items of a sales order) - how to read them for an update.
+
+    See SAP._update_odata_document(). The items are read with a GET of the collection path. The
+    entity path of an item is taken from its __metadata.uri (OData V2) or built from the key
+    properties (OData V4) - so internal keys (e.g. of production order operations) work as well.
+    """
+
+    # The collection with the items of the document, e.g. "A_SalesOrder('413')/to_Item" or
+    # "PlannedOrderComponent" (with a $filter in params):
+    collection_path: str
+    # The entity set of the items, e.g. "A_SalesOrderItem" (to build the entity path for OData V4):
+    entity_set: str
+    # The key properties of the items (to build the entity path for OData V4):
+    key_properties: tuple[str, ...]
+    # The item number users refer to, e.g. "SalesOrderItem" or "ManufacturingOrderOperation":
+    number_property: str
+    # A text that identifies the item as well, e.g. the item text or the material - items can be
+    # referred to by it if it is unique and no item has this number:
+    text_property: str | None = None
+    # Additional OData query options, e.g. {"$filter": "PlannedOrder eq '103'"}:
+    params: dict | None = None
+    # Property with the version of an item - if a number occurs several times, the latest version wins:
+    version_property: str | None = None
+    # The name of an item in messages, e.g. "item", "operation" or "component":
+    label: str = "item"
+
+
+# Messages (in the 'sap-message' header of successful requests) saying that SAP has not changed anything:
+SAP_ODATA_NO_CHANGE_MESSAGES = {
+    "V1/041": "SAP ignores changes of this field for this document",
+}
+
+# Parsed $metadata per (base URL, service) - shared by all SAP objects (e.g. one per user):
+_ODATA_METADATA: dict[tuple[str, str], dict[str, ODataEntityType]] = {}
+_ODATA_METADATA_LOCK = threading.Lock()
 
 
 class _ODataReadError(Exception):
@@ -1918,6 +1977,7 @@ class SAP:
             parse_error_response (bool, optional):
                 Whether the error response should be returned as a dictionary (SAPODataErrorModel.model_dump())
                 instead of None. Defaults to False.
+                Deprecated: use capture_errors() to get the error details instead.
 
         Returns:
             dict | requests.Response | None:
@@ -1925,6 +1985,9 @@ class SAP:
                 or None in case of an error (or the parsed error if parse_error_response is True).
 
         """
+
+        if parse_error_response:
+            warn_parse_error_response_deprecated()
 
         # Readable error of this request for callers of the public methods (see last_error):
         self._thread_local.last_error = None
@@ -3236,6 +3299,149 @@ class SAP:
 
     # end method definition
 
+    def get_odata_entity_type(self, service: str, entity_set: str) -> ODataEntityType | None:
+        """Return the entity type of an entity set as defined in the $metadata of the service.
+
+        The $metadata is read once per SAP system and service (and kept for all SAP objects).
+        A failed read is not kept - the next call tries again.
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            entity_set (str):
+                The entity set, e.g. "A_SalesOrderItem".
+
+        Returns:
+            ODataEntityType | None:
+                The entity type or None if the $metadata cannot be read or has no such entity set.
+
+        """
+
+        key = (self._base_url or "", service)
+        with _ODATA_METADATA_LOCK:
+            entity_types = _ODATA_METADATA.get(key)
+        if entity_types is None:
+            response = self.do_request(
+                url=self.service_url(service) + "/$metadata",
+                headers={"Accept": "application/xml"},
+                show_error=False,
+                show_warning=True,
+                warning_message="Cannot read the $metadata of SAP OData service -> '{}'".format(service),
+                parse_request_response=False,
+            )
+            if response is None:
+                return None
+            try:
+                entity_types = parse_odata_metadata(response.content, SAP_ODATA_SERVICES[service].odata_version)
+            except (ValueError, TypeError, AttributeError) as error:
+                self.logger.warning(
+                    "Cannot interpret the $metadata of SAP OData service -> '%s'; error -> %s", service, error
+                )
+                return None
+            with _ODATA_METADATA_LOCK:
+                _ODATA_METADATA[key] = entity_types
+
+        return entity_types.get(entity_set)
+
+    # end method definition
+
+    def _prepare_odata_changes(self, service: str, entity_path: str, payload: dict) -> tuple[dict, list[str]]:
+        """Check and convert the changes of an entity with the property definitions of the $metadata.
+
+        SAP checks the JSON format of the values strictly (see sap_metadata) - e.g. decimals are
+        strings in OData V2 and in OData V4 with IEEE754Compatible=true. Properties that do not
+        exist or cannot be changed are rejected (SAP would ignore them or fail with an unclear error).
+        If the $metadata cannot be read, the payload is returned unchanged.
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            entity_path (str):
+                The path of the entity, e.g. "A_SalesOrderItem(SalesOrder='413',SalesOrderItem='10')",
+                or just the entity set, e.g. "A_SalesOrderItem".
+            payload (dict):
+                The changes with OData property names (see SAPODataCreateModel.to_odata_update()).
+
+        Returns:
+            tuple[dict, list[str]]:
+                The converted payload and the unit / currency properties (OData V4) that SAP needs
+                together with the changed quantities / amounts but that are not part of the changes.
+
+        Raises:
+            ValueError:
+                If a property does not exist, cannot be changed or has an invalid value.
+
+        """
+
+        entity_set = entity_path.split("(", 1)[0]
+        entity_type = self.get_odata_entity_type(service=service, entity_set=entity_set)
+        if entity_type is None:
+            return payload, []
+
+        odata_version = SAP_ODATA_SERVICES[service].odata_version
+        result = {}
+        units = []
+        for name, value in payload.items():
+            prop = entity_type.properties.get(name)
+            if prop is None:
+                message = "Unknown property -> '{}' of SAP entity -> '{}'".format(name, entity_set)
+                raise ValueError(message)
+            if not prop.updatable:
+                message = "Property -> '{}' of SAP entity -> '{}' cannot be changed ({})".format(
+                    name, entity_set, "key" if prop.is_key else "read-only in SAP"
+                )
+                raise ValueError(message)
+            result[name] = to_odata_value(prop, value, odata_version)
+            unit = prop.unit_property
+            if not unit:
+                continue
+            # SAP requires the ISO code of the unit if the entity has one (e.g. "BaseUnitISOCode" for
+            # "BaseUnit" - "[/IWBEP/CM_V4_COS/060] ISO unit must be provided"):
+            iso_unit = unit + "ISOCode"
+            if iso_unit in entity_type.properties:
+                unit = iso_unit
+            if unit not in payload and prop.unit_property not in payload and unit not in units:
+                units.append(unit)
+
+        return result, units
+
+    # end method definition
+
+    def _odata_no_change_message(self, response: requests.Response) -> str | None:
+        """Return the message of SAP's 'sap-message' header that says that nothing has been changed.
+
+        Args:
+            response (requests.Response):
+                The response of a modifying request.
+
+        Returns:
+            str | None:
+                The message, e.g. "V1/041 No data was changed", or None if SAP reports no such message.
+
+        """
+
+        header = getattr(response, "headers", {}).get("sap-message")
+        if not header:
+            return None
+        try:
+            message = json.loads(header)
+        except ValueError:
+            return None
+        # The update has been done - an unexpected header format must not turn it into an error:
+        if not isinstance(message, dict):
+            return None
+        details = message.get("details")
+        entries = [message, *(details if isinstance(details, list) else [])]
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("code"), str):
+                code = entry["code"]
+                if code in SAP_ODATA_NO_CHANGE_MESSAGES:
+                    return "{} {}".format(code, entry.get("message") or "").strip()
+
+        return None
+
+    # end method definition
+
     def _update_odata_entity(
         self,
         service: str,
@@ -3270,7 +3476,9 @@ class SAP:
         """
 
         try:
-            payload = model.to_odata_update(changes)
+            payload, units = self._prepare_odata_changes(
+                service=service, entity_path=entity_path, payload=model.to_odata_update(changes)
+            )
         except ValueError as value_error:
             self.log_error("Invalid changes for SAP %s; error -> %s", label, str(value_error))
             return False
@@ -3283,6 +3491,17 @@ class SAP:
         exists, etag = self._get_odata_etag(url=url, headers=headers, label=label)
         if not exists:
             return False
+        if units:
+            # OData V4 quantities / amounts need their unit / currency - send the current one along:
+            current = self.do_request(
+                url=url,
+                params={"$select": ",".join(units)},
+                headers=dict(ODATA_V4_IEEE754_HEADERS),
+                failure_message="Cannot read the units of SAP {}".format(label),
+            )
+            if current is None:
+                return False
+            payload.update({unit: current.get(unit) for unit in units})
         if not etag:
             # SAP requires an If-Match header - "*" matches any version (no optimistic locking):
             self.logger.warning(
@@ -3299,9 +3518,209 @@ class SAP:
             json_data=payload,
             failure_message="Failed to update SAP {}".format(label),
             success_message="Successfully updated SAP {}.".format(label),
+            parse_request_response=False,
         )
+        if response is None:
+            return False
 
-        return response is not None
+        # Some services accept changes of fields they ignore and only report it in the 'sap-message'
+        # header, e.g. V1/041 "No data was changed" (HTTP 204) - the update did not happen:
+        unchanged = self._odata_no_change_message(response)
+        if unchanged:
+            self.log_error(
+                "SAP did not change %s -> %s (%s) - the changed field(s) cannot be changed this way: %s",
+                label,
+                unchanged,
+                SAP_ODATA_NO_CHANGE_MESSAGES[unchanged.split(" ", 1)[0]],
+                ", ".join(payload),
+            )
+            return False
+
+        return True
+
+    # end method definition
+
+    def _get_odata_items(self, service: str, items: SAPODataItemSet, label: str) -> dict[str, tuple[str, str]] | None:
+        """Read the items of an SAP document and return their entity paths (see _update_odata_document()).
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            items (SAPODataItemSet):
+                The items of the document.
+            label (str):
+                The name of the document for log messages, e.g. "sales order -> '413'".
+
+        Returns:
+            dict[str, tuple[str, str]] | None:
+                {item number without leading zeros: (entity path, item text)} or None in case of an error.
+
+        """
+
+        is_odata_v4 = SAP_ODATA_SERVICES[service].odata_version == 4
+        properties = {items.number_property, *items.key_properties}
+        if items.text_property:
+            properties.add(items.text_property)
+        if items.version_property:
+            properties.add(items.version_property)
+        response = self.do_request(
+            url=self.service_url(service) + "/" + items.collection_path,
+            params={**(items.params or {}), "$select": ",".join(sorted(properties))},
+            headers=ODATA_V4_IEEE754_HEADERS if is_odata_v4 else None,
+            show_error=False,
+            show_warning=True,
+            warning_message="Cannot get the {}s of SAP {}".format(items.label, label),
+        )
+        if response is None:
+            self.log_error("Cannot read the %ss of SAP %s!", items.label, label)
+            return None
+
+        entries = response.get("value", []) if is_odata_v4 else response.get("d", {}).get("results", [])
+        result: dict[str, tuple[str, str]] = {}
+        versions: dict[str, int] = {}
+        for entry in entries:
+            number = str(entry.get(items.number_property) or "").lstrip("0") or "0"
+            version = int(entry.get(items.version_property) or 0) if items.version_property else 0
+            if number in versions and versions[number] > version:
+                continue
+            uri = (entry.get("__metadata") or {}).get("uri", "")
+            if uri and not is_odata_v4:
+                entity_path = uri.rsplit("/", 1)[-1]
+            else:
+                entity_path = "{}({})".format(
+                    items.entity_set,
+                    ",".join(
+                        "{}='{}'".format(key, self._quote_key(str(entry.get(key) or "")))
+                        for key in items.key_properties
+                    ),
+                )
+            versions[number] = version
+            text = str(entry.get(items.text_property) or "") if items.text_property else ""
+            result[number] = (entity_path, text)
+
+        return result
+
+    # end method definition
+
+    def _update_odata_document(
+        self,
+        service: str,
+        label: str,
+        header_path: str | None,
+        header_model: type[SAPODataCreateModel],
+        changes: dict | None,
+        item_changes: dict[str, dict] | None,
+        items: SAPODataItemSet | None,
+        item_model: type[SAPODataCreateModel] = SAPODataCreateModel,
+    ) -> bool:
+        """Update individual fields of an SAP document (header) and of its items.
+
+        All changes are validated first (with the field definitions of the create models) and the
+        items must belong to the document - otherwise nothing is changed. Header and items are
+        separate entities in SAP (one request each): if a request fails, the changes before it
+        remain. The items are changed first and the header last - some documents reject header
+        changes in some S/4HANA releases while item changes work (e.g. purchase contracts), so a
+        rejected header change does not block the item changes.
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            label (str):
+                The name of the document for log messages, e.g. "sales order -> '413'".
+            header_path (str | None):
+                The entity path of the header, e.g. "A_SalesOrder('413')". Only needed for header changes.
+            header_model (type[SAPODataCreateModel]):
+                The create model whose field definitions are used for the header changes.
+            changes (dict | None):
+                The header fields to change (snake case attribute names or OData property names).
+            item_changes (dict[str, dict] | None):
+                The changes per item number (with or without leading zeros), e.g. {"10": {"RequestedQuantity": 5}}.
+                An item can also be referred to by its text (see SAPODataItemSet.text_property) if it is unique.
+            items (SAPODataItemSet | None):
+                The items of the document. Only needed for item changes.
+            item_model (type[SAPODataCreateModel], optional):
+                The create model whose field definitions are used for the item changes. Defaults to
+                SAPODataCreateModel (no field definitions - OData property names only).
+
+        Returns:
+            bool:
+                True if the document (and its items) have been updated, False in case of an error.
+
+        """
+
+        if not changes and not item_changes:
+            self.log_error("No changes given for SAP %s!", label)
+            return False
+        if item_changes and items is None:
+            self.log_error("The items of SAP %s cannot be changed!", label)
+            return False
+
+        # Check all changes first - an invalid change must not leave the document half changed:
+        try:
+            if changes:
+                header_payload = header_model.to_odata_update(changes)
+                if header_path:
+                    self._prepare_odata_changes(service=service, entity_path=header_path, payload=header_payload)
+            for item_change in (item_changes or {}).values():
+                item_payload = item_model.to_odata_update(item_change)
+                if items is not None:
+                    self._prepare_odata_changes(service=service, entity_path=items.entity_set, payload=item_payload)
+        except ValueError as value_error:
+            self.log_error("Invalid changes for SAP %s; error -> %s", label, str(value_error))
+            return False
+
+        item_paths: list[tuple[str, str, dict]] = []
+        if item_changes and items is not None:
+            existing = self._get_odata_items(service=service, items=items, label=label)
+            if existing is None:
+                return False
+            by_text: dict[str, list[str]] = {}
+            for number, (_path, text) in existing.items():
+                by_text.setdefault(text.casefold(), []).append(number)
+            unknown = []
+            for item, item_change in item_changes.items():
+                number = str(item).strip().lstrip("0") or "0"
+                if number not in existing and len(by_text.get(str(item).strip().casefold(), [])) == 1:
+                    number = by_text[str(item).strip().casefold()][0]
+                if number not in existing:
+                    unknown.append(str(item))
+                    continue
+                item_paths.append((number, existing[number][0], item_change))
+            if unknown:
+                # List the items - the agent can pick the right one without reading the document again:
+                self.log_error(
+                    "SAP %s has no %s(s) -> %s! Its %ss are -> %s",
+                    label,
+                    items.label,
+                    ", ".join(unknown),
+                    items.label,
+                    "; ".join(
+                        "{} '{}'".format(number, text) if text else number for number, (_path, text) in existing.items()
+                    )
+                    or "none",
+                )
+                return False
+
+        # Stop at the first error - a later successful request would reset last_error:
+        for number, entity_path, item_change in item_paths:
+            if not self._update_odata_entity(
+                service=service,
+                entity_path=entity_path,
+                model=item_model,
+                changes=item_change,
+                label="{} -> '{}' of {}".format(items.label if items else "item", number, label),
+            ):
+                return False
+
+        if not changes:
+            return True
+        if header_path is None:
+            self.log_error("The header of SAP %s cannot be changed!", label)
+            return False
+
+        return self._update_odata_entity(
+            service=service, entity_path=header_path, model=header_model, changes=changes, label=label
+        )
 
     # end method definition
 
@@ -3414,12 +3833,23 @@ class SAP:
             return None
 
         # The components need the new order - SAP rejects them in the deep insert:
-        component_errors = [
-            error
-            for operation in order.operations
-            for component in operation.components
-            if (error := self._create_order_component(created["MaintenanceOrder"], operation, component))
-        ]
+        component_errors = []
+        for operation in order.operations:
+            for component in operation.components:
+                # The plant of the operation is the default plant of its components:
+                if (
+                    self.create_maintenance_order_component(
+                        order_id=created["MaintenanceOrder"],
+                        operation=operation.operation,
+                        component=component.model_copy(update={"plant": component.plant or operation.plant}),
+                    )
+                    is None
+                ):
+                    component_errors.append(  # noqa: PERF401 - the loop creates the components in SAP
+                        "material -> '{}' of operation -> {}: {}".format(
+                            component.material, operation.operation, self.last_error
+                        )
+                    )
         if component_errors:
             self.log_error(
                 "Maintenance order -> %s has been created, but %d component(s) could not be created -> %s",
@@ -3430,42 +3860,6 @@ class SAP:
             created["ComponentErrors"] = component_errors
 
         return created
-
-    # end method definition
-
-    def _create_order_component(
-        self,
-        order_id: str,
-        operation: SAPMaintenanceOrderOperationModel,
-        component: SAPMaintenanceOrderComponentModel,
-    ) -> str | None:
-        """Create a component of an operation of a new maintenance order (see create_maintenance_order()).
-
-        Args:
-            order_id (str):
-                The number of the new maintenance order.
-            operation (SAPMaintenanceOrderOperationModel):
-                The operation the component belongs to - its plant is the default plant of the component.
-            component (SAPMaintenanceOrderComponentModel):
-                The component.
-
-        Returns:
-            str | None:
-                None if the component has been created, otherwise the error message.
-
-        """
-
-        created = self.create_maintenance_order_component(
-            order_id=order_id,
-            operation=operation.operation,
-            component=component.model_copy(update={"plant": component.plant or operation.plant}),
-        )
-        if created is not None:
-            return None
-
-        return "material -> '{}' of operation -> {}: {}".format(
-            component.material, operation.operation, self.last_error
-        )
 
     # end method definition
 
@@ -3620,6 +4014,116 @@ class SAP:
             query=query or SAPMaintenanceOrderQueryModel(),
             label="maintenance orders",
         )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_business_object")
+    def get_business_object(self, bo_type: str, bo_id: str) -> SAPODataModel | None:
+        """Get an SAP object by the business object reference used by an Extended ECM workspace.
+
+        Dispatch to the corresponding OData getter and return its response model unchanged.
+        SAPBusinessObjectType.get_key_fields() converts the internal SAP ID into the
+        individual keys, including composite keys such as material document number and year.
+        Supported types are listed in SAP_BUSINESS_OBJECT_TYPES in sap_models.py.
+
+        Args:
+            bo_type (str):
+                The SAP BOR object type, e.g. "BUS2007" or "BUS2017".
+            bo_id (str):
+                The business object ID in SAP's internal format, e.g. "000004000340"
+                or "49000001232026". Single-field IDs also accept the external format.
+
+        Returns:
+            SAPODataModel | None:
+                The getter's typed SAP object, or None if it does not exist, the type
+                is unsupported, the ID is invalid, or the request fails. Use last_error
+                or pyxecm.capture_errors() to inspect failures; None alone does not
+                prove that the object is absent.
+
+        """
+
+        if not bo_id.strip():
+            self.log_error("Cannot get SAP business object of type -> '%s': the ID is empty.", bo_type)
+            return None
+
+        try:
+            keys = SAPBusinessObjectType.get(bo_type).get_key_fields(bo_id)
+        except ValueError as error:
+            self.log_error("Cannot get SAP business object: %s", error)
+            return None
+
+        if not all(keys):
+            self.log_error(
+                "Cannot get SAP business object of type -> '%s' with ID -> '%s': a key field is empty.",
+                bo_type,
+                bo_id,
+            )
+            return None
+
+        self.logger.debug("Get SAP business object of type -> '%s' with ID -> '%s'", bo_type, bo_id)
+
+        match bo_type:
+            case "BUS2007":
+                return self.get_maintenance_order(order_id=keys[0])
+            case "BUS2038":
+                return self.get_maintenance_notification(notification_id=keys[0])
+            case "BUS2128":
+                return self.get_maintenance_order_confirmation(confirmation_id=keys[0], counter=keys[1])
+            case "BUS1020":
+                return self.get_maintenance_plan(plan_id=keys[0])
+            case "BUS1019":
+                return self.get_task_list(
+                    task_list_type=keys[0], task_list_group=keys[1], task_list_group_counter=keys[2]
+                )
+            case "BUS2012":
+                return self.get_purchase_order(order_id=keys[0])
+            case "BUS2105":
+                return self.get_purchase_requisition(requisition_id=keys[0])
+            case "BUS2014":
+                return self.get_purchase_contract(contract_id=keys[0])
+            case "BUS2081":
+                return self.get_supplier_invoice(invoice_id=keys[0], fiscal_year=keys[1])
+            case "BUS2032":
+                return self.get_sales_order(order_id=keys[0])
+            case "BUS2034":
+                return self.get_sales_contract(contract_id=keys[0])
+            case "BUS2094":
+                return self.get_credit_memo_request(credit_memo_request_id=keys[0])
+            case "BUS2096":
+                return self.get_debit_memo_request(debit_memo_request_id=keys[0])
+            case "VBRK" | "BUS2037":
+                return self.get_billing_document(billing_document_id=keys[0])
+            case "LIKP":
+                return self.get_outbound_delivery(delivery_id=keys[0])
+            case "BUS2015":
+                return self.get_inbound_delivery(delivery_id=keys[0])
+            case "BUS2017":
+                return self.get_goods_movement(document=keys[0], document_year=keys[1])
+            case "BUS2004":
+                return self.get_planned_order(planned_order_id=keys[0])
+            case "BUS2005":
+                return self.get_production_order(order_id=keys[0])
+            case "EQUI":
+                return self.get_equipment(equipment_id=keys[0])
+            case "BUS0010":
+                return self.get_functional_location(functional_location_id=keys[0])
+            case "BUS1001006" | "BUS1001":
+                return self.get_product(product_id=keys[0])
+            case "BUS1006":
+                return self.get_business_partner(business_partner_id=keys[0])
+            case "KNA1":
+                return self.get_customer(customer_id=keys[0])
+            case "LFA1":
+                return self.get_supplier(supplier_id=keys[0])
+            case "BUS0002":
+                return self.get_company_code(company_code=keys[0])
+            case "BUS0012":
+                return self.get_cost_center(controlling_area=keys[0], cost_center=keys[1])
+            case "BUS0015":
+                return self.get_profit_center(controlling_area=keys[0], profit_center=keys[1])
+            case _:
+                self.log_error("Unsupported SAP business object type -> '%s' with ID -> '%s'.", bo_type, bo_id)
+                return None
 
     # end method definition
 
@@ -4213,31 +4717,48 @@ class SAP:
 
     # end method definition
 
-    def update_purchase_order(self, order_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP purchase order.
+    def update_purchase_order(
+        self, order_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP purchase order and of its items.
 
-        The changes are validated with the field definitions of SAPPurchaseOrderModel (e.g. upper
-        case codes, lengths, date formats). Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the purchase order - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
         Args:
             order_id (str):
-                The purchase order number, e.g. "4500001539".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPPurchaseOrderModel or OData
-                property names, e.g. {"your_reference": "PO-4711", "payment_terms": "0001"}.
+                The purchase order number, e.g. "4500001586".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPPurchaseOrderModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"OrderQuantity": 20}} (snake case attribute names of SAPPurchaseOrderItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the purchase order has been updated, False in case of an error.
+                True if the purchase order (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(order_id)
+
+        return self._update_odata_document(
             service="API_PURCHASEORDER_2",
-            entity_path="PurchaseOrder('{}')".format(order_id.replace("'", "''")),
-            model=SAPPurchaseOrderModel,
-            changes=changes,
             label="purchase order -> '{}'".format(order_id),
+            header_path="PurchaseOrder('{}')".format(key),
+            header_model=SAPPurchaseOrderModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="PurchaseOrder('{}')/_PurchaseOrderItem".format(key),
+                entity_set="PurchaseOrderItem",
+                key_properties=("PurchaseOrder", "PurchaseOrderItem"),
+                number_property="PurchaseOrderItem",
+                text_property="PurchaseOrderItemText",
+                label="item",
+            ),
+            item_model=SAPPurchaseOrderItemModel,
         )
 
     # end method definition
@@ -4410,31 +4931,74 @@ class SAP:
 
     # end method definition
 
-    def update_maintenance_notification(self, notification_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP maintenance notification.
+    def update_maintenance_notification(
+        self, notification_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP maintenance notification and of its items.
 
-        The changes are validated with the field definitions of SAPMaintenanceNotificationModel (e.g. upper
-        case codes, lengths, date formats). Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the maintenance notification - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
+        The codes of an item (damage, object part) can be set or replaced, but not removed (SAP only
+        allows this in its UI).
 
         Args:
             notification_id (str):
-                The maintenance notification number, e.g. "10000210".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPMaintenanceNotificationModel or OData
-                property names, e.g. {"priority": "1", "breakdown": True}.
+                The maintenance notification number, e.g. "10000239".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPMaintenanceNotificationModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"1": {"MaintNotifItemText": "Seal leak"}} (snake case attribute names of SAPMaintenanceNotificationItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the maintenance notification has been updated, False in case of an error.
+                True if the maintenance notification (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        # SAP cannot remove the codes of an item with the API - only replace them ("IM/150 Please enter
+        # code for code group" / "EAMS_BO/124 To delete codes and code groups, use the 'Remove' pushbutton"):
+        codes = (
+            "MaintNotifDamageCodeGroup",
+            "MaintNotificationDamageCode",
+            "MaintNotifObjPrtCodeGroup",
+            "MaintNotifObjPrtCode",
+        )
+        for item, item_change in (item_changes or {}).items():
+            try:
+                payload = SAPMaintenanceNotificationItemModel.to_odata_update(item_change)
+            except ValueError:
+                continue  # reported by _update_odata_document()
+            if removed := [code for code in codes if code in payload and not payload[code]]:
+                self.log_error(
+                    "SAP cannot remove the codes -> %s of item -> '%s' of maintenance notification -> '%s' with the "
+                    "API - codes can only be replaced by other codes. Remove them in SAP (e.g. in the app 'Change "
+                    "Maintenance Notification').",
+                    ", ".join(removed),
+                    item,
+                    notification_id,
+                )
+                return False
+
+        key = self._quote_key(notification_id)
+
+        return self._update_odata_document(
             service="API_MAINTNOTIFICATION",
-            entity_path="MaintenanceNotification('{}')".format(notification_id.replace("'", "''")),
-            model=SAPMaintenanceNotificationModel,
-            changes=changes,
             label="maintenance notification -> '{}'".format(notification_id),
+            header_path="MaintenanceNotification('{}')".format(key),
+            header_model=SAPMaintenanceNotificationModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="MaintenanceNotification('{}')/to_Item".format(key),
+                entity_set="MaintenanceNotificationItem",
+                key_properties=("MaintenanceNotification", "MaintenanceNotificationItem"),
+                number_property="MaintenanceNotificationItem",
+                text_property="MaintNotifItemText",
+                label="item",
+            ),
+            item_model=SAPMaintenanceNotificationItemModel,
         )
 
     # end method definition
@@ -4613,31 +5177,48 @@ class SAP:
 
     # end method definition
 
-    def update_sales_order(self, order_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP sales order.
+    def update_sales_order(
+        self, order_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP sales order and of its items.
 
-        The changes are validated with the field definitions of SAPSalesOrderModel (e.g. upper
-        case codes, lengths, date formats). Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the sales order - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
         Args:
             order_id (str):
                 The sales order number, e.g. "413".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPSalesOrderModel or OData
-                property names, e.g. {"requested_delivery_date": "2026-12-01"}.
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPSalesOrderModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"RequestedQuantity": 5}} (snake case attribute names of SAPSalesOrderItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the sales order has been updated, False in case of an error.
+                True if the sales order (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(order_id)
+
+        return self._update_odata_document(
             service="API_SALES_ORDER_SRV",
-            entity_path="A_SalesOrder('{}')".format(order_id.replace("'", "''")),
-            model=SAPSalesOrderModel,
-            changes=changes,
             label="sales order -> '{}'".format(order_id),
+            header_path="A_SalesOrder('{}')".format(key),
+            header_model=SAPSalesOrderModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_SalesOrder('{}')/to_Item".format(key),
+                entity_set="A_SalesOrderItem",
+                key_properties=("SalesOrder", "SalesOrderItem"),
+                number_property="SalesOrderItem",
+                text_property="SalesOrderItemText",
+                label="item",
+            ),
+            item_model=SAPSalesOrderItemModel,
         )
 
     # end method definition
@@ -4808,31 +5389,48 @@ class SAP:
 
     # end method definition
 
-    def update_sales_contract(self, contract_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP sales contract.
+    def update_sales_contract(
+        self, contract_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP sales contract and of its items.
 
-        The changes are validated with the field definitions of SAPSalesContractModel (e.g. upper
-        case codes, lengths, date formats). Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the sales contract - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
         Args:
             contract_id (str):
-                The sales contract number, e.g. "40000040".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPSalesContractModel or OData
-                property names, e.g. {"validity_end_date": "2027-12-31"}.
+                The sales contract number, e.g. "40000039".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPSalesContractModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"RequestedQuantity": 100}} (snake case attribute names of SAPSalesContractItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the sales contract has been updated, False in case of an error.
+                True if the sales contract (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(contract_id)
+
+        return self._update_odata_document(
             service="API_SALES_CONTRACT_SRV",
-            entity_path="A_SalesContract('{}')".format(contract_id.replace("'", "''")),
-            model=SAPSalesContractModel,
-            changes=changes,
             label="sales contract -> '{}'".format(contract_id),
+            header_path="A_SalesContract('{}')".format(key),
+            header_model=SAPSalesContractModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_SalesContract('{}')/to_Item".format(key),
+                entity_set="A_SalesContractItem",
+                key_properties=("SalesContract", "SalesContractItem"),
+                number_property="SalesContractItem",
+                text_property="SalesContractItemText",
+                label="item",
+            ),
+            item_model=SAPSalesContractItemModel,
         )
 
     # end method definition
@@ -5003,34 +5601,52 @@ class SAP:
 
     # end method definition
 
-    def update_purchase_contract(self, contract_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP purchase contract (header).
+    def update_purchase_contract(
+        self, contract_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP purchase contract and of its items.
 
-        The changes are validated with the field definitions of SAPPurchaseContractModel (e.g. upper
-        case codes, lengths, date formats). Use update_purchase_contract_item() to change items.
+        All changes are validated first and the items must belong to the purchase contract - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
-        Some S/4HANA releases reject header changes with "Purchase contract cannot be saved in
+        A deleted item is restored with the item change {"PurchasingContractDeletionCode": ""}.
+        Some S/4HANA releases reject all header changes with "Purchase contract cannot be saved in
         preparation" (versions 0001 and 0002 of the API) while item changes work.
 
         Args:
             contract_id (str):
                 The purchase contract number, e.g. "4600000070".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPPurchaseContractModel or OData
-                property names, e.g. {"validity_end_date": "2027-12-31"}.
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPPurchaseContractModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"net_price": 925.00}} (snake case attribute names of SAPPurchaseContractItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the purchase contract has been updated, False in case of an error.
+                True if the purchase contract (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(contract_id)
+
+        return self._update_odata_document(
             service="API_PURCHASECONTRACT_PROCESS_SRV",
-            entity_path="A_PurchaseContract('{}')".format(self._quote_key(contract_id)),
-            model=SAPPurchaseContractModel,
-            changes=changes,
             label="purchase contract -> '{}'".format(contract_id),
+            header_path="A_PurchaseContract('{}')".format(key),
+            header_model=SAPPurchaseContractModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_PurchaseContract('{}')/to_PurchaseContractItem".format(key),
+                entity_set="A_PurchaseContractItem",
+                key_properties=("PurchaseContract", "PurchaseContractItem"),
+                number_property="PurchaseContractItem",
+                text_property="PurchaseContractItemText",
+                label="item",
+            ),
+            item_model=SAPPurchaseContractItemModel,
         )
 
     # end method definition
@@ -5039,6 +5655,7 @@ class SAP:
         """Update individual fields of an item of an SAP purchase contract.
 
         The changes are validated with the field definitions of SAPPurchaseContractItemModel.
+        To change the header and several items at once, use update_purchase_contract().
         The deletion indicator of the item can be changed with the OData property
         "PurchasingContractDeletionCode" ("L" = deleted, "S" = blocked, "" = active).
 
@@ -5082,7 +5699,7 @@ class SAP:
         API_PURCHASECONTRACT_PROCESS_SRV does not allow DELETE - like in SAP GUI
         (ME32K), contracts are deleted by setting the deletion indicator "L" of their
         items. Deleted items can no longer be referenced by purchase orders. The
-        deletion can be undone per item with update_purchase_contract_item() and
+        deletion can be undone per item with update_purchase_contract() and the item change
         {"PurchasingContractDeletionCode": ""}.
 
         Args:
@@ -5281,31 +5898,48 @@ class SAP:
 
     # end method definition
 
-    def update_purchase_requisition(self, requisition_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP purchase requisition.
+    def update_purchase_requisition(
+        self, requisition_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP purchase requisition and of its items.
 
-        The changes are validated with the field definitions of SAPPurchaseRequisitionModel (e.g. upper
-        case codes, lengths, date formats). Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the purchase requisition - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
         Args:
             requisition_id (str):
-                The purchase requisition number, e.g. "10000151".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPPurchaseRequisitionModel or OData
-                property names, e.g. {"description": "Web cams for the training room"}.
+                The purchase requisition number, e.g. "10000175".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPPurchaseRequisitionModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"RequestedQuantity": 5}} (snake case attribute names of SAPPurchaseRequisitionItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the purchase requisition has been updated, False in case of an error.
+                True if the purchase requisition (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(requisition_id)
+
+        return self._update_odata_document(
             service="API_PURCHASEREQUISITION_2",
-            entity_path="PurchaseReqn('{}')".format(requisition_id.replace("'", "''")),
-            model=SAPPurchaseRequisitionModel,
-            changes=changes,
             label="purchase requisition -> '{}'".format(requisition_id),
+            header_path="PurchaseReqn('{}')".format(key),
+            header_model=SAPPurchaseRequisitionModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="PurchaseReqn('{}')/_PurchaseRequisitionItem".format(key),
+                entity_set="PurchaseReqnItem",
+                key_properties=("PurchaseRequisition", "PurchaseRequisitionItem"),
+                number_property="PurchaseRequisitionItem",
+                text_property="PurchaseRequisitionItemText",
+                label="item",
+            ),
+            item_model=SAPPurchaseRequisitionItemModel,
         )
 
     # end method definition
@@ -5424,31 +6058,48 @@ class SAP:
 
     # end method definition
 
-    def update_credit_memo_request(self, request_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP credit memo request.
+    def update_credit_memo_request(
+        self, request_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP credit memo request and of its items.
 
-        The changes are validated with the field definitions of SAPCreditMemoRequestModel.
-        Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the credit memo request - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
         Args:
             request_id (str):
                 The credit memo request number, e.g. "60000012".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPCreditMemoRequestModel or OData
-                property names, e.g. {"billing_block": ""}.
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPCreditMemoRequestModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"RequestedQuantity": 1}} (snake case attribute names of SAPCreditMemoRequestItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the credit memo request has been updated, False in case of an error.
+                True if the credit memo request (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(request_id)
+
+        return self._update_odata_document(
             service="API_CREDIT_MEMO_REQUEST_SRV",
-            entity_path="A_CreditMemoRequest('{}')".format(self._quote_key(request_id)),
-            model=SAPCreditMemoRequestModel,
-            changes=changes,
             label="credit memo request -> '{}'".format(request_id),
+            header_path="A_CreditMemoRequest('{}')".format(key),
+            header_model=SAPCreditMemoRequestModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_CreditMemoRequest('{}')/to_Item".format(key),
+                entity_set="A_CreditMemoRequestItem",
+                key_properties=("CreditMemoRequest", "CreditMemoRequestItem"),
+                number_property="CreditMemoRequestItem",
+                text_property="CreditMemoRequestItemText",
+                label="item",
+            ),
+            item_model=SAPCreditMemoRequestItemModel,
         )
 
     # end method definition
@@ -5614,31 +6265,48 @@ class SAP:
 
     # end method definition
 
-    def update_debit_memo_request(self, request_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP debit memo request.
+    def update_debit_memo_request(
+        self, request_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP debit memo request and of its items.
 
-        The changes are validated with the field definitions of SAPDebitMemoRequestModel.
-        Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the debit memo request - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
 
         Args:
             request_id (str):
                 The debit memo request number, e.g. "70000012".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPDebitMemoRequestModel or OData
-                property names, e.g. {"billing_block": ""}.
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPDebitMemoRequestModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"RequestedQuantity": 1}} (snake case attribute names of SAPDebitMemoRequestItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the debit memo request has been updated, False in case of an error.
+                True if the debit memo request (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(request_id)
+
+        return self._update_odata_document(
             service="API_DEBIT_MEMO_REQUEST_SRV",
-            entity_path="A_DebitMemoRequest('{}')".format(self._quote_key(request_id)),
-            model=SAPDebitMemoRequestModel,
-            changes=changes,
             label="debit memo request -> '{}'".format(request_id),
+            header_path="A_DebitMemoRequest('{}')".format(key),
+            header_model=SAPDebitMemoRequestModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_DebitMemoRequest('{}')/to_Item".format(key),
+                entity_set="A_DebitMemoRequestItem",
+                key_properties=("DebitMemoRequest", "DebitMemoRequestItem"),
+                number_property="DebitMemoRequestItem",
+                text_property="DebitMemoRequestItemText",
+                label="item",
+            ),
+            item_model=SAPDebitMemoRequestItemModel,
         )
 
     # end method definition
@@ -6178,31 +6846,51 @@ class SAP:
 
     # end method definition
 
-    def update_outbound_delivery(self, delivery_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP outbound delivery (header).
+    def update_outbound_delivery(
+        self, delivery_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP outbound delivery and of its items.
 
-        The changes are validated with the field definitions of SAPOutboundDeliveryModel.
-        Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the outbound delivery - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
+
+        SAP allows to change e.g. the storage location (required for the goods issue), the batch or
+        the delivery quantity of the items - items can also be referred to by their material.
 
         Args:
             delivery_id (str):
-                The delivery number, e.g. "80000123".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPOutboundDeliveryModel or OData
-                property names, e.g. {"bill_of_lading": "BOL-4711"}.
+                The outbound delivery number, e.g. "80000123".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPOutboundDeliveryModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"StorageLocation": "0001"}} (snake case attribute names of SAPOutboundDeliveryItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the delivery has been updated, False in case of an error.
+                True if the outbound delivery (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(delivery_id)
+
+        return self._update_odata_document(
             service="API_OUTBOUND_DELIVERY_SRV",
-            entity_path="A_OutbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
-            model=SAPOutboundDeliveryModel,
-            changes=changes,
             label="outbound delivery -> '{}'".format(delivery_id),
+            header_path="A_OutbDeliveryHeader('{}')".format(key),
+            header_model=SAPOutboundDeliveryModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_OutbDeliveryHeader('{}')/to_DeliveryDocumentItem".format(key),
+                entity_set="A_OutbDeliveryItem",
+                key_properties=("DeliveryDocument", "DeliveryDocumentItem"),
+                number_property="DeliveryDocumentItem",
+                text_property="Material",
+                label="item",
+            ),
+            item_model=SAPOutboundDeliveryItemModel,
         )
 
     # end method definition
@@ -6450,31 +7138,51 @@ class SAP:
 
     # end method definition
 
-    def update_inbound_delivery(self, delivery_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP inbound delivery (header).
+    def update_inbound_delivery(
+        self, delivery_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP inbound delivery and of its items.
 
-        The changes are validated with the field definitions of SAPInboundDeliveryModel.
-        Items cannot be changed with this method.
+        All changes are validated first and the items must belong to the inbound delivery - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
+
+        SAP allows to change e.g. the delivered quantity or the batch of the items (not their storage
+        location) - items can also be referred to by their material.
 
         Args:
             delivery_id (str):
-                The delivery number, e.g. "180000123".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPInboundDeliveryModel or OData
-                property names, e.g. {"delivery_date": "2026-11-03"}.
+                The inbound delivery number, e.g. "180000123".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPInboundDeliveryModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"ActualDeliveryQuantity": 4}} (snake case attribute names of SAPInboundDeliveryItemModel or OData property names).
+                Defaults to None (items unchanged).
 
         Returns:
             bool:
-                True if the delivery has been updated, False in case of an error.
+                True if the inbound delivery (and its items) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(delivery_id)
+
+        return self._update_odata_document(
             service="API_INBOUND_DELIVERY_SRV",
-            entity_path="A_InbDeliveryHeader('{}')".format(self._quote_key(delivery_id)),
-            model=SAPInboundDeliveryModel,
-            changes=changes,
             label="inbound delivery -> '{}'".format(delivery_id),
+            header_path="A_InbDeliveryHeader('{}')".format(key),
+            header_model=SAPInboundDeliveryModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_InbDeliveryHeader('{}')/to_DeliveryDocumentItem".format(key),
+                entity_set="A_InbDeliveryItem",
+                key_properties=("DeliveryDocument", "DeliveryDocumentItem"),
+                number_property="DeliveryDocumentItem",
+                text_property="Material",
+                label="item",
+            ),
+            item_model=SAPInboundDeliveryItemModel,
         )
 
     # end method definition
@@ -7392,24 +8100,22 @@ class SAP:
     def update_maintenance_plan(
         self, plan_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
     ) -> bool:
-        """Update individual fields of an SAP maintenance plan and of its maintenance items.
+        """Update individual fields of an SAP maintenance plan and of its items.
 
-        The header changes are validated with the field definitions of SAPMaintenancePlanModel,
-        the item changes with those of SAPMaintenancePlanItemModel - all of them before anything
-        is changed. The items must belong to the plan. Header and items are separate entities in
-        SAP (one request each): if a request fails, the changes before it remain. Cycles cannot
-        be changed with this method.
+        All changes are validated first and the items must belong to the maintenance plan - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
+
+        The item numbers (MaintenanceItem) are unique in the SAP system, not positions in the plan.
+        Cycles cannot be changed with this method.
 
         Args:
             plan_id (str):
-                The maintenance plan number, e.g. "10".
+                The maintenance plan number, e.g. "2".
             changes (dict | None, optional):
-                The header fields to change - snake case attribute names of SAPMaintenancePlanModel or
-                OData property names. Defaults to None (header unchanged).
+                The header fields to change - snake case attribute names of SAPMaintenancePlanModel or OData
+                property names. Defaults to None (header unchanged).
             item_changes (dict[str, dict] | None, optional):
-                The changes per maintenance item number (MaintenanceItem - unique in the SAP system, not the
-                position in the plan), e.g. {"142": {"functional_location": "CW"}}
-                (snake case attribute names of SAPMaintenancePlanItemModel or OData property names).
+                The changes per item number, e.g. {"142": {"functional_location": "CW"}} (snake case attribute names of SAPMaintenancePlanItemModel or OData property names).
                 Defaults to None (items unchanged).
 
         Returns:
@@ -7418,79 +8124,24 @@ class SAP:
 
         """
 
-        if not changes and not item_changes:
-            self.log_error("No changes given for SAP maintenance plan -> '%s'!", plan_id)
-            return False
+        key = self._quote_key(plan_id)
 
-        # Check all changes first - an invalid item change must not leave the plan half changed:
-        try:
-            if changes:
-                SAPMaintenancePlanModel.to_odata_update(changes)
-            for item_change in (item_changes or {}).values():
-                SAPMaintenancePlanItemModel.to_odata_update(item_change)
-        except ValueError as value_error:
-            self.log_error("Invalid changes for SAP maintenance plan -> '%s'; error -> %s", plan_id, str(value_error))
-            return False
-
-        if item_changes:
-            plan = self.get_maintenance_plan(plan_id=plan_id, expand_items=True)
-            if plan is None:
-                return False
-            # SAP returns the item numbers without leading zeros:
-            existing = {item.item_id.lstrip("0") for item in plan.items or []}
-            if unknown := sorted(item_id for item_id in item_changes if item_id.lstrip("0") not in existing):
-                # List the items of the plan - item numbers are unique in SAP, not positions in the plan:
-                self.log_error(
-                    "SAP maintenance plan -> '%s' has no item(s) -> %s! Its items are -> %s",
-                    plan_id,
-                    ", ".join(unknown),
-                    "; ".join("{} '{}'".format(item.item_id, item.description or "") for item in plan.items or [])
-                    or "none",
-                )
-                return False
-
-        if changes and not self._update_odata_entity(
+        return self._update_odata_document(
             service="API_MAINTENANCEPLAN",
-            entity_path="MaintenancePlan('{}')".format(plan_id.replace("'", "''")),
-            model=SAPMaintenancePlanModel,
-            changes=changes,
             label="maintenance plan -> '{}'".format(plan_id),
-        ):
-            return False
-
-        # Stop at the first error - a later successful request would reset last_error:
-        return all(
-            self.update_maintenance_plan_item(item_id=item_id, changes=item_change)
-            for item_id, item_change in (item_changes or {}).items()
-        )
-
-    # end method definition
-
-    def update_maintenance_plan_item(self, item_id: str, changes: dict) -> bool:
-        """Update individual fields of a maintenance item of an SAP maintenance plan.
-
-        The changes are validated with the field definitions of SAPMaintenancePlanItemModel, e.g. to
-        set the technical object (functional location or equipment), the task list or the work center.
-
-        Args:
-            item_id (str):
-                The maintenance item number (MaintenanceItem), e.g. "142" - unique in the SAP system, not the
-                position in the plan (see the items of get_maintenance_plan()).
-            changes (dict):
-                The fields to change - snake case attribute names of SAPMaintenancePlanItemModel or OData property names.
-
-        Returns:
-            bool:
-                True if the maintenance item has been updated, False in case of an error.
-
-        """
-
-        return self._update_odata_entity(
-            service="API_MAINTENANCEPLAN",
-            entity_path="MaintenanceItem('{}')".format(item_id.replace("'", "''")),
-            model=SAPMaintenancePlanItemModel,
+            header_path="MaintenancePlan('{}')".format(key),
+            header_model=SAPMaintenancePlanModel,
             changes=changes,
-            label="maintenance item -> '{}'".format(item_id),
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="MaintenancePlan('{}')/to_Item".format(key),
+                entity_set="MaintenanceItem",
+                key_properties=("MaintenanceItem",),
+                number_property="MaintenanceItem",
+                text_property="MaintenanceItemDescription",
+                label="item",
+            ),
+            item_model=SAPMaintenancePlanItemModel,
         )
 
     # end method definition
@@ -7680,12 +8331,13 @@ class SAP:
         task_list_type: str,
         task_list_group: str,
         task_list_group_counter: str,
-        changes: dict,
+        changes: dict | None = None,
+        item_changes: dict[str, dict] | None = None,
     ) -> bool:
-        """Update individual fields of an SAP maintenance task list (its latest version).
+        """Update individual fields of an SAP maintenance task list (its latest version) and of its operations.
 
-        The changes are validated with the field definitions of SAPTaskListModel.
-        Operations cannot be changed with this method.
+        All changes are validated first and the operations must belong to the task list - otherwise
+        nothing is changed. The operations are changed first, the header last (see _update_odata_document()).
 
         Args:
             task_list_type (str):
@@ -7694,38 +8346,73 @@ class SAP:
                 The task list group, e.g. "PUMP-01".
             task_list_group_counter (str):
                 The task list group counter, e.g. "1".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPTaskListModel or OData
-                property names, e.g. {"description": "Monthly pump inspection"}.
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPTaskListModel or OData
+                property names, e.g. {"description": "Monthly pump inspection"}. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per operation number, e.g. {"10": {"OperationText": "Replace seal"}} (snake case
+                attribute names of SAPTaskListOperationModel or OData property names). Defaults to None
+                (operations unchanged).
 
         Returns:
             bool:
-                True if the task list has been updated, False in case of an error.
+                True if the task list (and its operations) have been updated, False in case of an error.
 
         """
 
-        # The version counter is part of the key - read the latest version first:
-        task_list = self.get_task_list(
-            task_list_type=task_list_type,
-            task_list_group=task_list_group,
-            task_list_group_counter=task_list_group_counter,
-            expand_items=False,
-        )
-        if task_list is None:
-            return False
+        label = "maintenance task list -> {}/{}/{}".format(task_list_type, task_list_group, task_list_group_counter)
+        header_path = None
+        if changes:
+            # The version counter is part of the key - read the latest version first:
+            task_list = self.get_task_list(
+                task_list_type=task_list_type,
+                task_list_group=task_list_group,
+                task_list_group_counter=task_list_group_counter,
+                expand_items=False,
+            )
+            if task_list is None:
+                return False
+            header_path = (
+                "MaintenanceTaskList(TaskListType='{}',TaskListGroup='{}',TaskListGroupCounter='{}',"
+                "TaskListVersionCounter='{}')".format(
+                    self._quote_key(task_list.task_list_type),
+                    self._quote_key(task_list.task_list_group),
+                    self._quote_key(task_list.task_list_group_counter),
+                    self._quote_key(task_list.version_counter or ""),
+                )
+            )
 
-        return self._update_odata_entity(
+        return self._update_odata_document(
             service="API_MAINTENANCETASKLIST",
-            entity_path="MaintenanceTaskList(TaskListType='{}',TaskListGroup='{}',TaskListGroupCounter='{}',"
-            "TaskListVersionCounter='{}')".format(
-                self._quote_key(task_list.task_list_type),
-                self._quote_key(task_list.task_list_group),
-                self._quote_key(task_list.task_list_group_counter),
-                self._quote_key(task_list.version_counter or ""),
-            ),
-            model=SAPTaskListModel,
+            label=label,
+            header_path=header_path,
+            header_model=SAPTaskListModel,
             changes=changes,
-            label="maintenance task list -> {}/{}/{}".format(task_list_type, task_list_group, task_list_group_counter),
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="MaintenanceTaskListOperation",
+                params={
+                    "$filter": "TaskListType eq '{}' and TaskListGroup eq '{}' and TaskListGroupCounter eq '{}'".format(
+                        self._quote_key(task_list_type),
+                        self._quote_key(task_list_group),
+                        self._quote_key(task_list_group_counter),
+                    )
+                },
+                entity_set="MaintenanceTaskListOperation",
+                key_properties=(
+                    "TaskListType",
+                    "TaskListGroup",
+                    "TaskListGroupCounter",
+                    "TaskListSequence",
+                    "TaskListOperationInternalId",
+                    "TaskListOpBOMItmIntVersCounter",
+                ),
+                number_property="MaintenanceTaskListOperation",
+                text_property="OperationText",
+                version_property="TaskListOpBOMItmIntVersCounter",
+                label="operation",
+            ),
+            item_model=SAPTaskListOperationModel,
         )
 
     # end method definition
@@ -7836,29 +8523,55 @@ class SAP:
 
     # end method definition
 
-    def update_planned_order(self, planned_order_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP planned order.
+    def update_planned_order(
+        self, planned_order_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP planned order and of its components.
 
-        The changes are validated with the field definitions of SAPPlannedOrderModel.
+        All changes are validated first and the components must belong to the planned order - otherwise
+        nothing is changed. The components are changed first, the header last (see _update_odata_document()).
+
+        Like in SAP GUI (MD12), changing a component makes the planned order firm (PlannedOrderIsFirm,
+        PlannedOrderBOMIsFixed) - MRP no longer changes it. The required quantity of a component cannot
+        be changed (SAP ignores it) - it follows the planned order quantity and the bill of material.
 
         Args:
             planned_order_id (str):
-                The planned order number, e.g. "1234".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPPlannedOrderModel or OData property names.
+                The planned order number, e.g. "103".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPPlannedOrderModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per component - BOM item number or material - e.g. {"0010": {"StorageLocation": "0001"}}
+                or {"100-100": {"StorageLocation": "0001"}} (snake case attribute names of SAPPlannedOrderComponentModel
+                or OData property names).
+                Defaults to None (components unchanged).
 
         Returns:
             bool:
-                True if the planned order has been updated, False in case of an error.
+                True if the planned order (and its components) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        key = self._quote_key(planned_order_id)
+
+        return self._update_odata_document(
             service="API_PLANNEDORDER",
-            entity_path="PlannedOrderHeader('{}')".format(planned_order_id.replace("'", "''")),
-            model=SAPPlannedOrderModel,
-            changes=changes,
             label="planned order -> '{}'".format(planned_order_id),
+            header_path="PlannedOrderHeader('{}')".format(key),
+            header_model=SAPPlannedOrderModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="PlannedOrderComponent",
+                params={"$filter": "PlannedOrder eq '{}'".format(key)},
+                entity_set="PlannedOrderComponent",
+                key_properties=("PlannedOrder", "Reservation", "ReservationItem"),
+                number_property="BillOfMaterialItemNumber",
+                text_property="Material",
+                label="component",
+            ),
+            item_model=SAPPlannedOrderComponentModel,
         )
 
     # end method definition
@@ -7910,7 +8623,9 @@ class SAP:
 
     # end method definition
 
-    def create_production_order(self, order: SAPProductionOrderModel | dict, release: bool = False) -> dict | None:
+    def create_production_order(
+        self, order: SAPProductionOrderModel | dict, release: bool = False
+    ) -> SAPProductionOrderResponseModel | None:
         """Create an SAP production order - optionally released right away.
 
         SAP determines operations and components from the routing / production version
@@ -7925,10 +8640,12 @@ class SAP:
                 Whether to release the production order after the creation. Defaults to False.
 
         Returns:
-            dict | None:
-                The created production order as returned by SAP (including the number in
-                "ManufacturingOrder") or None in case of an error. If the release fails, the
-                created order is still returned (an error is logged).
+            SAPProductionOrderResponseModel | None:
+                The production order as it is in SAP after the creation (and release) - read
+                again, so the status shows whether the release was done (is_released) - or None
+                in case of an error. If the release fails, the created order is still returned
+                and last_error tells why it was not released. If it cannot be read again, the
+                response of the creation is returned.
 
         """
 
@@ -7940,10 +8657,28 @@ class SAP:
             key_fields=["ManufacturingOrder"],
             label="production order",
         )
-        if created and release:
-            self.change_production_order_status(created["ManufacturingOrder"], SAPProductionOrderAction.RELEASE)
+        if not created:
+            return None
 
-        return created
+        order_id = created["ManufacturingOrder"]
+        release_error = None
+        if release and not self.change_production_order_status(order_id, SAPProductionOrderAction.RELEASE):
+            release_error = self.last_error or "unknown error"
+
+        # The response of the creation has the status before the release - read the order again:
+        order = self.get_production_order(
+            order_id=order_id, expand_items=True
+        ) or SAPProductionOrderResponseModel.model_validate(created)
+
+        # Set after reading the order (a successful request resets last_error):
+        if release_error:
+            self.log_error(
+                "Production order -> '%s' has been created but could not be released; error -> %s",
+                order_id,
+                release_error,
+            )
+
+        return order
 
     # end method definition
 
@@ -8148,29 +8883,81 @@ class SAP:
 
     # end method definition
 
-    def update_production_order(self, order_id: str, changes: dict) -> bool:
-        """Update individual fields of an SAP production order.
+    def update_production_order(
+        self, order_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP production order and of its operations.
 
-        The changes are validated with the field definitions of SAPProductionOrderModel. SAP allows changing scheduling, date / time and quantity information.
+        All changes are validated first and the operations must belong to the production order - otherwise
+        nothing is changed. The operations are changed first, the header last (see _update_odata_document()).
+
+        The item changes are changes of the operations (A_ProductionOrderOperation_2), e.g. their
+        short text, work center, quantity or standard values.
 
         Args:
             order_id (str):
-                The production order number, e.g. "1000123".
-            changes (dict):
-                The fields to change - snake case attribute names of SAPProductionOrderModel or OData property names.
+                The production order number, e.g. "1000185".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPProductionOrderModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per operation number, e.g. {"0010": {"WorkCenter": "1320"}} (snake case attribute
+                names of SAPProductionOrderOperationModel or OData property names).
+                Defaults to None (operations unchanged).
 
         Returns:
             bool:
-                True if the production order has been updated, False in case of an error.
+                True if the production order (and its operations) have been updated, False in case of an error.
 
         """
 
-        return self._update_odata_entity(
+        # SAP only accepts standard values for operations with a work center - otherwise it fails with
+        # "Input value ... for AFVGD-VGW01 could not be set" (verified in S/4HANA):
+        standard_values = {"WorkCenterStandardWorkQty{}".format(number) for number in range(1, 7)}
+        operations_to_check = []
+        for operation, item_change in (item_changes or {}).items():
+            try:
+                payload = SAPProductionOrderOperationModel.to_odata_update(item_change)
+            except ValueError:
+                continue  # reported by _update_odata_document()
+            if standard_values & payload.keys() and not payload.get("WorkCenter"):
+                operations_to_check.append(str(operation).strip().lstrip("0"))
+        if operations_to_check:
+            order = self.get_production_order(order_id=order_id, expand_items=True)
+            if order is None:
+                return False
+            without_work_center = {
+                (operation.operation or "").lstrip("0")
+                for operation in order.operations or []
+                if not operation.work_center
+            }
+            if missing := [operation for operation in operations_to_check if operation in without_work_center]:
+                self.log_error(
+                    "Operation(s) -> %s of SAP production order -> '%s' have no work center - standard values can "
+                    "only be set together with a work center (WorkCenter)!",
+                    ", ".join(missing),
+                    order_id,
+                )
+                return False
+
+        key = self._quote_key(order_id)
+
+        return self._update_odata_document(
             service="API_PRODUCTION_ORDER_2_SRV",
-            entity_path="A_ProductionOrder_2('{}')".format(order_id.replace("'", "''")),
-            model=SAPProductionOrderModel,
-            changes=changes,
             label="production order -> '{}'".format(order_id),
+            header_path="A_ProductionOrder_2('{}')".format(key),
+            header_model=SAPProductionOrderModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_ProductionOrder_2('{}')/to_ProductionOrderOperation".format(key),
+                entity_set="A_ProductionOrderOperation_2",
+                key_properties=("OrderInternalBillOfOperations", "OrderIntBillOfOperationsItem"),
+                number_property="ManufacturingOrderOperation",
+                text_property="MfgOrderOperationText",
+                label="operation",
+            ),
+            item_model=SAPProductionOrderOperationModel,
         )
 
     # end method definition
@@ -8826,6 +9613,94 @@ class SAP:
         self.logger.info("Got %d SAP material BOMs.", len(results))
 
         return results
+
+    # end method definition
+
+    def update_material_bom(
+        self,
+        material: str,
+        plant: str,
+        usage: str = "1",
+        alternative: str = "1",
+        changes: dict | None = None,
+        item_changes: dict[str, dict] | None = None,
+    ) -> bool:
+        """Update individual fields of a material BOM (header) and of its items.
+
+        All changes are validated first and the items must belong to the BOM - otherwise nothing
+        is changed. The items are changed first, the header last (see _update_odata_document()).
+        BOMs with engineering change management (change numbers) are not supported.
+
+        Args:
+            material (str):
+                The material (product) of the BOM, e.g. "P-100".
+            plant (str):
+                The plant of the BOM, e.g. "3000".
+            usage (str, optional):
+                The BOM usage, e.g. "1" (production) or "4" (plant maintenance / spare parts). Defaults to "1".
+            alternative (str, optional):
+                The alternative BOM. Defaults to "1".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPMaterialBOMModel or OData
+                property names, e.g. {"BOMHeaderText": "Pump assembly"}. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number or component, e.g. {"0010": {"BillOfMaterialItemQuantity": 2}}
+                or {"100-100": {"BillOfMaterialItemQuantity": 2}} (snake case attribute names of
+                SAPMaterialBOMItemModel or OData property names). Defaults to None (items unchanged).
+
+        Returns:
+            bool:
+                True if the BOM (and its items) have been updated, False in case of an error.
+
+        """
+
+        label = "material BOM -> '{}' (plant -> '{}', usage -> '{}', alternative -> '{}')".format(
+            material, plant, usage, alternative
+        )
+        if not changes and not item_changes:
+            self.log_error("No changes given for SAP %s!", label)
+            return False
+
+        # The BOM has 7 key fields (e.g. the internal BOM number) - take its entity path from the BOM:
+        response = self.do_request(
+            url=self.service_url("API_BILL_OF_MATERIAL_SRV") + "/MaterialBOM",
+            params={
+                "$filter": "Material eq '{}' and Plant eq '{}' and BillOfMaterialVariantUsage eq '{}' and "
+                "BillOfMaterialVariant eq '{}'".format(
+                    self._quote_key(material),
+                    self._quote_key(plant),
+                    self._quote_key(usage),
+                    self._quote_key(alternative),
+                ),
+                "$select": "BillOfMaterial",
+            },
+            show_error=False,
+            show_warning=True,
+            warning_message="Cannot get SAP {}".format(label),
+        )
+        boms = (response or {}).get("d", {}).get("results", [])
+        if not boms:
+            self.log_error("Cannot find SAP %s!", label)
+            return False
+        header_path = boms[0]["__metadata"]["uri"].rsplit("/", 1)[-1]
+
+        return self._update_odata_document(
+            service="API_BILL_OF_MATERIAL_SRV",
+            label=label,
+            header_path=header_path,
+            header_model=SAPMaterialBOMModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path=header_path + "/to_BillOfMaterialItem",
+                entity_set="MaterialBOMItem",
+                key_properties=(),
+                number_property="BillOfMaterialItemNumber",
+                text_property="BillOfMaterialComponent",
+                label="item",
+            ),
+            item_model=SAPMaterialBOMItemModel,
+        )
 
     # end method definition
 

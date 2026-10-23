@@ -527,6 +527,10 @@ class ManagerPushSettings(BaseSettings):
     heartbeat_seconds: int = Field(default=60, gt=0)
     max_log_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
     queue_size: int = Field(default=100, gt=0)
+    artifacts_version_url: str = Field(
+        default="http://customizer-artifacts/version.json",
+        description="Where the payload image tells its commit (empty: not reported).",
+    )
 
     model_config = SettingsConfigDict(env_prefix="CUSTOMIZER_MANAGER_")
 

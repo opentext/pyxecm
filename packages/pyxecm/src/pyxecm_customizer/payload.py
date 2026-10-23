@@ -11615,6 +11615,8 @@ class Payload:
         bo_type: str | None = None,
         bo_id: str | None = None,
         parent_workspace_node_id: int | None = None,
+        show_error: bool = True,
+        create_form: dict | None = None,
     ) -> dict | None:
         """Prepare the category structure for the workspace creation.
 
@@ -11631,6 +11633,11 @@ class Payload:
                 The optional business object ID.
             parent_workspace_node_id (int, optional):
                 The optional parent Workspace ID.
+            show_error (bool, optional):
+                Log an error if the create form cannot be retrieved. Otherwise log a warning.
+            create_form (dict | None, optional):
+                The workspace create form if it has already been retrieved.
+                If None, it is retrieved here.
 
         Returns:
             dict | None:
@@ -11641,15 +11648,16 @@ class Payload:
 
         category_create_data = {}
 
-        response = self._otcs_frontend.get_workspace_create_form(
+        response = create_form or self._otcs_frontend.get_workspace_create_form(
             template_id=template_id,
             external_system_id=ext_system_id,
             bo_type=bo_type,
             bo_id=bo_id,
             parent_id=parent_workspace_node_id,
+            show_error=show_error,
         )
         if response is None or "forms" not in response:
-            self.logger.error(
+            (self.logger.error if show_error else self.logger.warning)(
                 "Failed to retrieve create information for template ID -> %s!",
                 template_id,
             )
@@ -12896,9 +12904,6 @@ class Payload:
             )
             return True
 
-        # Read optional description from payload:
-        description = workspace.get("description", "")
-
         # Read Type Name from payload:
         if "type_name" not in workspace:
             self.logger.error(
@@ -13145,18 +13150,23 @@ class Payload:
                         bo_id,
                     )
                     response = self._otcs.set_workspace_reference(
-                        workspace_id=workspace_id, external_system_id=external_system_id, bo_type=bo_type, bo_id=bo_id
+                        workspace_id=workspace_id,
+                        external_system_id=external_system_id,
+                        bo_type=bo_type,
+                        bo_id=bo_id,
+                        show_error=False,
                     )
                     if not response:
-                        self.logger.error(
-                            "Failed to set a reference for workspace -> '%s' (%d) to business object -> ('%s', '%s', %s)!",
+                        # The workspace exists, so we keep it without the reference (e.g. it has been
+                        # created without business object as the business object does not exist):
+                        self.logger.warning(
+                            "Failed to set a reference for workspace -> '%s' (%d) to business object -> ('%s', '%s', %s)! Keeping the workspace without it.",
                             name,
                             workspace_id,
                             external_system_id,
                             bo_type,
                             bo_id,
                         )
-                        return False
                 else:
                     self.logger.info(
                         "Workspace -> '%s' (%d) has already a reference to business object -> ('%s', '%s', %s).",
@@ -13168,29 +13178,6 @@ class Payload:
                     )
                 continue
 
-            # Read categories from payload:
-            if "categories" in workspace:
-                categories = workspace["categories"]
-                workspace_category_data = self.prepare_workspace_create_form(
-                    categories=categories,
-                    template_id=template_id,
-                    ext_system_id=business_object["ext_system_id"],
-                    bo_type=business_object["bo_type"],
-                    bo_id=business_object["bo_id"],
-                    parent_workspace_node_id=parent_workspace_node_id,
-                )
-                if not workspace_category_data:
-                    self.logger.error(
-                        "Failed to prepare the category data for workspace -> '%s'!",
-                        name,
-                    )
-                    return False
-            else:
-                self.logger.debug(
-                    "Workspace payload has no category data! Will leave category attributes empty...",
-                )
-                workspace_category_data = {}
-
             if ibo_workspace_id:
                 self.logger.info(
                     "Connect existing workspace -> '%s' to an additional business object of type -> '%s' and ID -> '%s' (IBO)...",
@@ -13198,21 +13185,13 @@ class Payload:
                     business_object["bo_type"],
                     business_object["bo_id"],
                 )
-            # Create the workspace with all provided information:
-            response = self._otcs.create_workspace(
-                workspace_template_id=template_id,
-                workspace_name=name,
-                workspace_description=description,
-                workspace_type=workspace_type_id,
-                category_data=workspace_category_data,
-                external_system_id=business_object["ext_system_id"],
-                bo_type=business_object["bo_type"],
-                bo_id=business_object["bo_id"],
-                parent_id=parent_workspace_node_id,
+            response = self.create_workspace_from_template(
+                workspace=workspace,
+                template_id=template_id,
+                workspace_type_id=workspace_type_id,
+                business_object=business_object,
+                parent_workspace_node_id=parent_workspace_node_id,
                 ibo_workspace_id=ibo_workspace_id,
-                show_error=(
-                    not self._sap
-                ),  # if SAP is active it may produce workspaces concurrently (race condition). Then we don't want to issue errors.
             )
             if response is None:
                 # Check if workspace has been concurrently created by some other
@@ -13223,6 +13202,26 @@ class Payload:
                 time.sleep(5)
 
                 workspace_id = self.determine_workspace_id(workspace=workspace)
+                if not workspace_id and not ibo_workspace_id and business_object["bo_id"]:
+                    # Typically the business object does not exist in the external system.
+                    # We still want the workspace (and everything that depends on it),
+                    # so we create it without the business object reference:
+                    self.logger.warning(
+                        "Failed to create workspace -> '%s' of type -> '%s' with business object -> ('%s', '%s', %s)! Creating it without business object instead...",
+                        name,
+                        type_name,
+                        external_system_id,
+                        bo_type,
+                        bo_id,
+                    )
+                    response = self.create_workspace_from_template(
+                        workspace=workspace,
+                        template_id=template_id,
+                        workspace_type_id=workspace_type_id,
+                        business_object={"ext_system_id": None, "bo_type": None, "bo_id": None},
+                        parent_workspace_node_id=parent_workspace_node_id,
+                    )
+            if response is None:
                 if workspace_id:
                     self.logger.info(
                         "Workspace -> '%s' of type -> '%s' has been created by an external process and has ID -> %s.",
@@ -13280,6 +13279,172 @@ class Payload:
         return self.process_workspace_post(
             workspace=workspace,
         )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="create_workspace_from_template")
+    def create_workspace_from_template(
+        self,
+        workspace: dict,
+        template_id: int,
+        workspace_type_id: int,
+        business_object: dict,
+        parent_workspace_node_id: int | None = None,
+        ibo_workspace_id: int | None = None,
+    ) -> dict | None:
+        """Create a workspace (or connect it to an additional business object) with its category data.
+
+        Args:
+            workspace (dict):
+                Dictionary with payload of a single workspace.
+            template_id (int):
+                The workspace template ID.
+            workspace_type_id (int):
+                The workspace type ID.
+            business_object (dict):
+                The business object to connect with keys "ext_system_id", "bo_type", and "bo_id".
+                All values are None for a workspace without business object.
+            parent_workspace_node_id (int | None, optional):
+                The optional parent Workspace ID.
+            ibo_workspace_id (int | None, optional):
+                The ID of an existing workspace to connect with an additional business object.
+
+        Returns:
+            dict | None:
+                The response of the workspace creation or None in case of an error.
+
+        """
+
+        # Failures with a business object are handled by the caller (race condition
+        # with external systems, creation without business object), so we only warn:
+        show_error = not business_object["bo_id"]
+
+        create_form = None
+        if business_object["bo_id"]:
+            create_form = self._otcs_frontend.get_workspace_create_form(
+                template_id=template_id,
+                external_system_id=business_object["ext_system_id"],
+                bo_type=business_object["bo_type"],
+                bo_id=business_object["bo_id"],
+                parent_id=parent_workspace_node_id,
+                show_error=False,
+            )
+            if create_form is None:
+                self.logger.warning(
+                    "Failed to retrieve create information for template ID -> %s!",
+                    template_id,
+                )
+                return None
+            if self.is_business_object_empty(create_form=create_form):
+                # Some business object types (e.g. SAP purchase contracts) don't fail for
+                # a business object that doesn't exist in the external system. They deliver
+                # empty business object data instead, so the workspace name (from the naming
+                # rule of the workspace type) consists only of separators like ' - ':
+                self.logger.warning(
+                    "Business object -> ('%s', '%s', %s) of workspace -> '%s' delivers no data (name from naming rule -> '%s'). It probably doesn't exist in the external system!",
+                    business_object["ext_system_id"],
+                    business_object["bo_type"],
+                    business_object["bo_id"],
+                    workspace["name"],
+                    self.get_create_form_name(create_form=create_form),
+                )
+                return None
+
+        # Read categories from payload:
+        if "categories" in workspace:
+            workspace_category_data = self.prepare_workspace_create_form(
+                categories=workspace["categories"],
+                template_id=template_id,
+                ext_system_id=business_object["ext_system_id"],
+                bo_type=business_object["bo_type"],
+                bo_id=business_object["bo_id"],
+                parent_workspace_node_id=parent_workspace_node_id,
+                show_error=show_error,
+                create_form=create_form,
+            )
+            if not workspace_category_data:
+                (self.logger.error if show_error else self.logger.warning)(
+                    "Failed to prepare the category data for workspace -> '%s'!",
+                    workspace["name"],
+                )
+                return None
+        else:
+            self.logger.debug(
+                "Workspace payload has no category data! Will leave category attributes empty...",
+            )
+            workspace_category_data = {}
+
+        # Create the workspace with all provided information:
+        return self._otcs.create_workspace(
+            workspace_template_id=template_id,
+            workspace_name=workspace["name"],
+            workspace_description=workspace.get("description", ""),
+            workspace_type=workspace_type_id,
+            category_data=workspace_category_data,
+            external_system_id=business_object["ext_system_id"],
+            bo_type=business_object["bo_type"],
+            bo_id=business_object["bo_id"],
+            parent_id=parent_workspace_node_id,
+            ibo_workspace_id=ibo_workspace_id,
+            show_error=show_error,
+        )
+
+    # end method definition
+
+    @staticmethod
+    def get_create_form_name(create_form: dict) -> str | None:
+        """Get the workspace name of a workspace create form.
+
+        This is the name the naming rule of the workspace type derives
+        from the business object (if the form was requested for one).
+
+        Args:
+            create_form (dict):
+                The response of get_workspace_create_form().
+
+        Returns:
+            str | None:
+                The workspace name or None if the form has no name.
+
+        """
+
+        # The system attributes form is the one without a role name:
+        system_attributes_form = next(
+            (form for form in create_form.get("forms", []) if "role_name" not in form),
+            None,
+        )
+        if not system_attributes_form:
+            return None
+
+        return system_attributes_form.get("data", {}).get("name")
+
+    # end method definition
+
+    @staticmethod
+    def is_business_object_empty(create_form: dict) -> bool:
+        """Check if a workspace create form has been built from an empty business object.
+
+        For business objects that don't exist in the external system some
+        business object types deliver empty data instead of an error. The
+        naming rule of the workspace type then produces a name without any
+        letters or digits, e.g. ' - '. An empty name is not considered as
+        it can also mean the workspace type has no naming rule.
+
+        Args:
+            create_form (dict):
+                The response of get_workspace_create_form() for a business object.
+
+        Returns:
+            bool:
+                True if the business object delivered no data, False otherwise.
+
+        """
+
+        name = Payload.get_create_form_name(create_form=create_form)
+        if not name or not name.strip():
+            return False
+
+        return not any(char.isalnum() for char in name)
 
     # end method definition
 

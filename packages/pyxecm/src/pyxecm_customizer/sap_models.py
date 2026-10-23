@@ -42,6 +42,7 @@ from pydantic import (
     PlainSerializer,
     StringConstraints,
     TypeAdapter,
+    ValidationError,
     WithJsonSchema,
     computed_field,
     model_validator,
@@ -638,6 +639,8 @@ SAP_BUSINESS_OBJECT_TYPES: dict[str, SAPBusinessObjectType] = {
     "BUS2081": SAPBusinessObjectType("supplier invoice", (10, 4)),
     "BUS2032": SAPBusinessObjectType("sales order", (10,)),
     "BUS2034": SAPBusinessObjectType("sales contract", (10,)),
+    "BUS2094": SAPBusinessObjectType("credit memo request", (10,)),
+    "BUS2096": SAPBusinessObjectType("debit memo request", (10,)),
     "VBRK": SAPBusinessObjectType("billing document", (10,)),
     "BUS2037": SAPBusinessObjectType("billing document", (10,)),
     "LIKP": SAPBusinessObjectType("outbound delivery", (10,)),
@@ -842,7 +845,14 @@ class SAPODataCreateModel(SAPODataModel):
                 message = "Field -> '{}' refers to child entities which cannot be changed with an update".format(key)
                 raise ValueError(message)
             adapter = TypeAdapter(Annotated[field.annotation, *field.metadata] if field.metadata else field.annotation)
-            payload[field.alias or key] = adapter.dump_python(adapter.validate_python(value), mode="json")
+            try:
+                validated = adapter.validate_python(value)
+            except ValidationError:
+                # Agents often send numbers for texts (e.g. a year or a code) - accept them as text:
+                if not isinstance(value, int | float | Decimal) or isinstance(value, bool):
+                    raise
+                validated = adapter.validate_python(format(value, "f") if isinstance(value, Decimal) else str(value))
+            payload[field.alias or key] = adapter.dump_python(validated, mode="json")
 
         return payload
 
@@ -1609,12 +1619,18 @@ class SAPMaintenanceOrderOperationModel(SAPODataCreateModel):
     """An operation of an SAP Plant Maintenance order (API_MAINTENANCEORDER).
 
     Additional OData properties of the operation that are not modelled here can be
-    passed with their OData name (e.g. "PlannedWorkQuantity"). The components
+    passed with their OData name (e.g. "MaintOrdOperationWorkDuration"). The components
     (materials) of the operation are created after the order.
 
     See: https://api.sap.com/api/API_MAINTENANCEORDER/overview
 
     """
+
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        # Verified in S/4HANA: SAP recalculates the duration ("CN/702 Calculation executed"):
+        "MaintOrderOperationDuration": "SAP calculates the duration from the work and the number of capacities - "
+        "change MaintOrdOperationWorkDuration or NumberOfCapacities instead",
+    }
 
     operation: Numc4 = Field(
         default="10",
@@ -4084,6 +4100,12 @@ class SAPPurchaseContractItemModel(SAPPurchasingItemModel):
 
     """
 
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        # Verified in S/4HANA: SAP answers "MMPUR_OUTL_AGREEMENT/028 No changes have been made":
+        "ContractNetPriceAmount": "the price of an existing contract item is kept in its conditions and cannot "
+        "be changed with this API",
+    }
+
     item: Numc5 = Field(
         default="10",
         alias="PurchaseContractItem",
@@ -6122,6 +6144,11 @@ class SAPBillingDocumentItemQueryModel(SAPODataQueryModel):
 
 class SAPOutboundDeliveryItemModel(SAPODataCreateModel):
     """An item of an SAP outbound delivery - a reference to the sales order item to deliver (API_OUTBOUND_DELIVERY_SRV)."""
+
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        "ReferenceSDDocument": "the sales order of a delivery item cannot be changed - delete and create the delivery",
+        "ReferenceSDDocumentItem": "the sales order item of a delivery item cannot be changed - delete and create the delivery",
+    }
 
     reference_document: SAPCode = Field(
         alias="ReferenceSDDocument",
@@ -10286,6 +10313,38 @@ class SAPPlannedOrderModel(SAPODataCreateModel):
     # end method definition
 
 
+class SAPPlannedOrderComponentModel(SAPODataCreateModel):
+    """The changeable fields of a component of an SAP planned order (API_PLANNEDORDER, PlannedOrderComponent).
+
+    Only used to validate component changes (see SAP.update_planned_order()) - components are
+    created by SAP from the bill of material.
+    """
+
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        # Verified in S/4HANA: the PATCH succeeds, but the quantity stays unchanged (also with a fixed
+        # quantity or a fixed BOM of the planned order):
+        "RequiredQuantity": "SAP ignores changes of the required quantity of a component - it follows the "
+        "planned order quantity and the bill of material; change the planned order quantity instead",
+    }
+
+    requirement_date: date | None = Field(
+        default=None,
+        alias="MatlCompRequirementDate",
+        description="Requirement date of the component, e.g. '2026-11-02'.",
+    )
+    storage_location: SAPCode | None = Field(
+        default=None,
+        alias="StorageLocation",
+        description="Storage location the component is taken from, e.g. '0001'.",
+        max_length=4,
+    )
+    quantity_is_fixed: bool | None = Field(
+        default=None,
+        alias="QuantityIsFixed",
+        description="Whether the quantity is fixed (independent of the order quantity).",
+    )
+
+
 class SAPPlannedOrderResponseModel(SAPODataModel):
     """A planned order as returned by SAP (API_PLANNEDORDER, OData V4).
 
@@ -10555,6 +10614,68 @@ class SAPProductionOrderModel(SAPODataCreateModel):
         return self
 
     # end method definition
+
+
+class SAPProductionOrderOperationModel(SAPODataCreateModel):
+    """The changeable fields of an operation of an SAP production order (API_PRODUCTION_ORDER_2_SRV).
+
+    Only used to validate operation changes (see SAP.update_production_order()) - operations are
+    created by SAP from the routing.
+    """
+
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        # Verified in S/4HANA (also for orders that are not released): SAP rejects these changes,
+        # although $metadata declares the properties as updatable:
+        "OpPlannedTotalQuantity": "the operation quantity follows the order quantity - change the order quantity "
+        "instead",
+        "ErlstSchedldExecDurnInWorkdays": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldExecStrtDte": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldExecStrtTme": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldExecEndDte": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldExecEndTme": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldProcgStrtDte": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldProcgStrtTme": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldTrdwnStrtDte": "SAP schedules the operations - change the order dates instead",
+        "OpErlstSchedldTrdwnStrtTme": "SAP schedules the operations - change the order dates instead",
+    }
+
+    description: str | None = Field(
+        default=None,
+        alias="MfgOrderOperationText",
+        description="Short text of the operation (max. 40 characters).",
+        max_length=40,
+    )
+    work_center: SAPCode | None = Field(
+        default=None,
+        alias="WorkCenter",
+        description="Work center of the operation, e.g. '1320'.",
+        max_length=8,
+    )
+    standard_value_1: SAPDecimal | None = Field(
+        default=None,
+        alias="WorkCenterStandardWorkQty1",
+        description="First standard value of the operation (e.g. the setup time - see the work center). Only for "
+        "operations with a work center.",
+        ge=0,
+        max_digits=9,
+        decimal_places=3,
+    )
+    standard_value_2: SAPDecimal | None = Field(
+        default=None,
+        alias="WorkCenterStandardWorkQty2",
+        description="Second standard value of the operation (e.g. the machine time - see the work center).",
+        ge=0,
+        max_digits=9,
+        decimal_places=3,
+    )
+    standard_value_3: SAPDecimal | None = Field(
+        default=None,
+        alias="WorkCenterStandardWorkQty3",
+        description="Third standard value of the operation (e.g. the labor time - see the work center).",
+        ge=0,
+        max_digits=9,
+        decimal_places=3,
+    )
 
 
 class SAPProductionOrderOperationResponseModel(SAPODataModel):
@@ -11557,6 +11678,8 @@ class SAPMaterialBOMItemModel(SAPODataCreateModel):
     READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
         "BillOfMaterialItemNumber": "the item number identifies the item",
         "BillOfMaterialComponent": "SAP does not allow to change the component - delete and create the item",
+        # Verified in S/4HANA: SAP accepts the change, but keeps the old value:
+        "FixedQuantity": "SAP ignores this field - use BOMItemHasFixedQuantity for a fixed quantity",
     }
 
     item_number: Numc4 | None = Field(

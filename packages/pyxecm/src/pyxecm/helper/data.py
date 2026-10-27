@@ -705,18 +705,30 @@ class Data:
         convert_dates: bool = False,
         index_column: str | None = None,
         compression: str | None = None,
+        replace: bool = False,
     ) -> bool:
         """Load JSON data into a Pandas data frame.
+
+        Without a schema (no `dtypes` given when the Data object was created), pandas infers the
+        data types.
+
+        With a schema, the JSON file is loaded with the schema (e.g. data saved with save_json_data()):
+        pandas does not infer the data types (it would e.g. turn the string "1e3" into the number
+        1000.0), and the schema is applied after loading (see apply_schema()): the columns of the
+        schema with their data types (also datetimes, if saved in ISO format) and the index
+        (`index_columns`). If the schema cannot be applied, the data frame is left unchanged.
 
         Args:
             json_path (str):
                 The path to the JSON file.
             convert_dates (bool, optional):
                 Defines whether or not dates should be converted.
-                The default is False = dates are NOT converted.
+                The default is False = dates are NOT converted. With a schema, the datetime
+                columns of the schema are converted anyway.
             index_column (str | None, optional):
                 The Name of the column (i.e. JSON data field) that should
                 become the index in the loaded data frame. Defaults to None.
+                Not to be combined with a schema - its index (`index_columns`) is applied.
             compression (str | None, optional):
                 The compression of the JSON file that is to be decompressed:
                 * gzip (.gz)
@@ -725,6 +737,9 @@ class Data:
                 * xz (.xz)
                 The value for compression should not include the dot.
                 Default is None = no compression.
+            replace (bool, optional):
+                If True, the loaded data replaces the content of the data frame. If False (default),
+                it is appended to the data frame (with a new row index).
 
         Returns:
             bool: False in case an error occurred, True otherwise.
@@ -758,6 +773,8 @@ class Data:
                 path_or_buf=json_path,
                 convert_dates=convert_dates,
                 compression=compression,
+                # With a schema the data types are defined by it - pandas must not infer them:
+                dtype=not self._schema,
             )
 
             if index_column and index_column not in df.columns:
@@ -769,10 +786,18 @@ class Data:
 
             if index_column:
                 df = df.set_index(keys=index_column)
-            if self._df is None:
+            previous_df = self._df
+            if replace or self._df is None:
                 self._df = df
             else:
                 self._df = pd.concat([self._df, df], ignore_index=True)
+            if self._schema:
+                try:
+                    self.apply_schema()
+                except Exception:
+                    # apply_schema() has logged the error - keep the data frame as it was:
+                    self._df = previous_df
+                    raise
             self.logger.info(
                 "After loading JSON file -> '%s', the data frame has %s row(s) and %s column(s)",
                 json_path,
@@ -824,8 +849,13 @@ class Data:
         preserve_index: bool = False,
         index_column: str = "index",
         compression: str | None = None,
+        indent: int | None = 2,
     ) -> bool:
         """Save JSON data from data frame to file.
+
+        Datetimes are saved in ISO format (with millisecond precision). A data frame saved with
+        `orient="records"` is loaded again with its data types by load_json_data() of a Data object
+        with the same schema.
 
         Args:
             json_path (str):
@@ -851,6 +881,9 @@ class Data:
                 * zip (.zip)
                 * xz (.xz)
                 Default is None = no compression.
+            indent (int | None, optional):
+                The number of spaces to indent the JSON. None writes compact JSON (smaller files).
+                Defaults to 2.
 
         Returns:
             bool:
@@ -874,8 +907,10 @@ class Data:
         # Save data to JSON file
         try:
             if self._df is not None:
-                if not os.path.exists(os.path.dirname(json_path)):
-                    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+                # A file name without directory is saved in the current directory:
+                json_directory = os.path.dirname(json_path)
+                if json_directory:
+                    os.makedirs(json_directory, exist_ok=True)
 
                 # index parameter is only allowed if orient has one of the following values:
                 if orient in ("columns", "index", "table", "split"):
@@ -883,7 +918,7 @@ class Data:
                         path_or_buf=json_path,
                         index=preserve_index,
                         orient=orient,
-                        indent=2,
+                        indent=indent,
                         compression=compression,
                         date_format="iso",
                     )
@@ -899,7 +934,7 @@ class Data:
                     df_with_index.to_json(
                         path_or_buf=json_path,
                         orient=orient,
-                        indent=2,
+                        indent=indent,
                         compression=compression,
                         date_format="iso",
                     )
@@ -907,7 +942,7 @@ class Data:
                     self._df.to_json(
                         path_or_buf=json_path,
                         orient=orient,
-                        indent=2,
+                        indent=indent,
                         compression=compression,
                         date_format="iso",
                     )
@@ -1819,6 +1854,9 @@ class Data:
     def deduplicate(self, unique_fields: list, inplace: bool = True) -> pd.DataFrame:
         """Remove duplicate rows that have all fields in unique_fields in common.
 
+        The index defined for this Data object (`index_columns`) is kept - its rows are selected by it (e.g.
+        with `loc[]`). Without one, the rows are numbered again (0, 1, 2, ...).
+
         Args:
             unique_fields (list):
                 Defines the fields for which we want a unique combination for.
@@ -1834,11 +1872,13 @@ class Data:
 
         if inplace:
             self._df.drop_duplicates(subset=unique_fields, inplace=True)
-            self._df.reset_index(drop=True, inplace=True)
+            if not self._index_columns:
+                self._df.reset_index(drop=True, inplace=True)
             return self._df
         else:
             df = self._df.drop_duplicates(subset=unique_fields, inplace=False)
-            df = df.reset_index(drop=True, inplace=False)
+            if not self._index_columns:
+                df = df.reset_index(drop=True, inplace=False)
             return df
 
     # end method definition

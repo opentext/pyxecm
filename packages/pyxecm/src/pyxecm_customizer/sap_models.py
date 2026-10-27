@@ -45,6 +45,7 @@ from pydantic import (
     ValidationError,
     WithJsonSchema,
     computed_field,
+    field_validator,
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
@@ -3206,6 +3207,14 @@ class SAPPurchaseOrderItemResponseModel(SAPODataModel):
         default=None,
         alias="IsCompletelyDelivered",
         description="True if the item is completely delivered - no further goods receipts are expected.",
+    )
+    invoice_is_goods_receipt_based: SAPFlag = Field(
+        default=None,
+        alias="InvoiceIsGoodsReceiptBased",
+        description=(
+            "True if the item uses goods-receipt-based invoice verification: each invoice item for it refers to a "
+            "goods receipt (material document) - see SAPSupplierInvoicePurchaseOrderItemModel.reference_document."
+        ),
     )
     schedule_lines: list[SAPPurchaseOrderScheduleLineResponseModel] | None = Field(
         default=None,
@@ -7177,7 +7186,10 @@ class SAPSupplierInvoicePurchaseOrderItemModel(SAPODataCreateModel):
     reference_document: SAPCode | None = Field(
         default=None,
         alias="ReferenceDocument",
-        description="Goods receipt (material document) the item refers to - for goods-receipt-based invoice verification.",
+        description=(
+            "Goods receipt (material document) the item refers to - required (with year and item) if the purchase "
+            "order item uses goods-receipt-based invoice verification (InvoiceIsGoodsReceiptBased)."
+        ),
         max_length=10,
     )
     reference_document_fiscal_year: str | None = Field(
@@ -7450,7 +7462,8 @@ class SAPSupplierInvoiceModel(SAPODataCreateModel):
     order items (`purchase_order_items`) and / or posted to G/L accounts
     (`gl_account_items`), materials (`material_items`) or fixed assets
     (`asset_items`). Instead of giving the items, purchase orders, delivery notes or
-    service entry sheets can be selected - SAP then proposes their open items.
+    service entry sheets can be selected - SAP then proposes their open items (only when
+    the invoice is posted directly, not together with `purchase_order_items`).
     The invoice is posted directly or parked (`status` 'A') and posted later
     (SAP.post_supplier_invoice()). The invoice number and fiscal year are assigned by SAP.
 
@@ -7691,7 +7704,11 @@ class SAPSupplierInvoiceModel(SAPODataCreateModel):
     purchase_order_items: Annotated[list[SAPSupplierInvoicePurchaseOrderItemModel], unique_numbers("item")] = Field(
         default_factory=list,
         alias="to_SuplrInvcItemPurOrdRef",
-        description="Items that refer to purchase order items. Item numbers must be unique.",
+        description=(
+            "Items that refer to purchase order items. Item numbers must be unique. Give either these items or "
+            "selected documents (selected_purchase_orders, selected_delivery_notes or "
+            "selected_service_entry_sheets) - SAP rejects an invoice with both."
+        ),
         exclude_if=is_empty,
     )
     gl_account_items: Annotated[list[SAPSupplierInvoiceGLAccountItemModel], unique_numbers("item")] = Field(
@@ -7727,7 +7744,10 @@ class SAPSupplierInvoiceModel(SAPODataCreateModel):
     selected_purchase_orders: list[SAPSupplierInvoiceSelectedPurchaseOrderModel] = Field(
         default_factory=list,
         alias="to_SelectedPurchaseOrders",
-        description="Purchase orders (items) whose open items SAP proposes as invoice items - instead of `purchase_order_items`.",
+        description=(
+            "Purchase orders (items) whose open items SAP proposes as invoice items - instead of "
+            "`purchase_order_items`, only for invoices that are posted directly (a parked invoice gets no items)."
+        ),
         exclude_if=is_empty,
     )
     selected_delivery_notes: list[SAPSupplierInvoiceSelectedDeliveryNoteModel] = Field(
@@ -7795,6 +7815,37 @@ class SAPSupplierInvoiceModel(SAPODataCreateModel):
             message = (
                 "A supplier invoice needs items (purchase order, G/L account, material or asset items) or selected "
                 "purchase orders, delivery notes or service entry sheets"
+            )
+            raise ValueError(message)
+
+        return self
+
+    # end method definition
+
+    @model_validator(mode="after")
+    def check_selected_documents(self) -> Self:
+        """Validate the selected purchase orders, delivery notes and service entry sheets.
+
+        Verified in S/4HANA: SAP rejects selected documents together with purchase order items
+        (M8/742 "Table 'to_SuplrInvcItemPurOrdRef' must not be filled"), and a parked invoice with
+        selected documents is saved without items - it can't be posted later (M8/063).
+
+        """
+
+        if not (self.selected_purchase_orders or self.selected_delivery_notes or self.selected_service_entry_sheets):
+            return self
+
+        if self.purchase_order_items:
+            message = (
+                "Give either purchase_order_items or selected purchase orders / delivery notes / service entry "
+                "sheets - SAP rejects both together (M8/742)"
+            )
+            raise ValueError(message)
+        if self.status == "A":
+            message = (
+                "A parked invoice (status 'A') gets no items from selected purchase orders / delivery notes / service "
+                "entry sheets - give purchase_order_items (with the goods receipt as reference_document for "
+                "goods-receipt-based invoice verification) or post the invoice directly"
             )
             raise ValueError(message)
 
@@ -8809,6 +8860,152 @@ class SAPGoodsMovementItemQueryModel(SAPODataQueryModel):
     documents: Annotated[list[SAPCode] | None, ODataCondition("MaterialDocument")] = Field(
         default=None, description="Material document numbers, e.g. ['4900000123']."
     )
+
+
+# ---------------------------------------------------------------------------
+# Material stock (API_MATERIAL_STOCK_SRV, OData V2)
+# ---------------------------------------------------------------------------
+
+# The stock types of the material stock (InventoryStockType, domain NSDM_LBBSA):
+SAP_INVENTORY_STOCK_TYPES: dict[str, str] = {
+    "01": "Unrestricted-Use Stock",
+    "02": "Stock in Quality Inspection",
+    "03": "Returns",
+    "04": "Stock Transfer (Storage Location)",
+    "05": "Stock Transfer (Plant)",
+    "06": "Stock in Transit",
+    "07": "Blocked Stock",
+    "08": "Restricted-Use Stock",
+    "09": "Tied Empties",
+    "10": "Valuated Goods Receipt Blocked Stock",
+}
+
+
+class SAPMaterialStockResponseModel(SAPODataModel):
+    """The stock of a material in one stock segment as returned by SAP (API_MATERIAL_STOCK_SRV, A_MatlStkInAcctMod).
+
+    A stock segment is the combination of plant, storage location, batch, stock type and special
+    stock (e.g. consignment stock of a supplier or the stock of a sales order). SAP keeps segments
+    with a quantity of 0 (e.g. after the stock has been issued) - see SAPMaterialStockQueryModel.include_zero.
+
+    """
+
+    material: str = Field(alias="Material", description="Material (product) number; see get_products().")
+    plant: str = Field(alias="Plant", description="Plant of the stock; see get_plants().")
+    storage_location: str | None = Field(
+        default=None,
+        alias="StorageLocation",
+        description="Storage location of the stock - empty for stock that is not kept in a storage location (e.g. in transit).",
+    )
+    batch: str | None = Field(
+        default=None, alias="Batch", description="Batch of the stock (batch-managed materials only)."
+    )
+    stock_type: str | None = Field(
+        default=None,
+        alias="InventoryStockType",
+        description="Stock type, e.g. '01' (unrestricted-use), '02' (quality inspection), '07' (blocked); see stock_type_name.",
+    )
+    special_stock_type: str | None = Field(
+        default=None,
+        alias="InventorySpecialStockType",
+        description="Special stock type, e.g. 'K' (supplier consignment), 'E' (sales order stock), 'Q' (project stock) - empty for own stock.",
+    )
+    supplier: str | None = Field(
+        default=None, alias="Supplier", description="Supplier of special stock (e.g. consignment stock)."
+    )
+    customer: str | None = Field(
+        default=None, alias="Customer", description="Customer of special stock (e.g. customer consignment)."
+    )
+    sales_order: str | None = Field(
+        default=None, alias="SDDocument", description="Sales order of sales order stock (special stock 'E')."
+    )
+    sales_order_item: str | None = Field(
+        default=None, alias="SDDocumentItem", description="Sales order item of sales order stock."
+    )
+    wbs_element_internal_id: str | None = Field(
+        default=None, alias="WBSElementInternalID", description="Internal ID of the WBS element of project stock."
+    )
+    quantity: SAPDecimal | None = Field(
+        default=None, alias="MatlWrhsStkQtyInMatlBaseUnit", description="Stock quantity in the base unit."
+    )
+    base_unit: str | None = Field(
+        default=None, alias="MaterialBaseUnit", description="Base unit of the material (English unit code, e.g. 'PC')."
+    )
+
+    @field_validator("wbs_element_internal_id", "sales_order_item", mode="before")
+    @classmethod
+    def check_initial_numbers(cls, value: str | None) -> str | None:
+        """SAP returns '0' / '000...0' for stock without WBS element or sales order item - read it as None."""
+
+        return value if value and value.strip("0") else None
+
+    # end method definition
+
+    @computed_field
+    @property
+    def stock_type_name(self) -> str | None:
+        """Return the name of the stock type, e.g. 'Blocked Stock'."""
+
+        return SAP_INVENTORY_STOCK_TYPES.get(self.stock_type or "", self.stock_type)
+
+    # end method definition
+
+
+class SAPMaterialStockQueryModel(SAPODataQueryModel):
+    """Search criteria for the SAP material stock (API_MATERIAL_STOCK_SRV, A_MatlStkInAcctMod)."""
+
+    SORT_PROPERTIES: ClassVar[dict[str, str]] = {
+        "material": "Material {direction},Plant asc,StorageLocation asc,Batch asc,InventoryStockType asc",
+    }
+    sort_by: Literal["material"] = Field(default="material", description="Sort criterion.")
+    sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
+    materials: Annotated[list[SAPCode] | None, ODataCondition("Material")] = Field(
+        default=None, description="Materials (products), e.g. ['R-9010']."
+    )
+    plants: Annotated[list[SAPCode] | None, ODataCondition("Plant")] = Field(
+        default=None, description="Plants, e.g. ['3000']."
+    )
+    storage_locations: Annotated[list[SAPCode] | None, ODataCondition("StorageLocation")] = Field(
+        default=None, description="Storage locations, e.g. ['0001']."
+    )
+    batches: Annotated[list[SAPCode] | None, ODataCondition("Batch")] = Field(
+        default=None, description="Batches, e.g. ['SL2024-07B']."
+    )
+    stock_types: Annotated[list[SAPCode] | None, ODataCondition("InventoryStockType")] = Field(
+        default=None, description="Stock types, e.g. ['01'] (unrestricted-use), ['07'] (blocked)."
+    )
+    special_stock_types: Annotated[list[SAPCode] | None, ODataCondition("InventorySpecialStockType")] = Field(
+        default=None, description="Special stock types, e.g. ['K'] (supplier consignment), [''] = own stock only."
+    )
+    include_zero: bool = Field(
+        default=False,
+        description="Also return stock segments with a quantity of 0 - SAP keeps them e.g. after the stock has been issued.",
+    )
+
+    def to_odata(self, odata_version: int) -> dict:
+        """Return the OData query options - without the segments of quantity 0 unless include_zero is set.
+
+        The segments without stock are filtered by SAP, so that the limit and the paging only count
+        segments with stock (in S/4HANA most segments of a plant can have a quantity of 0).
+
+        Args:
+            odata_version (int):
+                The OData version of the service (2 or 4).
+
+        Returns:
+            dict:
+                The query options ($filter, $orderby).
+
+        """
+
+        params = super().to_odata(odata_version=odata_version)
+        if not self.include_zero:
+            condition = "MatlWrhsStkQtyInMatlBaseUnit ne {}".format("0M" if odata_version == 2 else "0")
+            params["$filter"] = "{} and {}".format(params["$filter"], condition) if "$filter" in params else condition
+
+        return params
+
+    # end method definition
 
 
 # ---------------------------------------------------------------------------
@@ -11172,7 +11369,10 @@ class SAPProductPlantModel(SAPODataCreateModel):
     is_batch_managed: bool | None = Field(
         default=None,
         alias="IsBatchManagementRequired",
-        description="True if the product is managed in batches in this plant.",
+        description=(
+            "True if the product is managed in batches in this plant. SAP needs it on the product as well "
+            "(is_batch_managed of the product) and allows to change it only as long as there is no stock."
+        ),
     )
     storage_locations: Annotated[list[SAPProductStorageLocationModel], unique_numbers("storage_location")] = Field(
         default_factory=list,
@@ -11395,6 +11595,15 @@ class SAPProductModel(SAPODataCreateModel):
         description="Part number of the manufacturer (order number in the manufacturer's catalog). SAP stores it in upper case.",
         max_length=40,
     )
+    is_batch_managed: bool | None = Field(
+        default=None,
+        alias="IsBatchManagementRequired",
+        description=(
+            "True if the product is managed in batches (e.g. to trace defective deliveries). SAP needs it on the "
+            "product and in each plant - it is passed on to the plants of the product that don't set it. Can "
+            "only be changed as long as there is no stock of the product."
+        ),
+    )
     descriptions: list[SAPProductDescriptionModel] = Field(
         default_factory=list,
         alias="to_Description",
@@ -11427,6 +11636,20 @@ class SAPProductModel(SAPODataCreateModel):
                 raise ValueError(message)
         for plant in self.plants:
             plant.assign_product_id(self.product_id)
+
+        return self
+
+    # end method definition
+
+    @model_validator(mode="after")
+    def check_batch_management(self) -> Self:
+        """Set batch management on the product and its plants - SAP needs it on both levels."""
+
+        if self.is_batch_managed is None and any(plant.is_batch_managed for plant in self.plants):
+            self.is_batch_managed = True
+        for plant in self.plants:
+            if plant.is_batch_managed is None:
+                plant.is_batch_managed = self.is_batch_managed
 
         return self
 
@@ -11532,7 +11755,10 @@ class SAPProductPlantResponseModel(SAPODataModel):
     is_batch_managed: bool | None = Field(
         default=None,
         alias="IsBatchManagementRequired",
-        description="True if the product is managed in batches in this plant.",
+        description=(
+            "True if the product is managed in batches in this plant. SAP needs it on the product as well "
+            "(is_batch_managed of the product) and allows to change it only as long as there is no stock."
+        ),
     )
     is_marked_for_deletion: bool | None = Field(
         default=None,
@@ -11594,6 +11820,11 @@ class SAPProductResponseModel(SAPODataModel):
     )
     manufacturer_part_number: str | None = Field(
         default=None, alias="ProductManufacturerNumber", description="Part number of the manufacturer."
+    )
+    is_batch_managed: bool | None = Field(
+        default=None,
+        alias="IsBatchManagementRequired",
+        description="True if the product is managed in batches (see also the plant data).",
     )
     is_marked_for_deletion: bool | None = Field(
         default=None, alias="IsMarkedForDeletion", description="True if the product is marked for deletion."
@@ -11660,6 +11891,9 @@ class SAPProductQueryModel(SAPODataQueryModel):
     )
     product_groups: Annotated[list[SAPCode] | None, ODataCondition("ProductGroup")] = Field(
         default=None, description="Product (material) groups."
+    )
+    is_batch_managed: Annotated[bool | None, ODataCondition("IsBatchManagementRequired")] = Field(
+        default=None, description="True = only products managed in batches, False = only products without batches."
     )
     is_marked_for_deletion: Annotated[bool | None, ODataCondition("IsMarkedForDeletion")] = Field(
         default=None, description="True = only products marked for deletion, False = only active products."

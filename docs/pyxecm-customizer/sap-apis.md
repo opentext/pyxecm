@@ -98,9 +98,10 @@ and `get_sap_key_fields()` converts a business object ID (SAP's internal format,
 
 ### Inventory Management
 
-| Service                     | BO Type   | Version | Entity Sets                                          | Purpose                                                     |
-| --------------------------- | --------- | ------- | ---------------------------------------------------- | ----------------------------------------------------------- |
-| `API_MATERIAL_DOCUMENT_SRV` | `BUS2017` | V2      | `A_MaterialDocumentHeader`, `A_MaterialDocumentItem` | Create / Read / Cancel goods movements (material documents) |
+| Service                     | BO Type   | Version | Entity Sets                                          | Purpose                                                          |
+| --------------------------- | --------- | ------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| `API_MATERIAL_DOCUMENT_SRV` | `BUS2017` | V2      | `A_MaterialDocumentHeader`, `A_MaterialDocumentItem` | Create / Read / Cancel goods movements (material documents)      |
+| `API_MATERIAL_STOCK_SRV`    | -         | V2      | `A_MaterialStock`, `A_MatlStkInAcctMod`              | Read the stock per plant, storage location, batch and stock type |
 
 ### Production
 

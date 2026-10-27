@@ -42,7 +42,7 @@ OData V2 - activate in /IWFND/MAINT_SERVICE ("Add Service", see above):
   API_MAINTORDERCONFIRMATION, API_MAINTENANCEPLAN
 * Sales: API_SALES_ORDER_SRV, API_SALES_CONTRACT_SRV
 * Purchasing: API_PURCHASECONTRACT_PROCESS_SRV
-* Inventory Management: API_MATERIAL_DOCUMENT_SRV
+* Inventory Management: API_MATERIAL_DOCUMENT_SRV, API_MATERIAL_STOCK_SRV
 * Production: API_PRODUCTION_ORDER_2_SRV
 * Master data: API_PRODUCT_SRV, API_STORAGELOCATION_SRV, API_WORK_CENTERS,
   API_EQUIPMENT, API_FUNCTIONALLOCATION, API_BUSINESS_PARTNER, API_COMPANYCODE_SRV,
@@ -204,6 +204,8 @@ from .sap_models import (
     SAPMaterialBOMModel,
     SAPMaterialBOMQueryModel,
     SAPMaterialBOMResponseModel,
+    SAPMaterialStockQueryModel,
+    SAPMaterialStockResponseModel,
     SAPODataCreateModel,
     SAPODataErrorModel,
     SAPODataModel,
@@ -512,6 +514,14 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         oauth_scope="ZAPI_MATERIAL_DOCUMENT_SRV_0001",
         entity_sets=["A_MaterialDocumentHeader", "A_MaterialDocumentItem"],
         description="Inventory Management - Goods Movement / Material Document (Create, Read, Cancel)",
+    ),
+    "API_MATERIAL_STOCK_SRV": SAPODataServiceModel(
+        name="API_MATERIAL_STOCK_SRV",
+        path="/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_MATERIAL_STOCK_SRV_0001",
+        entity_sets=["A_MaterialStock", "A_MatlStkInAcctMod"],
+        description="Inventory Management - Material Stock (Read)",
     ),
     # RAP based services, published as OData V2:
     "API_MAINTORDERCONFIRMATION": SAPODataServiceModel(
@@ -7683,6 +7693,35 @@ class SAP:
 
     # end method definition
 
+    def get_goods_movement_items(
+        self, query: SAPGoodsMovementItemQueryModel | None = None
+    ) -> list[SAPGoodsMovementItemResponseModel] | None:
+        """Get SAP material document items as a list.
+
+        All matching items are read (page by page, see iter_goods_movement_items()) and returned at once.
+
+        Args:
+            query (SAPGoodsMovementItemQueryModel | None, optional):
+                The search criteria, e.g. the purchase orders and movement types of the items.
+                Defaults to None (all items).
+
+        Returns:
+            list[SAPGoodsMovementItemResponseModel] | None:
+                The material document items (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_goods_movement_items(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP material document items.", len(results))
+
+        return results
+
+    # end method definition
+
     def get_goods_movements(
         self, query: SAPGoodsMovementQueryModel | None = None
     ) -> list[SAPGoodsMovementResponseModel] | None:
@@ -7787,6 +7826,67 @@ class SAP:
                 document, document_year, " item " + item if item else ""
             ),
         )
+
+    # end method definition
+
+    def iter_material_stock(
+        self, query: SAPMaterialStockQueryModel | None = None
+    ) -> SAPODataIterator[SAPMaterialStockResponseModel]:
+        """Iterate over the SAP material stock - reading it page by page from SAP.
+
+        Each entry is the stock of a material in one stock segment (plant, storage location,
+        batch, stock type and special stock). Use this for large result sets: only one page is
+        held in memory at a time. Errors are logged and end the iteration (check the 'failed'
+        attribute of the returned iterator afterwards).
+
+        Args:
+            query (SAPMaterialStockQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all stock
+                except segments with a quantity of 0).
+
+        Returns:
+            SAPODataIterator[SAPMaterialStockResponseModel]:
+                The iterator over the stock segments.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_MATERIAL_STOCK_SRV",
+            entity_set="A_MatlStkInAcctMod",
+            model=SAPMaterialStockResponseModel,
+            query=query or SAPMaterialStockQueryModel(),
+            label="material stock",
+        )
+
+    # end method definition
+
+    def get_material_stock(
+        self, query: SAPMaterialStockQueryModel | None = None
+    ) -> list[SAPMaterialStockResponseModel] | None:
+        """Get the SAP material stock as a list of stock segments.
+
+        All matching stock segments are read (page by page, see iter_material_stock()) and returned
+        at once. For very large result sets prefer iter_material_stock().
+
+        Args:
+            query (SAPMaterialStockQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all stock
+                except segments with a quantity of 0).
+
+        Returns:
+            list[SAPMaterialStockResponseModel] | None:
+                The stock segments (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_material_stock(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP material stock segments.", len(results))
+
+        return results
 
     # end method definition
 

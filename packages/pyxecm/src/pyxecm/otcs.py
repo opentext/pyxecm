@@ -6661,6 +6661,10 @@ class OTCS:
     ) -> dict | None:
         """Get a node based on the node ID.
 
+        Workspace type (verified with OTCM 26.4): for a business workspace the properties have the
+        workspace type name ("wksp_type_name"), but no workspace type ID - and this REST API does not
+        support business properties. Use get_workspace() with "business_properties" for the ID.
+
         Args:
             node_id (int):
                 The ID of the node to retrieve.
@@ -7369,6 +7373,12 @@ class OTCS:
         metadata: bool = False,
     ) -> dict | None:
         """Get the subnodes of a given parent node ID.
+
+        Workspace type (verified with OTCM 26.4): business workspaces in the subnodes have the workspace
+        type name ("wksp_type_name") in their properties, but no workspace type ID - not even if requested
+        with "properties{wnf_wksp_type_id}". Use get_workspace() with "business_properties" for the ID.
+
+        REST API endpoint: GET /api/v1/nodes/{parent_node_id}/subnodes
 
         Args:
             parent_node_id (int):
@@ -15089,7 +15099,18 @@ class OTCS:
     ) -> dict | None:
         """Get a workspace based on the node ID.
 
-        REST endpoint: /v2/businessworkspaces
+        REST endpoint: /v2/businessworkspaces/{node_id}
+
+        Workspace type (verified with OTCM 26.4): the properties have the workspace type NAME
+        ("wksp_type_name"), but never the workspace type ID - not even if requested with
+        "properties{wnf_wksp_type_id}" (unlike get_workspace_by_type_and_name() and
+        get_workspace_relationships()). The ID is only in the business properties
+        ("business_properties" -> "workspace_type_id"). They are delivered for all workspaces (also
+        for workspaces without business objects) if "business_properties" is in `fields` (it can be
+        narrowed, e.g. "business_properties{workspace_type_id}") or if `fields` is empty. So the default
+        `fields="properties"` delivers no type ID. NOTE: the "workspace_type_name" of the business
+        properties is not always the name of the workspace type (e.g. "Project" for the workspace type
+        "SAP PPM Project") - use "wksp_type_name" of the properties for the name.
 
         Args:
             node_id (int):
@@ -15103,6 +15124,8 @@ class OTCS:
                 - "business_properties" (all the information for the business object and the external system)
                   NOTE: this delivers only one business object per workspace. If there are multiple business objects connected to the workspace
                   only the first one will be returned. Use "workspace_references" to get all connected business objects.
+                  It is also the only place where this REST API delivers the workspace type ID ("workspace_type_id",
+                  see above).
                 - "categories" (the category data of the workspace item)
                 - "workspace_references" (a list with the references to business objects in external systems)
                 - "display_urls" (a list with the URLs to external business systems)
@@ -15407,6 +15430,11 @@ class OTCS:
         Returning a generator avoids loading a large number of workspace instances
         at once. Instead you can iterate over the potential large list of subnodes.
 
+        Workspace type (verified with OTCM 26.4): each workspace instance has the workspace type ID in
+        its properties ("wnf_wksp_type_id") - with narrowed `fields` only if they include it, e.g.
+        "properties{id,name,wnf_wksp_type_id}". It has no workspace type name ("wksp_type_name"). See
+        get_workspace_by_type_and_name() for the details.
+
         Example usage:
             ```python
             workspace_instances = otcs_object.get_workspace_instances_iterator(type_id=2)
@@ -15600,10 +15628,20 @@ class OTCS:
         either as the type ID or the type name.
 
         The REST API endpoint of this method is /v2/businessworkspaces
+
         This API is behaving different from normal node / workspace API.
         Especially the fields and metadata deliver a non-standard format.
         fields=categories seems to not deliver the actual category data.
         If you want category data you should use get_workspace() method instead.
+
+        Workspace type (verified with OTCM 26.4): each workspace has the workspace type ID in its
+        properties ("wnf_wksp_type_id") - with narrowed `fields` only if they include it, e.g.
+        "properties{id,name,wnf_wksp_type_id}" (with `fields` this method requests only the given
+        properties - `action=properties-`; without it OTCS would ignore the narrowing and deliver all
+        properties). The properties have NO workspace type name: "wksp_type_name" is not delivered, and
+        "wnf_wksp_type_formatted" is not always the name of the workspace type (e.g. "Project" for the
+        workspace type "SAP PPM Project") - resolve the name from the ID, e.g. with
+        get_workspace_type_name(). This REST API does not deliver business properties.
 
         Args:
             type_name (str, optional):
@@ -16785,6 +16823,15 @@ class OTCS:
 
         REST API endpoint of this method is /v2/businessworkspaces/{id}/relateditems
 
+        Workspace type (verified with OTCM 26.4): each related workspace has the workspace type ID in its
+        properties ("wnf_wksp_type_id") - with narrowed `fields` only if they include it, e.g.
+        "properties{id,wnf_wksp_type_id,rel_type}" (with `fields` this method requests only the given
+        properties - `action=properties-`; without it OTCS would ignore the narrowing and deliver all
+        properties). The properties have NO workspace type name: "wksp_type_name" is not delivered, and
+        "wnf_wksp_type_formatted" is not always the name of the workspace type (e.g. "Project" for the
+        workspace type "SAP PPM Project") - resolve the name from the ID, e.g. with
+        get_workspace_type_name(). This REST API does not deliver business properties.
+
         Args:
             workspace_id (int):
                 The ID of the workspace.
@@ -17018,6 +17065,11 @@ class OTCS:
 
         Using a generator avoids loading a large number of nodes into memory at once.
         Instead you can iterate over the potential large list of related workspaces.
+
+        Workspace type (verified with OTCM 26.4): each related workspace has the workspace type ID in its
+        properties ("wnf_wksp_type_id") - with narrowed `fields` only if they include it, e.g.
+        "properties{id,wnf_wksp_type_id,rel_type}". It has no workspace type name ("wksp_type_name").
+        See get_workspace_relationships() for the details.
 
         Example usage:
             ```python
@@ -25719,14 +25771,30 @@ class OTCS:
             workspace_node_id = self.get_result_value(response=workspace_node, key="id")
         elif isinstance(workspace_node, int):
             workspace_node_id = workspace_node
-            workspace_node = self.get_workspace(node_id=workspace_node_id, fields=fields, metadata=metadata)
+            # Unlike the workspace instances and related workspaces, get_workspace() has the workspace type ID
+            # only in the business properties (see get_workspace()) - so they are requested as well. Without
+            # fields, get_workspace() delivers all field groups (including the business properties):
+            workspace_node = self.get_workspace(
+                node_id=workspace_node_id,
+                fields=[*(fields if isinstance(fields, list) else [fields]), "business_properties{workspace_type_id}"]
+                if fields
+                else fields,
+                metadata=metadata,
+            )
         else:
             self.logger.error("Illegal type of workspace node parameter. Expect 'int' or 'dict'!")
             return {"processed": processed, "traversed": traversed}
 
         workspace_name = self.get_result_value(response=workspace_node, key="name")
-        workspace_type_id = self.get_result_value(response=workspace_node, key="wnf_wksp_type_id")
-        workspace_type_name = self.get_workspace_type_name(type_id=workspace_type_id)
+        workspace_type_id = self.get_result_value(response=workspace_node, key="wnf_wksp_type_id", show_error=False)
+        if workspace_type_id is None:
+            # If we don't get the workspace type ID from the standard field, try the business properties:
+            workspace_type_id = self.get_result_value(
+                response=workspace_node, key="workspace_type_id", property_name="business_properties", show_error=False
+            )
+        workspace_type_name = (
+            self.get_workspace_type_name(type_id=workspace_type_id) if workspace_type_id is not None else None
+        )
 
         if workspace_node_id in processed_workspaces:
             self.logger.info(
@@ -25741,7 +25809,7 @@ class OTCS:
         processed_workspaces[workspace_node_id] = workspace_name
 
         self.logger.info(
-            "Processing workspace -> '%s' (%s) of type -> '%s' (%d) in depth -> %d",
+            "Processing workspace -> '%s' (%s) of type -> '%s' (%s) in depth -> %d",
             workspace_name,
             workspace_node_id,
             workspace_type_name,

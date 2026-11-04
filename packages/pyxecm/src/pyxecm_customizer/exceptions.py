@@ -21,6 +21,20 @@ class StopOnError(Exception):
         super().__init__(message)
 
 
+class WaitTimeoutError(Exception):
+    """Custom exception if a service / pod did not become ready within the configured timeout."""
+
+    def __init__(self, message: str) -> None:
+        """Initialize the WaitTimeoutError with a message.
+
+        Args:
+            message (str):
+                The error message.
+
+        """
+        super().__init__(message)
+
+
 class PayloadImportError(Exception):
     """Custom exception if the import of the payload failed."""
 

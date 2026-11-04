@@ -831,6 +831,11 @@ class PayloadList:
                         name=payload_item["name"],
                         logfile_path=payload_item["logfile"],
                     )
+                if completed_item["status"] == "failed":
+                    # Pods restart and logs rotate soon after - capture them now for the analysis.
+                    self.manager_push.push_failure_snapshot(
+                        payload_index=int(payload_item["index"]), reason="payload failed"
+                    )
 
         # end  def run_and_complete_payload()
 

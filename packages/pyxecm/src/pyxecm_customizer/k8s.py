@@ -36,6 +36,8 @@ from kubernetes.client.exceptions import ApiException
 from kubernetes.config.config_exception import ConfigException
 from kubernetes.stream import stream
 
+from .wait import WaitBudget, wait_until
+
 default_logger = logging.getLogger("pyxecm_customizer.k8s")
 
 
@@ -263,7 +265,9 @@ class K8s:
         pod_name: str,
         condition_name: str,
         sleep_time: int = 30,
-    ) -> None:
+        timeout: int = 0,
+        budget: WaitBudget | None = None,
+    ) -> bool:
         """Wait for the pod to reach a defined condition (e.g. "Ready").
 
         Args:
@@ -273,45 +277,97 @@ class K8s:
                 The name of the condition, e.g. "Ready".
             sleep_time (int, optional):
                 The number of seconds to wait between repetitive status checks. Defaults to 30.
+            timeout (int, optional):
+                The maximum number of seconds to wait. 0 = wait forever. Defaults to 0.
+            budget (WaitBudget | None, optional):
+                Optional budget of waiting time shared with other waits. Defaults to None.
 
         Returns:
-            None
+            bool:
+                True if the pod reached the condition, False if the timeout was reached.
 
         """
 
-        ready = False
-        while not ready:
+        def is_in_condition() -> bool:
             try:
                 pod_status = self.get_core_v1_api().read_namespaced_pod_status(
                     pod_name,
                     self.get_namespace(),
                 )
-
-                # Check if the pod has reached the defined condition:
-                for cond in pod_status.status.conditions:
-                    if cond.type == condition_name and cond.status == "True":
-                        self.logger.info(
-                            "Pod -> '%s' is in state -> '%s'!",
-                            pod_name,
-                            condition_name,
-                        )
-                        ready = True
-                        break
-                else:
-                    self.logger.info(
-                        "Pod -> '%s' is not yet in state -> '%s'. Waiting...",
-                        pod_name,
-                        condition_name,
-                    )
-                    time.sleep(sleep_time)
-                    continue
-
             except ApiException:
                 self.logger.error(
-                    "Failed to wait for pod -> '%s' to reach state -> '%s'.",
+                    "Failed to get status of pod -> '%s' while waiting for state -> '%s'.",
                     pod_name,
                     condition_name,
                 )
+                return False
+
+            return any(
+                cond.type == condition_name and cond.status == "True" for cond in pod_status.status.conditions or []
+            )
+
+        ready = wait_until(
+            check=is_in_condition,
+            what=f"Pod -> '{pod_name}' (state -> '{condition_name}')",
+            timeout=timeout,
+            interval=sleep_time,
+            budget=budget,
+            on_timeout=lambda: self.log_pod_diagnostics(pod_name),
+            logger=self.logger,
+        )
+        if ready:
+            self.logger.info("Pod -> '%s' is in state -> '%s'!", pod_name, condition_name)
+
+        return bool(ready)
+
+    # end method definition
+
+    def log_pod_diagnostics(self, pod_name: str) -> None:
+        """Log status details of a pod to help identifying why it does not become ready.
+
+        Args:
+            pod_name (str):
+                The name of the Kubernetes pod in the current namespace.
+
+        """
+
+        pod = self.get_pod(pod_name=pod_name)
+        if not pod or not pod.status:
+            self.logger.error("Diagnostics: pod -> '%s' not found or has no status!", pod_name)
+            return
+
+        status = pod.status
+        self.logger.error("Diagnostics: pod -> '%s' is in phase -> '%s'.", pod_name, status.phase)
+        for cond in status.conditions or []:
+            if cond.status != "True":
+                self.logger.error(
+                    "Diagnostics: pod -> '%s' condition -> '%s' is '%s' (reason -> '%s', message -> '%s').",
+                    pod_name,
+                    cond.type,
+                    cond.status,
+                    cond.reason,
+                    cond.message,
+                )
+        for cs in (status.init_container_statuses or []) + (status.container_statuses or []):
+            state = cs.state
+            if state and state.waiting:
+                state_text = f"waiting (reason -> '{state.waiting.reason}', message -> '{state.waiting.message}')"
+            elif state and state.terminated:
+                state_text = (
+                    f"terminated (reason -> '{state.terminated.reason}', exit code -> {state.terminated.exit_code})"
+                )
+            else:
+                state_text = "running"
+            last = cs.last_state.terminated if cs.last_state else None
+            self.logger.error(
+                "Diagnostics: container -> '%s' of pod -> '%s' is %s, ready -> %s, restarts -> %s%s.",
+                cs.name,
+                pod_name,
+                state_text,
+                cs.ready,
+                cs.restart_count,
+                (f", last termination reason -> '{last.reason}' (exit code -> {last.exit_code})" if last else ""),
+            )
 
     # end method definition
 
@@ -1431,16 +1487,9 @@ class K8s:
         wait_timeout: int = 1800,
         endpoint_service_name: str | None = None,
     ) -> bool:
-        """Enterprise-grade zero-downtime rolling restart of a stateful set.
+        """Trigger a Kubernetes rolling restart and optionally wait for completion.
 
-        Guarantees:
-        - Zero-downtime traffic handling (via readiness probes)
-        - Kubernetes-native rollout
-        - Deterministic state transitions
-        - Traffic draining via Service endpoints
-        - Readiness-gated pod rotation
-        - Failure detection
-        - Rollout completion validation
+        Availability depends on replica counts, readiness probes and application dependencies.
 
         Args:
             sts_name (str):
@@ -1448,13 +1497,39 @@ class K8s:
             wait (bool, optional):
                 Whether to wait for rollout completion. Defaults to True.
             wait_timeout (int, optional):
-                Max seconds to wait. Defaults to 1800.
+                Max seconds to wait, including endpoint registration. 0 = unlimited. Defaults to 1800.
             endpoint_service_name (str | None, optional):
                 Service name for endpoint gating. Defaults to None (no endpoint gating).
 
         Returns:
             bool:
                 True if successful, False otherwise
+
+        """
+
+        sts = self.trigger_stateful_set_restart(sts_name)
+        if sts is None:
+            return False
+        if not wait:
+            return True
+        return self.wait_stateful_set_restarts(
+            {sts_name: sts},
+            endpoint_services={sts_name: endpoint_service_name} if endpoint_service_name else None,
+            timeout=wait_timeout,
+        )
+
+    # end method definition
+
+    def trigger_stateful_set_restart(self, sts_name: str) -> V1StatefulSet | None:
+        """Patch a StatefulSet to start a rollout without waiting for its pods.
+
+        Args:
+            sts_name (str):
+                Name of the StatefulSet.
+
+        Returns:
+            V1StatefulSet | None:
+                Patched StatefulSet containing the target generation, or None on failure.
 
         """
 
@@ -1467,9 +1542,16 @@ class K8s:
         sts = self.get_stateful_set(sts_name)
         if not sts:
             self.logger.error("Stateful set -> '%s' not found!", sts_name)
-            return False
+            return None
 
         replicas = sts.spec.replicas or 0
+
+        strategy = sts.spec.update_strategy
+        if strategy and (
+            strategy.type == "OnDelete" or (strategy.rolling_update and (strategy.rolling_update.partition or 0) > 0)
+        ):
+            self.logger.error("Stateful set -> '%s' does not allow an automatic full rolling restart!", sts_name)
+            return None
 
         # ------------------------------------------------------------------
         # Safety checks
@@ -1494,165 +1576,123 @@ class K8s:
                     container.name,
                     sts_name,
                 )
-                return False
+                return None
         # end for container in containers
 
         # ------------------------------------------------------------------
         # Trigger rolling restart via annotation
         # ------------------------------------------------------------------
 
-        now = datetime.now(UTC).isoformat(timespec="seconds") + "Z"
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
 
         patch_body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
 
         sts = self.patch_stateful_set(sts_name, patch_body)
         if not sts:
             self.logger.error("Failed to trigger rolling restart for stateful set -> '%s'", sts_name)
-            return False
+            return None
 
         self.logger.info("Rolling restart triggered for stateful set -> '%s'", sts_name)
 
-        if not wait:
-            return True
+        return sts
 
-        target_generation = sts.metadata.generation
-        self.logger.debug("Rollout triggered. Target generation -> %s", target_generation)
+    # end method definition
 
-        # ------------------------------------------------------------------
-        # Rollout monitoring
-        # ------------------------------------------------------------------
+    def wait_stateful_set_restarts(
+        self,
+        targets: dict[str, V1StatefulSet],
+        endpoint_services: dict[str, str] | None = None,
+        timeout: int = 1800,
+        interval: int = 30,
+        budget: WaitBudget | None = None,
+    ) -> bool:
+        """Monitor already-triggered rollouts together, without worker threads.
 
-        start_time = time.time()
-        last_logged_revision = None
-        wait_time = 3
+        Args:
+            targets (dict[str, V1StatefulSet]):
+                StatefulSet names and the patch responses recording their target generations.
+            endpoint_services (dict[str, str] | None, optional):
+                Optional service name for each StatefulSet requiring endpoint validation.
+            timeout (int, optional):
+                Shared timeout for rollout and endpoint checks. 0 = unlimited. Defaults to 1800.
+            interval (int, optional):
+                Seconds between checks. Defaults to 30.
+            budget (WaitBudget | None, optional):
+                Shared customizer wait budget, charged once for the whole group.
 
-        while True:
-            # Avoid tight loop
-            time.sleep(wait_time)
+        Returns:
+            bool:
+                True when all rollouts and endpoint checks succeed, False on timeout.
 
-            elapsed = time.time() - start_time
-            if elapsed > wait_timeout:
-                self.logger.error(
-                    "Timeout waiting for rolling restart of stateful set -> '%s'",
-                    sts_name,
-                )
-                return False
+        """
 
-            sts = self.get_stateful_set(sts_name)
-            if not sts:
-                self.logger.warning("Stateful set -> '%s' not found during rollout monitoring. Retrying...", sts_name)
-                continue
+        pending = dict(targets)
 
-            # The ONLY reliable way to know if the loop is seeing the NEW rollout
-            if (sts.status.observed_generation or 0) < target_generation:
-                self.logger.debug(
-                    "Kubernetes controller hasn't processed the new generation -> %s yet...", target_generation
-                )
-                continue
+        def check() -> bool:
+            for name, target in list(pending.items()):
+                try:
+                    sts = self.get_stateful_set(name)
+                    if not sts or not sts.status:
+                        continue
+                    status = sts.status
+                    desired = sts.spec.replicas or 0
+                    if (
+                        (status.observed_generation or 0) < target.metadata.generation
+                        or (status.ready_replicas or 0) != desired
+                        or (status.updated_replicas or 0) != desired
+                        or (status.available_replicas or 0) != desired
+                        or (
+                            desired > 0
+                            and (not status.update_revision or status.current_revision != status.update_revision)
+                        )
+                    ):
+                        continue
 
-            status = sts.status
+                    service = (endpoint_services or {}).get(name)
+                    if service and desired > 0:
+                        selector = ",".join(f"{k}={v}" for k, v in sts.spec.selector.match_labels.items())
+                        pods = self.list_pods(label_selector=selector)
+                        if pods is None:
+                            continue
+                        # Do not let an empty/incomplete pod list pass via all([]).
+                        ips = [p.status.pod_ip for p in pods.items if p.status and p.status.pod_ip]
+                        if len(ips) < desired:
+                            continue
+                        endpoints = self.get_core_v1_api().read_namespaced_endpoints(
+                            name=service,
+                            namespace=self.get_namespace(),
+                        )
+                        registered = {
+                            addr.ip for subset in (endpoints.subsets or []) for addr in (subset.addresses or [])
+                        }
+                        if not all(ip in registered for ip in ips):
+                            continue
+                except ApiException as err:
+                    self.logger.debug("Cannot check rollout for stateful set -> '%s': %s", name, err)
+                    continue
 
-            desired = sts.spec.replicas or 0
-            ready = status.ready_replicas or 0
-            updated = status.updated_replicas or 0
-            available = status.available_replicas or 0
-            current_revision = status.current_revision
-            update_revision = status.update_revision
+                self.logger.info("Rolling restart completed for stateful set -> '%s'", name)
+                del pending[name]
+            return not pending
 
-            # Log revision changes
-            if update_revision != last_logged_revision:
-                self.logger.debug(
-                    "Stateful set -> '%s' rollout revision: current=%s update=%s",
-                    sts_name,
-                    current_revision,
-                    update_revision,
-                )
-                last_logged_revision = update_revision
+        def diagnostics() -> None:
+            for name in pending:
+                self.logger.error("Rolling restart still pending for stateful set -> '%s'", name)
+                selector = ",".join(f"{k}={v}" for k, v in targets[name].spec.selector.match_labels.items())
+                pods = self.list_pods(label_selector=selector)
+                for pod in pods.items if pods is not None else []:
+                    self.log_pod_diagnostics(pod.metadata.name)
 
-            # ------------------------------------------------------------------
-            # Rollout completion condition
-            # ------------------------------------------------------------------
-
-            self.logger.info(
-                "Rolling restart in progress for stateful set -> '%s'... (ready=%s, updated=%s, available=%s, desired=%s)",
-                sts_name,
-                ready,
-                updated,
-                available,
-                desired,
+        return bool(
+            wait_until(
+                check,
+                "StatefulSet rolling restarts",
+                timeout=timeout,
+                interval=interval,
+                budget=budget,
+                on_timeout=diagnostics,
+                logger=self.logger,
             )
-
-            if ready == desired and updated == desired and available == desired and current_revision == update_revision:
-                self.logger.info(
-                    "Stateful set -> '%s' rollout completed successfully (%s/%s pods ready)",
-                    sts_name,
-                    ready,
-                    desired,
-                )
-                break  # the while loop will exit here if the rollout is successful
-
-            wait_time = 30
-
-        # end while rollout monitoring
-
-        # ------------------------------------------------------------------
-        # Endpoint gating (optional)
-        # ------------------------------------------------------------------
-
-        if endpoint_service_name:
-            self.logger.info(
-                "Validating registration of stateful set -> '%s' at service -> '%s'",
-                sts_name,
-                endpoint_service_name,
-            )
-
-            # Extract the match_labels from the STS spec
-            match_labels = sts.spec.selector.match_labels
-
-            # Convert the dictionary into a comma-separated string (e.g., "app=my-app,tier=frontend")
-            selector = ",".join([f"{k}={v}" for k, v in match_labels.items()])
-
-            # Use the dynamic selector to list the pods
-            pod_list = self.list_pods(label_selector=selector)
-
-            pods = pod_list.items
-
-            pod_ips = [p.status.pod_ip for p in pods if p.status.pod_ip]
-
-            start_time = time.time()
-            while True:
-                if time.time() - start_time > 300:
-                    self.logger.error(
-                        "Timeout waiting for endpoint registration for stateful set -> '%s'.",
-                        sts_name,
-                    )
-                    return False
-
-                endpoints = self.get_core_v1_api().read_namespaced_endpoints(
-                    name=endpoint_service_name,
-                    namespace=self.get_namespace(),
-                )
-
-                registered_ips = [addr.ip for subset in (endpoints.subsets or []) for addr in (subset.addresses or [])]
-
-                if all(ip in registered_ips for ip in pod_ips):
-                    self.logger.info(
-                        "All pods for stateful set -> '%s' registered in service -> '%s' endpoint.",
-                        sts_name,
-                        endpoint_service_name,
-                    )
-                    break
-
-                self.logger.info(
-                    "Waiting for service endpoint registration for stateful set -> '%s'...",
-                    sts_name,
-                )
-                time.sleep(5)
-            # end while endpoint registration
-        # end if endpoint_service_name
-
-        self.logger.info("Rolling restart completed for stateful set ->'%s'", sts_name)
-
-        return True
+        )
 
     # end method definition

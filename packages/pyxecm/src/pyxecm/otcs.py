@@ -2602,7 +2602,13 @@ class OTCS:
         self.logger.debug("Authenticating with OTCS at -> %s", request_url)
         self.logger.debug(
             "Using %s for authentication at OTCS...",
-            "OTDS token" if self._otds_token else "OTDS ticket" if self._otds_ticket else "username/password",
+            "OTDS token"
+            if self._otds_token
+            else "OTDS ticket"
+            if self._otds_ticket
+            else "OTDS object"
+            if self._otds_object
+            else "username/password",
         )
 
         # Initialize the ticket to not set:
@@ -5048,7 +5054,7 @@ class OTCS:
         expand: str | None = None,
         fields: str | list = "properties",  # per default we just get the most important information
         metadata: bool = False,
-        limit: int = 20,
+        limit: int = 50,
         page: int = 1,
     ) -> dict | None:
         """Get the groups a user is a member of.
@@ -7217,6 +7223,118 @@ class OTCS:
                     else self.ITEM_TYPE_CLASSIFICATION
                     if current_item_id != volume_id
                     else self.ITEM_TYPE_CLASSIFICATION_TREE,
+                    item_name=path_element,
+                )
+                path_item_id = self.get_result_value(response=node, key="id")
+            if not path_item_id:
+                if show_error:
+                    self.logger.error(
+                        "Cannot find path element -> '%s' in container with ID -> %d!",
+                        path_element,
+                        current_item_id,
+                    )
+                else:
+                    self.logger.debug(
+                        "Cannot find path element -> '%s' in container with ID -> %d.",
+                        path_element,
+                        current_item_id,
+                    )
+                return None
+            current_item_id = path_item_id
+            self.logger.debug(
+                "Traversing path element -> '%s' (%s)",
+                path_element,
+                str(current_item_id),
+            )
+
+        return node
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_node_by_volume_and_path")
+    def get_node_by_parent_and_path(
+        self,
+        parent_id: int,
+        path: list | None = None,
+        create_path: bool = False,
+        fields: str | list = "properties",
+        metadata: bool = False,
+        show_error: bool = False,
+    ) -> dict | None:
+        """Get a node based on the parent and path (list of container items).
+
+        Args:
+            parent_id (int):
+                ID of the parent node.
+            path (list, optional):
+                A list of container items (top down),
+                last item is the name of the item to be retrieved.
+                If path is empty the node of the volume is returned.
+            create_path (bool, optional):
+                if path elements are missing: should they be created?
+            fields (str | list, optional):
+                Which fields to retrieve.
+                This can have a significant impact on performance.
+                Possible fields include:
+                - "properties" (can be further restricted by specifying sub-fields,
+                  e.g., "properties{id,name,parent_id,description}")
+                - "categories"
+                - "versions" (can be further restricted by specifying ".element(0)" to
+                  retrieve only the latest version)
+                - "permissions" (can be further restricted by specifying ".limit(5)" to
+                  retrieve only the first 5 permissions)
+
+                This parameter can be a string to select one field group or a list of
+                strings to select multiple field groups.
+                Defaults to "properties".
+            metadata (bool, optional):
+                If True, returns metadata (data type, field length, min/max values, etc.)
+                about the data.
+                The metadata will be returned under `results.metadata`, `metadata_map`,
+                and `metadata_order`.
+                Defaults to False.
+            show_error (bool, optional):
+                If True, treat as error if node is not found.
+
+        Returns:
+            dict | None:
+                Node information or None if no node with this path is found.
+
+        """
+
+        # If path is not given we use empty list to make
+        # the for loop below working in this case as well:
+        if path is None:
+            path = []
+
+        current_item_id = parent_id
+
+        # In case the path is an empty list we will have the node of the volume:
+        # Only deliver the full set of requested fields if this node is the final result, i.e.
+        # if path is empty:
+        node = self.get_node(
+            node_id=current_item_id,
+            fields=fields if not path else "properties{id,name}",
+            metadata=metadata if not path else False,
+        )
+
+        for i, path_element in enumerate(path):
+            # We only deliver the full set of fields for the last path element:
+            if i == len(path) - 1:
+                node = self.get_node_by_parent_and_name(
+                    parent_id=current_item_id, name=path_element, fields=fields, metadata=metadata
+                )
+            # For intermediate path elements we use the minimum set of fields (ID)
+            # to allow traversal of the path (IMPORTANT: turn-off exact_match if name property is excluded):
+            else:
+                node = self.get_node_by_parent_and_name(
+                    parent_id=current_item_id, name=path_element, fields="properties{id}", exact_match=False
+                )
+            path_item_id = self.get_result_value(response=node, key="id", show_error=show_error)
+            if not path_item_id and create_path:
+                node = self.create_item(
+                    parent_id=current_item_id,
+                    item_type=self.ITEM_TYPE_FOLDER,
                     item_name=path_element,
                 )
                 path_item_id = self.get_result_value(response=node, key="id")
@@ -10020,6 +10138,8 @@ class OTCS:
         2. Via a local filesystem path (file_url pointing to an existing file or directory)
         3. Via in-memory content using the file_content parameter (str or bytes)
 
+        REST API Endpoint: POST /api/v2/nodes/{node_id}/versions
+
         Args:
             node_id (int):
                 The ID of the document to add a version to.
@@ -10041,6 +10161,77 @@ class OTCS:
         Returns:
             dict | None:
                 Add version response or None if the upload fails.
+
+        Example:
+        {
+            'links': {
+                'data': {
+                    'self': {
+                        'body': '',
+                        'content_type': '',
+                        'href': '/api/v2/nodes/820115/versions',
+                        'method': 'POST',
+                        'name': ''
+                    }
+                }
+            },
+            'results': {
+                'data': {
+                    'properties': {
+                        'advanced_versioning': False,
+                        'container': False,
+                        'container_size': 0,
+                        'create_date': '2026-10-27T17:24:41Z',
+                        'create_user_id': 24313,
+                        'description': 'SAP purchase contract 4600000074 with Delta Pump Mfg Inc. Rendered from the SAP data in the style of an SAP form.',
+                        'description_multilingual': {...},
+                        'external_create_date': '2026-10-16T00:00:00',
+                        'external_identity': '',
+                        'external_identity_type': '',
+                        'external_modify_date': None,
+                        'external_source': '',
+                        'favorite': False,
+                        'hidden': False,
+                        'icon': '/cssupport/webdoc/apppdf.gif',
+                        'icon_large': '/cssupport/webdoc/apppdf_large.gif',
+                        'id': 820115,
+                        'mime_type': 'application/pdf',
+                        'modify_date': '2026-10-28T12:32:49Z',
+                        ...
+                    },
+                    'versions': {
+                        'create_date': '2026-10-28T12:38:25Z',
+                        'description': 'SAP purchase contract 4600000074 with Delta Pump Mfg Inc. Rendered from the SAP data in the style of an SAP form.',
+                        'external_create_date': None,
+                        'external_identity': '',
+                        'external_identity_type': '',
+                        'external_modify_date': None,
+                        'external_source': '',
+                        'file_create_date': '2026-10-28T12:38:25Z',
+                        'file_modify_date': '2026-10-28T12:38:25Z',
+                        'file_name': 'Purchase Contract 4600000074 - Delta Pump Mfg Inc.pdf',
+                        'file_size': 18000,
+                        'file_type': 'pdf',
+                        'has_generation': False,
+                        'id': 820115,
+                        'locked': False,
+                        'locked_date': None,
+                        'locked_user_id': None,
+                        'mime_type': 'application/pdf',
+                        'modify_date': '2026-10-28T12:38:25Z',
+                        'name': 'Purchase Contract 4600000074 - Delta Pump Mfg Inc.pdf',
+                        'owner_id': 4711,
+                        'provider_id': 12345,
+                        'version_guid': '1E747CD4-64BC-4CC4-999D-C10E336F51FF',
+                        'version_id': 857964,
+                        'version_number': 6,
+                        'version_number_major': 6,
+                        'version_number_minor': 0,
+                        'version_number_name': '6'
+                    }
+                }
+            }
+        }
 
         """
 
@@ -10188,7 +10379,7 @@ class OTCS:
             files=upload_post_files,
             timeout=None,
             failure_message="Failed to add file -> '{}' as new version to document with ID -> {}".format(
-                file_url,
+                file_name,
                 node_id,
             ),
         )

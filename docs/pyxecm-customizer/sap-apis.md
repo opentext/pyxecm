@@ -18,9 +18,14 @@ live system - it reports exactly which of the steps below is still missing per s
    - V4: "Publish Service Groups" for the service group (e.g. `API_PURCHASEORDER_2`).
 2. **`SICF`**: the ICF node of the service must be active (`/sap/opu/odata/sap/<service>`
    for V2, `/sap/opu/odata4` for V4).
-3. **`PFCG`**: the calling user needs authorization object **`S_SERVICE`** for the
-   service (role menu entry of type `IWSG`), plus the business authorizations for the
-   underlying transaction (e.g. as for `IW31` to create maintenance orders).
+3. **`PFCG`**: the calling user needs the start authorization for the service plus the
+   business authorizations for the underlying transaction (e.g. as for `IW31` to create
+   maintenance orders):
+   - V2: authorization object **`S_SERVICE`** (role menu entry of type `IWSG`, e.g.
+     `R3TR IWSV API_MAINTNOTIFICATION 0001`).
+   - V4: authorization object **`S_START`** for the service group (role menu entry
+     "TADIR Service" `R3TR G4BA <service group>`, e.g. `API_PURCHASEORDER_2`) - **not**
+     `S_SERVICE`. Without it, SAP answers HTTP 403 with message `/IWBEP/CM_V4_COS/011`.
 4. **`/IWFND/GW_CLIENT`**: `GET /sap/opu/odata/sap/<service>/$metadata` (or the V4
    equivalent) should return HTTP 200 as a smoke test.
 
@@ -54,8 +59,9 @@ reference system; "-" means there is no BOR object type for the entity.
 
 The business object types that business workspaces are typically linked to are also available
 in code: `SAP_BUSINESS_OBJECT_TYPES` in `pyxecm_customizer.sap_models` (name and key structure),
-and `get_sap_key_fields()` converts a business object ID (SAP's internal format, e.g.
-`"49000001232026"`) into the key fields the OData APIs expect (e.g. `("4900000123", "2026")`).
+and `SAPBusinessObjectType.get(bo_type).get_key_fields(bo_id)` converts a business object ID
+(SAP's internal format, e.g. `"49000001232026"` for `BUS2017`) into the key fields the OData
+APIs expect (e.g. `("4900000123", "2026")`).
 
 ¹ `BUS0008001` is the BOR object type "Plant storage area" - the storage location of a plant.
 
@@ -96,6 +102,12 @@ and `get_sap_key_fields()` converts a business object ID (SAP's internal format,
 | `API_SUPPLIERINVOICE_PROCESS_SRV`  | `BUS2081`                   | V2             | `A_SupplierInvoice`, `A_SuplrInvcItemPurOrdRef`, `A_SupplierInvoiceItemGLAcct`                      | Create / Read / Delete / Cancel / Release supplier invoices                |
 | `API_INBOUND_DELIVERY_SRV`         | `BUS2015`                   | V2 (`;v=0002`) | `A_InbDeliveryHeader`, `A_InbDeliveryItem`                                                          | Create / Read / Update / Delete inbound deliveries, putaway, goods receipt |
 
+### Warranty
+
+| Service             | BO Type   | Version | Entity Sets                                                  | Purpose                                                                               |
+| ------------------- | --------- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `API_WARRANTYCLAIM` | `BUS2222` | V4      | `WarrantyClaim`, `WarrantyClaimVersion`, `WarrantyClaimItem` | Create / Read / Update / Process warranty claims from customers and against suppliers |
+
 ### Inventory Management
 
 | Service                     | BO Type   | Version | Entity Sets                                          | Purpose                                                          |
@@ -110,24 +122,25 @@ and `get_sap_key_fields()` converts a business object ID (SAP's internal format,
 | `API_PLANNEDORDER`           | `BUS2004` | V4      | `PlannedOrderHeader`                                                               | Create / Read / Update / Delete / Schedule planned orders      |
 | `API_PRODUCTION_ORDER_2_SRV` | `BUS2005` | V2      | `A_ProductionOrder_2`, `A_ProductionOrderOperation_2`, `A_ProductionOrderStatus_2` | Create / Read / Update / Convert / Status of production orders |
 
-### Master Data (read-only)
+### Master Data
 
-| Service                              | BO Type                                        | Version | Entity Sets                                           | Purpose                    |
-| ------------------------------------ | ---------------------------------------------- | ------- | ----------------------------------------------------- | -------------------------- |
-| `API_PLANT_2`                        | `BUS0008`                                      | V4      | `Plant`                                               | Plants                     |
-| `API_STORAGELOCATION_SRV`            | `BUS0008001` ¹                                 | V2      | `StorageLocation`                                     | Storage locations          |
-| `API_PRODUCT_SRV`                    | `BUS1001006` (generic: `BUS1001`)              | V2      | `A_Product`, `A_ProductPlant`, `A_ProductDescription` | Products / materials       |
-| `API_PRODUCTION_VERSION`             | -                                              | V4      | `ProductionVersion`                                   | Production versions        |
-| `API_WORK_CENTERS`                   | `BUS0011`                                      | V2      | `A_WorkCenters`                                       | Work centers               |
-| `API_EQUIPMENT`                      | `EQUI`                                         | V2      | `Equipment`                                           | Equipment master           |
-| `API_FUNCTIONALLOCATION`             | `BUS0010`                                      | V2      | `FunctionalLocation`                                  | Functional location master |
-| `API_BUSINESS_PARTNER`               | `BUS1006` (customer: `KNA1`, supplier: `LFA1`) | V2      | `A_BusinessPartner`, `A_BusinessPartnerRole`          | Business partners          |
-| `API_COMPANYCODE_SRV`                | `BUS0002`                                      | V2      | `A_CompanyCode`                                       | Company codes              |
-| `API_SALESORGANIZATION_SRV`          | `BUS0006`                                      | V2      | `A_SalesOrganization`                                 | Sales organizations        |
-| `API_PURCHASINGORGANIZATION`         | `BUS0007`                                      | V4      | `A_PurchasingOrganization`                            | Purchasing organizations   |
-| `API_COSTCENTER_SRV`                 | `BUS0012`                                      | V2      | `A_CostCenter`                                        | Cost centers               |
-| `API_PROFITCENTER_SRV`               | `BUS0015`                                      | V2      | `A_ProfitCenter`                                      | Profit centers             |
-| `API_GLACCOUNTINCHARTOFACCOUNTS_SRV` | `BUS3006`                                      | V2      | `A_GLAccountInChartOfAccounts`                        | G/L accounts               |
+| Service                              | BO Type                                        | Version        | Entity Sets                                           | Purpose                                                  |
+| ------------------------------------ | ---------------------------------------------- | -------------- | ----------------------------------------------------- | -------------------------------------------------------- |
+| `API_PLANT_2`                        | `BUS0008`                                      | V4             | `Plant`                                               | Read plants                                              |
+| `API_STORAGELOCATION_SRV`            | `BUS0008001` ¹                                 | V2             | `StorageLocation`                                     | Read storage locations                                   |
+| `API_PRODUCT_SRV`                    | `BUS1001006` (generic: `BUS1001`)              | V2             | `A_Product`, `A_ProductPlant`, `A_ProductDescription` | Create / Read products (materials)                       |
+| `API_BILL_OF_MATERIAL_SRV`           | `BUS1080`                                      | V2 (`;v=0002`) | `MaterialBOM`, `MaterialBOMItem`                      | Create / Read / Update material BOMs, add / delete items |
+| `API_PRODUCTION_VERSION`             | -                                              | V4             | `ProductionVersion`                                   | Read production versions                                 |
+| `API_WORK_CENTERS`                   | `BUS0011`                                      | V2             | `A_WorkCenters`                                       | Read work centers                                        |
+| `API_EQUIPMENT`                      | `EQUI`                                         | V2             | `Equipment`                                           | Create / Read equipment                                  |
+| `API_FUNCTIONALLOCATION`             | `BUS0010`                                      | V2             | `FunctionalLocation`                                  | Create / Read functional locations                       |
+| `API_BUSINESS_PARTNER`               | `BUS1006` (customer: `KNA1`, supplier: `LFA1`) | V2             | `A_BusinessPartner`, `A_BusinessPartnerRole`          | Create / Read business partners (customers, suppliers)   |
+| `API_COMPANYCODE_SRV`                | `BUS0002`                                      | V2             | `A_CompanyCode`                                       | Read company codes                                       |
+| `API_SALESORGANIZATION_SRV`          | `BUS0006`                                      | V2             | `A_SalesOrganization`                                 | Read sales organizations                                 |
+| `API_PURCHASINGORGANIZATION`         | `BUS0007`                                      | V4             | `A_PurchasingOrganization`                            | Read purchasing organizations                            |
+| `API_COSTCENTER_SRV`                 | `BUS0012`                                      | V2             | `A_CostCenter`                                        | Read cost centers                                        |
+| `API_PROFITCENTER_SRV`               | `BUS0015`                                      | V2             | `A_ProfitCenter`                                      | Read profit centers                                      |
+| `API_GLACCOUNTINCHARTOFACCOUNTS_SRV` | `BUS3006`                                      | V2             | `A_GLAccountInChartOfAccounts`                        | Read G/L accounts                                        |
 
 ## RFC channel (`SAP.call()`)
 

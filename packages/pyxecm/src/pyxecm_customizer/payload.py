@@ -75,7 +75,7 @@ from pyxecm.helper import HTTP, XML, Data
 from pyxecm_customizer.settings import Settings
 
 from .browser_automation import BrowserAutomation
-from .exceptions import PayloadImportError, StopOnError
+from .exceptions import PayloadImportError, StopOnError, WaitTimeoutError
 from .guidewire import Guidewire
 from .k8s import K8s
 from .m365 import M365
@@ -83,6 +83,7 @@ from .salesforce import Salesforce
 from .sap import SAP
 from .servicenow import ServiceNow
 from .successfactors import SuccessFactors
+from .wait import WaitBudget, wait_until
 
 tracer = trace.get_tracer(__name__)
 default_logger = logging.getLogger("pyxecm_customizer.payload")
@@ -249,6 +250,7 @@ class Payload:
         otkd_object: OTKD | None = None,
         avts_object: AVTS | None = None,
         settings: Settings | None = None,
+        wait_budget: WaitBudget | None = None,
         logger: logging.Logger = default_logger,
     ) -> None:
         """Initialize the Payload object.
@@ -310,6 +312,9 @@ class Payload:
             settings (Settings | None, optional):
                 The customizer settings. They are the fallback for values that are
                 not defined in the payload. Defaults to the settings of the environment.
+            wait_budget (WaitBudget | None, optional):
+                Optional budget for the time all waits for services to become ready may
+                take together (see setting wait_timeout_total). Defaults to None.
             logger (logging.Logger, optional):
                 The logging object to use for all log messages. Defaults to default_logger.
 
@@ -356,6 +361,7 @@ class Payload:
         self.upload_status_files: bool = upload_status_files
         self.status_file_check: bool = status_file_check
         self._otawp = otawp_object
+        self._wait_budget = wait_budget
 
         self._payload: dict = {}
         self._payload_options: dict = {}
@@ -809,21 +815,11 @@ class Payload:
             )
 
             # Loop to wait for OTCS to create its OTDS user partition:
-            otcs_partition = self._otds.get_partition(
-                self._otcs.partition_name(),
-                show_error=False,
+            self.wait_for(
+                lambda: self._otds.get_partition(name=self._otcs.partition_name(), show_error=False),
+                f"OTDS user partition -> '{self._otcs.partition_name()}' for Content Server",
+                service="otawp",
             )
-            while otcs_partition is None:
-                self.logger.warning(
-                    "OTDS user partition -> '%s' for Content Server does not exist yet. Waiting...",
-                    self._otcs.partition_name(),
-                )
-
-                time.sleep(30)
-                otcs_partition = self._otds.get_partition(
-                    name=self._otcs.partition_name(),
-                    show_error=False,
-                )
 
             # Add the OTDS user partition for OTCS to the AppWorks Platform Access Role in OTDS.
             # This will effectively sync all OTCS users with AppWorks Platform:
@@ -1462,6 +1458,47 @@ class Payload:
 
     # end method definition
 
+    def wait_for[T](self, check: Callable[[], T | None], what: str, service: str = "otcs") -> T:
+        """Wait until check() returns a truthy value or the configured timeout is reached.
+
+        Args:
+            check (Callable[[], T | None]):
+                Function that is called repeatedly until it returns a truthy value.
+            what (str):
+                Description of what we are waiting for (used in log messages).
+            service (str, optional):
+                The settings section of the service to determine the timeout. Defaults to "otcs".
+
+        Returns:
+            T:
+                The result of check().
+
+        Raises:
+            WaitTimeoutError:
+                If the timeout is reached. This marks the customizer run as failed.
+
+        """
+
+        timeout = getattr(getattr(self._settings, service, None), "wait_timeout", None)
+        if timeout is None:
+            timeout = self._settings.wait_timeout
+
+        result = wait_until(
+            check=check,
+            what=what,
+            timeout=timeout,
+            interval=self._settings.wait_interval,
+            budget=self._wait_budget,
+            logger=self.logger,
+        )
+        if not result:
+            msg = f"{what} did not become ready within the configured timeout!"
+            raise WaitTimeoutError(msg)
+
+        return result
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="check_status_file")
     def check_status_file(
         self,
@@ -1506,13 +1543,10 @@ class Payload:
             message,
         )
 
-        while not self._otcs.is_ready():
-            self.logger.info(
-                "OTCS -> %s is not ready. Cannot check status file for -> '%s' in OTCS. Waiting 30 seconds and retry...",
-                self._otcs.hostname(),
-                payload_section_name,
-            )
-            time.sleep(30)
+        self.wait_for(
+            self._otcs.is_ready,
+            f"OTCS -> '{self._otcs.hostname()}' (check status file for -> '{payload_section_name}')",
+        )
 
         response = self._otcs.get_node_by_volume_and_path(
             volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
@@ -1601,13 +1635,10 @@ class Payload:
             )
             prefix = "failure_"
 
-        while not self._otcs.is_ready():
-            self.logger.info(
-                "OTCS -> %s is not ready. Cannot write status file for -> '%s' to OTCS. Waiting 30 seconds and retry...",
-                self._otcs.hostname(),
-                payload_section_name,
-            )
-            time.sleep(30)
+        self.wait_for(
+            self._otcs.is_ready,
+            f"OTCS -> '{self._otcs.hostname()}' (write status file for -> '{payload_section_name}')",
+        )
 
         response = self._otcs.get_node_by_volume_and_path(
             volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
@@ -1702,13 +1733,10 @@ class Payload:
             payload_section_name,
         )
 
-        while not self._otcs.is_ready():
-            self.logger.info(
-                "OTCS -> '%s' is not ready. Cannot read status file for -> '%s' from OTCS. Waiting 30 seconds and retry...",
-                self._otcs.hostname(),
-                payload_section_name,
-            )
-            time.sleep(30)
+        self.wait_for(
+            self._otcs.is_ready,
+            f"OTCS -> '{self._otcs.hostname()}' (read status file for -> '{payload_section_name}')",
+        )
 
         response = self._otcs.get_node_by_volume_and_path(
             volume_type=self._otcs.VOLUME_TYPE_PERSONAL_WORKSPACE,
@@ -21060,6 +21088,8 @@ class Payload:
                 system_id=system_id,
                 destination=destination,
                 base_url=base_url,
+                verify_ssl=self._settings.sap.verify_ssl,
+                ca_bundle=self._settings.sap.ca_bundle,
                 saml_idp_private_key=pem_contents.get(saml_idp_private_key_file),
                 saml_idp_certificate=pem_contents.get(saml_idp_certificate_file),
                 saml_issuer=saml_issuer,
@@ -21080,6 +21110,8 @@ class Payload:
                 system_id=system_id,
                 destination=destination,
                 base_url=base_url,
+                verify_ssl=self._settings.sap.verify_ssl,
+                ca_bundle=self._settings.sap.ca_bundle,
                 saml_idp_private_key=pem_contents.get(saml_idp_private_key_file),
                 saml_idp_certificate=pem_contents.get(saml_idp_certificate_file),
                 saml_issuer=saml_issuer,

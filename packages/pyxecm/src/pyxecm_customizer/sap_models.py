@@ -9,6 +9,22 @@ The module contains:
 * Create models (e.g. SAPMaintenanceOrderModel) - validated input data that is
   converted into the OData payload with to_odata().
 * Response models (e.g. SAPMaintenanceOrderResponseModel) - typed results of read requests.
+* Query models (e.g. SAPMaintenanceOrderQueryModel) - search criteria of the list methods.
+
+Class hierarchy - the subclasses mostly declare fields, the behavior comes from the base classes:
+
+    SAPODataModel                     parse SAP responses, str() = compact JSON
+    ├── *ResponseModel                results of SAP.get_*() / iter_*()
+    └── SAPODataCreateModel           to_odata() / to_odata_update()
+        ├── *Model                    data of SAP.create_*(), changes of SAP.update_*()
+        └── SAPPurchasingItemModel    common fields of purchasing document items
+    SAPODataQueryModel                to_odata() = $filter / $orderby / $expand
+    └── *QueryModel                   search criteria of SAP.get_*s() / iter_*s()
+
+A comment above each subclass names what it inherits and which SAP methods use it. These notes
+are comments on purpose: pydantic puts the class docstring into the JSON schema ("description"),
+and LLM tools that take or return the models show it to the LLM - so docstrings describe the
+data for API users and LLMs, comments explain the code to developers.
 
 The Python attribute names of the models are snake case, the aliases are the OData
 property names of the SAP APIs. Both can be used to initialize the models.
@@ -30,7 +46,7 @@ from datetime import time as dtime
 from decimal import Decimal
 from enum import StrEnum
 from functools import partial
-from typing import Annotated, ClassVar, Literal, Self, get_origin
+from typing import Annotated, ClassVar, Literal, Self, cast, get_args, get_origin
 
 import requests
 from pydantic import (
@@ -402,9 +418,15 @@ def unique_numbers(attribute: str) -> AfterValidator:
 
     """
 
-    def check(children: list) -> list:
+    def check(children: list | None) -> list | None:
+        if not children:
+            return children
+
+        # Children without a number (None, e.g. numbers that SAP assigns) are not compared:
         duplicates = sorted(
-            number for number, count in Counter(getattr(child, attribute) for child in children).items() if count > 1
+            number
+            for number, count in Counter(getattr(child, attribute) for child in children).items()
+            if count > 1 and number is not None
         )
         if duplicates:
             message = "Numbers must be unique, duplicates -> {}".format(duplicates)
@@ -433,6 +455,86 @@ SAPCurrency = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=T
 # A quantity / amount. SAP (OData V4) transfers decimals as strings to avoid rounding errors,
 # but the JSON schema shows a plain number - easier to fill for API clients and LLMs:
 SAPDecimal = Annotated[Decimal, WithJsonSchema({"type": "number"})]
+
+# ISO codes (UN/ECE Recommendation 20) of SAP's standard English (commercial) unit codes. OData V4 APIs
+# with an ISO unit property (e.g. BaseUnitISOCode of API_PURCHASEREQUISITION_2) require the ISO code -
+# SAP derives its internal unit from it. The ISO code states what the unit means, so it is the same in
+# all SAP systems, while the commercial and internal codes are system data (e.g. hours: 'H' or 'HR').
+# Other units are given with their ISO code directly (e.g. `unit_iso_code`):
+SAP_UNIT_ISO_CODES: dict[str, str] = {
+    "PC": "PCE",  # piece
+    "EA": "EA",  # each
+    "AU": "C62",  # activity unit
+    "%": "P1",  # percent
+    "G": "GRM",
+    "KG": "KGM",
+    "TO": "TNE",  # metric ton
+    "LB": "LBR",
+    "ML": "MLT",
+    "L": "LTR",
+    "GAL": "GLL",  # US gallon
+    "MM": "MMT",
+    "CM": "CMT",
+    "M": "MTR",
+    "KM": "KMT",
+    "IN": "INH",
+    "FT": "FOT",
+    "M2": "MTK",
+    "M3": "MTQ",
+    "S": "SEC",
+    "MIN": "MIN",
+    "H": "HUR",
+    "HR": "HUR",
+    "DAY": "DAY",
+    "WK": "WEE",
+    "MON": "MON",
+    "PAA": "PR",  # pair
+    "BT": "BO",  # bottle
+    "CAN": "CA",
+    "ROL": "RO",  # roll
+    "PAL": "PF",  # pallet
+}
+
+
+def unit_iso_code(unit: str | None) -> str | None:
+    """Return the ISO code of an SAP unit code, e.g. 'PC' -> 'PCE' (see SAP_UNIT_ISO_CODES).
+
+    Args:
+        unit (str | None):
+            The English (commercial) unit code, e.g. "PC".
+
+    Returns:
+        str | None:
+            The ISO code or None if the unit is not in SAP_UNIT_ISO_CODES.
+
+    """
+
+    return SAP_UNIT_ISO_CODES.get((unit or "").strip().upper())
+
+
+def send_purchase_requisition_units_as_iso(item: dict) -> dict:
+    """Remove BaseUnit from the payload of a purchase requisition item and its account assignments.
+
+    API_PURCHASEREQUISITION_2 expects SAP's internal unit code in BaseUnit (e.g. 'ST' for 'PC') and
+    rejects a BaseUnit that doesn't match BaseUnitISOCode - with the ISO code alone, SAP determines
+    the unit itself.
+
+    Args:
+        item (dict):
+            The OData payload of the item (changed in place).
+
+    Returns:
+        dict:
+            The payload.
+
+    """
+
+    for entity in [item, *item.get("_PurchaseReqnAcctAssgmt", [])]:
+        if entity.get("BaseUnitISOCode"):
+            entity.pop("BaseUnit", None)
+
+    return item
+
 
 # An SAP flag ("X" = true, "" = false) in response models - read as boolean:
 SAPFlag = Annotated[bool | None, BeforeValidator(parse_sap_flag)]
@@ -642,6 +744,7 @@ SAP_BUSINESS_OBJECT_TYPES: dict[str, SAPBusinessObjectType] = {
     "BUS2034": SAPBusinessObjectType("sales contract", (10,)),
     "BUS2094": SAPBusinessObjectType("credit memo request", (10,)),
     "BUS2096": SAPBusinessObjectType("debit memo request", (10,)),
+    "BUS2222": SAPBusinessObjectType("warranty claim", (12,)),
     "VBRK": SAPBusinessObjectType("billing document", (10,)),
     "BUS2037": SAPBusinessObjectType("billing document", (10,)),
     "LIKP": SAPBusinessObjectType("outbound delivery", (10,)),
@@ -657,6 +760,10 @@ SAP_BUSINESS_OBJECT_TYPES: dict[str, SAPBusinessObjectType] = {
     "KNA1": SAPBusinessObjectType("customer", (10,)),
     "LFA1": SAPBusinessObjectType("vendor", (10,)),
     "BUS0002": SAPBusinessObjectType("company code", (4,)),
+    "BUS0008": SAPBusinessObjectType("plant", (4,)),
+    "BUS0006": SAPBusinessObjectType("sales organization", (4,)),
+    "BUS0007": SAPBusinessObjectType("purchasing organization", (4,)),
+    "BUS3006": SAPBusinessObjectType("G/L account", (4, 10)),
     "BUS0012": SAPBusinessObjectType("cost center", (4, 10)),
     "BUS0015": SAPBusinessObjectType("profit center", (4, 10)),
 }
@@ -678,6 +785,9 @@ class SAPODataModel(BaseModel):
     returns many technical properties (often in raw OData formats like "/Date(...)/")
     that would only be noise for users or LLMs. Model a property to return it.
     The create models keep them instead (see SAPODataCreateModel).
+
+    Direct subclasses are the response models (*ResponseModel) that the SAP read methods
+    validate the OData results with (model_validate()), e.g. SAP.get_sales_order().
 
     """
 
@@ -741,6 +851,13 @@ class SAPODataCreateModel(SAPODataModel):
     modelled can be passed with their OData name (e.g. "ResponsibleCostCenter") and
     are sent as they are (kept as extra fields, see model_extra).
 
+    The subclasses (e.g. SAPSalesOrderModel and its SAPSalesOrderItemModel) only declare
+    the fields with their validations and inherit:
+    * to_odata(): the payload of the SAP create methods, e.g. SAP.create_sales_order().
+    * to_odata_update(): validates the changes of the SAP update methods, e.g.
+      SAP.update_sales_order(), with the same field definitions as a create.
+    * check_unknown_fields(): rejects misspelled field names (e.g. from an LLM).
+
     """
 
     model_config = ConfigDict(serialize_by_alias=True, extra="allow")
@@ -752,7 +869,9 @@ class SAPODataCreateModel(SAPODataModel):
     @model_validator(mode="before")
     @classmethod
     def check_unknown_fields(cls, data: object) -> object:
-        """Reject unknown lower case keys - they are misspelled attribute names, not OData properties.
+        """Reject unknown lower case keys and unknown navigation properties ("_...").
+
+        Lower case keys are misspelled attribute names, not OData properties.
 
         Additional OData properties that are not modelled can still be passed with their
         OData name (these start with an upper case letter), see to_odata_update().
@@ -763,7 +882,9 @@ class SAPODataCreateModel(SAPODataModel):
             return data
 
         known = set(cls.model_fields) | {field.alias for field in cls.model_fields.values() if field.alias}
-        unknown = sorted(key for key in data if key not in known and key[:1].islower())
+        # Keys starting with "_" are OData V4 navigation properties (e.g. "_PurchaseOrderScheduleLineTP" copied
+        # from a read) - SAP rejects them in a create of another API version or at the wrong level:
+        unknown = sorted(key for key in data if key not in known and (key[:1].islower() or key.startswith("_")))
         if unknown:
             message = "Unknown field(s) -> {} for {}".format(unknown, cls.__name__)
             raise ValueError(message)
@@ -842,10 +963,12 @@ class SAPODataCreateModel(SAPODataModel):
                     raise ValueError(message)
                 payload[key] = value
                 continue
-            if get_origin(field.annotation) is list:
+            if get_origin(field.annotation) is list or any(
+                get_origin(argument) is list for argument in get_args(field.annotation)
+            ):
                 message = "Field -> '{}' refers to child entities which cannot be changed with an update".format(key)
                 raise ValueError(message)
-            adapter = TypeAdapter(Annotated[field.annotation, *field.metadata] if field.metadata else field.annotation)
+            adapter = TypeAdapter(field.rebuild_annotation())
             try:
                 validated = adapter.validate_python(value)
             except ValidationError:
@@ -864,8 +987,9 @@ class SAPPurchasingItemModel(SAPODataCreateModel):
     """Base class of the items of purchasing documents (purchase order, contract and requisition).
 
     Provides the fields and validations common to all purchasing document items.
-    The subclasses add the item specific fields (e.g. the short text, whose OData
-    name differs per document type).
+    The subclasses (SAPPurchaseOrderItemModel, SAPPurchaseContractItemModel and
+    SAPPurchaseRequisitionItemModel) add the item specific fields (e.g. the short
+    text, whose OData name differs per document type).
 
     Contract with the subclasses (the validations access these fields by name):
     * item (required): the item number - used in error messages.
@@ -894,8 +1018,8 @@ class SAPPurchasingItemModel(SAPODataCreateModel):
             "Account assignment category, e.g. 'K' (cost center), 'F' (internal order), 'P' (project), 'A' (asset), "
             "'U' (unknown - in contracts, the account assignment is given in the release orders). Required for "
             "items with account assignments (purchase orders and requisitions) and for materials without stock "
-            "management (SAP: 'Account assignment mandatory for material') - system specific; copy from an "
-            "existing document if unsure."
+            "management (SAP: 'Account assignment mandatory for material') - system specific; ask the user who pays "
+            "(cost center, order, project, ...) if not given, in contracts use 'U'."
         ),
         max_length=1,
     )
@@ -1080,6 +1204,58 @@ class ODataCondition:
 
 
 @dataclass(frozen=True)
+class ODataDeletionCondition(ODataCondition):
+    """Describes the condition of a deletion filter (is_marked_for_deletion of the query models).
+
+    The field value True selects the deleted objects (property eq deleted_value), False the
+    objects that are not deleted (property ne deleted_value). With a path, the deletion
+    indicator is on the items: a document is deleted if all its items are deleted (e.g.
+    purchase orders - SAP doesn't set the header indicator when all items are deleted).
+
+    Attributes:
+        deleted_value (str | bool):
+            The value of the property for deleted objects, e.g. True, "X", "L" (purchasing
+            documents) or "5" (processing phase of maintenance notifications).
+
+    """
+
+    deleted_value: str | bool = True
+
+    def to_filter(self, value: object, odata_version: int) -> str:
+        """Return the $filter condition for the value of the deletion filter.
+
+        Args:
+            value (object):
+                True for the deleted objects, False for the objects that are not deleted.
+            odata_version (int):
+                The OData version of the service (2 or 4).
+
+        Returns:
+            str:
+                The condition, e.g. "EquipmentIsMarkedForDeletion ne true" or
+                "_PurchaseOrderItem/any(i:i/PurchasingDocumentDeletionCode ne 'L')".
+
+        Raises:
+            ValueError:
+                If a condition on child entities is used with an OData V2 service.
+
+        """
+
+        literal = odata_literal(self.deleted_value, odata_version=odata_version, kind=self.kind)
+        if not self.path:
+            return "{} {} {}".format(self.property, "eq" if value else "ne", literal)
+
+        if odata_version != 4:
+            message = "Conditions on child entities ('{}') are only supported by OData V4 services".format(self.path)
+            raise ValueError(message)
+        if value:
+            return "{}/all(i:i/{} eq {})".format(self.path, self.property, literal)
+        return "{}/any(i:i/{} ne {})".format(self.path, self.property, literal)
+
+    # end method definition
+
+
+@dataclass(frozen=True)
 class ODataTextSearch:
     """Describes how the name / description criterion of a query model is resolved via a text entity set.
 
@@ -1101,6 +1277,10 @@ class ODataTextSearch:
         scope (tuple[tuple[str, str], ...]):
             Fields of the query model that also restrict the texts, as (field, text property),
             e.g. (("controlling_area", "ControllingArea"),).
+        navigation (str):
+            The to-one navigation property from the texts to their object, e.g. "to_CostCenter" - all
+            criteria of the query then also restrict the texts, so that only the objects that match
+            the whole query are found. Empty if the text entity set has none (e.g. A_ProductDescription).
 
     """
 
@@ -1110,6 +1290,7 @@ class ODataTextSearch:
     key: str
     ids_field: str
     scope: tuple[tuple[str, str], ...] = ()
+    navigation: str = ""
 
 
 def text_search_variants(term: str) -> list[str]:
@@ -1146,6 +1327,11 @@ class SAPODataQueryModel(BaseModel):
     * expand_items (optional): whether to read the child entities (with EXPAND).
     * BASE_CONDITIONS (optional): conditions that are always part of the filter.
 
+    The subclasses (*QueryModel) inherit limit, sort_direction, page_size and to_odata(). They
+    are the query parameter of the SAP list methods, e.g. SAP.get_sales_orders(), which pass
+    to_odata() to SAP._iter_odata_collection(). Their JSON schema serves as the parameters of
+    LLM tools as well - so callers give readable criteria, not OData expressions.
+
     """
 
     model_config = ConfigDict(
@@ -1154,9 +1340,12 @@ class SAPODataQueryModel(BaseModel):
         field_title_generator=lambda name, _info: name.replace("_", " ").capitalize(),
     )
 
-    # The $orderby expressions of the sort_by values ("{direction}" is replaced with asc / desc):
+    # The $orderby expressions of the sort_by values ("{direction}" is replaced with asc / desc).
+    # The order must be unambiguous: $skip paging and "the latest ..." (limit=1) rely on it - so
+    # sorts by a date also sort by the document number:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {}
-    # The $expand expression to read the child entities (if expand_items is set):
+    # The $expand expression to read the child entities (if expand_items is set) - in the same
+    # request instead of one request per entity:
     EXPAND: ClassVar[str] = ""
     # Conditions that are always part of the filter (e.g. "Customer ne ''"):
     BASE_CONDITIONS: ClassVar[list[str]] = []
@@ -1190,13 +1379,7 @@ class SAPODataQueryModel(BaseModel):
 
         """
 
-        conditions = list(self.BASE_CONDITIONS)
-        for name, field in type(self).model_fields.items():
-            marker = next((item for item in field.metadata if isinstance(item, ODataCondition)), None)
-            value = getattr(self, name)
-            if marker is None or value is None or value == []:
-                continue
-            conditions.append(marker.to_filter(value=value, odata_version=odata_version))
+        conditions = list(self.BASE_CONDITIONS) + self.to_odata_conditions(odata_version=odata_version)
 
         sort_by = getattr(self, "sort_by", None)
         params = {"$orderby": self.SORT_PROPERTIES[sort_by].format(direction=self.sort_direction)} if sort_by else {}
@@ -1212,6 +1395,71 @@ class SAPODataQueryModel(BaseModel):
 
     # end method definition
 
+    def to_odata_conditions(self, odata_version: int, navigation: str = "", exclude: tuple[str, ...] = ()) -> list[str]:
+        """Return the $filter conditions of the fields with an ODataCondition (without BASE_CONDITIONS).
+
+        With a navigation property, the conditions refer to the entity it leads to - so another entity set
+        can be filtered by the criteria of this query, e.g. material document items by the posting date of
+        their header ("to_MaterialDocumentHeader/PostingDate ge ..."). OData V2 supports this for to-one
+        navigation properties only. Conditions on child entities (ODataCondition.path) are left out then.
+
+        Args:
+            odata_version (int):
+                The OData version of the service (2 or 4).
+            navigation (str, optional):
+                The to-one navigation property to the entity of this query, e.g. "to_MaterialDocumentHeader".
+                Defaults to "" (conditions on the entity itself).
+            exclude (tuple[str, ...], optional):
+                Fields to leave out, e.g. criteria that the other query already has. Defaults to ().
+
+        Returns:
+            list[str]:
+                The conditions, e.g. ["MaterialDocumentYear eq '2026'", "PostingDate ge datetime'...'"].
+
+        """
+
+        conditions = []
+        for name, field in type(self).model_fields.items():
+            marker = next((item for item in field.metadata if isinstance(item, ODataCondition)), None)
+            value = getattr(self, name)
+            if marker is None or value is None or value == [] or name in exclude:
+                continue
+            if navigation:
+                if marker.path:
+                    continue
+                prefixed = (
+                    "{}/{}".format(navigation, marker.property)
+                    if isinstance(marker.property, str)
+                    else tuple("{}/{}".format(navigation, part) for part in marker.property)
+                )
+                marker = replace(marker, property=prefixed)
+            conditions.append(marker.to_filter(value=value, odata_version=odata_version))
+
+        return conditions
+
+    # end method definition
+
+    def accepts(self, entity: BaseModel) -> bool:  # noqa: ARG002
+        """Check the criteria SAP can't filter by - applied to each entity read (client-side filter).
+
+        SAP._iter_odata_collection() skips the entities that are not accepted; they don't count
+        towards the limit. Overridden by the query models with such criteria, e.g. the deletion
+        flag of maintenance orders (only part of the status text, which SAP can't filter by).
+
+        Args:
+            entity (BaseModel):
+                The entity read, validated into the response model.
+
+        Returns:
+            bool:
+                True if the entity matches. Always True here.
+
+        """
+
+        return True
+
+    # end method definition
+
 
 class SAPODataTextResponseModel(SAPODataModel):
     """An entity of a text entity set as returned by SAP - all properties are kept (see ODataTextSearch)."""
@@ -1220,7 +1468,7 @@ class SAPODataTextResponseModel(SAPODataModel):
 
 
 class SAPODataTextQueryModel(SAPODataQueryModel):
-    """Query of a text entity set for a text search (see ODataTextSearch and SAP._resolve_text_search()).
+    """Query of the keys of a text or item entity set (see SAP._resolve_text_search() and SAP._find_keys_via_items()).
 
     The conditions are given as OData filter expressions - this model is only built internally.
 
@@ -1228,6 +1476,8 @@ class SAPODataTextQueryModel(SAPODataQueryModel):
 
     conditions: SkipJsonSchema[list[str]] = Field(default_factory=list)
     order_by: SkipJsonSchema[str] = ""
+    # The properties to return ($select), e.g. only the key - the text search needs no other ones:
+    select: SkipJsonSchema[str] = ""
 
     def to_odata(self, odata_version: int) -> dict:  # noqa: ARG002
         """Return the OData query options of the text query.
@@ -1238,13 +1488,20 @@ class SAPODataTextQueryModel(SAPODataQueryModel):
 
         Returns:
             dict:
-                The query options ($filter, $orderby).
+                The query options ($filter, $orderby, $select).
 
         """
 
-        params = {"$filter": " and ".join("({})".format(condition) for condition in self.conditions)}
+        params = {}
+        # Joined conditions are parenthesized - each one can have a top-level 'or' (e.g. one per text property):
+        if len(self.conditions) == 1:
+            params["$filter"] = self.conditions[0]
+        elif self.conditions:
+            params["$filter"] = " and ".join("({})".format(condition) for condition in self.conditions)
         if self.order_by:
             params["$orderby"] = self.order_by
+        if self.select:
+            params["$select"] = self.select
 
         return params
 
@@ -1524,6 +1781,8 @@ class SAPODataErrorModel(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaintenanceOrderOperationModel, also created
+# on its own with SAP.create_maintenance_order_component().
 class SAPMaintenanceOrderComponentModel(SAPODataCreateModel):
     """A component (material, e.g. a spare part) of an operation of a maintenance order (API_MAINTENANCEORDER).
 
@@ -1582,6 +1841,7 @@ class SAPMaintenanceOrderComponentModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaintenanceOrderModel.
 class SAPTaskListReferenceModel(SAPODataCreateModel):
     """A maintenance task list whose operations and materials are taken over into a new maintenance order.
 
@@ -1616,6 +1876,9 @@ class SAPTaskListReferenceModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaintenanceOrderModel, also created on its
+# own with SAP.create_maintenance_order_operation(). to_odata_update() validates its changes in
+# SAP.update_maintenance_order_operation().
 class SAPMaintenanceOrderOperationModel(SAPODataCreateModel):
     """An operation of an SAP Plant Maintenance order (API_MAINTENANCEORDER).
 
@@ -1647,7 +1910,11 @@ class SAPMaintenanceOrderOperationModel(SAPODataCreateModel):
     control_key: SAPCode | None = Field(
         default=None,
         alias="OperationControlKey",
-        description="Operation control key. Practically mandatory - the API applies no default and rejects operations without one. E.g. 'PM01' (standard), 'YBM1' (S/4HANA Cloud) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description=(
+            "Operation control key, e.g. 'PM01' (standard), 'YBM1' (S/4HANA Cloud) - system specific. "
+            "Leave empty unless the user names one: SAP applies the default control key of the order type and planning plant "
+            "(customizing; without one SAP rejects the operation with IW/104)."
+        ),
         max_length=4,
     )
     work_center: SAPCode | None = Field(
@@ -1695,6 +1962,8 @@ class SAPMaintenanceOrderOperationModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_maintenance_order(), to_odata_update()
+# the changes of SAP.update_maintenance_order().
 class SAPMaintenanceOrderModel(SAPODataCreateModel):
     """Data to create an SAP Plant Maintenance order (API_MAINTENANCEORDER).
 
@@ -1738,10 +2007,14 @@ class SAPMaintenanceOrderModel(SAPODataCreateModel):
         }
     )
 
-    order_type: SAPCode = Field(
+    order_type: SAPCode | None = Field(
+        default=None,
         alias="MaintenanceOrderType",
-        description="Maintenance order type, e.g. 'PM01' (standard) or 'YA01' (S/4HANA Cloud) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
-        min_length=1,
+        description=(
+            "Maintenance order type, e.g. 'PM01' (standard) or 'YA01' (S/4HANA Cloud) - system specific. "
+            "With a notification, leave it empty unless the user names one: SAP takes the order type assigned to the notification type. "
+            "Required without a notification - SAP has no default then."
+        ),
         max_length=4,
     )
     description: str = Field(
@@ -1753,49 +2026,55 @@ class SAPMaintenanceOrderModel(SAPODataCreateModel):
     planning_plant: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlanningPlant",
-        description="Maintenance planning plant, e.g. '1010'. Usually required.",
+        description=(
+            "Maintenance planning plant, e.g. '1010'. "
+            "Leave empty: SAP derives it from the notification or the equipment / functional location."
+        ),
         max_length=4,
     )
     main_work_center: SAPCode | None = Field(
         default=None,
         alias="MainWorkCenter",
-        description="Main work center responsible for the order, e.g. 'RES-0100'. Usually required.",
+        description=(
+            "Main work center responsible for the order, e.g. 'RES-0100'. "
+            "Leave empty unless the user names one: SAP derives it from the notification or the equipment / functional location."
+        ),
         max_length=8,
     )
     main_work_center_plant: SAPCode | None = Field(
         default=None,
         alias="MainWorkCenterPlant",
-        description="Plant of the main work center, e.g. '1010'.",
+        description="Plant of the main work center, e.g. '1010'. Leave empty: SAP derives it with the main work center.",
         max_length=4,
     )
     equipment: SAPCode | None = Field(
         default=None,
         alias="Equipment",
-        description="Equipment (technical object) to maintain, e.g. '210100001'. Give this or `functional_location`.",
+        description="Equipment (technical object) to maintain, e.g. '210100001'. Give this or `functional_location` - not needed with a notification (SAP takes its technical object).",
         max_length=18,
     )
     functional_location: str | None = Field(
         default=None,
         alias="FunctionalLocation",
-        description="Internal functional location ID - not the (longer) label shown in the UI. Give this or `equipment`.",
+        description="Internal functional location ID - not the (longer) label shown in the UI. Give this or `equipment` - not needed with a notification (SAP takes its technical object).",
         max_length=30,
     )
     priority: SAPCode | None = Field(
         default=None,
         alias="MaintPriority",
-        description="Maintenance priority, e.g. '1' (very high) to '4' (low) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance priority, in the SAP standard '1' (very high), '2' (high), '3' (medium) or '4' (low).",
         max_length=1,
     )
     activity_type: SAPCode | None = Field(
         default=None,
         alias="MaintenanceActivityType",
-        description="Maintenance activity type, e.g. '001' (inspection), '002' (repair) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance activity type, e.g. '001' (inspection), '002' (repair) - system specific. Leave empty unless the user names one: SAP applies the default of the order type.",
         max_length=3,
     )
     planner_group: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlannerGroup",
-        description="Maintenance planner group, e.g. '010' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance planner group, e.g. '010'. Leave empty: SAP derives it from the notification or the equipment / functional location.",
         max_length=3,
     )
     notification: SAPCode | None = Field(
@@ -1878,6 +2157,7 @@ class SAPMaintenanceOrderModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPMaintenanceOrderOperationResponseModel.
 class SAPMaintenanceOrderComponentResponseModel(SAPODataModel):
     """A component (material) of a maintenance order operation as returned by SAP (API_MAINTENANCEORDER)."""
 
@@ -1907,6 +2187,7 @@ class SAPMaintenanceOrderComponentResponseModel(SAPODataModel):
     reservation_item: str | None = Field(default=None, alias="ReservationItem", description="Item of the reservation.")
 
 
+# Inherits from SAPODataModel - nested in SAPMaintenanceOrderResponseModel.
 class SAPMaintenanceOrderOperationResponseModel(SAPODataModel):
     """An operation of an SAP Plant Maintenance order as returned by SAP (API_MAINTENANCEORDER).
 
@@ -1929,7 +2210,7 @@ class SAPMaintenanceOrderOperationResponseModel(SAPODataModel):
     control_key: str | None = Field(
         default=None,
         alias="OperationControlKey",
-        description="Operation control key, e.g. 'PM01' or 'YBM1' - reuse it when creating operations.",
+        description="Operation control key, e.g. 'PM01' or 'YBM1'.",
     )
     work_center: str | None = Field(
         default=None,
@@ -2004,6 +2285,34 @@ class SAPMaintenanceOrderOperationResponseModel(SAPODataModel):
         alias="IsMarkedForDeletion",
         description="True if the operation of a released order has been deleted (deletion flag).",
     )
+    actual_work: SAPDecimal | None = Field(
+        default=None, alias="ActualWorkQuantity", description="Work confirmed so far, in `planned_work_unit`."
+    )
+    forecast_work: SAPDecimal | None = Field(
+        default=None, alias="ForecastWorkQuantity", description="Expected total work, in `planned_work_unit`."
+    )
+    equipment: str | None = Field(
+        default=None,
+        alias="Equipment",
+        description="Equipment the operation is performed on (if it differs from the order).",
+    )
+    functional_location: str | None = Field(
+        default=None,
+        alias="FunctionalLocation",
+        description="Functional location the operation is performed on (if it differs from the order).",
+    )
+    supplier: str | None = Field(
+        default=None, alias="OperationSupplier", description="Supplier of an externally processed operation (service)."
+    )
+    purchase_requisition: str | None = Field(
+        default=None,
+        alias="PurchaseRequisition",
+        description="Purchase requisition of an externally processed operation; see get_purchase_requisition().",
+    )
+    purchase_requisition_item: str | None = Field(
+        default=None, alias="PurchaseRequisitionItem", description="Item of the purchase requisition."
+    )
+    user_status: str | None = Field(default=None, alias="UserStatusText", description="User status of the operation.")
     components: Annotated[
         list[SAPMaintenanceOrderComponentResponseModel] | None,
         BeforeValidator(unwrap_odata_navigation),
@@ -2014,6 +2323,9 @@ class SAPMaintenanceOrderOperationResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_maintenance_order(), SAP.get_maintenance_orders() and
+# SAP.iter_maintenance_orders().
 class SAPMaintenanceOrderResponseModel(SAPODataModel):
     """An SAP Plant Maintenance order as returned by SAP (API_MAINTENANCEORDER).
 
@@ -2153,6 +2465,32 @@ class SAPMaintenanceOrderResponseModel(SAPODataModel):
         alias="MaintenancePlan",
         description="Maintenance plan that generated the order (preventive maintenance); see get_maintenance_plan().",
     )
+    person_responsible: str | None = Field(
+        default=None, alias="MaintOrdPersonResponsible", description="Personnel number of the person responsible."
+    )
+    maintenance_item: str | None = Field(
+        default=None,
+        alias="MaintenanceItem",
+        description="Maintenance item of the maintenance plan that generated the order.",
+    )
+    maintenance_plan_call: int | None = Field(
+        default=None,
+        alias="MaintenanceCall",
+        description="Call number of the maintenance plan that generated the order.",
+    )
+    cost_center: str | None = Field(default=None, alias="CostCenter", description="Cost center of the order.")
+    responsible_cost_center: str | None = Field(
+        default=None, alias="ResponsibleCostCenter", description="Cost center responsible for the order."
+    )
+    profit_center: str | None = Field(default=None, alias="ProfitCenter", description="Profit center of the order.")
+    wbs_element: str | None = Field(
+        default=None, alias="WBSElement", description="WBS element (project) the order is assigned to."
+    )
+    revision: str | None = Field(
+        default=None,
+        alias="MaintenanceRevision",
+        description="Revision - groups orders of a planned shutdown or overhaul.",
+    )
     operations: Annotated[
         list[SAPMaintenanceOrderOperationResponseModel] | None,
         BeforeValidator(unwrap_odata_navigation),
@@ -2163,14 +2501,18 @@ class SAPMaintenanceOrderResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_maintenance_orders() and SAP.iter_maintenance_orders().
 class SAPMaintenanceOrderQueryModel(SAPODataQueryModel):
     """Search criteria for SAP maintenance orders (API_MAINTENANCEORDER)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "order_id": "MaintenanceOrder {direction}",
         "created": "MaintOrderCreationDateTime {direction}",
         "basic_start": "MaintOrdBasicStartDateTime {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the operations in the same request:
     EXPAND: ClassVar[str] = "to_MaintenanceOrderOperation"
     sort_by: Literal["order_id", "created", "basic_start"] = Field(default="order_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -2188,11 +2530,12 @@ class SAPMaintenanceOrderQueryModel(SAPODataQueryModel):
     main_work_center: Annotated[SAPCode | None, ODataCondition("MainWorkCenter")] = Field(
         default=None, description="Main work center responsible for the order."
     )
-    equipment: Annotated[SAPCode | None, ODataCondition("Equipment")] = Field(
-        default=None, description="Equipment the order refers to."
+    equipment_ids: Annotated[list[SAPCode] | None, ODataCondition("Equipment")] = Field(
+        default=None,
+        description="Equipments the orders refer to, e.g. ['10000004', '10000006'] (orders of any of them).",
     )
-    functional_location: Annotated[str | None, ODataCondition("FunctionalLocation")] = Field(
-        default=None, description="Internal functional location ID the order refers to."
+    functional_location_ids: Annotated[list[str] | None, ODataCondition("FunctionalLocation")] = Field(
+        default=None, description="Internal functional location IDs the orders refer to (orders of any of them)."
     )
     notification: Annotated[SAPCode | None, ODataCondition("MaintenanceNotification")] = Field(
         default=None, description="Maintenance notification the order was created from."
@@ -2221,7 +2564,33 @@ class SAPMaintenanceOrderQueryModel(SAPODataQueryModel):
     basic_start_to: Annotated[
         date | None, ODataCondition("MaintOrdBasicStartDateTime", operator="le", kind="timestamp")
     ] = Field(default=None, description="Only orders with basic start on or before this date.")
+    is_marked_for_deletion: bool | None = Field(
+        default=None,
+        description="True = only deleted orders (deletion flag, status DLFL), False = only orders that are not deleted.",
+    )
     expand_items: bool = Field(default=False, description="Also return the operations of each order.")
+
+    def accepts(self, entity: BaseModel) -> bool:
+        """Check the deletion flag - the API only has it in the status text, which SAP can't filter by (HTTP 501).
+
+        Args:
+            entity (BaseModel):
+                The maintenance order read (SAPMaintenanceOrderResponseModel).
+
+        Returns:
+            bool:
+                True if the order matches is_marked_for_deletion (or the criterion isn't set).
+
+        """
+
+        if self.is_marked_for_deletion is None:
+            return True
+
+        order = cast("SAPMaintenanceOrderResponseModel", entity)
+
+        return ("DLFL" in (order.system_status or "").split()) == self.is_marked_for_deletion
+
+    # end method definition
 
 
 # ---------------------------------------------------------------------------
@@ -2229,6 +2598,8 @@ class SAPMaintenanceOrderQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaintenanceNotificationModel.
+# to_odata_update() validates its changes in SAP.update_maintenance_notification().
 class SAPMaintenanceNotificationItemModel(SAPODataCreateModel):
     """An item (damage / object part) of an SAP maintenance notification (API_MAINTNOTIFICATION)."""
 
@@ -2246,29 +2617,31 @@ class SAPMaintenanceNotificationItemModel(SAPODataCreateModel):
     damage_code_group: SAPCode | None = Field(
         default=None,
         alias="MaintNotifDamageCodeGroup",
-        description="Code group of the damage code (catalog C, max. 8 characters) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Code group of the damage code (catalog C, max. 8 characters) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=8,
     )
     damage_code: SAPCode | None = Field(
         default=None,
         alias="MaintNotificationDamageCode",
-        description="Damage code within `damage_code_group` - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Damage code within `damage_code_group` - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     object_part_code_group: SAPCode | None = Field(
         default=None,
         alias="MaintNotifObjPrtCodeGroup",
-        description="Code group of the object part code (catalog B, max. 8 characters) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Code group of the object part code (catalog B, max. 8 characters) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=8,
     )
     object_part_code: SAPCode | None = Field(
         default=None,
         alias="MaintNotifObjPrtCode",
-        description="Object part code within `object_part_code_group` - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Object part code within `object_part_code_group` - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_maintenance_notification(),
+# to_odata_update() the changes of SAP.update_maintenance_notification().
 class SAPMaintenanceNotificationModel(SAPODataCreateModel):
     """Data to create an SAP maintenance notification (API_MAINTNOTIFICATION, OData V2).
 
@@ -2301,7 +2674,7 @@ class SAPMaintenanceNotificationModel(SAPODataCreateModel):
 
     notification_type: SAPCode = Field(
         alias="NotificationType",
-        description="Notification type, e.g. 'M1' (maintenance request), 'M2' (malfunction report) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Notification type - SAP has no default. In the SAP standard 'M1' (maintenance request: planned work, e.g. a replacement) or 'M2' (malfunction report: something is broken or failing). Ask the user if the request fits neither.",
         min_length=1,
         max_length=2,
     )
@@ -2319,7 +2692,7 @@ class SAPMaintenanceNotificationModel(SAPODataCreateModel):
     priority: SAPCode | None = Field(
         default=None,
         alias="MaintPriority",
-        description="Maintenance priority, e.g. '1' (very high) to '4' (low) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance priority, in the SAP standard '1' (very high), '2' (high), '3' (medium) or '4' (low).",
         max_length=1,
     )
     technical_object: SAPCode | None = Field(
@@ -2342,7 +2715,7 @@ class SAPMaintenanceNotificationModel(SAPODataCreateModel):
     planner_group: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlannerGroup",
-        description="Maintenance planner group, e.g. '010' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance planner group, e.g. '010'. Usually derived from the technical object.",
         max_length=3,
     )
     main_work_center: SAPCode | None = Field(
@@ -2371,13 +2744,13 @@ class SAPMaintenanceNotificationModel(SAPODataCreateModel):
     code_group: SAPCode | None = Field(
         default=None,
         alias="MaintNotificationCodeGroup",
-        description="Code group of the coding (problem category, max. 8 characters) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Code group of the coding (problem category, max. 8 characters) - system specific. Only if the user gives it.",
         max_length=8,
     )
     code: SAPCode | None = Field(
         default=None,
         alias="MaintNotificationCode",
-        description="Coding code within `code_group` - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Coding code within `code_group` - system specific. Only if the user gives it.",
         max_length=4,
     )
     external_reference: str | None = Field(
@@ -2456,6 +2829,7 @@ class SAPMaintenanceNotificationModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPMaintenanceNotificationResponseModel.
 class SAPMaintenanceNotificationItemResponseModel(SAPODataModel):
     """An item of an SAP maintenance notification as returned by SAP (API_MAINTNOTIFICATION)."""
 
@@ -2476,6 +2850,9 @@ class SAPMaintenanceNotificationItemResponseModel(SAPODataModel):
     is_deleted: SAPFlag = Field(default=None, alias="IsDeleted", description="True if the item has been deleted.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_maintenance_notification(), SAP.get_maintenance_notifications()
+# and SAP.iter_maintenance_notifications().
 class SAPMaintenanceNotificationResponseModel(SAPODataModel):
     """An SAP maintenance notification as returned by SAP (API_MAINTNOTIFICATION).
 
@@ -2509,6 +2886,9 @@ class SAPMaintenanceNotificationResponseModel(SAPODataModel):
         alias="MaintPriority",
         description="Priority, e.g. '1' (very high) to '4' (low) - system specific.",
     )
+    priority_text: str | None = Field(
+        default=None, alias="MaintPriorityDesc", description="Text of the priority from SAP customizing, e.g. '2-High'."
+    )
     technical_object: str | None = Field(
         default=None, alias="TechnicalObject", description="Affected equipment number or functional location."
     )
@@ -2522,6 +2902,9 @@ class SAPMaintenanceNotificationResponseModel(SAPODataModel):
         alias="TechnicalObjectLabel",
         description="Label of the technical object (equipment number or functional location label) as shown in the SAP UI.",
     )
+    technical_object_description: str | None = Field(
+        default=None, alias="TechnicalObjectDescription", description="Description of the technical object."
+    )
     functional_location: str | None = Field(
         default=None,
         alias="FunctionalLocationLabelName",
@@ -2532,21 +2915,31 @@ class SAPMaintenanceNotificationResponseModel(SAPODataModel):
         alias="MaintenancePlanningPlant",
         description="Maintenance planning plant - the plant whose planner groups plan and schedule the maintenance work.",
     )
+    planning_plant_name: str | None = Field(default=None, alias="PlantName", description="Name of the planning plant.")
     planner_group: str | None = Field(
         default=None,
         alias="MaintenancePlannerGroup",
         description="Planner group - the team that plans the maintenance work.",
+    )
+    planner_group_name: str | None = Field(
+        default=None, alias="MaintenancePlannerGroupName", description="Name of the planner group."
     )
     main_work_center: str | None = Field(
         default=None,
         alias="MainWorkCenter",
         description="Main work center - responsible for executing the maintenance work; see get_work_center().",
     )
+    main_work_center_text: str | None = Field(
+        default=None, alias="MainWorkCenterText", description="Description of the main work center."
+    )
     main_work_center_plant: str | None = Field(
         default=None, alias="MainWorkCenterPlant", description="Plant of the main work center."
     )
     reported_by: str | None = Field(
         default=None, alias="ReportedByUser", description="Person who reported the problem."
+    )
+    reporter_name: str | None = Field(
+        default=None, alias="ReporterFullName", description="Full name of the person who reported the problem."
     )
     created_by_user: str | None = Field(
         default=None, alias="CreatedByUser", description="SAP user ID of the user who created the record."
@@ -2568,6 +2961,9 @@ class SAPMaintenanceNotificationResponseModel(SAPODataModel):
         default=None,
         alias="NotifProcessingPhase",
         description="Processing phase code, e.g. '1' (outstanding), '3' (in process), '4' (completed).",
+    )
+    processing_phase_text: str | None = Field(
+        default=None, alias="NotifProcessingPhaseDesc", description="Text of the processing phase, e.g. 'Outstanding'."
     )
     creation_datetime: ODataDateTime = Field(
         default=None, alias="CreationDateTime", description="Timestamp of the creation of the notification."
@@ -2630,6 +3026,46 @@ class SAPMaintenanceNotificationResponseModel(SAPODataModel):
         alias="FunctionalLocation",
         description="Functional location (internal ID) - a place in the technical structure where equipment is installed; see get_functional_location().",
     )
+    breakdown_duration: SAPDecimal | None = Field(
+        default=None,
+        alias="MaintObjectDowntimeDuration",
+        description="Breakdown duration - how long the technical object was down, in `breakdown_duration_unit`.",
+    )
+    breakdown_duration_unit: str | None = Field(
+        default=None, alias="MaintObjDowntimeDurationUnit", description="Unit of the breakdown duration, e.g. 'H'."
+    )
+    malfunction_effect: str | None = Field(
+        default=None, alias="MalfunctionEffect", description="Effect of the malfunction on the system (code)."
+    )
+    malfunction_effect_text: str | None = Field(
+        default=None,
+        alias="MalfunctionEffectText",
+        description="Text of the malfunction effect, e.g. 'System not available'.",
+    )
+    maintenance_plan: str | None = Field(
+        default=None,
+        alias="MaintenancePlan",
+        description="Maintenance plan that generated the notification (preventive maintenance); see get_maintenance_plan().",
+    )
+    maintenance_plan_call: int | None = Field(
+        default=None, alias="MaintenancePlanCallNumber", description="Call number of the maintenance plan."
+    )
+    person_responsible: str | None = Field(
+        default=None, alias="PersonResponsible", description="Personnel number of the person responsible."
+    )
+    person_responsible_name: str | None = Field(
+        default=None, alias="PersonResponsibleName", description="Name of the person responsible."
+    )
+    maintenance_plant: str | None = Field(
+        default=None,
+        alias="MaintenancePlant",
+        description="Maintenance plant - the plant where the technical object is installed.",
+    )
+    location_description: str | None = Field(
+        default=None,
+        alias="LocationDescription",
+        description="Description of the current location of the technical object.",
+    )
     items: Annotated[
         list[SAPMaintenanceNotificationItemResponseModel] | None,
         BeforeValidator(unwrap_odata_navigation),
@@ -2640,13 +3076,17 @@ class SAPMaintenanceNotificationResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_maintenance_notifications() and SAP.iter_maintenance_notifications().
 class SAPMaintenanceNotificationQueryModel(SAPODataQueryModel):
     """Search criteria for SAP maintenance notifications (API_MAINTNOTIFICATION)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "notification_id": "MaintenanceNotification {direction}",
         "created": "CreationDateTime {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["notification_id", "created"] = Field(default="notification_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -2661,8 +3101,12 @@ class SAPMaintenanceNotificationQueryModel(SAPODataQueryModel):
     planning_plant: Annotated[SAPCode | None, ODataCondition("MaintenancePlanningPlant")] = Field(
         default=None, description="Maintenance planning plant, e.g. '1010'."
     )
-    technical_object: Annotated[str | None, ODataCondition("TechnicalObject")] = Field(
-        default=None, description="Equipment number or internal functional location ID the notification refers to."
+    technical_object_ids: Annotated[list[str] | None, ODataCondition("TechnicalObject")] = Field(
+        default=None,
+        description=(
+            "Equipment numbers or functional location labels the notifications refer to, e.g. "
+            "['10000004', 'P-3000-N001'] (notifications of any of them)."
+        ),
     )
     priorities: Annotated[list[SAPCode] | None, ODataCondition("MaintPriority")] = Field(
         default=None, description="Priorities, e.g. ['1'] for very high. System specific."
@@ -2686,7 +3130,37 @@ class SAPMaintenanceNotificationQueryModel(SAPODataQueryModel):
     created_to: Annotated[date | None, ODataCondition("CreationDateTime", operator="le", kind="timestamp")] = Field(
         default=None, description="Only notifications created on or before this date."
     )
+    is_marked_for_deletion: Annotated[
+        bool | None, ODataDeletionCondition("NotifProcessingPhase", deleted_value="5")
+    ] = Field(
+        default=None,
+        description="True = only deleted notifications (deletion flag), False = only notifications that are not deleted.",
+    )
     expand_items: bool = Field(default=False, description="Also return the items (damages) of each notification.")
+
+    @field_validator("technical_object_ids")
+    @classmethod
+    def add_padded_equipment_numbers(cls, values: list[str] | None) -> list[str] | None:
+        """Also match numeric equipment numbers with leading zeros.
+
+        TechnicalObject is a generic field without ALPHA conversion: SAP stores a numeric
+        equipment number with leading zeros ('000000000010000004'), so '10000004' alone
+        finds nothing. The unpadded value is kept for numeric functional location labels.
+
+        """
+
+        if not values:
+            return values
+
+        return list(
+            dict.fromkeys(
+                padded
+                for value in values
+                for padded in (value, value.zfill(18) if value.isdigit() and len(value) < 18 else value)
+            )
+        )
+
+    # end method definition
 
 
 # ---------------------------------------------------------------------------
@@ -2694,6 +3168,7 @@ class SAPMaintenanceNotificationQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPPurchaseOrderItemModel.
 class SAPPurchaseOrderScheduleLineModel(SAPODataCreateModel):
     """A schedule line (delivery date and quantity) of a purchase order item (API_PURCHASEORDER_2)."""
 
@@ -2723,6 +3198,7 @@ class SAPPurchaseOrderScheduleLineModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPPurchaseOrderItemModel.
 class SAPPurchaseOrderAccountAssignmentModel(SAPODataCreateModel):
     """An account assignment of a purchase order item (API_PURCHASEORDER_2).
 
@@ -2786,12 +3262,17 @@ class SAPPurchaseOrderAccountAssignmentModel(SAPODataCreateModel):
     )
 
 
+# Inherits material, material group and account assignment category - with their checks - from SAPPurchasingItemModel (a
+# SAPODataCreateModel): part of the deep create payload of SAPPurchaseOrderModel. to_odata_update() validates its
+# changes in SAP.update_purchase_order().
 class SAPPurchaseOrderItemModel(SAPPurchasingItemModel):
     """An item of a purchase order (API_PURCHASEORDER_2).
 
     An item needs either a material or a short text plus a material group.
     Items can only be created together with the purchase order (SAP does not
-    allow adding items to an existing purchase order via this API).
+    allow adding items to an existing purchase order via this API). An item that
+    refers to a purchase contract item is a release order of the contract: SAP takes
+    the price and conditions of the contract and updates its released quantity.
 
     """
 
@@ -2825,14 +3306,17 @@ class SAPPurchaseOrderItemModel(SAPPurchasingItemModel):
     # OData V4 requires the unit together with the quantity (/IWBEP/CM_V4S_RUN/049):
     unit: SAPCode = Field(
         alias="PurchaseOrderQuantityUnit",
-        description="Order unit as English unit code, e.g. 'PC' (piece) - copy it from an existing purchase order or the material if unsure.",
+        description="Order unit as English unit code, e.g. 'PC' (piece) - the base unit of the material unless the user gives another one.",
         min_length=1,
         max_length=3,
     )
     net_price: SAPDecimal | None = Field(
         default=None,
         alias="NetPriceAmount",
-        description="Net price per `price_unit` in the document currency, e.g. 32.00. Defaults to the price from purchasing info records.",
+        description=(
+            "Net price per `price_unit` in the document currency, e.g. 32.00. Defaults to the price from purchasing "
+            "info records - or of the purchase contract item the item refers to (purchase_contract)."
+        ),
         ge=0,
         max_digits=11,
         decimal_places=2,
@@ -2862,20 +3346,61 @@ class SAPPurchaseOrderItemModel(SAPPurchasingItemModel):
     item_category: SAPCode | None = Field(
         default=None,
         alias="PurchaseOrderItemCategory",
-        description="Item category: empty = standard, 'K' consignment, 'L' subcontracting, 'D' service, 'S' third-party - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Item category: empty = standard, 'K' consignment, 'L' subcontracting, 'D' service, 'S' third-party - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=1,
     )
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code (country specific), e.g. 'V1' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Tax code (country specific), e.g. 'V1' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=2,
+    )
+    purchase_contract: SAPCode | None = Field(
+        default=None,
+        alias="PurchaseContract",
+        description=(
+            "Purchase contract (outline agreement) the item is ordered against, e.g. '4600000074' - for an order "
+            "'at the price of the contract'. SAP takes price and conditions from the contract item (verified in "
+            "S/4HANA: without it, the API's net price may be replaced by 0 if there is no info record). Give "
+            "purchase_contract_item with it; see get_purchase_contract()."
+        ),
+        max_length=10,
+    )
+    purchase_contract_item: Numc5 | None = Field(
+        default=None,
+        alias="PurchaseContractItem",
+        description="Item of the purchase contract (5 digits, padded), e.g. 10 -> '00010'.",
+    )
+    purchase_requisition: SAPCode | None = Field(
+        default=None,
+        alias="PurchaseRequisition",
+        description=(
+            "Purchase requisition the item orders, e.g. '10000194'. SAP marks the requisition item as ordered "
+            "(otherwise it stays open) and takes plant, account assignment and delivery date from it - leave them "
+            "empty (verified in S/4HANA 2023). Give purchase_requisition_item with it; see get_purchase_requisition()."
+        ),
+        max_length=10,
+    )
+    purchase_requisition_item: Numc5 | None = Field(
+        default=None,
+        alias="PurchaseRequisitionItem",
+        description="Item of the purchase requisition (5 digits, padded), e.g. 10 -> '00010'.",
     )
     requisitioner: str | None = Field(
         default=None,
         alias="RequisitionerName",
         description="Name of the requisitioner (free text, max. 12 characters).",
         max_length=12,
+    )
+    supplier_confirmation_control: SAPCode | None = Field(
+        default=None,
+        alias="SupplierConfirmationControlKey",
+        description=(
+            "Confirmation control key - which supplier confirmations are expected, e.g. '0004' (inbound delivery). "
+            "Inbound deliveries can only be created for items whose confirmation control expects them. "
+            "Defaults to the supplier's or material's setting."
+        ),
+        max_length=4,
     )
     schedule_lines: Annotated[list[SAPPurchaseOrderScheduleLineModel], unique_numbers("schedule_line")] = Field(
         default_factory=list,
@@ -2916,6 +3441,8 @@ class SAPPurchaseOrderItemModel(SAPPurchasingItemModel):
     # end method definition
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_purchase_order(), to_odata_update() the
+# changes of SAP.update_purchase_order().
 class SAPPurchaseOrderModel(SAPODataCreateModel):
     """Data to create an SAP purchase order (API_PURCHASEORDER_2, OData V4).
 
@@ -2955,25 +3482,25 @@ class SAPPurchaseOrderModel(SAPODataCreateModel):
     order_type: SAPCode = Field(
         default="NB",
         alias="PurchaseOrderType",
-        description="Purchase order type. 'NB' (standard purchase order, default); the API supports NB and copies of it - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Purchase order type. 'NB' (standard purchase order, default); the API supports NB and copies of it - system specific - give another one only if the user asks for it.",
         min_length=1,
         max_length=4,
     )
     company_code: SAPCode = Field(
         alias="CompanyCode",
-        description="Company code of the ordering legal entity, e.g. '1010'.",
+        description="Company code of the ordering legal entity, e.g. '1010' - the company code of the plant / purchasing organization.",
         min_length=1,
         max_length=4,
     )
     purchasing_organization: SAPCode = Field(
         alias="PurchasingOrganization",
-        description="Purchasing organization, e.g. '1010'.",
+        description="Purchasing organization, e.g. '1010' - the one of the supplier's purchasing data (or assigned to the plant) unless the user gives another one.",
         min_length=1,
         max_length=4,
     )
     purchasing_group: SAPCode = Field(
         alias="PurchasingGroup",
-        description="Purchasing group (the responsible buyer or buyer team), e.g. '001'.",
+        description="Purchasing group (responsible buyer), e.g. '001' - SAP has no default: the one of the supplier's purchasing data unless the user gives another one.",
         min_length=1,
         max_length=3,
     )
@@ -2996,7 +3523,7 @@ class SAPPurchaseOrderModel(SAPODataCreateModel):
     payment_terms: SAPCode | None = Field(
         default=None,
         alias="PaymentTerms",
-        description="Terms of payment key, e.g. '0001'. Defaults to the supplier's terms - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Terms of payment key, e.g. '0001'. Defaults to the supplier's terms - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     your_reference: str | None = Field(
@@ -3031,6 +3558,7 @@ class SAPPurchaseOrderModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPPurchaseOrderItemResponseModel.
 class SAPPurchaseOrderScheduleLineResponseModel(SAPODataModel):
     """A schedule line of a purchase order item as returned by SAP (API_PURCHASEORDER_2)."""
 
@@ -3071,6 +3599,7 @@ class SAPPurchaseOrderScheduleLineResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPPurchaseOrderItemResponseModel.
 class SAPPurchaseOrderAccountAssignmentResponseModel(SAPODataModel):
     """An account assignment of a purchase order item as returned by SAP (API_PURCHASEORDER_2)."""
 
@@ -3113,6 +3642,7 @@ class SAPPurchaseOrderAccountAssignmentResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPPurchaseOrderResponseModel.
 class SAPPurchaseOrderItemResponseModel(SAPODataModel):
     """An item of a purchase order as returned by SAP (API_PURCHASEORDER_2).
 
@@ -3208,6 +3738,14 @@ class SAPPurchaseOrderItemResponseModel(SAPODataModel):
         alias="IsCompletelyDelivered",
         description="True if the item is completely delivered - no further goods receipts are expected.",
     )
+    tax_jurisdiction: str | None = Field(
+        default=None,
+        alias="TaxJurisdiction",
+        description=(
+            "Tax jurisdiction (US sales tax), e.g. 'NY0000000'. A supplier invoice item for this purchase order "
+            "item needs the same tax jurisdiction - see SAPSupplierInvoicePurchaseOrderItemModel.tax_jurisdiction."
+        ),
+    )
     invoice_is_goods_receipt_based: SAPFlag = Field(
         default=None,
         alias="InvoiceIsGoodsReceiptBased",
@@ -3216,6 +3754,42 @@ class SAPPurchaseOrderItemResponseModel(SAPODataModel):
             "goods receipt (material document) - see SAPSupplierInvoicePurchaseOrderItemModel.reference_document."
         ),
     )
+    supplier_confirmation_control: str | None = Field(
+        default=None,
+        alias="SupplierConfirmationControlKey",
+        description="Confirmation control key - which supplier confirmations (order acknowledgment, shipping notification) are expected; e.g. '0004' = inbound delivery. Inbound deliveries can only be created for items with a confirmation control that expects them.",
+    )
+    invoice_is_expected: SAPFlag = Field(
+        default=None,
+        alias="InvoiceIsExpected",
+        description="True if an invoice is expected for the item (false for free-of-charge items).",
+    )
+    is_finally_invoiced: SAPFlag = Field(
+        default=None,
+        alias="IsFinallyInvoiced",
+        description="True if the final invoice has been received - no further invoices are expected.",
+    )
+    is_free_of_charge: SAPFlag = Field(
+        default=None, alias="PurchasingItemIsFreeOfCharge", description="True if the item is free of charge."
+    )
+    is_returns_item: SAPFlag = Field(
+        default=None, alias="IsReturnsItem", description="True for a returns item (goods sent back to the supplier)."
+    )
+    info_record: str | None = Field(
+        default=None,
+        alias="PurchasingInfoRecord",
+        description="Purchasing info record - the supplier-specific conditions of the material the item uses.",
+    )
+    supplier_material_number: str | None = Field(
+        default=None, alias="SupplierMaterialNumber", description="The supplier's number of the material."
+    )
+    manufacturer: str | None = Field(
+        default=None, alias="Manufacturer", description="Manufacturer (supplier number of the manufacturer)."
+    )
+    manufacturer_part_number: str | None = Field(
+        default=None, alias="ManufacturerPartNmbr", description="Manufacturer part number."
+    )
+    batch: str | None = Field(default=None, alias="Batch", description="Batch of the material to be delivered.")
     schedule_lines: list[SAPPurchaseOrderScheduleLineResponseModel] | None = Field(
         default=None,
         alias="_PurchaseOrderScheduleLineTP",
@@ -3234,6 +3808,9 @@ class SAPPurchaseOrderItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_purchase_order(), SAP.get_purchase_orders() and
+# SAP.iter_purchase_orders().
 class SAPPurchaseOrderResponseModel(SAPODataModel):
     """A purchase order as returned by SAP (API_PURCHASEORDER_2, OData V4).
 
@@ -3303,6 +3880,24 @@ class SAPPurchaseOrderResponseModel(SAPODataModel):
         alias="CorrespncExternalReference",
         description="Reference of the business partner (e.g. the supplier's quotation or the customer's reference).",
     )
+    release_is_not_completed: SAPFlag = Field(
+        default=None,
+        alias="ReleaseIsNotCompleted",
+        description="True if the purchase order still waits for approval (release) - it cannot be sent to the supplier yet.",
+    )
+    release_strategy: str | None = Field(
+        default=None,
+        alias="PurchasingReleaseStrategy",
+        description="Release strategy - the approval procedure of the purchase order (empty if no approval is required).",
+    )
+    cancellation_reason: str | None = Field(
+        default=None, alias="PurgReasonForDocCancellation", description="Reason why the purchase order was cancelled."
+    )
+    exchange_rate: SAPDecimal | None = Field(
+        default=None,
+        alias="ExchangeRate",
+        description="Exchange rate between the document currency and the company code currency.",
+    )
     items: list[SAPPurchaseOrderItemResponseModel] | None = Field(
         default=None,
         alias="_PurchaseOrderItem",
@@ -3320,13 +3915,19 @@ class SAPPurchaseOrderResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_purchase_orders() and SAP.iter_purchase_orders().
 class SAPPurchaseOrderQueryModel(SAPODataQueryModel):
     """Search criteria for SAP purchase orders (API_PURCHASEORDER_2, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the order number orders documents of the same
+    # date (e.g. 'the latest order' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "order_id": "PurchaseOrder {direction}",
-        "order_date": "PurchaseOrderDate {direction}",
+        "order_date": "PurchaseOrderDate {direction},PurchaseOrder {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items with their schedule lines
+    # and account assignments in the same request:
     EXPAND: ClassVar[str] = "_PurchaseOrderItem($expand=_PurchaseOrderScheduleLineTP,_PurOrdAccountAssignment)"
     sort_by: Literal["order_id", "order_date"] = Field(default="order_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -3362,12 +3963,28 @@ class SAPPurchaseOrderQueryModel(SAPODataQueryModel):
     material: Annotated[SAPCode | None, ODataCondition("Material", path="_PurchaseOrderItem")] = Field(
         default=None, description="Only purchase orders with an item for this material."
     )
+    purchase_contract: Annotated[SAPCode | None, ODataCondition("PurchaseContract", path="_PurchaseOrderItem")] = Field(
+        default=None,
+        description=(
+            "Only purchase orders with an item that refers to this purchase contract (release orders), e.g. "
+            "'4600000074' - their item quantities are the released quantity of the contract."
+        ),
+    )
     plant: Annotated[SAPCode | None, ODataCondition("Plant", path="_PurchaseOrderItem")] = Field(
         default=None, description="Only purchase orders with an item for this plant."
+    )
+    is_marked_for_deletion: Annotated[
+        bool | None,
+        ODataDeletionCondition("PurchasingDocumentDeletionCode", path="_PurchaseOrderItem", deleted_value="L"),
+    ] = Field(
+        default=None,
+        description="True = only deleted purchase orders (all items deleted), False = only purchase orders with an item that is not deleted.",
     )
     expand_items: bool = Field(default=False, description="Also return the items of each purchase order.")
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSalesOrderModel. to_odata_update() validates
+# its changes in SAP.update_sales_order().
 class SAPSalesOrderItemModel(SAPODataCreateModel):
     """An item of an SAP sales order (API_SALES_ORDER_SRV)."""
 
@@ -3406,7 +4023,7 @@ class SAPSalesOrderItemModel(SAPODataCreateModel):
     item_category: SAPCode | None = Field(
         default=None,
         alias="SalesOrderItemCategory",
-        description="Sales document item category, e.g. 'TAN' (standard item). Usually determined automatically - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document item category, e.g. 'TAN' (standard item). Usually determined automatically - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     customer_material: str | None = Field(
@@ -3417,6 +4034,8 @@ class SAPSalesOrderItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_sales_order(), to_odata_update() the
+# changes of SAP.update_sales_order().
 class SAPSalesOrderModel(SAPODataCreateModel):
     """Data to create an SAP sales order (API_SALES_ORDER_SRV, OData V2).
 
@@ -3446,7 +4065,7 @@ class SAPSalesOrderModel(SAPODataCreateModel):
 
     order_type: SAPCode = Field(
         alias="SalesOrderType",
-        description="Sales document type, e.g. 'OR' / 'TA' (standard order) or 'YT' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document type, e.g. 'OR' / 'TA' (standard order) or 'YT' - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=4,
     )
@@ -3477,13 +4096,13 @@ class SAPSalesOrderModel(SAPODataCreateModel):
     sales_group: SAPCode | None = Field(
         default=None,
         alias="SalesGroup",
-        description="Sales group - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales group - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     sales_office: SAPCode | None = Field(
         default=None,
         alias="SalesOffice",
-        description="Sales office - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales office - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     customer_reference: str | None = Field(
@@ -3505,7 +4124,7 @@ class SAPSalesOrderModel(SAPODataCreateModel):
     payment_terms: SAPCode | None = Field(
         default=None,
         alias="CustomerPaymentTerms",
-        description="Terms of payment key, e.g. '0001'. Defaults to the customer's terms - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Terms of payment key, e.g. '0001'. Defaults to the customer's terms - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     currency: SAPCurrency | None = Field(
@@ -3520,6 +4139,7 @@ class SAPSalesOrderModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPSalesOrderResponseModel.
 class SAPSalesOrderItemResponseModel(SAPODataModel):
     """An item of an SAP sales order as returned by SAP (API_SALES_ORDER_SRV)."""
 
@@ -3573,8 +4193,32 @@ class SAPSalesOrderItemResponseModel(SAPODataModel):
         alias="FixedValueDate",
         description="Fixed value date of the item - the payment terms are calculated from this date.",
     )
+    shipping_point: str | None = Field(
+        default=None, alias="ShippingPoint", description="Shipping point that ships the item."
+    )
+    storage_location: str | None = Field(
+        default=None, alias="StorageLocation", description="Storage location the item is delivered from."
+    )
+    batch: str | None = Field(default=None, alias="Batch", description="Batch of the material.")
+    billing_block: str | None = Field(
+        default=None, alias="ItemBillingBlockReason", description="Billing block of the item (empty = not blocked)."
+    )
+    higher_level_item: str | None = Field(
+        default=None,
+        alias="HigherLevelItem",
+        description="Higher-level item - set for sub-items, e.g. the components of a sales BOM or free goods.",
+    )
+    gross_weight: SAPDecimal | None = Field(
+        default=None, alias="ItemGrossWeight", description="Gross weight of the item in `weight_unit`."
+    )
+    net_weight: SAPDecimal | None = Field(
+        default=None, alias="ItemNetWeight", description="Net weight of the item in `weight_unit`."
+    )
+    weight_unit: str | None = Field(default=None, alias="ItemWeightUnit", description="Unit of the weights, e.g. 'KG'.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_sales_order(), SAP.get_sales_orders() and SAP.iter_sales_orders().
 class SAPSalesOrderResponseModel(SAPODataModel):
     """An SAP sales order as returned by SAP (API_SALES_ORDER_SRV, OData V2).
 
@@ -3674,6 +4318,42 @@ class SAPSalesOrderResponseModel(SAPODataModel):
         alias="ReferenceSDDocument",
         description="Preceding sales document the document was created from (e.g. a quotation or contract).",
     )
+    delivery_block: str | None = Field(
+        default=None,
+        alias="DeliveryBlockReason",
+        description="Delivery block - why the order must not be delivered yet (empty = not blocked).",
+    )
+    billing_block: str | None = Field(
+        default=None,
+        alias="HeaderBillingBlockReason",
+        description="Billing block - why the order must not be billed yet (empty = not blocked).",
+    )
+    block_status: str | None = Field(
+        default=None,
+        alias="TotalBlockStatus",
+        description="Overall block status (delivery, billing and credit blocks): empty = not blocked, 'A' = not blocked, 'B' = partially blocked, 'C' = completely blocked.",
+    )
+    credit_check_status: str | None = Field(
+        default=None,
+        alias="TotalCreditCheckStatus",
+        description="Result of the credit check: empty = not performed, 'A' = passed, 'B' = failed (credit block), 'D' = released.",
+    )
+    rejection_status: str | None = Field(
+        default=None,
+        alias="OverallSDDocumentRejectionSts",
+        description="Rejection status: 'A' = no item rejected, 'B' = partially rejected, 'C' = completely rejected.",
+    )
+    incoterms: str | None = Field(
+        default=None, alias="IncotermsClassification", description="Incoterms, e.g. 'FOB' or 'CIF'."
+    )
+    incoterms_location: str | None = Field(
+        default=None, alias="IncotermsLocation1", description="Place the Incoterms refer to, e.g. 'Hamburg'."
+    )
+    shipping_condition: str | None = Field(
+        default=None,
+        alias="ShippingCondition",
+        description="Shipping condition - how the goods are shipped, e.g. '01' standard.",
+    )
     items: Annotated[list[SAPSalesOrderItemResponseModel] | None, BeforeValidator(unwrap_odata_navigation)] = Field(
         default=None,
         alias="to_Item",
@@ -3681,14 +4361,19 @@ class SAPSalesOrderResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_sales_orders() and SAP.iter_sales_orders().
 class SAPSalesOrderQueryModel(SAPODataQueryModel):
     """Search criteria for SAP sales orders (API_SALES_ORDER_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the order number orders documents of the same
+    # date (e.g. 'the latest order' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "order_id": "SalesOrder {direction}",
-        "order_date": "SalesOrderDate {direction}",
-        "requested_delivery": "RequestedDeliveryDate {direction}",
+        "order_date": "SalesOrderDate {direction},SalesOrder {direction}",
+        "requested_delivery": "RequestedDeliveryDate {direction},SalesOrder {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["order_id", "order_date", "requested_delivery"] = Field(
         default="order_id", description="Sort criterion."
@@ -3745,6 +4430,8 @@ class SAPSalesOrderQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSalesContractModel. to_odata_update()
+# validates its changes in SAP.update_sales_contract().
 class SAPSalesContractItemModel(SAPODataCreateModel):
     """An item of an SAP sales contract (API_SALES_CONTRACT_SRV).
 
@@ -3796,11 +4483,13 @@ class SAPSalesContractItemModel(SAPODataCreateModel):
     item_category: SAPCode | None = Field(
         default=None,
         alias="SalesContractItemCategory",
-        description="Sales document item category. Usually determined automatically - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document item category. Usually determined automatically - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_sales_contract(), to_odata_update() the
+# changes of SAP.update_sales_contract().
 class SAPSalesContractModel(SAPODataCreateModel):
     """Data to create an SAP sales contract (API_SALES_CONTRACT_SRV, OData V2).
 
@@ -3830,7 +4519,7 @@ class SAPSalesContractModel(SAPODataCreateModel):
 
     contract_type: SAPCode = Field(
         alias="SalesContractType",
-        description="Sales contract type, e.g. 'CQ' (quantity contract), 'WK1' (value contract) or 'YC' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales contract type, e.g. 'CQ' (quantity contract), 'WK1' (value contract) or 'YC' - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=4,
     )
@@ -3882,7 +4571,7 @@ class SAPSalesContractModel(SAPODataCreateModel):
     payment_terms: SAPCode | None = Field(
         default=None,
         alias="CustomerPaymentTerms",
-        description="Terms of payment key, e.g. '0001' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Terms of payment key, e.g. '0001' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     currency: SAPCurrency | None = Field(
@@ -3913,6 +4602,7 @@ class SAPSalesContractModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPSalesContractResponseModel.
 class SAPSalesContractItemResponseModel(SAPODataModel):
     """An item of an SAP sales contract as returned by SAP (API_SALES_CONTRACT_SRV)."""
 
@@ -3967,6 +4657,9 @@ class SAPSalesContractItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_sales_contract(), SAP.get_sales_contracts() and
+# SAP.iter_sales_contracts().
 class SAPSalesContractResponseModel(SAPODataModel):
     """An SAP sales contract as returned by SAP (API_SALES_CONTRACT_SRV, OData V2).
 
@@ -4054,13 +4747,18 @@ class SAPSalesContractResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_sales_contracts() and SAP.iter_sales_contracts().
 class SAPSalesContractQueryModel(SAPODataQueryModel):
     """Search criteria for SAP sales contracts (API_SALES_CONTRACT_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the contract number orders documents of the
+    # same date (e.g. 'the latest contract' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "contract_id": "SalesContract {direction}",
-        "validity_end": "SalesContractValidityEndDate {direction}",
+        "validity_end": "SalesContractValidityEndDate {direction},SalesContract {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["contract_id", "validity_end"] = Field(default="contract_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -4099,6 +4797,9 @@ class SAPSalesContractQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits material, material group and account assignment category - with their checks - from SAPPurchasingItemModel (a
+# SAPODataCreateModel): part of the deep create payload of SAPPurchaseContractModel. to_odata_update() validates its
+# changes in SAP.update_purchase_contract() and SAP.update_purchase_contract_item().
 class SAPPurchaseContractItemModel(SAPPurchasingItemModel):
     """An item of an SAP purchase contract (API_PURCHASECONTRACT_PROCESS_SRV).
 
@@ -4148,7 +4849,7 @@ class SAPPurchaseContractItemModel(SAPPurchasingItemModel):
     net_price: SAPDecimal | None = Field(
         default=None,
         alias="ContractNetPriceAmount",
-        description="Net price per `price_unit` in the document currency, e.g. 950.00.",
+        description="Net price per `price_unit` in the document currency, e.g. 950.00 - the price agreed with the supplier: ask the user if not given (a requisition's price is only a valuation price).",
         ge=0,
         decimal_places=2,
     )
@@ -4161,13 +4862,13 @@ class SAPPurchaseContractItemModel(SAPPurchasingItemModel):
     item_category: SAPCode | None = Field(
         default=None,
         alias="PurchasingDocumentItemCategory",
-        description="Item category: empty = standard, 'M' material unknown, 'W' material group - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Item category: empty = standard, 'M' material unknown, 'W' material group - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=1,
     )
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code (country specific), e.g. 'V1' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Tax code (country specific), e.g. 'V1' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=2,
     )
     storage_location: SAPCode | None = Field(
@@ -4192,6 +4893,8 @@ class SAPPurchaseContractItemModel(SAPPurchasingItemModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_purchase_contract(), to_odata_update()
+# the changes of SAP.update_purchase_contract().
 class SAPPurchaseContractModel(SAPODataCreateModel):
     """Data to create an SAP purchase contract (API_PURCHASECONTRACT_PROCESS_SRV, OData V2).
 
@@ -4225,22 +4928,25 @@ class SAPPurchaseContractModel(SAPODataCreateModel):
     contract_type: SAPCode = Field(
         default="MK",
         alias="PurchaseContractType",
-        description="Purchase contract type: 'MK' quantity contract (default), 'WK' value contract - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Purchase contract type: 'MK' quantity contract (default), 'WK' value contract - system specific - give another one only if the user asks for it.",
         min_length=1,
         max_length=4,
     )
     company_code: SAPCode = Field(
-        alias="CompanyCode", description="Company code, e.g. '1010'.", min_length=1, max_length=4
+        alias="CompanyCode",
+        description="Company code of the ordering legal entity, e.g. '1010' - the company code of the plant / purchasing organization.",
+        min_length=1,
+        max_length=4,
     )
     purchasing_organization: SAPCode = Field(
         alias="PurchasingOrganization",
-        description="Purchasing organization, e.g. '1010'.",
+        description="Purchasing organization, e.g. '1010' - the one of the supplier's purchasing data (or assigned to the plant) unless the user gives another one.",
         min_length=1,
         max_length=4,
     )
     purchasing_group: SAPCode = Field(
         alias="PurchasingGroup",
-        description="Purchasing group (responsible buyer), e.g. '001'.",
+        description="Purchasing group (responsible buyer), e.g. '001' - SAP has no default: the one of the supplier's purchasing data unless the user gives another one.",
         min_length=1,
         max_length=3,
     )
@@ -4252,11 +4958,11 @@ class SAPPurchaseContractModel(SAPODataCreateModel):
     )
     validity_start_date: ODataV2Date = Field(
         alias="ValidityStartDate",
-        description="Start of the contract validity, e.g. '2026-11-01'. Required.",
+        description="Start of the contract validity, e.g. '2026-11-01'. Required - ask the user if not given.",
     )
     validity_end_date: ODataV2Date = Field(
         alias="ValidityEndDate",
-        description="End of the contract validity, e.g. '2026-11-01'. Required; must not be before `validity_start_date`.",
+        description="End of the contract validity, e.g. '2026-11-01'. Required - ask the user if not given; must not be before `validity_start_date`.",
     )
     target_amount: SAPDecimal | None = Field(
         default=None,
@@ -4273,7 +4979,7 @@ class SAPPurchaseContractModel(SAPODataCreateModel):
     payment_terms: SAPCode | None = Field(
         default=None,
         alias="PaymentTerms",
-        description="Terms of payment key, e.g. '0001' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Terms of payment key, e.g. '0001' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     your_reference: str | None = Field(
@@ -4349,6 +5055,7 @@ class SAPPurchaseContractModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPPurchaseContractResponseModel.
 class SAPPurchaseContractItemResponseModel(SAPODataModel):
     """An item of an SAP purchase contract as returned by SAP (API_PURCHASECONTRACT_PROCESS_SRV)."""
 
@@ -4384,10 +5091,14 @@ class SAPPurchaseContractItemResponseModel(SAPODataModel):
         default=None, alias="NetPriceQuantity", description="Quantity the net price refers to."
     )
     currency: str | None = Field(default=None, alias="DocumentCurrency", description="Document currency (ISO code).")
-    consumed_quantity: SAPDecimal | None = Field(
+    standard_release_order_quantity: SAPDecimal | None = Field(
         default=None,
         alias="PurgDocReleaseOrderQuantity",
-        description="Quantity already released (called off) from the contract.",
+        description=(
+            "Standard release order quantity - the default quantity of a release order, NOT the quantity already "
+            "released. The contract API has no released quantity: it is the sum of the purchase order items that "
+            "refer to the contract item (see SAPPurchaseOrderQueryModel.purchase_contract)."
+        ),
     )
     account_assignment_category: str | None = Field(
         default=None,
@@ -4407,6 +5118,9 @@ class SAPPurchaseContractItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_purchase_contract(), SAP.get_purchase_contracts() and
+# SAP.iter_purchase_contracts().
 class SAPPurchaseContractResponseModel(SAPODataModel):
     """An SAP purchase contract as returned by SAP (API_PURCHASECONTRACT_PROCESS_SRV, OData V2).
 
@@ -4492,13 +5206,18 @@ class SAPPurchaseContractResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_purchase_contracts() and SAP.iter_purchase_contracts().
 class SAPPurchaseContractQueryModel(SAPODataQueryModel):
     """Search criteria for SAP purchase contracts (API_PURCHASECONTRACT_PROCESS_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the contract number orders documents of the
+    # same date (e.g. 'the latest contract' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "contract_id": "PurchaseContract {direction}",
-        "validity_end": "ValidityEndDate {direction}",
+        "validity_end": "ValidityEndDate {direction},PurchaseContract {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_PurchaseContractItem"
     sort_by: Literal["contract_id", "validity_end"] = Field(default="contract_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -4525,7 +5244,60 @@ class SAPPurchaseContractQueryModel(SAPODataQueryModel):
     valid_on: Annotated[date | None, ODataCondition(("ValidityStartDate", "ValidityEndDate"), operator="valid_on")] = (
         Field(default=None, description="Only contracts valid on this date (e.g. today for the current ones).")
     )
+    is_marked_for_deletion: bool | None = Field(
+        default=None,
+        description="True = only deleted contracts (all items deleted), False = only contracts with an item that is not deleted.",
+    )
     expand_items: bool = Field(default=False, description="Also return the items of each contract.")
+
+    def to_odata(self, odata_version: int) -> dict:
+        """Return the OData query options - with the items if the deletion flag is a criterion (see accepts()).
+
+        SAP.iter_purchase_contracts() drops the items again if they haven't been requested (expand_items).
+
+        Args:
+            odata_version (int):
+                The OData version of the service.
+
+        Returns:
+            dict:
+                The query options ($filter, $orderby, $expand).
+
+        """
+
+        params = super().to_odata(odata_version=odata_version)
+        if self.is_marked_for_deletion is not None:
+            params["$expand"] = self.EXPAND
+
+        return params
+
+    # end method definition
+
+    def accepts(self, entity: BaseModel) -> bool:
+        """Check the deletion flag - deleting a contract sets the indicator of its items, not of the header.
+
+        The API (OData V2) can't filter by the items, so the contracts are checked when read.
+
+        Args:
+            entity (BaseModel):
+                The purchase contract read with its items (SAPPurchaseContractResponseModel).
+
+        Returns:
+            bool:
+                True if the contract matches is_marked_for_deletion (or the criterion isn't set).
+
+        """
+
+        if self.is_marked_for_deletion is None:
+            return True
+
+        contract = cast("SAPPurchaseContractResponseModel", entity)
+        items = contract.items or []
+        is_deleted = contract.deletion_code == "L" or bool(items and all(item.deletion_code == "L" for item in items))
+
+        return is_deleted == self.is_marked_for_deletion
+
+    # end method definition
 
 
 # ---------------------------------------------------------------------------
@@ -4533,6 +5305,7 @@ class SAPPurchaseContractQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPPurchaseRequisitionItemModel.
 class SAPPurchaseRequisitionAccountAssignmentModel(SAPODataCreateModel):
     """An account assignment of a purchase requisition item (API_PURCHASEREQUISITION_2).
 
@@ -4586,6 +5359,12 @@ class SAPPurchaseRequisitionAccountAssignmentModel(SAPODataCreateModel):
         description="Unit of `quantity` - the item's unit. Omit it to use the item's unit.",
         max_length=3,
     )
+    unit_iso_code: SAPCode | None = Field(
+        default=None,
+        alias="BaseUnitISOCode",
+        description="ISO code of `unit`, e.g. 'PCE'. Omit it to use the item's unit.",
+        max_length=3,
+    )
     distribution_percent: SAPDecimal | None = Field(
         default=None,
         alias="MultipleAcctAssgmtDistrPercent",
@@ -4596,6 +5375,9 @@ class SAPPurchaseRequisitionAccountAssignmentModel(SAPODataCreateModel):
     )
 
 
+# Inherits material, material group and account assignment category - with their checks - from SAPPurchasingItemModel (a
+# SAPODataCreateModel): part of the deep create payload of SAPPurchaseRequisitionModel. to_odata_update() validates its
+# changes in SAP.update_purchase_requisition().
 class SAPPurchaseRequisitionItemModel(SAPPurchasingItemModel):
     """An item of an SAP purchase requisition (API_PURCHASEREQUISITION_2, OData V4).
 
@@ -4622,11 +5404,23 @@ class SAPPurchaseRequisitionItemModel(SAPPurchasingItemModel):
         max_digits=13,
         decimal_places=3,
     )
-    # OData V4 requires the unit together with the quantity (/IWBEP/CM_V4S_RUN/049):
-    unit: SAPCode = Field(
+    # OData V4 requires the unit together with the quantity (/IWBEP/CM_V4S_RUN/049) - as ISO code
+    # (/IWBEP/CM_V4_COS/060). BaseUnit expects SAP's internal code (e.g. 'ST' for 'PC'), so only the
+    # ISO code is sent (see to_odata()):
+    unit: SAPCode | None = Field(
+        default=None,
         alias="BaseUnit",
-        description="Unit as English unit code, e.g. 'PC' (piece) - copy it from the material if unsure.",
+        description=(
+            "Unit as English unit code, e.g. 'PC' (piece) - copy it from the material if unsure. "
+            "Its ISO code is determined automatically for SAP's standard units; give `unit_iso_code` otherwise."
+        ),
         min_length=1,
+        max_length=3,
+    )
+    unit_iso_code: SAPCode | None = Field(
+        default=None,
+        alias="BaseUnitISOCode",
+        description="ISO code of the unit, e.g. 'PCE' (piece), 'KGM' (kilogram), 'HUR' (hour). Determined from `unit` if omitted.",
         max_length=3,
     )
     price: SAPDecimal | None = Field(
@@ -4651,7 +5445,9 @@ class SAPPurchaseRequisitionItemModel(SAPPurchasingItemModel):
         description="Currency of the price (ISO 4217 code), e.g. 'EUR'.",
     )
     delivery_date: date | None = Field(
-        default=None, alias="DeliveryDate", description="Requested delivery date, e.g. '2026-11-01'."
+        default=None,
+        alias="DeliveryDate",
+        description="Requested delivery date, e.g. '2026-11-01' - ask the user if not given.",
     )
     plant: SAPCode | None = Field(
         default=None, alias="Plant", description="Receiving plant, e.g. '1010'.", max_length=4
@@ -4671,19 +5467,19 @@ class SAPPurchaseRequisitionItemModel(SAPPurchasingItemModel):
     purchasing_organization: SAPCode | None = Field(
         default=None,
         alias="PurchasingOrganization",
-        description="Purchasing organization, e.g. '1010'.",
+        description="Purchasing organization, e.g. '1010'. Not needed - the requisition is assigned when it is ordered.",
         max_length=4,
     )
     purchasing_group: SAPCode | None = Field(
         default=None,
         alias="PurchasingGroup",
-        description="Purchasing group (responsible buyer), e.g. '001'.",
+        description="Purchasing group (responsible buyer), e.g. '001' - SAP has no default: the one of the (desired) supplier's purchasing data unless the user gives another one.",
         max_length=3,
     )
     item_category: SAPCode | None = Field(
         default=None,
         alias="PurchasingDocumentItemCategory",
-        description="Item category: empty = standard, 'K' consignment, 'L' subcontracting, 'D' service - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Item category: empty = standard, 'K' consignment, 'L' subcontracting, 'D' service - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=1,
     )
     desired_supplier: SAPCode | None = Field(
@@ -4722,9 +5518,19 @@ class SAPPurchaseRequisitionItemModel(SAPPurchasingItemModel):
 
         """
 
+        self.unit_iso_code = self.unit_iso_code or unit_iso_code(self.unit)
+        if not self.unit_iso_code:
+            message = (
+                "Item -> {} needs a `unit_iso_code` - the ISO code of unit -> '{}' is not known".format(
+                    self.item, self.unit
+                )
+                if self.unit
+                else "Item -> {} needs a `unit` or `unit_iso_code`".format(self.item)
+            )
+            raise ValueError(message)
         for account_assignment in self.account_assignments:
-            if account_assignment.quantity is not None:
-                account_assignment.unit = account_assignment.unit or self.unit
+            if account_assignment.quantity is not None and not account_assignment.unit_iso_code:
+                account_assignment.unit_iso_code = unit_iso_code(account_assignment.unit) or self.unit_iso_code
         if self.price is not None and not self.currency:
             message = "Item -> {} has a `price` but no `currency`".format(self.item)
             raise ValueError(message)
@@ -4733,7 +5539,56 @@ class SAPPurchaseRequisitionItemModel(SAPPurchasingItemModel):
 
     # end method definition
 
+    @classmethod
+    def to_odata_update(cls, changes: dict) -> dict:
+        """Return the OData payload to update individual fields of an item - a new unit as ISO code.
 
+        Args:
+            changes (dict):
+                The fields to change (see SAPODataCreateModel.to_odata_update()).
+
+        Returns:
+            dict:
+                The payload with OData property names.
+
+        Raises:
+            ValueError:
+                If a field is invalid or the ISO code of a new unit is not known.
+
+        """
+
+        payload = super().to_odata_update(changes)
+        if "BaseUnit" in payload:
+            unit = payload.pop("BaseUnit")
+            payload.setdefault("BaseUnitISOCode", unit_iso_code(unit))
+            if not payload["BaseUnitISOCode"]:
+                message = "The ISO code of unit -> '{}' is not known - change `unit_iso_code` instead".format(unit)
+                raise ValueError(message)
+
+        return payload
+
+    # end method definition
+
+    def to_odata(self) -> dict:
+        """Return the OData payload of the item - its units only as ISO codes.
+
+        API_PURCHASEREQUISITION_2 expects SAP's internal unit code in BaseUnit (e.g. 'ST' for 'PC')
+        and rejects a BaseUnit that doesn't match the ISO code - with the ISO code alone, SAP
+        determines the unit itself.
+
+        Returns:
+            dict:
+                The payload with OData property names.
+
+        """
+
+        return send_purchase_requisition_units_as_iso(super().to_odata())
+
+    # end method definition
+
+
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_purchase_requisition(),
+# to_odata_update() the changes of SAP.update_purchase_requisition().
 class SAPPurchaseRequisitionModel(SAPODataCreateModel):
     """Data to create an SAP purchase requisition (API_PURCHASEREQUISITION_2, OData V4).
 
@@ -4765,7 +5620,7 @@ class SAPPurchaseRequisitionModel(SAPODataCreateModel):
     requisition_type: SAPCode = Field(
         default="NB",
         alias="PurchaseRequisitionType",
-        description="Purchase requisition type, 'NB' (standard, default) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Purchase requisition type, 'NB' (standard, default) - system specific - give another one only if the user asks for it.",
         min_length=1,
         max_length=4,
     )
@@ -4784,7 +5639,25 @@ class SAPPurchaseRequisitionModel(SAPODataCreateModel):
         min_length=1,
     )
 
+    def to_odata(self) -> dict:
+        """Return the OData payload of the purchase requisition - the units of its items only as ISO codes.
 
+        Returns:
+            dict:
+                The payload with OData property names.
+
+        """
+
+        payload = super().to_odata()
+        for item in payload.get("_PurchaseRequisitionItem", []):
+            send_purchase_requisition_units_as_iso(item)
+
+        return payload
+
+    # end method definition
+
+
+# Inherits from SAPODataModel - nested in SAPPurchaseRequisitionItemResponseModel.
 class SAPPurchaseRequisitionAccountAssignmentResponseModel(SAPODataModel):
     """An account assignment of a purchase requisition item as returned by SAP (API_PURCHASEREQUISITION_2)."""
 
@@ -4824,6 +5697,7 @@ class SAPPurchaseRequisitionAccountAssignmentResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPPurchaseRequisitionResponseModel.
 class SAPPurchaseRequisitionItemResponseModel(SAPODataModel):
     """An item of an SAP purchase requisition as returned by SAP (API_PURCHASEREQUISITION_2).
 
@@ -4854,6 +5728,9 @@ class SAPPurchaseRequisitionItemResponseModel(SAPODataModel):
         default=None,
         alias="BaseUnit",
         description="Unit as returned by SAP - API_PURCHASEREQUISITION_2 may return internal codes, e.g. 'ST'.",
+    )
+    unit_iso_code: str | None = Field(
+        default=None, alias="BaseUnitISOCode", description="ISO code of the unit, e.g. 'PCE' (piece)."
     )
     price: SAPDecimal | None = Field(
         default=None, alias="PurchaseRequisitionPrice", description="Valuation price per `price_unit`."
@@ -4948,6 +5825,9 @@ class SAPPurchaseRequisitionItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_purchase_requisition(), SAP.get_purchase_requisitions() and
+# SAP.iter_purchase_requisitions().
 class SAPPurchaseRequisitionResponseModel(SAPODataModel):
     """An SAP purchase requisition as returned by SAP (API_PURCHASEREQUISITION_2, OData V4).
 
@@ -4974,12 +5854,17 @@ class SAPPurchaseRequisitionResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_purchase_requisitions() and SAP.iter_purchase_requisitions().
 class SAPPurchaseRequisitionQueryModel(SAPODataQueryModel):
     """Search criteria for SAP purchase requisitions (API_PURCHASEREQUISITION_2, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "requisition_id": "PurchaseRequisition {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items with their account
+    # assignments in the same request:
     EXPAND: ClassVar[str] = "_PurchaseRequisitionItem($expand=_PurchaseReqnAcctAssgmt)"
     sort_by: Literal["requisition_id"] = Field(default="requisition_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -5009,7 +5894,791 @@ class SAPPurchaseRequisitionQueryModel(SAPODataQueryModel):
     created_by: Annotated[SAPCode | None, ODataCondition("CreatedByUser", path="_PurchaseRequisitionItem")] = Field(
         default=None, description="Only requisitions with an item created by this SAP user."
     )
+    is_marked_for_deletion: Annotated[
+        bool | None, ODataDeletionCondition("IsDeleted", path="_PurchaseRequisitionItem")
+    ] = Field(
+        default=None,
+        description="True = only deleted purchase requisitions (all items deleted), False = only requisitions with an item that is not deleted.",
+    )
     expand_items: bool = Field(default=False, description="Also return the items of each requisition.")
+
+
+# ---------------------------------------------------------------------------
+# Warranty claims (API_WARRANTYCLAIM, OData V4)
+# ---------------------------------------------------------------------------
+# A warranty claim has versions (SAP creates the first one), and each version has items. Versions and items
+# can only be created together with the claim (deep create); the claim itself cannot be deleted in SAP.
+# Supplier claims (against a vendor) and customer claims (against a customer) are the same entity - the
+# supplier or customer fields and the claim type decide which one it is.
+
+
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPWarrantyClaimVersionModel. to_odata_update()
+# validates its changes in SAP.update_warranty_claim_version().
+class SAPWarrantyClaimItemModel(SAPODataCreateModel):
+    """An item of an SAP warranty claim version (API_WARRANTYCLAIM, OData V4).
+
+    The item type is required by SAP. Which other fields are required depends on the item type and the
+    warranty customizing of the system - SAP reports missing fields in its error messages.
+
+    """
+
+    # Create-only properties ($metadata: Core.Immutable) - SAP derives the controlling item type from the item type:
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        "WarrantyClaimItemNumber": "item numbers are assigned when the item is created",
+        "WarrantyItemType": "the item type of an existing item cannot be changed",
+    }
+
+    item: Numc6 | None = Field(
+        default=None,
+        alias="WarrantyClaimItemNumber",
+        description="Item number (6 digits, padded), e.g. 10 -> '000010'. SAP assigns it if omitted.",
+    )
+    item_type: SAPCode = Field(
+        alias="WarrantyItemType",
+        description=(
+            "Warranty item type: 'MAT' (spare part / material), 'FR' (labor value), 'SUBL' (external activity). "
+            "Required."
+        ),
+        min_length=1,
+        max_length=4,
+    )
+    item_key: str | None = Field(
+        default=None,
+        alias="WarrantyItemKey",
+        description="Key of the item that is not a material, e.g. the labor value of a labor item.",
+        max_length=40,
+    )
+    catalog: str | None = Field(
+        default=None,
+        alias="WarrantyClaimCatalog",
+        description="Catalog of the defect code - system specific.",
+        max_length=5,
+    )
+    defect_code: str | None = Field(
+        default=None,
+        alias="WarrantyClaimItemDefectCode",
+        description="Defect code of the item from the catalog - system specific.",
+        max_length=40,
+    )
+    material: SAPCode | None = Field(
+        default=None,
+        alias="Material",
+        description="Material (product) number of the defective or replaced part; see get_products().",
+        max_length=18,
+    )
+    quantity: SAPDecimal | None = Field(
+        default=None,
+        alias="WrntyClaimQuantity",
+        description="Quantity of the item, e.g. 1.",
+        gt=0,
+        max_digits=15,
+        decimal_places=3,
+    )
+    # OData V4 requires the unit together with the quantity (/IWBEP/CM_V4S_RUN/049) - see check_quantity_unit():
+    unit: SAPCode | None = Field(
+        default=None,
+        alias="QuantityUnit",
+        description=(
+            "Unit of the quantity as English unit code, e.g. 'PC' (piece) - required with `quantity`; the base unit "
+            "of the material unless the user gives another one."
+        ),
+        max_length=3,
+    )
+    price_amount: SAPDecimal | None = Field(
+        default=None,
+        alias="WrntyClaimItemPriceCndnAmount",
+        description=(
+            "Price of the item (amount of its price condition), e.g. the price of the part. SAP calculates the "
+            "claimed amounts of the item from it - only if the claim type has a pricing procedure, otherwise SAP "
+            "ignores the price."
+        ),
+        max_digits=24,
+        decimal_places=9,
+    )
+    price_currency: SAPCurrency | None = Field(
+        default=None,
+        alias="WrntyClaimItemPriceCndnCrcy",
+        description="Currency of the price, ISO code e.g. 'USD'.",
+    )
+    decision_code: str | None = Field(
+        default=None,
+        alias="WarrantyClaimItemDecisionCode",
+        description="Decision code of the item (system specific), e.g. the reason for accepting or rejecting it.",
+        max_length=8,
+    )
+    is_causing_damage: str | None = Field(
+        default=None,
+        alias="WrntyClmPartsIsCausingDamage",
+        description="'X' if this part caused the damage, otherwise empty.",
+        max_length=1,
+    )
+    tax_code: str | None = Field(
+        default=None,
+        alias="WarrantyClaimItemTaxCode",
+        description="Tax code of the item (system specific).",
+        max_length=2,
+    )
+    return_status_to_supplier: str | None = Field(
+        default=None,
+        alias="WrntyReturnPartsToSuplrStatus",
+        description=(
+            "Status of the return of the parts to the supplier: '0' (no return), '1' (parts have to be returned), "
+            "'2' (partial delivery), '3' (final delivery)."
+        ),
+        max_length=1,
+    )
+    return_status_from_customer: str | None = Field(
+        default=None,
+        alias="WrntyReturnPartsFrmCustStatus",
+        description=(
+            "Status of the return of the parts from the customer: '0' (no return), '1' (parts have to be returned), "
+            "'2' (partial delivery), '3' (final delivery)."
+        ),
+        max_length=1,
+    )
+    supplier_return_date: date | None = Field(
+        default=None,
+        alias="WrntyItemSuplrRetPartsDate",
+        description="Date by which the parts must be returned to the supplier.",
+    )
+    supplier_return_delivery_date: date | None = Field(
+        default=None,
+        alias="WrntyItmSuplrRetPartsDelivDate",
+        description="Date the parts were delivered back to the supplier.",
+    )
+    customer_return_date: date | None = Field(
+        default=None,
+        alias="WrntyItemCustRetPartsDate",
+        description="Date by which the customer must return the parts.",
+    )
+    customer_return_delivery_date: date | None = Field(
+        default=None,
+        alias="WrntyItmCustRetPartsDelivDate",
+        description="Date the parts of the customer were delivered.",
+    )
+
+    @model_validator(mode="after")
+    def check_quantity_unit(self) -> Self:
+        """Validate that an item with a quantity has its unit (SAP rejects the quantity without it)."""
+
+        if self.quantity is not None and not self.unit:
+            message = "Item -> {} has a quantity but no unit - give the unit, e.g. 'PC'".format(self.item or "?")
+            raise ValueError(message)
+
+        return self
+
+    # end method definition
+
+
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPWarrantyClaimModel. to_odata_update()
+# validates its changes in SAP.update_warranty_claim_version().
+class SAPWarrantyClaimVersionModel(SAPODataCreateModel):
+    """A version of an SAP warranty claim (API_WARRANTYCLAIM, OData V4).
+
+    SAP creates the first version with the claim. Changes of the claim (e.g. a new decision) are made in
+    new versions, so a version can be given with the claim - the items belong to it. SAP requires the sales
+    area and the currency in every version, supplier claims also the purchasing organization.
+
+    """
+
+    # Create-only property ($metadata: Core.Immutable):
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        "WrntyVersionNumber": "version numbers are assigned when the version is created",
+    }
+
+    number: Numc4 | None = Field(
+        default=None,
+        alias="WrntyVersionNumber",
+        description="Version number (4 digits, padded), e.g. 1 -> '0001'. SAP assigns it if omitted.",
+    )
+    decision_code: str | None = Field(
+        default=None,
+        alias="WrntyDecisionCode",
+        description="Decision code of the version (system specific).",
+        max_length=8,
+    )
+    partner: SAPCode | None = Field(
+        default=None,
+        alias="WarrantyClaimVersionPartner",
+        description="Business partner of the version - the supplier or the customer, depending on the claim.",
+        max_length=10,
+    )
+    currency: SAPCurrency | None = Field(
+        default=None,
+        alias="WrntyCurrencyCode",
+        description="Currency of the amounts, ISO code e.g. 'EUR'. Required by SAP.",
+    )
+    billing_document_date: date | None = Field(
+        default=None, alias="WrntyBillingDocumentDate", description="Billing document date of the version."
+    )
+    exchange_rate_date: date | None = Field(
+        default=None, alias="WrntyPriceExchangeRateDate", description="Date of the exchange rate for the prices."
+    )
+    is_released_for_shipping: str | None = Field(
+        default=None,
+        alias="WrntyVersIsReldForShipgToPart",
+        description="'X' if the version is released for shipping to the partner, otherwise empty.",
+        max_length=1,
+    )
+    purchasing_organization: SAPCode | None = Field(
+        default=None,
+        alias="PurchasingOrganization",
+        description=(
+            "Purchasing organization - required for supplier claims, must be the purchasing organization of the "
+            "plant; see get_purchasing_organizations()."
+        ),
+        max_length=4,
+    )
+    sales_organization: SAPCode | None = Field(
+        default=None,
+        alias="SalesOrganization",
+        description=(
+            "Sales organization - required in every version (supplier and customer claims); see "
+            "get_sales_organizations()."
+        ),
+        max_length=4,
+    )
+    distribution_channel: SAPCode | None = Field(
+        default=None,
+        alias="DistributionChannel",
+        description="Distribution channel of the sales area - required in every version.",
+        max_length=2,
+    )
+    division: SAPCode | None = Field(
+        default=None,
+        alias="Division",
+        description="Division of the sales area - required in every version.",
+        max_length=2,
+    )
+    items: Annotated[list[SAPWarrantyClaimItemModel] | None, unique_numbers("item")] = Field(
+        default=None,
+        alias="_WrntyClaimItem",
+        description="Items of the version. Item numbers must be unique.",
+    )
+
+
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_warranty_claim(), to_odata_update() the
+# changes of SAP.update_warranty_claim().
+class SAPWarrantyClaimModel(SAPODataCreateModel):
+    """Data to create an SAP warranty claim (API_WARRANTYCLAIM, OData V4).
+
+    The claim number is assigned by SAP. The claim type and the object (plant, object type and external
+    object number, e.g. an equipment) are the basis of the claim. A supplier claim needs the supplier, a
+    customer claim the customer. Unlike other SAP documents, the claim is not deleted via the API.
+
+    """
+
+    # Create-only property ($metadata: Core.Immutable):
+    READ_ONLY_PROPERTIES: ClassVar[dict[str, str]] = {
+        "WarrantyClaimType": "the claim type cannot be changed - create a new claim",
+    }
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "WarrantyClaimType": "1S01",
+                    "Plant": "3000",
+                    "WrntySupplier": "30050",
+                    "_WrntyClaimVersion": [
+                        {
+                            "_WrntyClaimItem": [
+                                {
+                                    "WarrantyItemType": "MAT",
+                                    "Material": "P-100",
+                                    "WrntyClaimQuantity": 1,
+                                    "QuantityUnit": "PC",
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    # The API accepts only SAP's standard claim types - copies with other names are rejected (WTY_RAP/095), see
+    # IF_WTY_CONSTANT_INTERFACE=>CO_WTY_CLAIM_TYPE:
+    claim_type: Literal["1S01", "1C01"] = Field(
+        alias="WarrantyClaimType",
+        description=(
+            "Warranty claim type: '1S01' (supplier claim - against a supplier) or '1C01' (customer claim - from a "
+            "customer). The API accepts no other claim types."
+        ),
+    )
+    plant: SAPCode | None = Field(
+        default=None,
+        alias="Plant",
+        description="Plant of the claim, e.g. '3000'; see get_plants().",
+        max_length=4,
+    )
+    # SAP standard values of the warranty object type (domain WTY_RELTY, table WTY_RELOB_TAB):
+    object_type: Literal["EQUI", "FUNC", "IBAS", "SERN", "VELO", "O"] | None = Field(
+        default=None,
+        alias="WarrantyObjectType",
+        description=(
+            "Type of the warranty object: 'EQUI' (equipment), 'FUNC' (functional location), 'IBAS' (installed "
+            "base), 'SERN' (serial number), 'VELO' (vehicle) or 'O' (other)."
+        ),
+    )
+    external_object_number: str | None = Field(
+        default=None,
+        alias="WrntyExternalObjectNumber",
+        description="Number of the warranty object (e.g. the equipment or the serial number), external format.",
+        max_length=40,
+    )
+    supplier: SAPCode | None = Field(
+        default=None,
+        alias="WrntySupplier",
+        description="Supplier of a supplier claim (vendor number, business partner in the supplier role).",
+        max_length=10,
+    )
+    supplier_role: SAPCode | None = Field(
+        default=None,
+        alias="WrntySupplierRole",
+        description="Partner function of the supplier, e.g. 'LF' (supplier). Omit it to use the one of the claim type.",
+        max_length=2,
+    )
+    supplier_coverage_type: SAPCode | None = Field(
+        default=None,
+        alias="WrntySupplierCoverageType",
+        description="Coverage type of the supplier warranty: 'WA' (warranty), 'NC' (not covered), 'RJ' (rejected).",
+        max_length=2,
+    )
+    supplier_responsible_person: SAPCode | None = Field(
+        default=None,
+        alias="WrntySuplrClaimRespPerson",
+        description="SAP user responsible for the supplier claim.",
+        max_length=12,
+    )
+    supplier_claim_is_closed: bool | None = Field(
+        default=None,
+        alias="WrntySupplierClaimIsClosed",
+        description="True to close the supplier claim.",
+    )
+    source: SAPCode | None = Field(
+        default=None,
+        alias="WrntyClaimSource",
+        description=(
+            "Source of the claim: 'QN' (quality notification), 'SO' (service order), 'WO' (work order), "
+            "'MN' (manual) or 'EX' (external)."
+        ),
+        max_length=2,
+    )
+    source_object_number: str | None = Field(
+        default=None,
+        alias="WrntyClaimSourceObjectNumber",
+        description="Number of the source object of the claim (e.g. a notification or a claim of the customer).",
+        max_length=40,
+    )
+    damage_date: date | None = Field(
+        default=None, alias="WrntyClaimDamageDate", description="Date the damage occurred."
+    )
+    registration_date: date | None = Field(
+        default=None, alias="WrntyClaimRegistrationDate", description="Date the claim was registered."
+    )
+    repair_date: date | None = Field(default=None, alias="WrntyClaimRepairDate", description="Date of the repair.")
+    repair_end_date: date | None = Field(
+        default=None, alias="WrntyClaimRepairEndDate", description="End date of the repair."
+    )
+    mileage: str | None = Field(
+        default=None,
+        alias="WarrantyClaimMileage",
+        description="Mileage of the warranty object at the damage date (text, e.g. '12500').",
+        max_length=7,
+    )
+    mileage_unit: SAPCode | None = Field(
+        default=None, alias="WarrantyClaimMileageUnit", description="Unit of the mileage, e.g. 'KM'.", max_length=3
+    )
+    operating_hours: str | None = Field(
+        default=None,
+        alias="WrntyClmOperatingDurationInHrs",
+        description="Operating duration of the warranty object at the damage date (text, e.g. '1200').",
+        max_length=7,
+    )
+    operating_duration_unit: SAPCode | None = Field(
+        default=None,
+        alias="WrntyClmOperatingDurationUnit",
+        description="Unit of the operating duration, e.g. 'H'.",
+        max_length=3,
+    )
+    customer: SAPCode | None = Field(
+        default=None,
+        alias="WarrantyCustomer",
+        description="Customer of a customer claim (customer number, business partner in the customer role).",
+        max_length=10,
+    )
+    customer_role: SAPCode | None = Field(
+        default=None,
+        alias="WarrantyCustomerRole",
+        description="Partner function of the customer, e.g. 'AG' (sold-to party). Omit it to use the one of the claim type.",
+        max_length=2,
+    )
+    customer_coverage_type: SAPCode | None = Field(
+        default=None,
+        alias="WarrantyCustomerCoverageType",
+        description="Coverage type of the customer warranty: 'WA' (warranty), 'NC' (not covered), 'RJ' (rejected).",
+        max_length=2,
+    )
+    customer_claim_group: SAPCode | None = Field(
+        default=None,
+        alias="WarrantyCustomerClaimGroup",
+        description="Claim group of the customer claim - system specific.",
+        max_length=10,
+    )
+    customer_responsible_person: SAPCode | None = Field(
+        default=None,
+        alias="WrntyCustClaimRespPerson",
+        description="SAP user responsible for the customer claim.",
+        max_length=12,
+    )
+    customer_claim_is_closed: bool | None = Field(
+        default=None,
+        alias="WarrantyCustomerClaimIsClosed",
+        description="True to close the customer claim.",
+    )
+    customer_claim_closed_date: date | None = Field(
+        default=None, alias="WrntyCustomerClaimClosedDate", description="Date the customer claim was closed."
+    )
+    versions: Annotated[list[SAPWarrantyClaimVersionModel] | None, unique_numbers("number")] = Field(
+        default=None,
+        alias="_WrntyClaimVersion",
+        description="Versions of the claim (with their items). SAP creates the first version if omitted.",
+    )
+
+
+# Inherits from SAPODataModel - nested in SAPWarrantyClaimVersionResponseModel, also returned by
+# SAP.confirm_customer_return_parts().
+class SAPWarrantyClaimItemResponseModel(SAPODataModel):
+    """An item of an SAP warranty claim version as returned by SAP (API_WARRANTYCLAIM)."""
+
+    item_uuid: str = Field(alias="WrntyItemUUID", description="Internal key of the item.")
+    item: str | None = Field(default=None, alias="WarrantyClaimItemNumber", description="Item number, e.g. '1'.")
+    item_type: str | None = Field(default=None, alias="WarrantyItemType", description="Warranty item type.")
+    controlling_item_type: str | None = Field(
+        default=None, alias="WrntyControllingItemType", description="Controlling item type of the item."
+    )
+    item_key: str | None = Field(
+        default=None, alias="WarrantyItemKey", description="Key of the item that is not a material (e.g. labor value)."
+    )
+    catalog: str | None = Field(default=None, alias="WarrantyClaimCatalog", description="Catalog of the defect code.")
+    defect_code: str | None = Field(default=None, alias="WarrantyClaimItemDefectCode", description="Defect code.")
+    material: str | None = Field(default=None, alias="Material", description="Material (product) number.")
+    quantity: SAPDecimal | None = Field(default=None, alias="WrntyClaimQuantity", description="Quantity.")
+    unit: str | None = Field(default=None, alias="QuantityUnit", description="Unit of the quantity.")
+    decision_code: str | None = Field(default=None, alias="WarrantyClaimItemDecisionCode", description="Decision code.")
+    is_causing_damage: str | None = Field(
+        default=None,
+        alias="WrntyClmPartsIsCausingDamage",
+        description="Whether the part is causing the damage (SAP flag).",
+    )
+    claimant_amount: SAPDecimal | None = Field(
+        default=None,
+        alias="WrntyClaimantClaimAmount",
+        description="Amount claimed by the claimant (customer claims; 0 in supplier claims).",
+    )
+    claimed_approved_amount: SAPDecimal | None = Field(
+        default=None,
+        alias="WrntyClaimedApprovedAmount",
+        description="Amount approved to the claimant (customer claims).",
+    )
+    reimburser_claim_amount: SAPDecimal | None = Field(
+        default=None,
+        alias="WrntyReimburserClaimAmount",
+        description="Amount claimed from the reimburser (the supplier in supplier claims).",
+    )
+    reimburse_approved_amount: SAPDecimal | None = Field(
+        default=None,
+        alias="WrntyReimburseApprovedAmount",
+        description="Amount approved by the reimburser (the supplier in supplier claims).",
+    )
+    currency: str | None = Field(default=None, alias="WrntyCurrencyCode", description="Currency of the amounts.")
+    price_amount: SAPDecimal | None = Field(
+        default=None, alias="WrntyClaimItemPriceCndnAmount", description="Price of the item (price condition amount)."
+    )
+    price_currency: str | None = Field(
+        default=None, alias="WrntyClaimItemPriceCndnCrcy", description="Currency of the price."
+    )
+    price_condition_type: str | None = Field(
+        default=None, alias="WrntyClmItmDfltCndnType", description="Default price condition type of the item."
+    )
+    tax_code: str | None = Field(default=None, alias="WarrantyClaimItemTaxCode", description="Tax code of the item.")
+    return_status_to_supplier: str | None = Field(
+        default=None,
+        alias="WrntyReturnPartsToSuplrStatus",
+        description="Status of the return of the parts to the supplier (SAP status code).",
+    )
+    return_status_from_customer: str | None = Field(
+        default=None,
+        alias="WrntyReturnPartsFrmCustStatus",
+        description="Status of the return of the parts from the customer (SAP status code).",
+    )
+    supplier_return_date: date | None = Field(
+        default=None,
+        alias="WrntyItemSuplrRetPartsDate",
+        description="Date by which the parts must be returned to the supplier.",
+    )
+    supplier_return_delivery_date: date | None = Field(
+        default=None,
+        alias="WrntyItmSuplrRetPartsDelivDate",
+        description="Date the parts were delivered to the supplier.",
+    )
+    customer_return_date: date | None = Field(
+        default=None, alias="WrntyItemCustRetPartsDate", description="Date by which the customer must return the parts."
+    )
+    customer_return_delivery_date: date | None = Field(
+        default=None,
+        alias="WrntyItmCustRetPartsDelivDate",
+        description="Date the parts of the customer were delivered.",
+    )
+    last_change_datetime: ODataDateTime = Field(
+        default=None, alias="WarrantyClaimChangeDateTime", description="Time of the last change."
+    )
+
+
+# Inherits from SAPODataModel - nested in SAPWarrantyClaimResponseModel.
+class SAPWarrantyClaimVersionResponseModel(SAPODataModel):
+    """A version of an SAP warranty claim as returned by SAP (API_WARRANTYCLAIM)."""
+
+    version_uuid: str = Field(alias="WrntyVersionUUID", description="Internal key of the version.")
+    number: str | None = Field(default=None, alias="WrntyVersionNumber", description="Version number, e.g. '1'.")
+    category: str | None = Field(
+        default=None,
+        alias="WarrantyClaimVersionCategory",
+        description=(
+            "Category of the version: 'IC' (incoming from customer), 'OC' (outgoing to customer), "
+            "'OV' (outgoing to supplier), 'IV' (incoming from supplier)."
+        ),
+    )
+    decision_code: str | None = Field(
+        default=None, alias="WrntyDecisionCode", description="Decision code of the version."
+    )
+    partner: str | None = Field(
+        default=None, alias="WarrantyClaimVersionPartner", description="Business partner of the version."
+    )
+    partner_role: str | None = Field(
+        default=None, alias="WrntyClaimVersionPartnerRole", description="Partner function of the business partner."
+    )
+    is_active: str | None = Field(
+        default=None, alias="WarrantyClaimVersionIsActive", description="Whether this is the active version (SAP flag)."
+    )
+    currency: str | None = Field(default=None, alias="WrntyCurrencyCode", description="Currency of the amounts.")
+    purchasing_organization: str | None = Field(
+        default=None, alias="PurchasingOrganization", description="Purchasing organization of the supplier claim."
+    )
+    sales_organization: str | None = Field(
+        default=None, alias="SalesOrganization", description="Sales organization of the customer claim."
+    )
+    distribution_channel: str | None = Field(
+        default=None, alias="DistributionChannel", description="Distribution channel of the sales area."
+    )
+    division: str | None = Field(default=None, alias="Division", description="Division of the sales area.")
+    billing_document_date: date | None = Field(
+        default=None, alias="WrntyBillingDocumentDate", description="Billing document date of the version."
+    )
+    exchange_rate: SAPDecimal | None = Field(
+        default=None, alias="WrntyExchangeRateForPrice", description="Exchange rate for the prices."
+    )
+    exchange_rate_date: date | None = Field(
+        default=None, alias="WrntyPriceExchangeRateDate", description="Date of the exchange rate for the prices."
+    )
+    preceding_version: str | None = Field(
+        default=None, alias="WrntyClmPrecedingVersionNmbr", description="Number of the preceding version."
+    )
+    document_condition: str | None = Field(
+        default=None, alias="WrntyDocumentCondition", description="Number of the pricing document of the version."
+    )
+    pricing_status: str | None = Field(
+        default=None, alias="WarrantyVersionPricingStatus", description="Pricing status of the version (SAP code)."
+    )
+    is_reverse_posting: SAPFlag = Field(
+        default=None, alias="WrntyVersionForReversePosting", description="True if the version is a reverse posting."
+    )
+    is_released_for_shipping: SAPFlag = Field(
+        default=None,
+        alias="WrntyVersIsReldForShipgToPart",
+        description="True if the version is released for shipping to the partner.",
+    )
+    creation_date: date | None = Field(
+        default=None, alias="WrntyClaimCreationDate", description="Date the version was created."
+    )
+    last_change_datetime: ODataDateTime = Field(
+        default=None, alias="WarrantyClaimChangeDateTime", description="Time of the last change."
+    )
+    items: list[SAPWarrantyClaimItemResponseModel] | None = Field(
+        default=None,
+        alias="_WrntyClaimItem",
+        description="Items. None if not requested ($expand), otherwise a (possibly empty) list.",
+    )
+
+
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_warranty_claim(), SAP.get_warranty_claims(),
+# SAP.iter_warranty_claims(), SAP.process_customer_claim(), SAP.process_supplier_claim() and
+# SAP.start_supplier_process_from_customer_claim().
+class SAPWarrantyClaimResponseModel(SAPODataModel):
+    """An SAP warranty claim as returned by SAP (API_WARRANTYCLAIM, OData V4).
+
+    Attributes:
+        versions (list[SAPWarrantyClaimVersionResponseModel] | None):
+            None if the versions have not been requested ($expand), otherwise a (possibly empty) list.
+
+    """
+
+    claim_uuid: str = Field(alias="WrntyClaimHeaderUUID", description="Internal key of the claim.")
+    claim_id: str = Field(alias="WarrantyClaimNumber", description="Warranty claim number, e.g. '10000001'.")
+    claim_type: str | None = Field(default=None, alias="WarrantyClaimType", description="Warranty claim type.")
+    plant: str | None = Field(default=None, alias="Plant", description="Plant of the claim.")
+    object_type: str | None = Field(
+        default=None, alias="WarrantyObjectType", description="Type of the warranty object."
+    )
+    external_object_number: str | None = Field(
+        default=None, alias="WrntyExternalObjectNumber", description="Number of the warranty object."
+    )
+    supplier: str | None = Field(
+        default=None,
+        alias="WrntySupplier",
+        description="Supplier of the supplier claim (vendor number); see get_suppliers().",
+    )
+    supplier_role: str | None = Field(
+        default=None, alias="WrntySupplierRole", description="Partner function of the supplier."
+    )
+    supplier_coverage_type: str | None = Field(
+        default=None, alias="WrntySupplierCoverageType", description="Coverage type of the supplier warranty."
+    )
+    supplier_responsible_person: str | None = Field(
+        default=None, alias="WrntySuplrClaimRespPerson", description="SAP user responsible for the supplier claim."
+    )
+    supplier_processing_status: str | None = Field(
+        default=None,
+        alias="WrntySuplrClmProcessingStatus",
+        description=(
+            "Processing status of the supplier claim, e.g. 'S010' (created), 'S040' (validated), 'S080' (waiting "
+            "for supplier response), 'S100' (supplier response received), 'S120' (posted to finance), 'S200' "
+            "(posted and closed), 'S220' (cancelled), 'S240' (rejected)."
+        ),
+    )
+    supplier_claim_is_closed: SAPFlag = Field(
+        default=None, alias="WrntySupplierClaimIsClosed", description="True if the supplier claim is closed."
+    )
+    supplier_claim_closed_date: date | None = Field(
+        default=None, alias="WrntySupplierClaimClosedDate", description="Date the supplier claim was closed."
+    )
+    customer: str | None = Field(
+        default=None,
+        alias="WarrantyCustomer",
+        description="Customer of the customer claim (customer number); see get_customers().",
+    )
+    customer_role: str | None = Field(
+        default=None, alias="WarrantyCustomerRole", description="Partner function of the customer."
+    )
+    customer_coverage_type: str | None = Field(
+        default=None, alias="WarrantyCustomerCoverageType", description="Coverage type of the customer warranty."
+    )
+    customer_claim_group: str | None = Field(
+        default=None, alias="WarrantyCustomerClaimGroup", description="Claim group of the customer claim."
+    )
+    customer_responsible_person: str | None = Field(
+        default=None, alias="WrntyCustClaimRespPerson", description="SAP user responsible for the customer claim."
+    )
+    customer_processing_status: str | None = Field(
+        default=None,
+        alias="WrntyCustClmProcessingStatus",
+        description=(
+            "Processing status of the customer claim, e.g. 'C010' (created), 'C020' (submitted), 'C040' (formal "
+            "validation successful), 'C080' (content validation successful), 'C120' (posted), 'C200' (posted and "
+            "closed), 'C240' (rejected)."
+        ),
+    )
+    customer_claim_is_closed: SAPFlag = Field(
+        default=None, alias="WarrantyCustomerClaimIsClosed", description="True if the customer claim is closed."
+    )
+    customer_claim_closed_date: date | None = Field(
+        default=None, alias="WrntyCustomerClaimClosedDate", description="Date the customer claim was closed."
+    )
+    source: str | None = Field(default=None, alias="WrntyClaimSource", description="Source of the claim.")
+    source_object_number: str | None = Field(
+        default=None, alias="WrntyClaimSourceObjectNumber", description="Number of the source object of the claim."
+    )
+    damage_date: date | None = Field(
+        default=None, alias="WrntyClaimDamageDate", description="Date the damage occurred."
+    )
+    registration_date: date | None = Field(
+        default=None, alias="WrntyClaimRegistrationDate", description="Date the claim was registered."
+    )
+    repair_date: date | None = Field(default=None, alias="WrntyClaimRepairDate", description="Date of the repair.")
+    repair_end_date: date | None = Field(
+        default=None, alias="WrntyClaimRepairEndDate", description="End date of the repair."
+    )
+    mileage: str | None = Field(default=None, alias="WarrantyClaimMileage", description="Mileage of the object.")
+    mileage_unit: str | None = Field(default=None, alias="WarrantyClaimMileageUnit", description="Unit of the mileage.")
+    operating_hours: str | None = Field(
+        default=None, alias="WrntyClmOperatingDurationInHrs", description="Operating duration of the object."
+    )
+    operating_duration_unit: str | None = Field(
+        default=None, alias="WrntyClmOperatingDurationUnit", description="Unit of the operating duration."
+    )
+    creation_date: date | None = Field(
+        default=None, alias="WrntyClaimCreationDate", description="Date the claim was created in SAP."
+    )
+    created_by_user: str | None = Field(
+        default=None, alias="CreatedByUser", description="SAP user who created the claim."
+    )
+    changed_date: date | None = Field(
+        default=None, alias="WrntyClaimChangedDate", description="Date of the last change."
+    )
+    last_changed_by_user: str | None = Field(
+        default=None, alias="LastChangedByUser", description="SAP user who changed the claim last."
+    )
+    last_change_datetime: ODataDateTime = Field(
+        default=None, alias="WarrantyClaimChangeDateTime", description="Time of the last change."
+    )
+    versions: list[SAPWarrantyClaimVersionResponseModel] | None = Field(
+        default=None,
+        alias="_WrntyClaimVersion",
+        description="Versions with their items. None if not requested ($expand), otherwise a (possibly empty) list.",
+    )
+
+
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_warranty_claims() and SAP.iter_warranty_claims().
+class SAPWarrantyClaimQueryModel(SAPODataQueryModel):
+    """Search criteria for SAP warranty claims (API_WARRANTYCLAIM, OData V4)."""
+
+    # $orderby per sort_by value (applied by the inherited to_odata()):
+    SORT_PROPERTIES: ClassVar[dict[str, str]] = {
+        "claim_id": "WarrantyClaimNumber {direction}",
+        "creation_date": "WrntyClaimCreationDate {direction}",
+    }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the versions with their items in the
+    # same request:
+    EXPAND: ClassVar[str] = "_WrntyClaimVersion($expand=_WrntyClaimItem)"
+    sort_by: Literal["claim_id", "creation_date"] = Field(default="claim_id", description="Sort criterion.")
+    sort_direction: Literal["asc", "desc"] = Field(
+        default="desc", description="Sort direction, desc = newest / highest first."
+    )
+    claim_ids: Annotated[list[SAPCode] | None, ODataCondition("WarrantyClaimNumber")] = Field(
+        default=None, description="Warranty claim numbers, e.g. ['10000001']."
+    )
+    claim_types: Annotated[list[SAPCode] | None, ODataCondition("WarrantyClaimType")] = Field(
+        default=None, description="Warranty claim types. System specific."
+    )
+    plant: Annotated[SAPCode | None, ODataCondition("Plant")] = Field(
+        default=None, description="Only claims of this plant, e.g. '3000'."
+    )
+    supplier: Annotated[SAPCode | None, ODataCondition("WrntySupplier")] = Field(
+        default=None, description="Only supplier claims of this supplier (vendor number)."
+    )
+    customer: Annotated[SAPCode | None, ODataCondition("WarrantyCustomer")] = Field(
+        default=None, description="Only customer claims of this customer."
+    )
+    external_object_number: Annotated[str | None, ODataCondition("WrntyExternalObjectNumber")] = Field(
+        default=None, description="Only claims for this warranty object, e.g. the equipment number."
+    )
+    source_object_number: Annotated[str | None, ODataCondition("WrntyClaimSourceObjectNumber")] = Field(
+        default=None, description="Only claims with this source object number (e.g. a notification)."
+    )
+    expand_items: bool = Field(default=False, description="Also return the versions and their items of each claim.")
 
 
 # ---------------------------------------------------------------------------
@@ -5017,6 +6686,8 @@ class SAPPurchaseRequisitionQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPCreditMemoRequestModel. to_odata_update()
+# validates its changes in SAP.update_credit_memo_request().
 class SAPCreditMemoRequestItemModel(SAPODataCreateModel):
     """An item of an SAP credit memo request (API_CREDIT_MEMO_REQUEST_SRV)."""
 
@@ -5059,7 +6730,7 @@ class SAPCreditMemoRequestItemModel(SAPODataCreateModel):
     item_category: SAPCode | None = Field(
         default=None,
         alias="CreditMemoRequestItemCategory",
-        description="Sales document item category, e.g. 'G2N'. Usually determined automatically - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document item category, e.g. 'G2N'. Usually determined automatically - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     customer_material: str | None = Field(
@@ -5070,6 +6741,8 @@ class SAPCreditMemoRequestItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_credit_memo_request(),
+# to_odata_update() the changes of SAP.update_credit_memo_request().
 class SAPCreditMemoRequestModel(SAPODataCreateModel):
     """Data to create an SAP credit memo request (API_CREDIT_MEMO_REQUEST_SRV, OData V2).
 
@@ -5100,7 +6773,7 @@ class SAPCreditMemoRequestModel(SAPODataCreateModel):
 
     request_type: SAPCode = Field(
         alias="CreditMemoRequestType",
-        description="Sales document type, e.g. 'CR' / 'G2' (credit memo request) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document type, e.g. 'CR' / 'G2' (credit memo request) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=4,
     )
@@ -5125,19 +6798,19 @@ class SAPCreditMemoRequestModel(SAPODataCreateModel):
     order_reason: SAPCode | None = Field(
         default=None,
         alias="SDDocumentReason",
-        description="Order reason - why the customer is credited, e.g. '001'. Often required for credit memo requests - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Order reason - why the customer is credited, e.g. '001'. Often required for credit memo requests - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     sales_group: SAPCode | None = Field(
         default=None,
         alias="SalesGroup",
-        description="Sales group - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales group - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     sales_office: SAPCode | None = Field(
         default=None,
         alias="SalesOffice",
-        description="Sales office - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales office - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     customer_reference: str | None = Field(
@@ -5187,6 +6860,7 @@ class SAPCreditMemoRequestModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPCreditMemoRequestResponseModel.
 class SAPCreditMemoRequestItemResponseModel(SAPODataModel):
     """An item of an SAP credit memo request as returned by SAP (API_CREDIT_MEMO_REQUEST_SRV)."""
 
@@ -5238,6 +6912,9 @@ class SAPCreditMemoRequestItemResponseModel(SAPODataModel):
     pricing_date: ODataDate = Field(default=None, alias="PricingDate", description="Date used for pricing.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_credit_memo_request(), SAP.get_credit_memo_requests() and
+# SAP.iter_credit_memo_requests().
 class SAPCreditMemoRequestResponseModel(SAPODataModel):
     """An SAP credit memo request as returned by SAP (API_CREDIT_MEMO_REQUEST_SRV, OData V2).
 
@@ -5326,13 +7003,18 @@ class SAPCreditMemoRequestResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_credit_memo_requests() and SAP.iter_credit_memo_requests().
 class SAPCreditMemoRequestQueryModel(SAPODataQueryModel):
     """Search criteria for SAP credit memo requests (API_CREDIT_MEMO_REQUEST_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the request number orders documents of the same
+    # date (e.g. 'the latest request' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "request_id": "CreditMemoRequest {direction}",
-        "request_date": "CreditMemoRequestDate {direction}",
+        "request_date": "CreditMemoRequestDate {direction},CreditMemoRequest {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["request_id", "request_date"] = Field(default="request_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -5376,6 +7058,8 @@ class SAPCreditMemoRequestQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPDebitMemoRequestModel. to_odata_update()
+# validates its changes in SAP.update_debit_memo_request().
 class SAPDebitMemoRequestItemModel(SAPODataCreateModel):
     """An item of an SAP debit memo request (API_DEBIT_MEMO_REQUEST_SRV)."""
 
@@ -5418,7 +7102,7 @@ class SAPDebitMemoRequestItemModel(SAPODataCreateModel):
     item_category: SAPCode | None = Field(
         default=None,
         alias="DebitMemoRequestItemCategory",
-        description="Sales document item category, e.g. 'L2N'. Usually determined automatically - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document item category, e.g. 'L2N'. Usually determined automatically - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     customer_material: str | None = Field(
@@ -5429,6 +7113,8 @@ class SAPDebitMemoRequestItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_debit_memo_request(), to_odata_update()
+# the changes of SAP.update_debit_memo_request().
 class SAPDebitMemoRequestModel(SAPODataCreateModel):
     """Data to create an SAP debit memo request (API_DEBIT_MEMO_REQUEST_SRV, OData V2).
 
@@ -5458,7 +7144,7 @@ class SAPDebitMemoRequestModel(SAPODataCreateModel):
 
     request_type: SAPCode = Field(
         alias="DebitMemoRequestType",
-        description="Sales document type, e.g. 'DR' / 'L2' (debit memo request) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales document type, e.g. 'DR' / 'L2' (debit memo request) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=4,
     )
@@ -5483,19 +7169,19 @@ class SAPDebitMemoRequestModel(SAPODataCreateModel):
     order_reason: SAPCode | None = Field(
         default=None,
         alias="SDDocumentReason",
-        description="Order reason - why the customer is charged, e.g. '002'. Often required for debit memo requests - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Order reason - why the customer is charged, e.g. '002'. Often required for debit memo requests - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     sales_group: SAPCode | None = Field(
         default=None,
         alias="SalesGroup",
-        description="Sales group - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales group - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     sales_office: SAPCode | None = Field(
         default=None,
         alias="SalesOffice",
-        description="Sales office - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Sales office - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     customer_reference: str | None = Field(
@@ -5545,6 +7231,7 @@ class SAPDebitMemoRequestModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPDebitMemoRequestResponseModel.
 class SAPDebitMemoRequestItemResponseModel(SAPODataModel):
     """An item of an SAP debit memo request as returned by SAP (API_DEBIT_MEMO_REQUEST_SRV)."""
 
@@ -5594,6 +7281,9 @@ class SAPDebitMemoRequestItemResponseModel(SAPODataModel):
     pricing_date: ODataDate = Field(default=None, alias="PricingDate", description="Date used for pricing.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_debit_memo_request(), SAP.get_debit_memo_requests() and
+# SAP.iter_debit_memo_requests().
 class SAPDebitMemoRequestResponseModel(SAPODataModel):
     """An SAP debit memo request as returned by SAP (API_DEBIT_MEMO_REQUEST_SRV, OData V2).
 
@@ -5675,13 +7365,18 @@ class SAPDebitMemoRequestResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_debit_memo_requests() and SAP.iter_debit_memo_requests().
 class SAPDebitMemoRequestQueryModel(SAPODataQueryModel):
     """Search criteria for SAP debit memo requests (API_DEBIT_MEMO_REQUEST_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the request number orders documents of the same
+    # date (e.g. 'the latest request' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "request_id": "DebitMemoRequest {direction}",
-        "request_date": "DebitMemoRequestDate {direction}",
+        "request_date": "DebitMemoRequestDate {direction},DebitMemoRequest {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["request_id", "request_date"] = Field(default="request_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -5722,6 +7417,7 @@ class SAPDebitMemoRequestQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataModel - nested in SAPBillingDocumentRequestResponseModel.
 class SAPBillingDocumentRequestItemResponseModel(SAPODataModel):
     """An item of an SAP billing document request as returned by SAP (API_BILLING_DOCUMENT_REQUEST_SRV)."""
 
@@ -5767,6 +7463,9 @@ class SAPBillingDocumentRequestItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_billing_document_request(), SAP.get_billing_document_requests()
+# and SAP.iter_billing_document_requests().
 class SAPBillingDocumentRequestResponseModel(SAPODataModel):
     """An SAP billing document request as returned by SAP (API_BILLING_DOCUMENT_REQUEST_SRV, OData V2).
 
@@ -5848,13 +7547,18 @@ class SAPBillingDocumentRequestResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_billing_document_requests() and SAP.iter_billing_document_requests().
 class SAPBillingDocumentRequestQueryModel(SAPODataQueryModel):
     """Search criteria for SAP billing document requests (API_BILLING_DOCUMENT_REQUEST_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the request number orders documents of the same
+    # date (e.g. 'the latest request' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "request_id": "BillingDocumentRequest {direction}",
-        "billing_date": "BillingDocumentDate {direction}",
+        "billing_date": "BillingDocumentDate {direction},BillingDocumentRequest {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["request_id", "billing_date"] = Field(default="request_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -5892,6 +7596,8 @@ class SAPBillingDocumentRequestQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataModel - nested in SAPBillingDocumentResponseModel, also returned by
+# SAP.iter_billing_document_items().
 class SAPBillingDocumentItemResponseModel(SAPODataModel):
     """An item of an SAP billing document as returned by SAP (API_BILLING_DOCUMENT_SRV)."""
 
@@ -5945,6 +7651,9 @@ class SAPBillingDocumentItemResponseModel(SAPODataModel):
     cost_center: str | None = Field(default=None, alias="CostCenter", description="Cost center of the item.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_billing_document(), SAP.get_billing_documents() and
+# SAP.iter_billing_documents().
 class SAPBillingDocumentResponseModel(SAPODataModel):
     """An SAP billing document as returned by SAP (API_BILLING_DOCUMENT_SRV, OData V2).
 
@@ -6043,6 +7752,17 @@ class SAPBillingDocumentResponseModel(SAPODataModel):
     document_reference: str | None = Field(
         default=None, alias="DocumentReferenceID", description="Reference (e.g. the external invoice number)."
     )
+    accounting_transfer_status: str | None = Field(
+        default=None,
+        alias="AccountingTransferStatus",
+        description="Posting status in accounting: 'A' = not yet posted (blocked), 'B' = posting error, 'C' = posted to accounting, empty = not relevant.",
+    )
+    payment_method: str | None = Field(
+        default=None, alias="PaymentMethod", description="Payment method, e.g. 'T' bank transfer."
+    )
+    country: str | None = Field(
+        default=None, alias="Country", description="Destination country/region of the goods (ISO code)."
+    )
     items: Annotated[list[SAPBillingDocumentItemResponseModel] | None, BeforeValidator(unwrap_odata_navigation)] = (
         Field(
             default=None,
@@ -6068,14 +7788,19 @@ class SAPBillingDocumentResponseModel(SAPODataModel):
     # end method definition
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_billing_documents() and SAP.iter_billing_documents().
 class SAPBillingDocumentQueryModel(SAPODataQueryModel):
     """Search criteria for SAP billing documents (API_BILLING_DOCUMENT_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the billing document number orders documents of
+    # the same date (e.g. 'the latest invoice' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "billing_document_id": "BillingDocument {direction}",
-        "billing_date": "BillingDocumentDate {direction}",
+        "billing_date": "BillingDocumentDate {direction},BillingDocument {direction}",
         "last_change": "LastChangeDateTime {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_Item"
     sort_by: Literal["billing_document_id", "billing_date", "last_change"] = Field(
         default="billing_document_id", description="Sort criterion."
@@ -6124,6 +7849,8 @@ class SAPBillingDocumentQueryModel(SAPODataQueryModel):
     expand_items: bool = Field(default=False, description="Also return the items of each billing document.")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.iter_billing_document_items().
 class SAPBillingDocumentItemQueryModel(SAPODataQueryModel):
     """Search criteria for SAP billing document items (API_BILLING_DOCUMENT_SRV, A_BillingDocumentItem).
 
@@ -6131,6 +7858,8 @@ class SAPBillingDocumentItemQueryModel(SAPODataQueryModel):
 
     """
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the items of a billing document stay together,
+    # in item order:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "billing_document_id": "BillingDocument {direction},BillingDocumentItem asc",
     }
@@ -6151,6 +7880,8 @@ class SAPBillingDocumentItemQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPOutboundDeliveryModel. to_odata_update()
+# validates its changes in SAP.update_outbound_delivery().
 class SAPOutboundDeliveryItemModel(SAPODataCreateModel):
     """An item of an SAP outbound delivery - a reference to the sales order item to deliver (API_OUTBOUND_DELIVERY_SRV)."""
 
@@ -6185,6 +7916,8 @@ class SAPOutboundDeliveryItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_outbound_delivery(), to_odata_update()
+# the changes of SAP.update_outbound_delivery().
 class SAPOutboundDeliveryModel(SAPODataCreateModel):
     """Data to create an SAP outbound delivery for sales order items (API_OUTBOUND_DELIVERY_SRV, OData V2).
 
@@ -6210,7 +7943,7 @@ class SAPOutboundDeliveryModel(SAPODataCreateModel):
     shipping_point: SAPCode | None = Field(
         default=None,
         alias="ShippingPoint",
-        description="Shipping point that processes the delivery, e.g. '1010'. Usually required - system specific; copy from an existing delivery if unsure.",
+        description="Shipping point that processes the delivery, e.g. '1010'. Usually required - the ShippingPoint of the sales order items unless the user gives another one.",
         max_length=4,
     )
     delivery_date: ODataV2Date = Field(
@@ -6235,6 +7968,8 @@ class SAPOutboundDeliveryModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPOutboundDeliveryResponseModel, also returned by
+# SAP.iter_outbound_delivery_items().
 class SAPOutboundDeliveryItemResponseModel(SAPODataModel):
     """An item of an SAP outbound delivery as returned by SAP (API_OUTBOUND_DELIVERY_SRV)."""
 
@@ -6293,6 +8028,9 @@ class SAPOutboundDeliveryItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_outbound_deliveries(), SAP.get_outbound_delivery() and
+# SAP.iter_outbound_deliveries().
 class SAPOutboundDeliveryResponseModel(SAPODataModel):
     """An SAP outbound delivery as returned by SAP (API_OUTBOUND_DELIVERY_SRV, OData V2).
 
@@ -6348,7 +8086,18 @@ class SAPOutboundDeliveryResponseModel(SAPODataModel):
     picking_status: str | None = Field(
         default=None,
         alias="OverallPickingStatus",
-        description="Overall picking status: 'A' not picked, 'B' partially picked, 'C' fully picked.",
+        description=(
+            "Overall picking status: 'A' not picked, 'B' partially picked, 'C' fully picked, empty if picking "
+            "is not relevant for the delivery."
+        ),
+    )
+    picking_confirmation_status: str | None = Field(
+        default=None,
+        alias="OverallPickingConfStatus",
+        description=(
+            "Overall status of the picking confirmation: 'A' not confirmed, 'B' partially confirmed, 'C' "
+            "confirmed, empty if no confirmation is required."
+        ),
     )
     goods_movement_status: str | None = Field(
         default=None,
@@ -6360,6 +8109,31 @@ class SAPOutboundDeliveryResponseModel(SAPODataModel):
         alias="OverallDelivReltdBillgStatus",
         description="Overall billing status: 'A' not billed, 'B' partially billed, 'C' billed.",
     )
+    proof_of_delivery_status: str | None = Field(
+        default=None,
+        alias="OverallProofOfDeliveryStatus",
+        description="Proof of delivery status: empty = not relevant, 'A' = not confirmed by the customer, 'C' = confirmed.",
+    )
+    packing_status: str | None = Field(
+        default=None,
+        alias="OverallPackingStatus",
+        description="Packing status: empty = not relevant, 'A' = not packed, 'B' = partially packed, 'C' = completely packed.",
+    )
+    loading_date: ODataDate = Field(default=None, alias="LoadingDate", description="Date the goods are loaded.")
+    number_of_packages: str | None = Field(
+        default=None, alias="TotalNumberOfPackage", description="Number of packages (handling units)."
+    )
+    volume: SAPDecimal | None = Field(
+        default=None, alias="HeaderVolume", description="Volume of the delivery in `volume_unit`."
+    )
+    volume_unit: str | None = Field(
+        default=None, alias="HeaderVolumeUnit", description="Unit of the volume, e.g. 'M3'."
+    )
+    shipping_condition: str | None = Field(
+        default=None,
+        alias="ShippingCondition",
+        description="Shipping condition - how the goods are shipped, e.g. '01' standard.",
+    )
     items: Annotated[list[SAPOutboundDeliveryItemResponseModel] | None, BeforeValidator(unwrap_odata_navigation)] = (
         Field(
             default=None,
@@ -6369,14 +8143,19 @@ class SAPOutboundDeliveryResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_outbound_deliveries() and SAP.iter_outbound_deliveries().
 class SAPOutboundDeliveryQueryModel(SAPODataQueryModel):
     """Search criteria for SAP outbound deliveries (API_OUTBOUND_DELIVERY_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the delivery number orders documents of the
+    # same date (e.g. 'the latest delivery' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "delivery_id": "DeliveryDocument {direction}",
-        "delivery_date": "DeliveryDate {direction}",
-        "planned_goods_issue": "PlannedGoodsIssueDate {direction}",
+        "delivery_date": "DeliveryDate {direction},DeliveryDocument {direction}",
+        "planned_goods_issue": "PlannedGoodsIssueDate {direction},DeliveryDocument {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_DeliveryDocumentItem"
     sort_by: Literal["delivery_id", "delivery_date", "planned_goods_issue"] = Field(
         default="delivery_id", description="Sort criterion."
@@ -6429,6 +8208,8 @@ class SAPOutboundDeliveryQueryModel(SAPODataQueryModel):
         return bool(self.sales_orders or self.materials)
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.iter_outbound_delivery_items().
 class SAPOutboundDeliveryItemQueryModel(SAPODataQueryModel):
     """Search criteria for SAP outbound delivery items (API_OUTBOUND_DELIVERY_SRV, A_OutbDeliveryItem).
 
@@ -6436,6 +8217,8 @@ class SAPOutboundDeliveryItemQueryModel(SAPODataQueryModel):
 
     """
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the items of a delivery stay together, in item
+    # order:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "delivery_id": "DeliveryDocument {direction},DeliveryDocumentItem asc",
     }
@@ -6459,6 +8242,8 @@ class SAPOutboundDeliveryItemQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPInboundDeliveryModel. to_odata_update()
+# validates its changes in SAP.update_inbound_delivery().
 class SAPInboundDeliveryItemModel(SAPODataCreateModel):
     """An item of an SAP inbound delivery - the delivered quantity of a purchase order item (API_INBOUND_DELIVERY_SRV)."""
 
@@ -6508,6 +8293,8 @@ class SAPInboundDeliveryItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_inbound_delivery(), to_odata_update()
+# the changes of SAP.update_inbound_delivery().
 class SAPInboundDeliveryModel(SAPODataCreateModel):
     """Data to create an SAP inbound delivery for purchase order items (API_INBOUND_DELIVERY_SRV, OData V2).
 
@@ -6564,6 +8351,8 @@ class SAPInboundDeliveryModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPInboundDeliveryResponseModel, also returned by
+# SAP.iter_inbound_delivery_items().
 class SAPInboundDeliveryItemResponseModel(SAPODataModel):
     """An item of an SAP inbound delivery as returned by SAP (API_INBOUND_DELIVERY_SRV)."""
 
@@ -6614,6 +8403,9 @@ class SAPInboundDeliveryItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_inbound_deliveries(), SAP.get_inbound_delivery() and
+# SAP.iter_inbound_deliveries().
 class SAPInboundDeliveryResponseModel(SAPODataModel):
     """An SAP inbound delivery as returned by SAP (API_INBOUND_DELIVERY_SRV, OData V2).
 
@@ -6665,6 +8457,15 @@ class SAPInboundDeliveryResponseModel(SAPODataModel):
         alias="OverallGoodsMovementStatus",
         description="Overall goods receipt status: 'A' not posted, 'B' partially posted, 'C' posted.",
     )
+    number_of_packages: str | None = Field(
+        default=None, alias="TotalNumberOfPackage", description="Number of packages (handling units)."
+    )
+    volume: SAPDecimal | None = Field(
+        default=None, alias="HeaderVolume", description="Volume of the delivery in `volume_unit`."
+    )
+    volume_unit: str | None = Field(
+        default=None, alias="HeaderVolumeUnit", description="Unit of the volume, e.g. 'M3'."
+    )
     items: Annotated[list[SAPInboundDeliveryItemResponseModel] | None, BeforeValidator(unwrap_odata_navigation)] = (
         Field(
             default=None,
@@ -6674,13 +8475,18 @@ class SAPInboundDeliveryResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_inbound_deliveries() and SAP.iter_inbound_deliveries().
 class SAPInboundDeliveryQueryModel(SAPODataQueryModel):
     """Search criteria for SAP inbound deliveries (API_INBOUND_DELIVERY_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the delivery number orders documents of the
+    # same date (e.g. 'the latest delivery' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "delivery_id": "DeliveryDocument {direction}",
-        "delivery_date": "DeliveryDate {direction}",
+        "delivery_date": "DeliveryDate {direction},DeliveryDocument {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_DeliveryDocumentItem"
     sort_by: Literal["delivery_id", "delivery_date"] = Field(default="delivery_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -6725,6 +8531,8 @@ class SAPInboundDeliveryQueryModel(SAPODataQueryModel):
         return bool(self.purchase_orders or self.materials)
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.iter_inbound_delivery_items().
 class SAPInboundDeliveryItemQueryModel(SAPODataQueryModel):
     """Search criteria for SAP inbound delivery items (API_INBOUND_DELIVERY_SRV, A_InbDeliveryItem).
 
@@ -6732,6 +8540,8 @@ class SAPInboundDeliveryItemQueryModel(SAPODataQueryModel):
 
     """
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the items of a delivery stay together, in item
+    # order:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "delivery_id": "DeliveryDocument {direction},DeliveryDocumentItem asc",
     }
@@ -6755,6 +8565,7 @@ class SAPInboundDeliveryItemQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoicePurchaseOrderItemModel.
 class SAPSupplierInvoiceAccountAssignmentModel(SAPODataCreateModel):
     """An account assignment of a purchase order item of a new SAP supplier invoice (API_SUPPLIERINVOICE_PROCESS_SRV).
 
@@ -6838,7 +8649,7 @@ class SAPSupplierInvoiceAccountAssignmentModel(SAPODataCreateModel):
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code, e.g. 'V1' - system specific; copy from an existing invoice if unsure.",
+        description="Tax code, e.g. 'V1' - system specific; the one the user gives or the tax code of the purchase order item - ask the user otherwise.",
         max_length=2,
     )
     is_unplanned: bool | None = Field(
@@ -6854,6 +8665,7 @@ class SAPSupplierInvoiceAccountAssignmentModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceMaterialItemModel(SAPODataCreateModel):
     """An item of a new SAP supplier invoice posted directly to a material - without purchase order (API_SUPPLIERINVOICE_PROCESS_SRV).
 
@@ -6918,7 +8730,7 @@ class SAPSupplierInvoiceMaterialItemModel(SAPODataCreateModel):
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code, e.g. 'V1' - system specific; copy from an existing invoice if unsure.",
+        description="Tax code, e.g. 'V1' - system specific; the one the user gives or the tax code of the purchase order item - ask the user otherwise.",
         max_length=2,
     )
     tax_jurisdiction: SAPCode | None = Field(
@@ -6929,6 +8741,7 @@ class SAPSupplierInvoiceMaterialItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceAssetItemModel(SAPODataCreateModel):
     """An item of a new SAP supplier invoice posted directly to a fixed asset (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -6977,7 +8790,7 @@ class SAPSupplierInvoiceAssetItemModel(SAPODataCreateModel):
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code, e.g. 'V1' - system specific; copy from an existing invoice if unsure.",
+        description="Tax code, e.g. 'V1' - system specific; the one the user gives or the tax code of the purchase order item - ask the user otherwise.",
         max_length=2,
     )
     tax_jurisdiction: SAPCode | None = Field(
@@ -6991,6 +8804,7 @@ class SAPSupplierInvoiceAssetItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceWithholdingTaxModel(SAPODataCreateModel):
     """A withholding tax of a new SAP supplier invoice (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7029,6 +8843,7 @@ class SAPSupplierInvoiceWithholdingTaxModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceSelectedPurchaseOrderModel(SAPODataCreateModel):
     """A purchase order (item) whose open items SAP proposes as invoice items (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7045,6 +8860,7 @@ class SAPSupplierInvoiceSelectedPurchaseOrderModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceSelectedDeliveryNoteModel(SAPODataCreateModel):
     """A delivery note whose goods receipts SAP proposes as invoice items (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7056,6 +8872,7 @@ class SAPSupplierInvoiceSelectedDeliveryNoteModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceSelectedServiceEntrySheetModel(SAPODataCreateModel):
     """A service entry sheet (item) whose services SAP proposes as invoice items (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7072,6 +8889,7 @@ class SAPSupplierInvoiceSelectedServiceEntrySheetModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceAdditionalDataModel(SAPODataCreateModel):
     """Name, address and bank details of a one-time supplier (API_SUPPLIERINVOICE_PROCESS_SRV).
 
@@ -7130,6 +8948,7 @@ class SAPSupplierInvoiceAdditionalDataModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoicePurchaseOrderItemModel(SAPODataCreateModel):
     """An item of an SAP supplier invoice that refers to a purchase order item (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7180,7 +8999,7 @@ class SAPSupplierInvoicePurchaseOrderItemModel(SAPODataCreateModel):
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code, e.g. 'V1' - system specific; copy from an existing invoice if unsure.",
+        description="Tax code, e.g. 'V1' - system specific; the one the user gives or the tax code of the purchase order item - ask the user otherwise.",
         max_length=2,
     )
     reference_document: SAPCode | None = Field(
@@ -7221,7 +9040,13 @@ class SAPSupplierInvoicePurchaseOrderItemModel(SAPODataCreateModel):
         max_length=3,
     )
     tax_jurisdiction: SAPCode | None = Field(
-        default=None, alias="TaxJurisdiction", description="Tax jurisdiction (US sales tax).", max_length=15
+        default=None,
+        alias="TaxJurisdiction",
+        description=(
+            "Tax jurisdiction (US sales tax), e.g. 'NY0000000' - required in company codes with tax jurisdictions "
+            "(posting fails with M8/757 'Enter a tax jurisdiction code'); take it from the purchase order item."
+        ),
+        max_length=15,
     )
     is_subsequent_debit_credit: Literal["X"] | None = Field(
         default=None,
@@ -7306,6 +9131,7 @@ class SAPSupplierInvoicePurchaseOrderItemModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceGLAccountItemModel(SAPODataCreateModel):
     """An item of an SAP supplier invoice posted directly to a G/L account (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7352,7 +9178,7 @@ class SAPSupplierInvoiceGLAccountItemModel(SAPODataCreateModel):
     tax_code: SAPCode | None = Field(
         default=None,
         alias="TaxCode",
-        description="Tax code, e.g. 'V1' - system specific; copy from an existing invoice if unsure.",
+        description="Tax code, e.g. 'V1' - system specific; the one the user gives or the tax code of the purchase order item - ask the user otherwise.",
         max_length=2,
     )
     text: str | None = Field(
@@ -7412,12 +9238,13 @@ class SAPSupplierInvoiceGLAccountItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierInvoiceModel.
 class SAPSupplierInvoiceTaxModel(SAPODataCreateModel):
     """A tax line of an SAP supplier invoice - needed if the tax is not calculated automatically (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
     tax_code: SAPCode = Field(
         alias="TaxCode",
-        description="Tax code, e.g. 'V1' - system specific; copy from an existing invoice if unsure.",
+        description="Tax code, e.g. 'V1' - system specific; the one the user gives or the tax code of the purchase order item - ask the user otherwise.",
         min_length=1,
         max_length=2,
     )
@@ -7455,6 +9282,7 @@ class SAPSupplierInvoiceTaxModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_supplier_invoice().
 class SAPSupplierInvoiceModel(SAPODataCreateModel):
     """Data to create (post) an SAP supplier invoice (API_SUPPLIERINVOICE_PROCESS_SRV, OData V2).
 
@@ -7798,6 +9626,22 @@ class SAPSupplierInvoiceModel(SAPODataCreateModel):
     # end method definition
 
     @model_validator(mode="after")
+    def fill_debit_credit_code(self) -> Self:
+        """Fill in the debit / credit code of the G/L account, material and asset items.
+
+        SAP requires it (M8/375 "Fill in mandatory field 'DebitCreditCode'"): debit 'S' for an
+        invoice, credit 'H' for a credit memo - unless the item gives its own.
+
+        """
+
+        for item in [*self.gl_account_items, *self.material_items, *self.asset_items]:
+            item.debit_credit_code = item.debit_credit_code or ("H" if self.is_credit_memo else "S")
+
+        return self
+
+    # end method definition
+
+    @model_validator(mode="after")
     def check_items(self) -> Self:
         """Validate that the invoice has items - or selects the documents SAP proposes the items from."""
 
@@ -7854,6 +9698,7 @@ class SAPSupplierInvoiceModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoicePurchaseOrderItemResponseModel.
 class SAPSupplierInvoiceAccountAssignmentResponseModel(SAPODataModel):
     """An account assignment of a purchase order item of an SAP supplier invoice as returned by SAP."""
 
@@ -7879,6 +9724,7 @@ class SAPSupplierInvoiceAccountAssignmentResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoiceResponseModel.
 class SAPSupplierInvoiceMaterialItemResponseModel(SAPODataModel):
     """A material item of an SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7897,6 +9743,7 @@ class SAPSupplierInvoiceMaterialItemResponseModel(SAPODataModel):
     tax_code: str | None = Field(default=None, alias="TaxCode", description="Tax code.")
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoiceResponseModel.
 class SAPSupplierInvoiceAssetItemResponseModel(SAPODataModel):
     """A fixed asset item of an SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7914,6 +9761,7 @@ class SAPSupplierInvoiceAssetItemResponseModel(SAPODataModel):
     text: str | None = Field(default=None, alias="SupplierInvoiceItemText", description="Text of the item.")
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoiceResponseModel.
 class SAPSupplierInvoiceTaxResponseModel(SAPODataModel):
     """A tax line of an SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7926,6 +9774,7 @@ class SAPSupplierInvoiceTaxResponseModel(SAPODataModel):
     tax_jurisdiction: str | None = Field(default=None, alias="TaxJurisdiction", description="Tax jurisdiction.")
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoiceResponseModel.
 class SAPSupplierInvoiceWithholdingTaxResponseModel(SAPODataModel):
     """A withholding tax of an SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7944,6 +9793,7 @@ class SAPSupplierInvoiceWithholdingTaxResponseModel(SAPODataModel):
     currency: str | None = Field(default=None, alias="DocumentCurrency", description="Document currency (ISO code).")
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoiceResponseModel.
 class SAPSupplierInvoicePurchaseOrderItemResponseModel(SAPODataModel):
     """A purchase order item of an SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -7970,6 +9820,9 @@ class SAPSupplierInvoicePurchaseOrderItemResponseModel(SAPODataModel):
         description="Plant - the site (factory, warehouse, maintenance location) the record belongs to; see get_plants().",
     )
     tax_code: str | None = Field(default=None, alias="TaxCode", description="Tax code.")
+    tax_jurisdiction: str | None = Field(
+        default=None, alias="TaxJurisdiction", description="Tax jurisdiction (US sales tax), e.g. 'NY0000000'."
+    )
     reference_document: str | None = Field(
         default=None, alias="ReferenceDocument", description="Goods receipt (material document) the item refers to."
     )
@@ -8001,6 +9854,7 @@ class SAPSupplierInvoicePurchaseOrderItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierInvoiceResponseModel.
 class SAPSupplierInvoiceGLAccountItemResponseModel(SAPODataModel):
     """A G/L account item of an SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
@@ -8033,9 +9887,15 @@ class SAPSupplierInvoiceGLAccountItemResponseModel(SAPODataModel):
         default=None, alias="WBSElement", description="WBS element that is charged with the costs."
     )
     tax_code: str | None = Field(default=None, alias="TaxCode", description="Tax code.")
+    tax_jurisdiction: str | None = Field(
+        default=None, alias="TaxJurisdiction", description="Tax jurisdiction (US sales tax)."
+    )
     text: str | None = Field(default=None, alias="SupplierInvoiceItemText", description="Text of the item.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_supplier_invoice(), SAP.get_supplier_invoices() and
+# SAP.iter_supplier_invoices().
 class SAPSupplierInvoiceResponseModel(SAPODataModel):
     """An SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV, OData V2).
 
@@ -8174,14 +10034,20 @@ class SAPSupplierInvoiceResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_supplier_invoices() and SAP.iter_supplier_invoices().
 class SAPSupplierInvoiceQueryModel(SAPODataQueryModel):
     """Search criteria for SAP supplier invoices (API_SUPPLIERINVOICE_PROCESS_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - invoice numbers are unique per fiscal year
+    # only, so the fiscal year is part of each sort:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "invoice_id": "FiscalYear {direction},SupplierInvoice {direction}",
-        "posting_date": "PostingDate {direction}",
-        "document_date": "DocumentDate {direction}",
+        "posting_date": "PostingDate {direction},FiscalYear {direction},SupplierInvoice {direction}",
+        "document_date": "DocumentDate {direction},FiscalYear {direction},SupplierInvoice {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items of all types and the taxes
+    # in the same request (also used by SAP.get_supplier_invoice()):
     EXPAND: ClassVar[str] = (
         "to_SuplrInvcItemPurOrdRef/to_SupplierInvoiceItmAcctAssgmt,to_SupplierInvoiceItemGLAcct,"
         "to_SuplrInvcItemMaterial,to_SuplrInvcItemAsset,to_SupplierInvoiceTax,to_SupplierInvoiceWhldgTax"
@@ -8226,6 +10092,59 @@ class SAPSupplierInvoiceQueryModel(SAPODataQueryModel):
         default=None, description="False = only invoices that have not been cancelled."
     )
     expand_items: bool = Field(default=False, description="Also return the items of each invoice.")
+
+
+class SAPSupplierInvoiceItemQueryModel(SAPODataQueryModel):
+    """Search criteria for purchase order items of SAP supplier invoices (A_SuplrInvcItemPurOrdRef).
+
+    Used to find the invoices of purchase orders (see SAP.get_supplier_invoice_items()) - the invoice header has no
+    purchase order. The items carry no reversal status: reversed invoices and their reversal documents are found too.
+
+    """
+
+    SORT_PROPERTIES: ClassVar[dict[str, str]] = {
+        "invoice_id": "FiscalYear {direction},SupplierInvoice {direction},SupplierInvoiceItem asc",
+    }
+    sort_by: Literal["invoice_id"] = Field(default="invoice_id", description="Sort criterion.")
+    sort_direction: Literal["asc", "desc"] = Field(
+        default="desc", description="Sort direction, desc = newest / highest first."
+    )
+    purchase_orders: Annotated[list[SAPCode] | None, ODataCondition("PurchaseOrder")] = Field(
+        default=None, description="Purchase orders of the items, e.g. ['4500001540']."
+    )
+    invoice_ids: Annotated[list[SAPCode] | None, ODataCondition("SupplierInvoice")] = Field(
+        default=None, description="Supplier invoice numbers, e.g. ['5105600123']."
+    )
+    fiscal_year: Annotated[str | None, ODataCondition("FiscalYear")] = Field(
+        default=None, description="Fiscal year of the invoices, e.g. '2026'."
+    )
+
+
+# Inherits limit, paging and to_odata() from SAPODataQueryModel. Used by SAP.get_supplier_invoice_gl_account_items().
+class SAPSupplierInvoiceGLAccountItemQueryModel(SAPODataQueryModel):
+    """Search criteria for G/L account items of SAP supplier invoices (A_SupplierInvoiceItemGLAcct).
+
+    Used to find how costs were posted before, e.g. the tax jurisdiction of a cost center - the cost center API
+    doesn't return it. Reversed invoices and their reversal documents are found too.
+
+    """
+
+    SORT_PROPERTIES: ClassVar[dict[str, str]] = {
+        "invoice_id": "FiscalYear {direction},SupplierInvoice {direction},SupplierInvoiceItem asc",
+    }
+    sort_by: Literal["invoice_id"] = Field(default="invoice_id", description="Sort criterion.")
+    sort_direction: Literal["asc", "desc"] = Field(
+        default="desc", description="Sort direction, desc = newest / highest first."
+    )
+    company_code: Annotated[SAPCode | None, ODataCondition("CompanyCode")] = Field(
+        default=None, description="Company code of the items, e.g. '1010'."
+    )
+    cost_centers: Annotated[list[SAPCode] | None, ODataCondition("CostCenter")] = Field(
+        default=None, description="Cost centers of the items, e.g. ['10101101']."
+    )
+    gl_accounts: Annotated[list[SAPCode] | None, ODataCondition("GLAccount")] = Field(
+        default=None, description="G/L accounts of the items, e.g. ['61000000']."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -8415,19 +10334,23 @@ class SAPInboundDeliveryAction(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPGoodsMovementModel.
 class SAPGoodsMovementItemModel(SAPODataCreateModel):
     """An item of a goods movement (material document item, API_MATERIAL_DOCUMENT_SRV).
 
     The movement type defines the business transaction, e.g. 101 (goods receipt for a
     purchase order - with purchase order, item and reference document type "B"),
-    201 (goods issue to a cost center), 261 (goods issue to a production order) or
-    311 (transfer posting between storage locations).
+    201 (goods issue to a cost center), 261 (goods issue to a production order),
+    311 (transfer posting between storage locations) or 412 with special stock "E"
+    (transfer posting from the plant's own stock into the sales order stock of a
+    make-to-order sales order item - 411 "E" moves it back; both need the receiving
+    storage location, e.g. the same storage location).
 
     """
 
     movement_type: SAPCode = Field(
         alias="GoodsMovementType",
-        description="Movement type, e.g. '101' (goods receipt for purchase order), '201' (issue to cost center), '261' (issue to order), '311' (transfer) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Movement type, e.g. '101' (goods receipt for purchase order), '201' (issue to cost center), '261' (issue to order), '311' (transfer) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=3,
     )
@@ -8501,10 +10424,27 @@ class SAPGoodsMovementItemModel(SAPODataCreateModel):
     )
     supplier: SAPCode | None = Field(default=None, alias="Supplier", description="Supplier number.", max_length=10)
     customer: SAPCode | None = Field(default=None, alias="Customer", description="Customer number.", max_length=10)
+    special_stock_type: SAPCode | None = Field(
+        default=None,
+        alias="InventorySpecialStockType",
+        description="Special stock: 'E' sales order stock (with `sales_order_stock` and `sales_order_stock_item`), e.g. for 412 'E' (own stock -> sales order stock) or 411 'E' (back) - both with the `receiving_storage_location` (e.g. the same storage location). Empty for own stock.",
+        max_length=1,
+    )
+    sales_order_stock: SAPCode | None = Field(
+        default=None,
+        alias="SpecialStockIdfgSalesOrder",
+        description="Sales order of the sales order stock (special stock 'E'), e.g. '481'.",
+        max_length=10,
+    )
+    sales_order_stock_item: Numc6 | None = Field(
+        default=None,
+        alias="SpecialStockIdfgSalesOrderItem",
+        description="Sales order item of the sales order stock (6 digits, padded), e.g. 10 -> '000010'.",
+    )
     reason_code: SAPCode | None = Field(
         default=None,
         alias="GoodsMovementReasonCode",
-        description="Reason for the movement, e.g. for scrapping or returns - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Reason for the movement, e.g. for scrapping or returns - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     receiving_plant: SAPCode | None = Field(
@@ -8535,7 +10475,33 @@ class SAPGoodsMovementItemModel(SAPODataCreateModel):
         description="True to set the 'delivery completed' indicator on the purchase / production order item.",
     )
 
+    @model_validator(mode="after")
+    def check_sales_order_stock(self) -> Self:
+        """Validate that sales order stock (special stock 'E') is given with its sales order item.
 
+        Transfer postings between own and sales order stock (411 / 412 'E') also need the
+        receiving storage location - SAP rejects them without it
+        ("[MM_IM_ODATA_API_MDOC/010] Property IssuingOrReceivingStorageLoc is mandatory").
+
+        """
+
+        if (self.special_stock_type or "").upper() != "E":
+            return self
+        if not (self.sales_order_stock and self.sales_order_stock_item):
+            message = (
+                "Sales order stock (`special_stock_type` 'E') needs `sales_order_stock` and `sales_order_stock_item`"
+            )
+            raise ValueError(message)
+        if self.movement_type in ("411", "412") and not self.receiving_storage_location:
+            message = "Movement type {} 'E' needs the `receiving_storage_location`".format(self.movement_type)
+            raise ValueError(message)
+
+        return self
+
+    # end method definition
+
+
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_goods_movement().
 class SAPGoodsMovementModel(SAPODataCreateModel):
     """Data to post a goods movement (material document, API_MATERIAL_DOCUMENT_SRV, OData V2).
 
@@ -8604,6 +10570,8 @@ class SAPGoodsMovementModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPGoodsMovementResponseModel, also returned by SAP.get_goods_movement_items()
+# and SAP.iter_goods_movement_items().
 class SAPGoodsMovementItemResponseModel(SAPODataModel):
     """An item of a material document as returned by SAP (API_MATERIAL_DOCUMENT_SRV)."""
 
@@ -8664,6 +10632,21 @@ class SAPGoodsMovementItemResponseModel(SAPODataModel):
         alias="Supplier",
         description="Supplier (vendor) number - a business partner in the supplier role; see get_suppliers().",
     )
+    special_stock_type: str | None = Field(
+        default=None,
+        alias="InventorySpecialStockType",
+        description="Special stock, e.g. 'E' (sales order stock), 'K' (supplier consignment) - empty for own stock.",
+    )
+    sales_order_stock: str | None = Field(
+        default=None,
+        alias="SpecialStockIdfgSalesOrder",
+        description="Sales order of the sales order stock (special stock 'E'); see get_sales_order().",
+    )
+    sales_order_stock_item: str | None = Field(
+        default=None,
+        alias="SpecialStockIdfgSalesOrderItem",
+        description="Sales order item of the sales order stock (special stock 'E').",
+    )
     amount: SAPDecimal | None = Field(
         default=None, alias="GdsMvtExtAmtInCoCodeCrcy", description="Value of the movement in company code currency."
     )
@@ -8710,6 +10693,9 @@ class SAPGoodsMovementItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_goods_movement(), SAP.get_goods_movements() and
+# SAP.iter_goods_movements().
 class SAPGoodsMovementResponseModel(SAPODataModel):
     """A material document (goods movement) as returned by SAP (API_MATERIAL_DOCUMENT_SRV, OData V2).
 
@@ -8761,6 +10747,8 @@ class SAPGoodsMovementResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_goods_movements() and SAP.iter_goods_movements().
 class SAPGoodsMovementQueryModel(SAPODataQueryModel):
     """Search criteria for SAP goods movements / material documents (API_MATERIAL_DOCUMENT_SRV).
 
@@ -8769,10 +10757,13 @@ class SAPGoodsMovementQueryModel(SAPODataQueryModel):
 
     """
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - material document numbers are unique per year
+    # only, so the year is part of each sort:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "document": "MaterialDocumentYear {direction},MaterialDocument {direction}",
-        "posting_date": "PostingDate {direction}",
+        "posting_date": "PostingDate {direction},MaterialDocumentYear {direction},MaterialDocument {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the items in the same request:
     EXPAND: ClassVar[str] = "to_MaterialDocumentItem"
     sort_by: Literal["document", "posting_date"] = Field(default="document", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -8797,8 +10788,9 @@ class SAPGoodsMovementQueryModel(SAPODataQueryModel):
     created_by: Annotated[SAPCode | None, ODataCondition("CreatedByUser")] = Field(
         default=None, description="SAP user who posted the material document."
     )
-    reference_document: Annotated[str | None, ODataCondition("ReferenceDocument")] = Field(
-        default=None, description="Reference document, e.g. a delivery note number."
+    # Not an ODataCondition - to_odata() also matches the number with leading zeros:
+    reference_document: str | None = Field(
+        default=None, description="Reference document, e.g. a delivery note or outbound delivery number."
     )
     purchase_orders: list[SAPCode] | None = Field(
         default=None, description="Only material documents with items of these purchase orders, e.g. ['4500001540']."
@@ -8823,7 +10815,40 @@ class SAPGoodsMovementQueryModel(SAPODataQueryModel):
 
         return any((self.purchase_orders, self.production_orders, self.materials, self.plants, self.movement_types))
 
+    # end method definition
 
+    def to_odata(self, odata_version: int) -> dict:
+        """Return the OData query options - the reference document also with leading zeros.
+
+        ReferenceDocument is a free text field without ALPHA conversion: the goods issue of an outbound
+        delivery stores the delivery number with leading zeros ('0080000155'), so '80000155' alone finds
+        nothing. The value as given is kept for delivery notes of suppliers.
+
+        Args:
+            odata_version (int):
+                The OData version of the service (2 or 4).
+
+        Returns:
+            dict:
+                The query options ($filter, $orderby, $expand).
+
+        """
+
+        params = super().to_odata(odata_version=odata_version)
+        reference = (self.reference_document or "").strip()
+        if reference:
+            values = dict.fromkeys((reference, reference.zfill(10) if reference.isdigit() else reference))
+            condition = " or ".join(
+                "ReferenceDocument eq {}".format(odata_literal(value, odata_version=odata_version)) for value in values
+            )
+            condition = "({})".format(condition) if len(values) > 1 else condition
+            params["$filter"] = "{} and {}".format(params["$filter"], condition) if "$filter" in params else condition
+
+        return params
+
+
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_goods_movement_items() and SAP.iter_goods_movement_items().
 class SAPGoodsMovementItemQueryModel(SAPODataQueryModel):
     """Search criteria for SAP material document items (API_MATERIAL_DOCUMENT_SRV, A_MaterialDocumentItem).
 
@@ -8832,6 +10857,8 @@ class SAPGoodsMovementItemQueryModel(SAPODataQueryModel):
 
     """
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the items of a material document stay together,
+    # in item order:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "document": "MaterialDocumentYear {direction},MaterialDocument {direction},MaterialDocumentItem asc",
     }
@@ -8881,6 +10908,8 @@ SAP_INVENTORY_STOCK_TYPES: dict[str, str] = {
 }
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_material_stock() and SAP.iter_material_stock().
 class SAPMaterialStockResponseModel(SAPODataModel):
     """The stock of a material in one stock segment as returned by SAP (API_MATERIAL_STOCK_SRV, A_MatlStkInAcctMod).
 
@@ -8951,9 +10980,13 @@ class SAPMaterialStockResponseModel(SAPODataModel):
     # end method definition
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_material_stock() and SAP.iter_material_stock().
 class SAPMaterialStockQueryModel(SAPODataQueryModel):
     """Search criteria for the SAP material stock (API_MATERIAL_STOCK_SRV, A_MatlStkInAcctMod)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - all key fields of a stock entry, for a stable
+    # order of the pages:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "material": "Material {direction},Plant asc,StorageLocation asc,Batch asc,InventoryStockType asc",
     }
@@ -9013,6 +11046,7 @@ class SAPMaterialStockQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_maintenance_order_confirmation().
 class SAPMaintenanceOrderConfirmationModel(SAPODataCreateModel):
     """Data to confirm work on a maintenance order operation (API_MAINTORDERCONFIRMATION, OData V2).
 
@@ -9138,7 +11172,7 @@ class SAPMaintenanceOrderConfirmationModel(SAPODataCreateModel):
     activity_type: SAPCode | None = Field(
         default=None,
         alias="ActivityType",
-        description="Activity type for cost allocation. Defaults to the activity type of the operation - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Activity type for cost allocation. Defaults to the activity type of the operation - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=6,
     )
     clear_open_reservations: bool | None = Field(
@@ -9155,11 +11189,14 @@ class SAPMaintenanceOrderConfirmationModel(SAPODataCreateModel):
     variance_reason: SAPCode | None = Field(
         default=None,
         alias="VarianceReasonCode",
-        description="Reason for a variance - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Reason for a variance - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_maintenance_order_confirmation(),
+# SAP.get_maintenance_order_confirmations() and SAP.iter_maintenance_order_confirmations().
 class SAPMaintenanceOrderConfirmationResponseModel(SAPODataModel):
     """A maintenance order confirmation as returned by SAP (API_MAINTORDERCONFIRMATION, OData V2)."""
 
@@ -9232,12 +11269,17 @@ class SAPMaintenanceOrderConfirmationResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_maintenance_order_confirmations() and
+# SAP.iter_maintenance_order_confirmations().
 class SAPMaintenanceOrderConfirmationQueryModel(SAPODataQueryModel):
     """Search criteria for SAP maintenance order confirmations (API_MAINTORDERCONFIRMATION)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the confirmation number orders documents of the
+    # same date (e.g. 'the latest confirmation' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "confirmation_id": "MaintOrderConf {direction}",
-        "posting_date": "PostingDate {direction}",
+        "posting_date": "PostingDate {direction},MaintOrderConf {direction}",
     }
     sort_by: Literal["confirmation_id", "posting_date"] = Field(
         default="confirmation_id", description="Sort criterion."
@@ -9265,6 +11307,7 @@ class SAPMaintenanceOrderConfirmationQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaintenancePlanModel.
 class SAPMaintenancePlanCycleModel(SAPODataCreateModel):
     """A cycle of a maintenance plan, e.g. every 3 months or every 500 operating hours."""
 
@@ -9299,6 +11342,8 @@ class SAPMaintenancePlanCycleModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaintenancePlanModel. to_odata_update()
+# validates its changes in SAP.update_maintenance_plan().
 class SAPMaintenancePlanItemModel(SAPODataCreateModel):
     """A maintenance item of a maintenance plan - the object to maintain and how (task list, order type)."""
 
@@ -9323,11 +11368,13 @@ class SAPMaintenancePlanItemModel(SAPODataCreateModel):
         description="Equipment to maintain, e.g. '210100001'. Give this or `functional_location`.",
         max_length=18,
     )
+    # The label, not the internal ID: SAP silently ignores FunctionalLocation on create and update (verified in
+    # S/4HANA 2023 - the item is saved without a technical object):
     functional_location: str | None = Field(
         default=None,
-        alias="FunctionalLocation",
-        description="Internal functional location ID - not the label shown in the UI. Give this or `equipment`.",
-        max_length=30,
+        alias="FunctionalLocationLabelName",
+        description="Functional location to maintain - its label as shown in the UI, e.g. 'C1-B01-1'. Give this or `equipment`.",
+        max_length=40,
     )
     task_list_type: SAPCode | None = Field(
         default=None,
@@ -9338,7 +11385,7 @@ class SAPMaintenancePlanItemModel(SAPODataCreateModel):
     task_list_group: SAPCode | None = Field(
         default=None,
         alias="TaskListGroup",
-        description="Task list group describing the work to do - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Task list group describing the work to do - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=8,
     )
     task_list_group_counter: SAPCode | None = Field(
@@ -9356,25 +11403,25 @@ class SAPMaintenancePlanItemModel(SAPODataCreateModel):
     planner_group: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlannerGroup",
-        description="Maintenance planner group - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance planner group - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     order_type: SAPCode | None = Field(
         default=None,
         alias="MaintenanceOrderType",
-        description="Order type of the generated maintenance orders, e.g. 'PM03' or 'YA03' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Order type of the generated maintenance orders, e.g. 'PM03' or 'YA03' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     notification_type: SAPCode | None = Field(
         default=None,
         alias="NotificationType",
-        description="Notification type of generated notifications, e.g. 'M1' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Notification type of generated notifications, e.g. 'M1' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=2,
     )
     activity_type: SAPCode | None = Field(
         default=None,
         alias="MaintenanceActivityType",
-        description="Maintenance activity type, e.g. '001' (inspection) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance activity type, e.g. '001' (inspection) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     main_work_center: SAPCode | None = Field(
@@ -9392,11 +11439,13 @@ class SAPMaintenancePlanItemModel(SAPODataCreateModel):
     priority: SAPCode | None = Field(
         default=None,
         alias="MaintPriority",
-        description="Maintenance priority of the generated orders, e.g. '3' - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance priority of the generated orders, e.g. '3' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=1,
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_maintenance_plan(), to_odata_update()
+# the changes of SAP.update_maintenance_plan().
 class SAPMaintenancePlanModel(SAPODataCreateModel):
     """Data to create an SAP maintenance plan (API_MAINTENANCEPLAN, OData V2).
 
@@ -9441,13 +11490,13 @@ class SAPMaintenancePlanModel(SAPODataCreateModel):
     category: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlanCategory",
-        description="Maintenance plan category, e.g. 'PM' (maintenance order), 'SM' (service order) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance plan category, e.g. 'PM' (maintenance order), 'SM' (service order) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=2,
     )
     strategy: SAPCode | None = Field(
         default=None,
         alias="MaintenanceStrategy",
-        description="Maintenance strategy for strategy plans, e.g. 'A'. Omit for single cycle plans (use `cycles`) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Maintenance strategy for strategy plans, e.g. 'A'. Omit for single cycle plans (use `cycles`) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=6,
     )
     # CallHorizonPercent is an Edm.String with MaxLength 3 in API_MAINTENANCEPLAN (not an Edm.Decimal).
@@ -9481,7 +11530,7 @@ class SAPMaintenancePlanModel(SAPODataCreateModel):
     scheduling_start_date: ODataV2Date = Field(
         default=None,
         alias="SchedulingStartDate",
-        description="Start date for scheduling, e.g. '2026-11-01'.",
+        description="Start date for scheduling, e.g. '2026-11-01'. SAP does not store it with a new plan - give it again when starting the scheduling.",
     )
     cycles: list[SAPMaintenancePlanCycleModel] = Field(
         default_factory=list,
@@ -9537,6 +11586,7 @@ class SAPMaintenancePlanModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPMaintenancePlanResponseModel.
 class SAPMaintenancePlanCycleResponseModel(SAPODataModel):
     """A cycle of a maintenance plan as returned by SAP (API_MAINTENANCEPLAN)."""
 
@@ -9562,6 +11612,8 @@ class SAPMaintenancePlanCycleResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPMaintenancePlanResponseModel, also returned by
+# SAP.iter_maintenance_plan_items().
 class SAPMaintenancePlanItemResponseModel(SAPODataModel):
     """A maintenance item of a maintenance plan as returned by SAP (API_MAINTENANCEPLAN)."""
 
@@ -9624,6 +11676,9 @@ class SAPMaintenancePlanItemResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_maintenance_plan(), SAP.get_maintenance_plans() and
+# SAP.iter_maintenance_plans().
 class SAPMaintenancePlanResponseModel(SAPODataModel):
     """A maintenance plan as returned by SAP (API_MAINTENANCEPLAN, OData V2).
 
@@ -9678,6 +11733,14 @@ class SAPMaintenancePlanResponseModel(SAPODataModel):
         alias="SchedulingEndDate",
         description="End date of the scheduling - no calls are planned after this date.",
     )
+    call_horizon: str | None = Field(
+        default=None,
+        alias="CallHorizonInDays",
+        description="Call horizon - how far ahead of the planned date a call (order) is generated.",
+    )
+    factory_calendar: str | None = Field(
+        default=None, alias="FactoryCalendar", description="Factory calendar used for scheduling (working days)."
+    )
     cycles: Annotated[
         list[SAPMaintenancePlanCycleResponseModel] | None,
         BeforeValidator(unwrap_odata_navigation),
@@ -9696,13 +11759,19 @@ class SAPMaintenancePlanResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_maintenance_plans() and SAP.iter_maintenance_plans().
 class SAPMaintenancePlanQueryModel(SAPODataQueryModel):
     """Search criteria for SAP maintenance plans (API_MAINTENANCEPLAN)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the plan number orders documents of the same
+    # date (e.g. 'the latest plan' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "plan_id": "MaintenancePlan {direction}",
-        "created": "CreationDate {direction}",
+        "created": "CreationDate {direction},MaintenancePlan {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the cycles and items in the same
+    # request:
     EXPAND: ClassVar[str] = "to_MaintenanceCycle,to_Item"
     sort_by: Literal["plan_id", "created"] = Field(default="plan_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -9740,7 +11809,33 @@ class SAPMaintenancePlanQueryModel(SAPODataQueryModel):
     equipment_ids: list[SAPCode] | None = Field(
         default=None, description="Only plans with items for these equipments, e.g. ['210100001']."
     )
+    is_marked_for_deletion: bool | None = Field(
+        default=None,
+        description="True = only deleted maintenance plans (deletion flag), False = only plans that are not deleted.",
+    )
     expand_items: bool = Field(default=False, description="Also return the cycles and items of each plan.")
+
+    def accepts(self, entity: BaseModel) -> bool:
+        """Check the deletion flag (system status I0076) - SAP can't filter by the system status (HTTP 501).
+
+        Args:
+            entity (BaseModel):
+                The maintenance plan read (SAPMaintenancePlanResponseModel).
+
+        Returns:
+            bool:
+                True if the plan matches is_marked_for_deletion (or the criterion isn't set).
+
+        """
+
+        if self.is_marked_for_deletion is None:
+            return True
+
+        plan = cast("SAPMaintenancePlanResponseModel", entity)
+
+        return ("I0076" in (plan.system_status or "").split()) == self.is_marked_for_deletion
+
+    # end method definition
 
     @property
     def has_item_criteria(self) -> bool:
@@ -9751,6 +11846,8 @@ class SAPMaintenancePlanQueryModel(SAPODataQueryModel):
         )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.iter_maintenance_plan_items().
 class SAPMaintenancePlanItemQueryModel(SAPODataQueryModel):
     """Search criteria for SAP maintenance items (API_MAINTENANCEPLAN, MaintenanceItem).
 
@@ -9759,6 +11856,8 @@ class SAPMaintenancePlanItemQueryModel(SAPODataQueryModel):
 
     """
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the items of a plan stay together, in item
+    # order:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "plan_id": "MaintenancePlan {direction},MaintenanceItem asc",
     }
@@ -9788,6 +11887,7 @@ class SAPMaintenancePlanItemQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPTaskListOperationModel.
 class SAPTaskListOperationMaterialModel(SAPODataCreateModel):
     """A material (component) needed by an operation of a new task list - e.g. a spare part.
 
@@ -9835,6 +11935,8 @@ class SAPTaskListOperationMaterialModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPTaskListModel. to_odata_update() validates
+# its changes in SAP.update_task_list().
 class SAPTaskListOperationModel(SAPODataCreateModel):
     """An operation of an SAP maintenance task list (API_MAINTENANCETASKLIST, OData V4).
 
@@ -9859,7 +11961,7 @@ class SAPTaskListOperationModel(SAPODataCreateModel):
     control_key: SAPCode | None = Field(
         default=None,
         alias="OperationControlProfile",
-        description="Operation control key, e.g. 'PM01' (internal processing) - system specific; copy from an existing task list if unsure.",
+        description="Operation control key, e.g. 'PM01' (internal processing) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=4,
     )
     work_center: SAPCode | None = Field(
@@ -9937,6 +12039,8 @@ class SAPTaskListOperationModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_task_list(), to_odata_update() the
+# changes of SAP.update_task_list().
 class SAPTaskListModel(SAPODataCreateModel):
     """Data to create an SAP maintenance task list (API_MAINTENANCETASKLIST, OData V4).
 
@@ -10037,19 +12141,19 @@ class SAPTaskListModel(SAPODataCreateModel):
     planner_group: SAPCode | None = Field(
         default=None,
         alias="ResponsiblePlannerGroup",
-        description="Maintenance planner group, e.g. '010' - system specific; copy from an existing task list if unsure.",
+        description="Maintenance planner group, e.g. '010' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     usage: SAPCode | None = Field(
         default=None,
         alias="TaskListUsage",
-        description="Task list usage, e.g. '4' (plant maintenance) - system specific; copy from an existing task list if unsure.",
+        description="Task list usage, e.g. '4' (plant maintenance) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     status: SAPCode | None = Field(
         default=None,
         alias="TaskListStatus",
-        description="Task list status, e.g. '4' (released) - system specific; copy from an existing task list if unsure.",
+        description="Task list status, e.g. '4' (released) - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     strategy: SAPCode | None = Field(
@@ -10122,6 +12226,7 @@ class SAPTaskListModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPTaskListOperationResponseModel.
 class SAPTaskListOperationMaterialResponseModel(SAPODataModel):
     """A material (component) of a task list operation as returned by SAP (API_MAINTENANCETASKLIST, OData V4)."""
 
@@ -10139,6 +12244,7 @@ class SAPTaskListOperationMaterialResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPTaskListResponseModel.
 class SAPTaskListOperationResponseModel(SAPODataModel):
     """An operation of a maintenance task list as returned by SAP (API_MAINTENANCETASKLIST)."""
 
@@ -10208,6 +12314,8 @@ class SAPTaskListOperationResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_task_list(), SAP.get_task_lists() and SAP.iter_task_lists().
 class SAPTaskListResponseModel(SAPODataModel):
     """A maintenance task list as returned by SAP (API_MAINTENANCETASKLIST, OData V4).
 
@@ -10307,15 +12415,21 @@ class SAPTaskListResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_task_lists() and SAP.iter_task_lists().
 class SAPTaskListQueryModel(SAPODataQueryModel):
     """Search criteria for SAP maintenance task lists (API_MAINTENANCETASKLIST, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - a task list is identified by type, group and
+    # group counter:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         # Latest version first for each task list (see get_task_list()):
         "task_list": "TaskListType {direction},TaskListGroup {direction},TaskListGroupCounter {direction},"
         "TaskListVersionCounter desc",
-        "last_change": "LastChangeDate {direction}",
+        "last_change": "LastChangeDate {direction},TaskListType {direction},TaskListGroup {direction},TaskListGroupCounter {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the operations with their materials in
+    # the same request:
     EXPAND: ClassVar[str] = "_Operation($expand=_OpMaterial)"
     sort_by: Literal["task_list", "last_change"] = Field(default="task_list", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -10349,7 +12463,7 @@ class SAPTaskListQueryModel(SAPODataQueryModel):
     statuses: Annotated[list[SAPCode] | None, ODataCondition("TaskListStatus")] = Field(
         default=None, description="Task list statuses. System specific."
     )
-    is_marked_for_deletion: Annotated[bool | None, ODataCondition("IsMarkedForDeletion")] = Field(
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("IsMarkedForDeletion")] = Field(
         default=None, description="False = only task lists that are not marked for deletion."
     )
     valid_on: Annotated[date | None, ODataCondition(("ValidityStartDate", "ValidityEndDate"), operator="valid_on")] = (
@@ -10363,6 +12477,8 @@ class SAPTaskListQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_planned_order() and
+# SAP.create_production_order_from_planned_order(), to_odata_update() the changes of SAP.update_planned_order().
 class SAPPlannedOrderModel(SAPODataCreateModel):
     """Data to create an SAP planned order (API_PLANNEDORDER, OData V4).
 
@@ -10390,7 +12506,7 @@ class SAPPlannedOrderModel(SAPODataCreateModel):
 
     order_type: SAPCode = Field(
         alias="PlannedOrderType",
-        description="Planned order type, e.g. 'LA' (stock order), 'KD' (customer order) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Planned order type, e.g. 'LA' (stock order), 'KD' (customer order) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=4,
     )
@@ -10510,6 +12626,7 @@ class SAPPlannedOrderModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataCreateModel for to_odata_update() and READ_ONLY_PROPERTIES - not for to_odata().
 class SAPPlannedOrderComponentModel(SAPODataCreateModel):
     """The changeable fields of a component of an SAP planned order (API_PLANNEDORDER, PlannedOrderComponent).
 
@@ -10542,6 +12659,9 @@ class SAPPlannedOrderComponentModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_planned_order(), SAP.get_planned_orders() and
+# SAP.iter_planned_orders().
 class SAPPlannedOrderResponseModel(SAPODataModel):
     """A planned order as returned by SAP (API_PLANNEDORDER, OData V4).
 
@@ -10636,14 +12756,38 @@ class SAPPlannedOrderResponseModel(SAPODataModel):
         alias="StorageLocation",
         description="Storage location within the plant where the material is stored; see get_storage_locations().",
     )
+    sales_order: str | None = Field(
+        default=None,
+        alias="SalesOrder",
+        description="Sales order the planned order was created for (make-to-order production).",
+    )
+    sales_order_item: str | None = Field(default=None, alias="SalesOrderItem", description="Item of the sales order.")
+    customer: str | None = Field(
+        default=None, alias="Customer", description="Customer of the sales order (make-to-order production)."
+    )
+    fixed_supplier: str | None = Field(
+        default=None,
+        alias="FixedSupplier",
+        description="Supplier the material is procured from (external procurement).",
+    )
+    goods_receipt_quantity: SAPDecimal | None = Field(
+        default=None, alias="GoodsReceiptQty", description="Quantity received so far."
+    )
+    issued_quantity: SAPDecimal | None = Field(
+        default=None, alias="IssuedQuantity", description="Quantity issued so far."
+    )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_planned_orders() and SAP.iter_planned_orders().
 class SAPPlannedOrderQueryModel(SAPODataQueryModel):
     """Search criteria for SAP planned orders (API_PLANNEDORDER, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the planned order number orders documents of
+    # the same date (e.g. 'the latest planned order' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "planned_order_id": "PlannedOrder {direction}",
-        "start_date": "PlndOrderPlannedStartDate {direction}",
+        "start_date": "PlndOrderPlannedStartDate {direction},PlannedOrder {direction}",
     }
     sort_by: Literal["planned_order_id", "start_date"] = Field(
         default="planned_order_id", description="Sort criterion."
@@ -10680,6 +12824,8 @@ class SAPPlannedOrderQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_production_order(), to_odata_update()
+# the changes of SAP.update_production_order().
 class SAPProductionOrderModel(SAPODataCreateModel):
     """Data to create an SAP production order (API_PRODUCTION_ORDER_2_SRV, OData V2).
 
@@ -10706,7 +12852,7 @@ class SAPProductionOrderModel(SAPODataCreateModel):
 
     order_type: SAPCode = Field(
         alias="ManufacturingOrderType",
-        description="Production order type, e.g. 'PP01' (standard production order) - system specific; look up the valid values (e.g. in similar documents) if unknown.",
+        description="Production order type, e.g. 'PP01' (standard production order) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=4,
     )
@@ -10779,6 +12925,17 @@ class SAPProductionOrderModel(SAPODataCreateModel):
         description="Production supervisor, e.g. '001'.",
         max_length=3,
     )
+    sales_order: SAPCode | None = Field(
+        default=None,
+        alias="SalesOrder",
+        description="Sales order to produce for (make-to-order) - the goods receipt of the order then goes into the sales order stock of `sales_order_item` (special stock 'E'), from which the delivery of the sales order item is issued.",
+        max_length=10,
+    )
+    sales_order_item: Numc6 | None = Field(
+        default=None,
+        alias="SalesOrderItem",
+        description="Item of the `sales_order` (6 digits, padded), e.g. 10 -> '000010'.",
+    )
 
     @model_validator(mode="after")
     def check_dates(self) -> Self:
@@ -10812,7 +12969,20 @@ class SAPProductionOrderModel(SAPODataCreateModel):
 
     # end method definition
 
+    @model_validator(mode="after")
+    def check_sales_order(self) -> Self:
+        """Validate that a sales order is given together with its item."""
 
+        if bool(self.sales_order) != bool(self.sales_order_item):
+            message = "Give the `sales_order` together with its `sales_order_item` (make-to-order production)"
+            raise ValueError(message)
+
+        return self
+
+    # end method definition
+
+
+# Inherits from SAPODataCreateModel for to_odata_update() and READ_ONLY_PROPERTIES - not for to_odata().
 class SAPProductionOrderOperationModel(SAPODataCreateModel):
     """The changeable fields of an operation of an SAP production order (API_PRODUCTION_ORDER_2_SRV).
 
@@ -10875,6 +13045,7 @@ class SAPProductionOrderOperationModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPProductionOrderResponseModel.
 class SAPProductionOrderOperationResponseModel(SAPODataModel):
     """An operation of a production order as returned by SAP (API_PRODUCTION_ORDER_2_SRV)."""
 
@@ -10958,6 +13129,7 @@ class SAPProductionOrderOperationResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPProductionOrderResponseModel.
 class SAPProductionOrderStatusResponseModel(SAPODataModel):
     """An active status of a production order as returned by SAP (API_PRODUCTION_ORDER_2_SRV)."""
 
@@ -10969,6 +13141,9 @@ class SAPProductionOrderStatusResponseModel(SAPODataModel):
     name: str | None = Field(default=None, alias="StatusName", description="Status name, e.g. 'Released'.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.create_production_order(), SAP.get_production_order(),
+# SAP.get_production_orders() and SAP.iter_production_orders().
 class SAPProductionOrderResponseModel(SAPODataModel):
     """A production order as returned by SAP (API_PRODUCTION_ORDER_2_SRV, OData V2).
 
@@ -11077,8 +13252,38 @@ class SAPProductionOrderResponseModel(SAPODataModel):
         alias="SalesOrder",
         description="Sales order the record belongs to (e.g. make-to-order production); see get_sales_order().",
     )
+    sales_order_item: str | None = Field(
+        default=None,
+        alias="SalesOrderItem",
+        description="Item of the sales order (make-to-order production) - the goods receipt goes into its sales order stock.",
+    )
     long_text: str | None = Field(
         default=None, alias="OrderLongText", description="Long text (note) of the production order."
+    )
+    is_scheduled: SAPFlag = Field(
+        default=None, alias="OrderIsScheduled", description="True if the order has been scheduled."
+    )
+    is_partially_confirmed: SAPFlag = Field(
+        default=None, alias="OrderIsPartiallyConfirmed", description="True if parts of the order have been confirmed."
+    )
+    is_confirmed: SAPFlag = Field(
+        default=None, alias="OrderIsConfirmed", description="True if the order has been completely confirmed."
+    )
+    is_partially_delivered: SAPFlag = Field(
+        default=None,
+        alias="OrderIsPartiallyDelivered",
+        description="True if part of the quantity has been received (goods receipt).",
+    )
+    is_delivered: SAPFlag = Field(
+        default=None,
+        alias="OrderIsDelivered",
+        description="True if the order quantity has been received completely (goods receipt).",
+    )
+    customer_name: str | None = Field(
+        default=None, alias="CustomerName", description="Name of the customer (make-to-order production)."
+    )
+    planned_scrap_quantity: SAPDecimal | None = Field(
+        default=None, alias="MfgOrderPlannedScrapQty", description="Planned scrap quantity, in `unit`."
     )
     operations: Annotated[
         list[SAPProductionOrderOperationResponseModel] | None,
@@ -11098,13 +13303,19 @@ class SAPProductionOrderResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_production_orders() and SAP.iter_production_orders().
 class SAPProductionOrderQueryModel(SAPODataQueryModel):
     """Search criteria for SAP production orders (API_PRODUCTION_ORDER_2_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - the order number orders documents of the same
+    # date (e.g. 'the latest order' with limit=1):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "order_id": "ManufacturingOrder {direction}",
-        "planned_start": "MfgOrderPlannedStartDate {direction}",
+        "planned_start": "MfgOrderPlannedStartDate {direction},ManufacturingOrder {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the operations and statuses in the
+    # same request:
     EXPAND: ClassVar[str] = "to_ProductionOrderOperation,to_ProductionOrderStatus"
     sort_by: Literal["order_id", "planned_start"] = Field(default="order_id", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(
@@ -11146,6 +13357,12 @@ class SAPProductionOrderQueryModel(SAPODataQueryModel):
     planned_start_to: Annotated[date | None, ODataCondition("MfgOrderPlannedStartDate", operator="le")] = Field(
         default=None, description="Only orders with planned start on or before this date."
     )
+    is_marked_for_deletion: Annotated[
+        bool | None, ODataDeletionCondition("OrderIsMarkedForDeletion", deleted_value="X")
+    ] = Field(
+        default=None,
+        description="True = only deleted orders (deletion flag), False = only orders that are not deleted.",
+    )
     expand_items: bool = Field(default=False, description="Also return the operations and status of each order.")
 
 
@@ -11154,6 +13371,8 @@ class SAPProductionOrderQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_plant(), SAP.get_plants() and SAP.iter_plants().
 class SAPPlantResponseModel(SAPODataModel):
     """A plant as returned by SAP (API_PLANT_2, OData V4)."""
 
@@ -11198,9 +13417,12 @@ class SAPPlantResponseModel(SAPODataModel):
     language: str | None = Field(default=None, alias="Language", description="Language key of the plant.")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_plants() and SAP.iter_plants().
 class SAPPlantQueryModel(SAPODataQueryModel):
     """Search criteria for SAP plants (API_PLANT_2, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"plant": "Plant {direction}"}
     sort_by: Literal["plant"] = Field(default="plant", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -11218,6 +13440,9 @@ class SAPPlantQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_storage_location(), SAP.get_storage_locations() and
+# SAP.iter_storage_locations().
 class SAPStorageLocationResponseModel(SAPODataModel):
     """A storage location of a plant as returned by SAP (API_STORAGELOCATION_SRV, OData V2)."""
 
@@ -11245,9 +13470,12 @@ class SAPStorageLocationResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_storage_locations() and SAP.iter_storage_locations().
 class SAPStorageLocationQueryModel(SAPODataQueryModel):
     """Search criteria for SAP storage locations (API_STORAGELOCATION_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - storage locations are unique per plant only:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"plant": "Plant {direction},StorageLocation {direction}"}
     sort_by: Literal["plant"] = Field(default="plant", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -11262,6 +13490,8 @@ class SAPStorageLocationQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPProductModel. to_odata_update() validates its
+# changes in SAP.update_product_description().
 class SAPProductDescriptionModel(SAPODataCreateModel):
     """A (language dependent) description of a new product."""
 
@@ -11287,6 +13517,8 @@ class SAPProductDescriptionModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPProductPlantModel, also created on its own
+# with SAP.create_product_storage_location().
 class SAPProductStorageLocationModel(SAPODataCreateModel):
     """The storage location data of a product in a plant (extends the product to a storage location)."""
 
@@ -11313,6 +13545,8 @@ class SAPProductStorageLocationModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPProductModel, also created on its own with
+# SAP.create_product_plant(). to_odata_update() validates its changes in SAP.update_product_plant().
 class SAPProductPlantModel(SAPODataCreateModel):
     """The plant specific data of a product (extends the product to a plant) - with its storage locations."""
 
@@ -11408,6 +13642,8 @@ class SAPProductPlantModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPProductModel, also created on its own with
+# SAP.create_product_valuation().
 class SAPProductValuationModel(SAPODataCreateModel):
     """The valuation data of a product in a valuation area (usually a plant) - needed for stock postings."""
 
@@ -11431,7 +13667,7 @@ class SAPProductValuationModel(SAPODataCreateModel):
         alias="ValuationClass",
         description=(
             "Valuation class (determines the G/L accounts), e.g. '3000' - system specific and must fit the "
-            "product type; copy from a similar product if unsure."
+            "product type; ask the user if not given."
         ),
         min_length=1,
         max_length=4,
@@ -11481,6 +13717,8 @@ class SAPProductValuationModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_product(), to_odata_update() the
+# changes of SAP.update_product().
 class SAPProductModel(SAPODataCreateModel):
     """Data to create an SAP product / material (API_PRODUCT_SRV, OData V2).
 
@@ -11547,7 +13785,7 @@ class SAPProductModel(SAPODataCreateModel):
     product_group: SAPCode | None = Field(
         default=None,
         alias="ProductGroup",
-        description="Product (material) group, e.g. 'L001' - system specific; copy from an existing product if unsure.",
+        description="Product (material) group, e.g. 'L001' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=9,
     )
     division: SAPCode | None = Field(
@@ -11656,6 +13894,7 @@ class SAPProductModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPProductResponseModel.
 class SAPProductDescriptionResponseModel(SAPODataModel):
     """A (language dependent) description of a product as returned by SAP (API_PRODUCT_SRV)."""
 
@@ -11666,6 +13905,7 @@ class SAPProductDescriptionResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPProductPlantResponseModel.
 class SAPProductStorageLocationResponseModel(SAPODataModel):
     """The storage location data of a product as returned by SAP (API_PRODUCT_SRV)."""
 
@@ -11678,6 +13918,7 @@ class SAPProductStorageLocationResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPProductResponseModel.
 class SAPProductValuationResponseModel(SAPODataModel):
     """The valuation data of a product in a valuation area as returned by SAP (API_PRODUCT_SRV)."""
 
@@ -11709,6 +13950,7 @@ class SAPProductValuationResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPProductResponseModel.
 class SAPProductPlantResponseModel(SAPODataModel):
     """The plant specific data of a product as returned by SAP (API_PRODUCT_SRV).
 
@@ -11775,6 +14017,23 @@ class SAPProductPlantResponseModel(SAPODataModel):
         alias="ProductionInvtryManagedLoc",
         description="Default storage location for production (goods issues / receipts of production orders).",
     )
+    minimum_lot_size: SAPDecimal | None = Field(
+        default=None, alias="MinimumLotSizeQuantity", description="Minimum lot size for planning, in `base_unit`."
+    )
+    maximum_lot_size: SAPDecimal | None = Field(
+        default=None, alias="MaximumLotSizeQuantity", description="Maximum lot size for planning, in `base_unit`."
+    )
+    fixed_lot_size: SAPDecimal | None = Field(
+        default=None, alias="FixedLotSizeQuantity", description="Fixed lot size for planning, in `base_unit`."
+    )
+    serial_number_profile: str | None = Field(
+        default=None,
+        alias="SerialNumberProfile",
+        description="Serial number profile in the plant - set if the product is serialized.",
+    )
+    stock_in_transit: SAPDecimal | None = Field(
+        default=None, alias="StockInTransitQuantity", description="Stock in transit to the plant, in `base_unit`."
+    )
     storage_locations: Annotated[
         list[SAPProductStorageLocationResponseModel] | None,
         BeforeValidator(unwrap_odata_navigation),
@@ -11785,6 +14044,8 @@ class SAPProductPlantResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_product(), SAP.get_products() and SAP.iter_products().
 class SAPProductResponseModel(SAPODataModel):
     """A product (material) as returned by SAP (API_PRODUCT_SRV, OData V2).
 
@@ -11846,6 +14107,28 @@ class SAPProductResponseModel(SAPODataModel):
         alias="CrossPlantStatusValidityDate",
         description="Date from which the cross-plant material status is valid.",
     )
+    product_hierarchy: str | None = Field(
+        default=None,
+        alias="ProductHierarchy",
+        description="Product hierarchy - classifies the product for sales and reporting.",
+    )
+    brand: str | None = Field(default=None, alias="Brand", description="Brand.")
+    country_of_origin: str | None = Field(
+        default=None, alias="CountryOfOrigin", description="Country/region of origin (ISO code)."
+    )
+    gtin: str | None = Field(
+        default=None, alias="ProductStandardID", description="Global Trade Item Number (GTIN / EAN / UPC)."
+    )
+    serial_number_profile: str | None = Field(
+        default=None,
+        alias="SerialNumberProfile",
+        description="Serial number profile - set if the product is serialized.",
+    )
+    cross_plant_status: str | None = Field(
+        default=None,
+        alias="CrossPlantStatus",
+        description="Cross-plant status - e.g. blocks the product for procurement or production in all plants.",
+    )
     descriptions: Annotated[
         list[SAPProductDescriptionResponseModel] | None,
         BeforeValidator(unwrap_odata_navigation),
@@ -11866,10 +14149,15 @@ class SAPProductResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_products() and SAP.iter_products().
 class SAPProductQueryModel(SAPODataQueryModel):
     """Search criteria for SAP products / materials (API_PRODUCT_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"product": "Product {direction}"}
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the descriptions and plant data in the
+    # same request:
     EXPAND: ClassVar[str] = "to_Description,to_Plant"
     TEXT_SEARCH: ClassVar[ODataTextSearch | None] = ODataTextSearch(
         field="description_contains",
@@ -11895,7 +14183,7 @@ class SAPProductQueryModel(SAPODataQueryModel):
     is_batch_managed: Annotated[bool | None, ODataCondition("IsBatchManagementRequired")] = Field(
         default=None, description="True = only products managed in batches, False = only products without batches."
     )
-    is_marked_for_deletion: Annotated[bool | None, ODataCondition("IsMarkedForDeletion")] = Field(
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("IsMarkedForDeletion")] = Field(
         default=None, description="True = only products marked for deletion, False = only active products."
     )
     description_contains: str | None = Field(
@@ -11906,6 +14194,8 @@ class SAPProductQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPMaterialBOMModel, also created on its own
+# with SAP.create_material_bom_item(). to_odata_update() validates its changes in SAP.update_material_bom().
 class SAPMaterialBOMItemModel(SAPODataCreateModel):
     """An item (component) of a new material BOM."""
 
@@ -11947,6 +14237,8 @@ class SAPMaterialBOMItemModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_material_bom(), to_odata_update() the
+# changes of SAP.update_material_bom().
 class SAPMaterialBOMModel(SAPODataCreateModel):
     """Data to create a material BOM (bill of material) of a product in a plant (API_BILL_OF_MATERIAL_SRV, V2).
 
@@ -12063,6 +14355,7 @@ class SAPMaterialBOMModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPMaterialBOMResponseModel.
 class SAPMaterialBOMItemResponseModel(SAPODataModel):
     """An item (component) of a material BOM as returned by SAP (API_BILL_OF_MATERIAL_SRV)."""
 
@@ -12086,8 +14379,33 @@ class SAPMaterialBOMItemResponseModel(SAPODataModel):
     )
     unit: str | None = Field(default=None, alias="BillOfMaterialItemUnit", description="Unit of the quantity.")
     valid_from: ODataDate = Field(default=None, alias="ValidityStartDate", description="Start of the validity.")
+    text: str | None = Field(
+        default=None,
+        alias="BOMItemDescription",
+        description="Item text (e.g. of text items or as note for a component).",
+    )
+    scrap_percent: SAPDecimal | None = Field(
+        default=None,
+        alias="ComponentScrapInPercent",
+        description="Component scrap in percent - additional quantity planned for losses.",
+    )
+    spare_part: str | None = Field(
+        default=None, alias="BOMItemIsSparePart", description="Spare part indicator, e.g. '1' (empty = no spare part)."
+    )
+    is_bulk_material: SAPFlag = Field(
+        default=None,
+        alias="IsBulkMaterial",
+        description="True for bulk material (e.g. screws, grease) - not planned or issued per order.",
+    )
+    issue_storage_location: str | None = Field(
+        default=None,
+        alias="ProdOrderIssueLocation",
+        description="Storage location the component is issued from for production.",
+    )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_material_boms() and SAP.iter_material_boms().
 class SAPMaterialBOMResponseModel(SAPODataModel):
     """A material BOM as returned by SAP (API_BILL_OF_MATERIAL_SRV, OData V2).
 
@@ -12111,6 +14429,9 @@ class SAPMaterialBOMResponseModel(SAPODataModel):
     )
     base_unit: str | None = Field(default=None, alias="BOMHeaderBaseUnit", description="Unit of the base quantity.")
     text: str | None = Field(default=None, alias="BOMHeaderText", description="Text of the BOM.")
+    is_marked_for_deletion: bool | None = Field(
+        default=None, alias="IsMarkedForDeletion", description="True if the BOM is marked for deletion."
+    )
     valid_from: ODataDate = Field(
         default=None, alias="HeaderValidityStartDate", description="Start of the validity of the BOM."
     )
@@ -12127,10 +14448,14 @@ class SAPMaterialBOMResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_material_boms() and SAP.iter_material_boms().
 class SAPMaterialBOMQueryModel(SAPODataQueryModel):
     """Search criteria for material BOMs (API_BILL_OF_MATERIAL_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"material": "Material {direction}"}
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the BOM items in the same request:
     EXPAND: ClassVar[str] = "to_BillOfMaterialItem"
     sort_by: Literal["material"] = Field(default="material", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -12141,9 +14466,15 @@ class SAPMaterialBOMQueryModel(SAPODataQueryModel):
     usage: Annotated[SAPCode | None, ODataCondition("BillOfMaterialVariantUsage")] = Field(
         default=None, description="BOM usage, e.g. '4' (plant maintenance), '1' (production)."
     )
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("IsMarkedForDeletion")] = Field(
+        default=None, description="True = only deleted BOMs (deletion flag), False = only BOMs that are not deleted."
+    )
     expand_items: bool = Field(default=True, description="Also return the items (components) of each BOM.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_production_version(), SAP.get_production_versions() and
+# SAP.iter_production_versions().
 class SAPProductionVersionResponseModel(SAPODataModel):
     """A production version (BOM + routing for a material in a plant) as returned by SAP (API_PRODUCTION_VERSION, OData V4)."""
 
@@ -12198,9 +14529,13 @@ class SAPProductionVersionResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_production_versions() and SAP.iter_production_versions().
 class SAPProductionVersionQueryModel(SAPODataQueryModel):
     """Search criteria for SAP production versions (API_PRODUCTION_VERSION, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - production versions are unique per material and
+    # plant only:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "material": "Material {direction},Plant {direction},ProductionVersion {direction}"
     }
@@ -12222,6 +14557,8 @@ class SAPProductionVersionQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_work_center(), SAP.get_work_centers() and SAP.iter_work_centers().
 class SAPWorkCenterResponseModel(SAPODataModel):
     """A work center as returned by SAP (API_WORK_CENTERS, OData V2).
 
@@ -12274,9 +14611,12 @@ class SAPWorkCenterResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_work_centers() and SAP.iter_work_centers().
 class SAPWorkCenterQueryModel(SAPODataQueryModel):
     """Search criteria for SAP work centers (API_WORK_CENTERS)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - work centers are unique per plant only:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"plant": "Plant {direction},WorkCenter {direction}"}
     sort_by: Literal["plant"] = Field(default="plant", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -12298,8 +14638,14 @@ class SAPWorkCenterQueryModel(SAPODataQueryModel):
     description_contains: Annotated[str | None, ODataCondition("WorkCenterDesc", operator="contains")] = Field(
         default=None, description="Text contained in the work center description (case-sensitive)."
     )
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("WorkCenterIsToBeDeleted")] = Field(
+        default=None,
+        description="True = only deleted work centers (deletion flag), False = only work centers that are not deleted.",
+    )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_equipment(), to_odata_update() the
+# changes of SAP.update_equipment().
 class SAPEquipmentModel(SAPODataCreateModel):
     """Data to create an SAP equipment (API_EQUIPMENT, OData V2).
 
@@ -12357,7 +14703,7 @@ class SAPEquipmentModel(SAPODataCreateModel):
     )
     category: SAPCode = Field(
         alias="EquipmentCategory",
-        description="Equipment category, e.g. 'M' (machines) - system specific; copy from an existing equipment if unsure.",
+        description="Equipment category, e.g. 'M' (machines) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=1,
     )
@@ -12387,7 +14733,7 @@ class SAPEquipmentModel(SAPODataCreateModel):
     planner_group: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlannerGroup",
-        description="Maintenance planner group, e.g. '010' - system specific; copy from an existing equipment if unsure.",
+        description="Maintenance planner group, e.g. '010' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     main_work_center: SAPCode | None = Field(
@@ -12528,6 +14874,8 @@ class SAPEquipmentModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_equipment(), SAP.get_equipments() and SAP.iter_equipments().
 class SAPEquipmentResponseModel(SAPODataModel):
     """An equipment (technical object) as returned by SAP (API_EQUIPMENT, OData V2).
 
@@ -12657,11 +15005,55 @@ class SAPEquipmentResponseModel(SAPODataModel):
         alias="FunctionalLocation",
         description="Functional location (internal ID) - a place in the technical structure where equipment is installed; see get_functional_location().",
     )
+    is_installed: SAPFlag = Field(
+        default=None,
+        alias="EquipmentIsInstalled",
+        description="True if the equipment is installed in a functional location (false for an installation in a superordinate equipment - see `superordinate_equipment`).",
+    )
+    is_available: SAPFlag = Field(
+        default=None,
+        alias="EquipmentIsAvailable",
+        description="True if the equipment is available, i.e. not installed in a functional location (system status AVLB instead of INST).",
+    )
+    is_inactive: SAPFlag = Field(
+        default=None, alias="EquipmentIsInactive", description="True if the equipment is inactive."
+    )
+    installation_position: str | None = Field(
+        default=None,
+        alias="EquipInstallationPositionNmbr",
+        description="Position of the equipment in the functional location or superordinate equipment.",
+    )
+    inventory_number: str | None = Field(default=None, alias="InventoryNumber", description="Inventory number.")
+    acquisition_value: SAPDecimal | None = Field(
+        default=None, alias="AcquisitionValue", description="Acquisition value in `currency`."
+    )
+    currency: str | None = Field(default=None, alias="Currency", description="Currency of the acquisition value.")
+    fixed_asset: str | None = Field(
+        default=None, alias="MasterFixedAsset", description="Fixed asset (main number) in asset accounting."
+    )
+    fixed_asset_subnumber: str | None = Field(
+        default=None, alias="FixedAsset", description="Sub-number of the fixed asset."
+    )
+    building: str | None = Field(default=None, alias="Building", description="Building.")
+    floor: str | None = Field(default=None, alias="Floor", description="Floor.")
+    room: str | None = Field(default=None, alias="RoomNumber", description="Room.")
+    work_center: str | None = Field(
+        default=None,
+        alias="WorkCenter",
+        description="Work center the equipment represents, e.g. a machine that is also a production resource.",
+    )
+    work_center_plant: str | None = Field(
+        default=None, alias="WorkCenterPlant", description="Plant of the work center."
+    )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_equipments() and SAP.iter_equipments().
 class SAPEquipmentQueryModel(SAPODataQueryModel):
     """Search criteria for SAP equipment (API_EQUIPMENT)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - equipment data is time dependent: the currently
+    # valid time segment first (SAP.get_equipment() reads only the first):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"equipment": "Equipment {direction},ValidityEndDate desc"}
     sort_by: Literal["equipment"] = Field(default="equipment", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -12695,8 +15087,14 @@ class SAPEquipmentQueryModel(SAPODataQueryModel):
     valid_on: Annotated[date | None, ODataCondition(("ValidityStartDate", "ValidityEndDate"), operator="valid_on")] = (
         Field(default=None, description="Only equipment data valid on this date (e.g. today for the current ones).")
     )
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("EquipmentIsMarkedForDeletion")] = Field(
+        default=None,
+        description="True = only deleted equipment (deletion flag), False = only equipment that are not deleted.",
+    )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_functional_location(),
+# to_odata_update() the changes of SAP.update_functional_location().
 class SAPFunctionalLocationModel(SAPODataCreateModel):
     """Data to create an SAP functional location (API_FUNCTIONALLOCATION, OData V2).
 
@@ -12750,13 +15148,13 @@ class SAPFunctionalLocationModel(SAPODataCreateModel):
     )
     structure: SAPCode = Field(
         alias="FuncLocationStructure",
-        description="Structure indicator (defines the edit mask and hierarchy levels of the label) - system specific; copy from an existing functional location if unsure.",
+        description="Structure indicator (defines the edit mask and hierarchy levels of the label) - the one of the superior functional location; ask the user for a top level functional location.",
         min_length=1,
         max_length=5,
     )
     category: SAPCode = Field(
         alias="FunctionalLocationCategory",
-        description="Functional location category, e.g. 'M' (technical system) - system specific; copy from an existing functional location if unsure.",
+        description="Functional location category, e.g. 'M' (technical system) - system specific - choose it from the meaning of the user's request (see the examples); ask the user if unclear.",
         min_length=1,
         max_length=1,
     )
@@ -12791,7 +15189,7 @@ class SAPFunctionalLocationModel(SAPODataCreateModel):
     planner_group: SAPCode | None = Field(
         default=None,
         alias="MaintenancePlannerGroup",
-        description="Maintenance planner group, e.g. '010' - system specific; copy from an existing functional location if unsure.",
+        description="Maintenance planner group, e.g. '010' - system specific - give it only if the user does; otherwise leave it empty (SAP applies its default).",
         max_length=3,
     )
     main_work_center: SAPCode | None = Field(
@@ -12871,6 +15269,9 @@ class SAPFunctionalLocationModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_functional_location(), SAP.get_functional_locations() and
+# SAP.iter_functional_locations().
 class SAPFunctionalLocationResponseModel(SAPODataModel):
     """A functional location (technical object) as returned by SAP (API_FUNCTIONALLOCATION, OData V2).
 
@@ -12981,11 +15382,43 @@ class SAPFunctionalLocationResponseModel(SAPODataModel):
         alias="SuperiorFunctionalLocation",
         description="Superior functional location (internal ID) in the technical structure.",
     )
+    is_active: SAPFlag = Field(
+        default=None, alias="FunctionalLocationIsActive", description="True if the functional location is active."
+    )
+    is_deactivated: SAPFlag = Field(
+        default=None,
+        alias="FuncnlLocIsDeactivated",
+        description="True if the functional location is deactivated (inactive).",
+    )
+    position: str | None = Field(
+        default=None, alias="FuncnlLocPosInSuperiorTechObj", description="Position in the superior functional location."
+    )
+    inventory_number: str | None = Field(default=None, alias="InventoryNumber", description="Inventory number.")
+    fixed_asset: str | None = Field(
+        default=None, alias="MasterFixedAsset", description="Fixed asset (main number) in asset accounting."
+    )
+    fixed_asset_subnumber: str | None = Field(
+        default=None, alias="FixedAsset", description="Sub-number of the fixed asset."
+    )
+    building: str | None = Field(default=None, alias="Building", description="Building.")
+    floor: str | None = Field(default=None, alias="Floor", description="Floor.")
+    room: str | None = Field(default=None, alias="RoomNumber", description="Room.")
+    work_center: str | None = Field(
+        default=None,
+        alias="WorkCenter",
+        description="Work center the functional location represents, e.g. a production line.",
+    )
+    work_center_plant: str | None = Field(
+        default=None, alias="WorkCenterPlant", description="Plant of the work center."
+    )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_functional_locations() and SAP.iter_functional_locations().
 class SAPFunctionalLocationQueryModel(SAPODataQueryModel):
     """Search criteria for SAP functional locations (API_FUNCTIONALLOCATION)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "functional_location": "FunctionalLocation {direction}",
         "label": "FunctionalLocationLabelName {direction}",
@@ -13015,8 +15448,13 @@ class SAPFunctionalLocationQueryModel(SAPODataQueryModel):
     planning_plant: Annotated[SAPCode | None, ODataCondition("MaintenancePlanningPlant")] = Field(
         default=None, description="Plant that plans the maintenance of the functional location."
     )
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("FuncnlLocIsMarkedForDeletion")] = Field(
+        default=None,
+        description="True = only deleted functional locations (deletion flag), False = only functional locations that are not deleted.",
+    )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPBusinessPartnerModel.
 class SAPBusinessPartnerAddressModel(SAPODataCreateModel):
     """An address of a new business partner."""
 
@@ -13052,6 +15490,7 @@ class SAPBusinessPartnerAddressModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPBusinessPartnerModel.
 class SAPBusinessPartnerRoleModel(SAPODataCreateModel):
     """A role of a new business partner."""
 
@@ -13068,13 +15507,14 @@ class SAPBusinessPartnerRoleModel(SAPODataCreateModel):
             "Business partner role, e.g. 'FLVN00' (supplier - general and company code data; enough for a "
             "manufacturer), 'FLVN01' (supplier - purchasing data; in addition to FLVN00 to order from the supplier), "
             "'FLCU00' (customer - general and company code data), 'FLCU01' (customer - sales data), 'BUP001' "
-            "(contact person). System specific; copy from a similar business partner if unsure."
+            "(contact person). System specific; choose them from what the business partner is for."
         ),
         min_length=1,
         max_length=6,
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierModel.
 class SAPSupplierPurchasingOrgModel(SAPODataCreateModel):
     """The purchasing organization data of a new supplier - needed to order from the supplier (role FLVN01)."""
 
@@ -13133,6 +15573,7 @@ class SAPSupplierPurchasingOrgModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPSupplierModel.
 class SAPSupplierCompanyModel(SAPODataCreateModel):
     """The company code data of a new supplier - needed to post its invoices and pay it (role FLVN00)."""
 
@@ -13174,6 +15615,7 @@ class SAPSupplierCompanyModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPBusinessPartnerModel.
 class SAPSupplierModel(SAPODataCreateModel):
     """The supplier data of a new business partner - created together with the business partner.
 
@@ -13203,6 +15645,7 @@ class SAPSupplierModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPCustomerSalesAreaModel.
 class SAPCustomerSalesAreaTaxModel(SAPODataCreateModel):
     """The tax classification of a new customer in a sales area - used to determine the output tax in sales."""
 
@@ -13232,6 +15675,7 @@ class SAPCustomerSalesAreaTaxModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPCustomerModel.
 class SAPCustomerSalesAreaModel(SAPODataCreateModel):
     """The sales area data of a new customer - needed to sell to the customer (role FLCU01)."""
 
@@ -13335,6 +15779,7 @@ class SAPCustomerSalesAreaModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPCustomerModel.
 class SAPCustomerCompanyModel(SAPODataCreateModel):
     """The company code data of a new customer - needed to post its invoices and payments (role FLCU00)."""
 
@@ -13369,6 +15814,7 @@ class SAPCustomerCompanyModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: part of the deep create payload of SAPBusinessPartnerModel.
 class SAPCustomerModel(SAPODataCreateModel):
     """The customer data of a new business partner - created together with the business partner.
 
@@ -13398,6 +15844,7 @@ class SAPCustomerModel(SAPODataCreateModel):
     )
 
 
+# Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_business_partner().
 class SAPBusinessPartnerModel(SAPODataCreateModel):
     """Data to create an SAP business partner - an organization (API_BUSINESS_PARTNER, OData V2).
 
@@ -13469,8 +15916,8 @@ class SAPBusinessPartnerModel(SAPODataCreateModel):
         default=None,
         alias="BusinessPartnerGrouping",
         description=(
-            "Business partner grouping (number range and type), e.g. '0001' - system specific; copy from a similar "
-            "business partner if unsure. SAP uses its default grouping if omitted."
+            "Business partner grouping (number range and type), e.g. '0001' - system specific; give it only if the "
+            "user does. SAP uses its default grouping if omitted."
         ),
         max_length=4,
     )
@@ -13518,8 +15965,8 @@ class SAPBusinessPartnerModel(SAPODataCreateModel):
         alias="to_Supplier",
         description=(
             "Purchasing organization and company code data of the supplier - needed to order from the supplier "
-            "and to post its invoices. Needs the role FLVN00 (and FLVN01 for purchasing organizations); copy the "
-            "values from a similar supplier if unsure."
+            "and to post its invoices. Needs the role FLVN00 (and FLVN01 for purchasing organizations); SAP names "
+            "missing required values - ask the user for them."
         ),
     )
     customer: SAPCustomerModel | None = Field(
@@ -13527,8 +15974,8 @@ class SAPBusinessPartnerModel(SAPODataCreateModel):
         alias="to_Customer",
         description=(
             "Sales area and company code data of the customer - needed to sell to the customer and to post its "
-            "invoices. Needs the role FLCU00 (and FLCU01 for sales areas); copy the values from a similar customer "
-            "if unsure."
+            "invoices. Needs the role FLCU00 (and FLCU01 for sales areas); SAP names missing required values - ask "
+            "the user for them."
         ),
     )
 
@@ -13599,6 +16046,7 @@ class SAPBusinessPartnerModel(SAPODataCreateModel):
     # end method definition
 
 
+# Inherits from SAPODataModel - nested in SAPBusinessPartnerResponseModel.
 class SAPBusinessPartnerAddressResponseModel(SAPODataModel):
     """An address of a business partner as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13610,8 +16058,12 @@ class SAPBusinessPartnerAddressResponseModel(SAPODataModel):
     postal_code: str | None = Field(default=None, alias="PostalCode", description="Postal code.")
     street: str | None = Field(default=None, alias="StreetName", description="Street name.")
     house_number: str | None = Field(default=None, alias="HouseNumber", description="House number.")
+    language: str | None = Field(
+        default=None, alias="Language", description="Correspondence language of the address (ISO code), e.g. 'DE'."
+    )
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierResponseModel.
 class SAPSupplierPurchasingOrgResponseModel(SAPODataModel):
     """The purchasing organization data of a supplier as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13641,6 +16093,7 @@ class SAPSupplierPurchasingOrgResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPSupplierResponseModel.
 class SAPSupplierCompanyResponseModel(SAPODataModel):
     """The company code data of a supplier as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13661,6 +16114,7 @@ class SAPSupplierCompanyResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPBusinessPartnerResponseModel.
 class SAPSupplierResponseModel(SAPODataModel):
     """The supplier data of a business partner as returned by SAP (API_BUSINESS_PARTNER).
 
@@ -13692,6 +16146,7 @@ class SAPSupplierResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPCustomerSalesAreaResponseModel.
 class SAPCustomerSalesAreaTaxResponseModel(SAPODataModel):
     """The tax classification of a customer in a sales area as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13706,6 +16161,7 @@ class SAPCustomerSalesAreaTaxResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPCustomerSalesAreaResponseModel.
 class SAPCustomerPartnerFunctionResponseModel(SAPODataModel):
     """A partner function of a customer in a sales area as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13719,6 +16175,7 @@ class SAPCustomerPartnerFunctionResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPCustomerResponseModel.
 class SAPCustomerSalesAreaResponseModel(SAPODataModel):
     """The sales area data of a customer as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13759,6 +16216,7 @@ class SAPCustomerSalesAreaResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPCustomerResponseModel.
 class SAPCustomerCompanyResponseModel(SAPODataModel):
     """The company code data of a customer as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13773,6 +16231,7 @@ class SAPCustomerCompanyResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPBusinessPartnerResponseModel.
 class SAPCustomerResponseModel(SAPODataModel):
     """The customer data of a business partner as returned by SAP (API_BUSINESS_PARTNER).
 
@@ -13800,6 +16259,7 @@ class SAPCustomerResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPBusinessPartnerResponseModel.
 class SAPBusinessPartnerRoleResponseModel(SAPODataModel):
     """A role of a business partner (e.g. FLVN00 supplier, FLCU00 customer) as returned by SAP (API_BUSINESS_PARTNER)."""
 
@@ -13811,6 +16271,10 @@ class SAPBusinessPartnerRoleResponseModel(SAPODataModel):
     valid_to: ODataDateTime = Field(default=None, alias="ValidTo", description="End of the validity of the role.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_business_partner(), SAP.get_business_partners(),
+# SAP.get_customer(), SAP.get_customers(), SAP.get_supplier(), SAP.get_suppliers(), SAP.iter_business_partners(),
+# SAP.iter_customers() and SAP.iter_suppliers().
 class SAPBusinessPartnerResponseModel(SAPODataModel):
     """A business partner (person or organization) as returned by SAP (API_BUSINESS_PARTNER, OData V2).
 
@@ -13898,6 +16362,31 @@ class SAPBusinessPartnerResponseModel(SAPODataModel):
         alias="to_BusinessPartnerAddress",
         description="Addresses. None if not requested ($expand), otherwise a (possibly empty) list.",
     )
+    is_marked_for_archiving: SAPFlag = Field(
+        default=None,
+        alias="IsMarkedForArchiving",
+        description="True if the business partner is marked for archiving (SAP's deletion flag for business partners).",
+    )
+    is_natural_person: SAPFlag = Field(
+        default=None,
+        alias="IsNaturalPerson",
+        description="True if the business partner is a natural person (e.g. a sole proprietor).",
+    )
+    legal_form: str | None = Field(
+        default=None, alias="LegalForm", description="Legal form of an organization, e.g. 'GmbH'."
+    )
+    industry: str | None = Field(default=None, alias="Industry", description="Industry sector.")
+    organization_name2: str | None = Field(
+        default=None, alias="OrganizationBPName2", description="Second line of the organization's name."
+    )
+    organization_name3: str | None = Field(
+        default=None, alias="OrganizationBPName3", description="Third line of the organization's name."
+    )
+    external_id: str | None = Field(
+        default=None,
+        alias="BusinessPartnerIDByExtSystem",
+        description="Number of the business partner in an external system.",
+    )
     supplier_data: Annotated[SAPSupplierResponseModel | None, BeforeValidator(unwrap_odata_single_navigation)] = Field(
         default=None,
         alias="to_Supplier",
@@ -13916,13 +16405,19 @@ class SAPBusinessPartnerResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_business_partners() and SAP.iter_business_partners(). Base class of
+# SAPCustomerQueryModel and SAPSupplierQueryModel.
 class SAPBusinessPartnerQueryModel(SAPODataQueryModel):
     """Search criteria for SAP business partners (API_BUSINESS_PARTNER)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "business_partner": "BusinessPartner {direction}",
         "name": "BusinessPartnerFullName {direction}",
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the roles in the same request
+    # (inherited by the customer and supplier queries):
     EXPAND: ClassVar[str] = "to_BusinessPartnerRole"
     sort_by: Literal["business_partner", "name"] = Field(default="business_partner", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -13942,16 +16437,26 @@ class SAPBusinessPartnerQueryModel(SAPODataQueryModel):
     is_blocked: Annotated[bool | None, ODataCondition("BusinessPartnerIsBlocked")] = Field(
         default=None, description="True = only centrally blocked business partners, False = only unblocked ones."
     )
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("IsMarkedForArchiving")] = Field(
+        default=None,
+        description="True = only business partners marked for archiving (SAP's deletion flag), False = only the others.",
+    )
     expand_items: bool = Field(default=False, description="Also return the roles of each business partner.")
 
 
+# Inherits the business partner criteria, EXPAND (roles) and to_odata() from SAPBusinessPartnerQueryModel and adds the
+# customer criteria - BASE_CONDITIONS restricts the results to business partners with a customer number. Used by
+# SAP.get_customers() and SAP.iter_customers().
 class SAPCustomerQueryModel(SAPBusinessPartnerQueryModel):
     """Search criteria for SAP customers - business partners with the customer role (API_BUSINESS_PARTNER)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - replaces the sort criteria of the business
+    # partners:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "customer": "Customer {direction}",
         "name": "BusinessPartnerFullName {direction}",
     }
+    # Only business partners with the customer role (they have a customer number):
     BASE_CONDITIONS: ClassVar[list[str]] = ["Customer ne ''"]
     sort_by: Literal["customer", "name"] = Field(default="customer", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -13960,13 +16465,19 @@ class SAPCustomerQueryModel(SAPBusinessPartnerQueryModel):
     )
 
 
+# Inherits the business partner criteria, EXPAND (roles) and to_odata() from SAPBusinessPartnerQueryModel and adds the
+# supplier criteria - BASE_CONDITIONS restricts the results to business partners with a supplier number. Used by
+# SAP.get_suppliers() and SAP.iter_suppliers().
 class SAPSupplierQueryModel(SAPBusinessPartnerQueryModel):
     """Search criteria for SAP suppliers (vendors) - business partners with the supplier role (API_BUSINESS_PARTNER)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - replaces the sort criteria of the business
+    # partners:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "supplier": "Supplier {direction}",
         "name": "BusinessPartnerFullName {direction}",
     }
+    # Only business partners with the supplier role (they have a supplier number):
     BASE_CONDITIONS: ClassVar[list[str]] = ["Supplier ne ''"]
     sort_by: Literal["supplier", "name"] = Field(default="supplier", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -13975,6 +16486,9 @@ class SAPSupplierQueryModel(SAPBusinessPartnerQueryModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_company_code(), SAP.get_company_codes() and
+# SAP.iter_company_codes().
 class SAPCompanyCodeResponseModel(SAPODataModel):
     """A company code as returned by SAP (API_COMPANYCODE_SRV, OData V2)."""
 
@@ -14004,9 +16518,12 @@ class SAPCompanyCodeResponseModel(SAPODataModel):
     credit_control_area: str | None = Field(default=None, alias="CreditControlArea", description="Credit control area.")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_company_codes() and SAP.iter_company_codes().
 class SAPCompanyCodeQueryModel(SAPODataQueryModel):
     """Search criteria for SAP company codes (API_COMPANYCODE_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"company_code": "CompanyCode {direction}"}
     sort_by: Literal["company_code"] = Field(default="company_code", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -14024,6 +16541,7 @@ class SAPCompanyCodeQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPSalesOrganizationResponseModel.
 class SAPSalesOrganizationTextResponseModel(SAPODataModel):
     """The (language dependent) name of a sales organization (API_SALESORGANIZATION_SRV)."""
 
@@ -14035,6 +16553,9 @@ class SAPSalesOrganizationTextResponseModel(SAPODataModel):
     name: str | None = Field(default=None, alias="SalesOrganizationName", description="Name of the sales organization.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_sales_organization(), SAP.get_sales_organizations() and
+# SAP.iter_sales_organizations().
 class SAPSalesOrganizationResponseModel(SAPODataModel):
     """A sales organization as returned by SAP (API_SALESORGANIZATION_SRV, OData V2).
 
@@ -14064,10 +16585,14 @@ class SAPSalesOrganizationResponseModel(SAPODataModel):
     ] = Field(default=None, alias="to_Text", description="Names per language. None if not requested ($expand).")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_sales_organizations() and SAP.iter_sales_organizations().
 class SAPSalesOrganizationQueryModel(SAPODataQueryModel):
     """Search criteria for SAP sales organizations (API_SALESORGANIZATION_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"sales_organization": "SalesOrganization {direction}"}
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the texts (names) in the same request:
     EXPAND: ClassVar[str] = "to_Text"
     TEXT_SEARCH: ClassVar[ODataTextSearch | None] = ODataTextSearch(
         field="name_contains",
@@ -14075,6 +16600,7 @@ class SAPSalesOrganizationQueryModel(SAPODataQueryModel):
         properties=("SalesOrganizationName",),
         key="SalesOrganization",
         ids_field="sales_organizations",
+        navigation="to_SalesOrganization",
     )
     sort_by: Literal["sales_organization"] = Field(default="sales_organization", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -14090,6 +16616,9 @@ class SAPSalesOrganizationQueryModel(SAPODataQueryModel):
     expand_items: bool = Field(default=False, description="Also return the names of each sales organization.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_purchasing_organization(), SAP.get_purchasing_organizations() and
+# SAP.iter_purchasing_organizations().
 class SAPPurchasingOrganizationResponseModel(SAPODataModel):
     """A purchasing organization as returned by SAP (API_PURCHASINGORGANIZATION, OData V4)."""
 
@@ -14107,9 +16636,12 @@ class SAPPurchasingOrganizationResponseModel(SAPODataModel):
     )
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_purchasing_organizations() and SAP.iter_purchasing_organizations().
 class SAPPurchasingOrganizationQueryModel(SAPODataQueryModel):
     """Search criteria for SAP purchasing organizations (API_PURCHASINGORGANIZATION, OData V4)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"purchasing_organization": "PurchasingOrganization {direction}"}
     sort_by: Literal["purchasing_organization"] = Field(
         default="purchasing_organization", description="Sort criterion."
@@ -14126,6 +16658,7 @@ class SAPPurchasingOrganizationQueryModel(SAPODataQueryModel):
     )
 
 
+# Inherits from SAPODataModel - nested in SAPCostCenterResponseModel.
 class SAPCostCenterTextResponseModel(SAPODataModel):
     """The (language dependent) name of a cost center (API_COSTCENTER_SRV)."""
 
@@ -14136,6 +16669,8 @@ class SAPCostCenterTextResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_cost_center(), SAP.get_cost_centers() and SAP.iter_cost_centers().
 class SAPCostCenterResponseModel(SAPODataModel):
     """A cost center as returned by SAP (API_COSTCENTER_SRV, OData V2).
 
@@ -14194,12 +16729,17 @@ class SAPCostCenterResponseModel(SAPODataModel):
     ] = Field(default=None, alias="to_Text", description="Names per language. None if not requested ($expand).")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_cost_centers() and SAP.iter_cost_centers().
 class SAPCostCenterQueryModel(SAPODataQueryModel):
     """Search criteria for SAP cost centers (API_COSTCENTER_SRV). Cost centers have validity periods - use valid_on for the current ones."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - cost centers are unique per controlling area
+    # and time dependent: the currently valid one first (SAP.get_cost_center() reads only the first):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "cost_center": "ControllingArea {direction},CostCenter {direction},ValidityEndDate desc"
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the texts (names) in the same request:
     EXPAND: ClassVar[str] = "to_Text"
     TEXT_SEARCH: ClassVar[ODataTextSearch | None] = ODataTextSearch(
         field="name_contains",
@@ -14208,6 +16748,7 @@ class SAPCostCenterQueryModel(SAPODataQueryModel):
         key="CostCenter",
         ids_field="cost_centers",
         scope=(("controlling_area", "ControllingArea"),),
+        navigation="to_CostCenter",
     )
     sort_by: Literal["cost_center"] = Field(default="cost_center", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -14238,6 +16779,7 @@ class SAPCostCenterQueryModel(SAPODataQueryModel):
     expand_items: bool = Field(default=False, description="Also return the names of each cost center.")
 
 
+# Inherits from SAPODataModel - nested in SAPProfitCenterResponseModel.
 class SAPProfitCenterTextResponseModel(SAPODataModel):
     """The (language dependent) name of a profit center (API_PROFITCENTER_SRV)."""
 
@@ -14248,6 +16790,9 @@ class SAPProfitCenterTextResponseModel(SAPODataModel):
     )
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_profit_center(), SAP.get_profit_centers() and
+# SAP.iter_profit_centers().
 class SAPProfitCenterResponseModel(SAPODataModel):
     """A profit center as returned by SAP (API_PROFITCENTER_SRV, OData V2).
 
@@ -14298,12 +16843,17 @@ class SAPProfitCenterResponseModel(SAPODataModel):
     ] = Field(default=None, alias="to_Text", description="Names per language. None if not requested ($expand).")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_profit_centers() and SAP.iter_profit_centers().
 class SAPProfitCenterQueryModel(SAPODataQueryModel):
     """Search criteria for SAP profit centers (API_PROFITCENTER_SRV). Profit centers have validity periods - use valid_on for the current ones."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - profit centers are unique per controlling area
+    # and time dependent: the currently valid one first (SAP.get_profit_center() reads only the first):
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {
         "profit_center": "ControllingArea {direction},ProfitCenter {direction},ValidityEndDate desc"
     }
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the texts (names) in the same request:
     EXPAND: ClassVar[str] = "to_Text"
     TEXT_SEARCH: ClassVar[ODataTextSearch | None] = ODataTextSearch(
         field="name_contains",
@@ -14312,6 +16862,7 @@ class SAPProfitCenterQueryModel(SAPODataQueryModel):
         key="ProfitCenter",
         ids_field="profit_centers",
         scope=(("controlling_area", "ControllingArea"),),
+        navigation="to_ProfitCenter",
     )
     sort_by: Literal["profit_center"] = Field(default="profit_center", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -14339,6 +16890,7 @@ class SAPProfitCenterQueryModel(SAPODataQueryModel):
     expand_items: bool = Field(default=False, description="Also return the names of each profit center.")
 
 
+# Inherits from SAPODataModel - nested in SAPGLAccountResponseModel.
 class SAPGLAccountTextResponseModel(SAPODataModel):
     """The (language dependent) name of a G/L account (API_GLACCOUNTINCHARTOFACCOUNTS_SRV)."""
 
@@ -14347,6 +16899,8 @@ class SAPGLAccountTextResponseModel(SAPODataModel):
     long_name: str | None = Field(default=None, alias="GLAccountLongName", description="Long name of the G/L account.")
 
 
+# Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
+# names (as LLM tools return it). Returned by SAP.get_gl_account(), SAP.get_gl_accounts() and SAP.iter_gl_accounts().
 class SAPGLAccountResponseModel(SAPODataModel):
     """A G/L account of a chart of accounts as returned by SAP (API_GLACCOUNTINCHARTOFACCOUNTS_SRV, OData V2).
 
@@ -14397,10 +16951,15 @@ class SAPGLAccountResponseModel(SAPODataModel):
     ] = Field(default=None, alias="to_Text", description="Names per language. None if not requested ($expand).")
 
 
+# Inherits limit, paging and to_odata() from SAPODataQueryModel - to_odata() turns the fields below into the OData
+# $filter / $orderby / $expand. Used by SAP.get_gl_accounts() and SAP.iter_gl_accounts().
 class SAPGLAccountQueryModel(SAPODataQueryModel):
     """Search criteria for SAP G/L accounts of a chart of accounts (API_GLACCOUNTINCHARTOFACCOUNTS_SRV)."""
 
+    # $orderby per sort_by value (applied by the inherited to_odata()) - G/L accounts are unique per chart of accounts
+    # only:
     SORT_PROPERTIES: ClassVar[dict[str, str]] = {"gl_account": "ChartOfAccounts {direction},GLAccount {direction}"}
+    # $expand for expand_items=True (applied by the inherited to_odata()) - reads the texts (names) in the same request:
     EXPAND: ClassVar[str] = "to_Text"
     TEXT_SEARCH: ClassVar[ODataTextSearch | None] = ODataTextSearch(
         field="name_contains",
@@ -14409,6 +16968,7 @@ class SAPGLAccountQueryModel(SAPODataQueryModel):
         key="GLAccount",
         ids_field="gl_accounts",
         scope=(("chart_of_accounts", "ChartOfAccounts"),),
+        navigation="to_GLAccountInChartOfAccounts",
     )
     sort_by: Literal["gl_account"] = Field(default="gl_account", description="Sort criterion.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
@@ -14429,6 +16989,10 @@ class SAPGLAccountQueryModel(SAPODataQueryModel):
     )
     is_blocked_for_posting: Annotated[bool | None, ODataCondition("AccountIsBlockedForPosting")] = Field(
         default=None, description="True = only accounts blocked for posting, False = only accounts open for posting."
+    )
+    is_marked_for_deletion: Annotated[bool | None, ODataDeletionCondition("AccountIsMarkedForDeletion")] = Field(
+        default=None,
+        description="True = only deleted G/L accounts (deletion flag), False = only G/L accounts that are not deleted.",
     )
     name_contains: str | None = Field(
         default=None, description="Text contained in the name of the G/L account, e.g. 'Revenue'."

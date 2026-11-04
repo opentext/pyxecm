@@ -71,6 +71,1002 @@ FONT_BOLD = "Helvetica-Bold"
 # quantities, dates and amounts (right-aligned):
 TEXT_COLUMNS = {"Unit", "Batch", "Plant", "Storage location", "Work center", "Control key", "Movement type"}
 
+# Thousands and decimal separators per country of the sender (like the dates, see format_date()) - all
+# other countries use "1,234.56":
+NUMBER_SEPARATORS = {
+    "DE": (".", ","),
+    "AT": (".", ","),
+    "IT": (".", ","),
+    "ES": (".", ","),
+    "NL": (".", ","),
+    "BE": (".", ","),
+    "PT": (".", ","),
+    "BR": (".", ","),
+    "DK": (".", ","),
+    "FR": ("\u00a0", ","),  # no-break space
+    "CH": ("'", "."),
+}
+
+# SAP's one-letter language keys (SPRAS) of the form languages - the OData APIs mostly return the
+# two-letter ISO codes:
+SAP_LANGUAGE_KEYS = {"D": "DE", "E": "EN", "F": "FR", "I": "IT", "S": "ES", "N": "NL", "P": "PT"}
+
+# The texts of the forms in German, French, Italian, Spanish, Dutch and Portuguese - the English text is the
+# key (and the text for English and all other languages). Texts with "{}" are templates for values. The form
+# data (SAPFormData) keeps the English texts; render_form() translates them into the language of the document:
+TRANSLATIONS: dict[str, dict[str, str]] = {
+    # Document titles (and the billing document categories, see SAP_SD_DOCUMENT_CATEGORIES):
+    "Order Confirmation": {
+        "DE": "Auftragsbestätigung",
+        "FR": "Confirmation de commande",
+        "IT": "Conferma d'ordine",
+        "ES": "Confirmación de pedido",
+        "NL": "Orderbevestiging",
+        "PT": "Confirmação de pedido",
+    },
+    "Delivery Note": {
+        "DE": "Lieferschein",
+        "FR": "Bon de livraison",
+        "IT": "Documento di trasporto",
+        "ES": "Albarán de entrega",
+        "NL": "Pakbon",
+        "PT": "Nota de entrega",
+    },
+    "Purchase Order": {
+        "DE": "Bestellung",
+        "FR": "Commande d'achat",
+        "IT": "Ordine d'acquisto",
+        "ES": "Pedido de compra",
+        "NL": "Inkooporder",
+        "PT": "Pedido de compra",
+    },
+    "Contract Confirmation": {
+        "DE": "Kontraktbestätigung",
+        "FR": "Confirmation de contrat",
+        "IT": "Conferma di contratto",
+        "ES": "Confirmación de contrato",
+        "NL": "Contractbevestiging",
+        "PT": "Confirmação de contrato",
+    },
+    "Purchase Contract": {
+        "DE": "Einkaufskontrakt",
+        "FR": "Contrat d'achat",
+        "IT": "Contratto d'acquisto",
+        "ES": "Contrato de compra",
+        "NL": "Inkoopcontract",
+        "PT": "Contrato de compra",
+    },
+    "Work Order": {
+        "DE": "Arbeitsauftrag",
+        "FR": "Ordre de travail",
+        "IT": "Ordine di lavoro",
+        "ES": "Orden de trabajo",
+        "NL": "Werkorder",
+        "PT": "Ordem de serviço",
+    },
+    "Production Order": {
+        "DE": "Fertigungsauftrag",
+        "FR": "Ordre de fabrication",
+        "IT": "Ordine di produzione",
+        "ES": "Orden de fabricación",
+        "NL": "Productieorder",
+        "PT": "Ordem de produção",
+    },
+    "Goods Receipt Slip": {
+        "DE": "Wareneingangsschein",
+        "FR": "Bon d'entrée de marchandises",
+        "IT": "Bolla di entrata merci",
+        "ES": "Vale de entrada de mercancías",
+        "NL": "Goederenontvangstbon",
+        "PT": "Guia de entrada de mercadorias",
+    },
+    "Goods Issue Slip": {
+        "DE": "Warenausgangsschein",
+        "FR": "Bon de sortie de marchandises",
+        "IT": "Bolla di uscita merci",
+        "ES": "Vale de salida de mercancías",
+        "NL": "Goederenuitgiftebon",
+        "PT": "Guia de saída de mercadorias",
+    },
+    "Transfer Posting Slip": {
+        "DE": "Umbuchungsschein",
+        "FR": "Bon de transfert",
+        "IT": "Bolla di trasferimento",
+        "ES": "Vale de traspaso",
+        "NL": "Overboekingsbon",
+        "PT": "Guia de transferência",
+    },
+    "Material Document": {
+        "DE": "Materialbeleg",
+        "FR": "Document article",
+        "IT": "Documento materiale",
+        "ES": "Documento de material",
+        "NL": "Materiaaldocument",
+        "PT": "Documento de material",
+    },
+    "Billing Document": {
+        "DE": "Faktura",
+        "FR": "Document de facturation",
+        "IT": "Documento di fatturazione",
+        "ES": "Documento de facturación",
+        "NL": "Factuurdocument",
+        "PT": "Documento de faturamento",
+    },
+    "Invoice": {"DE": "Rechnung", "FR": "Facture", "IT": "Fattura", "ES": "Factura", "NL": "Factuur", "PT": "Fatura"},
+    "Credit Memo": {
+        "DE": "Gutschrift",
+        "FR": "Avoir",
+        "IT": "Nota di credito",
+        "ES": "Abono",
+        "NL": "Creditnota",
+        "PT": "Nota de crédito",
+    },
+    "Debit Memo": {
+        "DE": "Lastschrift",
+        "FR": "Note de débit",
+        "IT": "Nota di debito",
+        "ES": "Nota de cargo",
+        "NL": "Debetnota",
+        "PT": "Nota de débito",
+    },
+    "Invoice Cancellation": {
+        "DE": "Rechnungsstorno",
+        "FR": "Annulation de facture",
+        "IT": "Storno fattura",
+        "ES": "Anulación de factura",
+        "NL": "Factuurannulering",
+        "PT": "Estorno de fatura",
+    },
+    "Credit Memo Cancellation": {
+        "DE": "Gutschriftsstorno",
+        "FR": "Annulation d'avoir",
+        "IT": "Storno nota di credito",
+        "ES": "Anulación de abono",
+        "NL": "Annulering creditnota",
+        "PT": "Estorno de nota de crédito",
+    },
+    "Pro Forma Invoice": {
+        "DE": "Proformarechnung",
+        "FR": "Facture pro forma",
+        "IT": "Fattura pro forma",
+        "ES": "Factura proforma",
+        "NL": "Pro-formafactuur",
+        "PT": "Fatura pró-forma",
+    },
+    "Intercompany Invoice": {
+        "DE": "IV-Rechnung",
+        "FR": "Facture intersociétés",
+        "IT": "Fattura intercompany",
+        "ES": "Factura intercompañía",
+        "NL": "Intercompany-factuur",
+        "PT": "Fatura intercompany",
+    },
+    "Intercompany Credit Memo": {
+        "DE": "IV-Gutschrift",
+        "FR": "Avoir intersociétés",
+        "IT": "Nota di credito intercompany",
+        "ES": "Abono intercompañía",
+        "NL": "Intercompany-creditnota",
+        "PT": "Nota de crédito intercompany",
+    },
+    # The number labels of the billing documents ("<title> number"):
+    "Billing Document number": {
+        "DE": "Fakturanummer",
+        "FR": "Numéro de document de facturation",
+        "IT": "Numero documento di fatturazione",
+        "ES": "Número de documento de facturación",
+        "NL": "Factuurdocumentnummer",
+        "PT": "Número do documento de faturamento",
+    },
+    "Invoice number": {
+        "DE": "Rechnungsnummer",
+        "FR": "Numéro de facture",
+        "IT": "Numero fattura",
+        "ES": "Número de factura",
+        "NL": "Factuurnummer",
+        "PT": "Número da fatura",
+    },
+    "Credit Memo number": {
+        "DE": "Gutschriftsnummer",
+        "FR": "Numéro d'avoir",
+        "IT": "Numero nota di credito",
+        "ES": "Número de abono",
+        "NL": "Creditnotanummer",
+        "PT": "Número da nota de crédito",
+    },
+    "Debit Memo number": {
+        "DE": "Lastschriftsnummer",
+        "FR": "Numéro de note de débit",
+        "IT": "Numero nota di debito",
+        "ES": "Número de nota de cargo",
+        "NL": "Debetnotanummer",
+        "PT": "Número da nota de débito",
+    },
+    "Invoice Cancellation number": {
+        "DE": "Stornonummer",
+        "FR": "Numéro d'annulation",
+        "IT": "Numero storno",
+        "ES": "Número de anulación",
+        "NL": "Annuleringsnummer",
+        "PT": "Número do estorno",
+    },
+    "Credit Memo Cancellation number": {
+        "DE": "Stornonummer",
+        "FR": "Numéro d'annulation",
+        "IT": "Numero storno",
+        "ES": "Número de anulación",
+        "NL": "Annuleringsnummer",
+        "PT": "Número do estorno",
+    },
+    "Pro Forma Invoice number": {
+        "DE": "Proformarechnungsnummer",
+        "FR": "Numéro de facture pro forma",
+        "IT": "Numero fattura pro forma",
+        "ES": "Número de factura proforma",
+        "NL": "Pro-formafactuurnummer",
+        "PT": "Número da fatura pró-forma",
+    },
+    "Intercompany Invoice number": {
+        "DE": "IV-Rechnungsnummer",
+        "FR": "Numéro de facture intersociétés",
+        "IT": "Numero fattura intercompany",
+        "ES": "Número de factura intercompañía",
+        "NL": "Intercompany-factuurnummer",
+        "PT": "Número da fatura intercompany",
+    },
+    "Intercompany Credit Memo number": {
+        "DE": "IV-Gutschriftsnummer",
+        "FR": "Numéro d'avoir intersociétés",
+        "IT": "Numero nota di credito intercompany",
+        "ES": "Número de abono intercompañía",
+        "NL": "Intercompany-creditnotanummer",
+        "PT": "Número da nota de crédito intercompany",
+    },
+    # Info block:
+    "Order number": {
+        "DE": "Auftragsnummer",
+        "FR": "Numéro de commande",
+        "IT": "Numero ordine",
+        "ES": "Número de pedido",
+        "NL": "Ordernummer",
+        "PT": "Número do pedido",
+    },
+    "Order date": {
+        "DE": "Auftragsdatum",
+        "FR": "Date de commande",
+        "IT": "Data ordine",
+        "ES": "Fecha de pedido",
+        "NL": "Orderdatum",
+        "PT": "Data do pedido",
+    },
+    "Customer number": {
+        "DE": "Kundennummer",
+        "FR": "Numéro de client",
+        "IT": "Numero cliente",
+        "ES": "Número de cliente",
+        "NL": "Klantnummer",
+        "PT": "Número do cliente",
+    },
+    "Your reference": {
+        "DE": "Ihr Zeichen",
+        "FR": "Votre référence",
+        "IT": "Vostro riferimento",
+        "ES": "Su referencia",
+        "NL": "Uw referentie",
+        "PT": "Sua referência",
+    },
+    "Your reference date": {
+        "DE": "Ihr Zeichen vom",
+        "FR": "Date de votre référence",
+        "IT": "Data vostro riferimento",
+        "ES": "Fecha de su referencia",
+        "NL": "Datum uw referentie",
+        "PT": "Data da sua referência",
+    },
+    "Requested delivery": {
+        "DE": "Wunschliefertermin",
+        "FR": "Livraison souhaitée",
+        "IT": "Consegna richiesta",
+        "ES": "Entrega solicitada",
+        "NL": "Gewenste levering",
+        "PT": "Entrega solicitada",
+    },
+    "Currency": {"DE": "Währung", "FR": "Devise", "IT": "Valuta", "ES": "Moneda", "NL": "Valuta", "PT": "Moeda"},
+    "Date": {"DE": "Datum", "FR": "Date", "IT": "Data", "ES": "Fecha", "NL": "Datum", "PT": "Data"},
+    "Sales order": {
+        "DE": "Kundenauftrag",
+        "FR": "Commande client",
+        "IT": "Ordine cliente",
+        "ES": "Pedido de cliente",
+        "NL": "Verkooporder",
+        "PT": "Ordem de venda",
+    },
+    "Delivery": {
+        "DE": "Lieferung",
+        "FR": "Livraison",
+        "IT": "Consegna",
+        "ES": "Entrega",
+        "NL": "Levering",
+        "PT": "Remessa",
+    },
+    "Delivery number": {
+        "DE": "Liefernummer",
+        "FR": "Numéro de livraison",
+        "IT": "Numero consegna",
+        "ES": "Número de entrega",
+        "NL": "Leveringsnummer",
+        "PT": "Número da remessa",
+    },
+    "Delivery date": {
+        "DE": "Lieferdatum",
+        "FR": "Date de livraison",
+        "IT": "Data di consegna",
+        "ES": "Fecha de entrega",
+        "NL": "Leverdatum",
+        "PT": "Data de entrega",
+    },
+    "Ship-to party": {
+        "DE": "Warenempfänger",
+        "FR": "Destinataire",
+        "IT": "Destinatario merci",
+        "ES": "Destinatario de mercancías",
+        "NL": "Goederenontvanger",
+        "PT": "Recebedor da mercadoria",
+    },
+    "Shipping point": {
+        "DE": "Versandstelle",
+        "FR": "Point d'expédition",
+        "IT": "Punto di spedizione",
+        "ES": "Puesto de expedición",
+        "NL": "Verzendpunt",
+        "PT": "Local de expedição",
+    },
+    "Goods issue": {
+        "DE": "Warenausgang",
+        "FR": "Sortie de marchandises",
+        "IT": "Uscita merci",
+        "ES": "Salida de mercancías",
+        "NL": "Goederenuitgifte",
+        "PT": "Saída de mercadorias",
+    },
+    "Purchase order number": {
+        "DE": "Bestellnummer",
+        "FR": "Numéro de commande",
+        "IT": "Numero ordine d'acquisto",
+        "ES": "Número de pedido de compra",
+        "NL": "Inkoopordernummer",
+        "PT": "Número do pedido de compra",
+    },
+    "Supplier number": {
+        "DE": "Lieferantennummer",
+        "FR": "Numéro de fournisseur",
+        "IT": "Numero fornitore",
+        "ES": "Número de proveedor",
+        "NL": "Leveranciersnummer",
+        "PT": "Número do fornecedor",
+    },
+    "Purchasing organization": {
+        "DE": "Einkaufsorganisation",
+        "FR": "Organisation d'achats",
+        "IT": "Organizzazione acquisti",
+        "ES": "Organización de compras",
+        "NL": "Inkooporganisatie",
+        "PT": "Organização de compras",
+    },
+    "Purchasing group": {
+        "DE": "Einkäufergruppe",
+        "FR": "Groupe d'acheteurs",
+        "IT": "Gruppo acquisti",
+        "ES": "Grupo de compras",
+        "NL": "Inkoopgroep",
+        "PT": "Grupo de compradores",
+    },
+    "Contract number": {
+        "DE": "Kontraktnummer",
+        "FR": "Numéro de contrat",
+        "IT": "Numero contratto",
+        "ES": "Número de contrato",
+        "NL": "Contractnummer",
+        "PT": "Número do contrato",
+    },
+    "Contract date": {
+        "DE": "Kontraktdatum",
+        "FR": "Date du contrat",
+        "IT": "Data contratto",
+        "ES": "Fecha del contrato",
+        "NL": "Contractdatum",
+        "PT": "Data do contrato",
+    },
+    "Valid from": {
+        "DE": "Gültig ab",
+        "FR": "Valable du",
+        "IT": "Valido dal",
+        "ES": "Válido desde",
+        "NL": "Geldig vanaf",
+        "PT": "Válido de",
+    },
+    "Valid to": {
+        "DE": "Gültig bis",
+        "FR": "Valable jusqu'au",
+        "IT": "Valido fino al",
+        "ES": "Válido hasta",
+        "NL": "Geldig tot",
+        "PT": "Válido até",
+    },
+    "Order type": {
+        "DE": "Auftragsart",
+        "FR": "Type d'ordre",
+        "IT": "Tipo ordine",
+        "ES": "Clase de orden",
+        "NL": "Ordersoort",
+        "PT": "Tipo de ordem",
+    },
+    "Priority": {
+        "DE": "Priorität",
+        "FR": "Priorité",
+        "IT": "Priorità",
+        "ES": "Prioridad",
+        "NL": "Prioriteit",
+        "PT": "Prioridade",
+    },
+    "Notification": {"DE": "Meldung", "FR": "Avis", "IT": "Avviso", "ES": "Aviso", "NL": "Melding", "PT": "Nota"},
+    "Planning plant": {
+        "DE": "Planungswerk",
+        "FR": "Division de planification",
+        "IT": "Divisione di pianificazione",
+        "ES": "Centro de planificación",
+        "NL": "Planningsvestiging",
+        "PT": "Centro de planejamento",
+    },
+    "Basic start": {
+        "DE": "Eckstart",
+        "FR": "Début de base",
+        "IT": "Inizio base",
+        "ES": "Inicio extremo",
+        "NL": "Basisstart",
+        "PT": "Início base",
+    },
+    "Basic finish": {
+        "DE": "Eckende",
+        "FR": "Fin de base",
+        "IT": "Fine base",
+        "ES": "Fin extremo",
+        "NL": "Basiseinde",
+        "PT": "Fim base",
+    },
+    "Material": {
+        "DE": "Material",
+        "FR": "Article",
+        "IT": "Materiale",
+        "ES": "Material",
+        "NL": "Materiaal",
+        "PT": "Material",
+    },
+    "Quantity": {
+        "DE": "Menge",
+        "FR": "Quantité",
+        "IT": "Quantità",
+        "ES": "Cantidad",
+        "NL": "Hoeveelheid",
+        "PT": "Quantidade",
+    },
+    "Planned start": {
+        "DE": "Geplanter Start",
+        "FR": "Début planifié",
+        "IT": "Inizio pianificato",
+        "ES": "Inicio planificado",
+        "NL": "Geplande start",
+        "PT": "Início planejado",
+    },
+    "Planned finish": {
+        "DE": "Geplantes Ende",
+        "FR": "Fin planifiée",
+        "IT": "Fine pianificata",
+        "ES": "Fin planificado",
+        "NL": "Gepland einde",
+        "PT": "Fim planejado",
+    },
+    "Material document": {
+        "DE": "Materialbeleg",
+        "FR": "Document article",
+        "IT": "Documento materiale",
+        "ES": "Documento de material",
+        "NL": "Materiaaldocument",
+        "PT": "Documento de material",
+    },
+    "Year": {"DE": "Jahr", "FR": "Année", "IT": "Anno", "ES": "Año", "NL": "Jaar", "PT": "Ano"},
+    "Posting date": {
+        "DE": "Buchungsdatum",
+        "FR": "Date comptable",
+        "IT": "Data di registrazione",
+        "ES": "Fecha de contabilización",
+        "NL": "Boekingsdatum",
+        "PT": "Data de lançamento",
+    },
+    "Document date": {
+        "DE": "Belegdatum",
+        "FR": "Date du document",
+        "IT": "Data documento",
+        "ES": "Fecha de documento",
+        "NL": "Documentdatum",
+        "PT": "Data do documento",
+    },
+    "Delivery note": {
+        "DE": "Lieferschein",
+        "FR": "Bon de livraison",
+        "IT": "Documento di trasporto",
+        "ES": "Albarán",
+        "NL": "Pakbon",
+        "PT": "Nota de entrega",
+    },
+    "Purchase order": {
+        "DE": "Bestellung",
+        "FR": "Commande d'achat",
+        "IT": "Ordine d'acquisto",
+        "ES": "Pedido de compra",
+        "NL": "Inkooporder",
+        "PT": "Pedido de compra",
+    },
+    "Order": {"DE": "Auftrag", "FR": "Ordre", "IT": "Ordine", "ES": "Orden", "NL": "Order", "PT": "Ordem"},
+    # Columns and table headings:
+    "Item": {"DE": "Pos.", "FR": "Poste", "IT": "Pos.", "ES": "Pos.", "NL": "Pos.", "PT": "Item"},
+    "Description": {
+        "DE": "Bezeichnung",
+        "FR": "Désignation",
+        "IT": "Descrizione",
+        "ES": "Descripción",
+        "NL": "Omschrijving",
+        "PT": "Descrição",
+    },
+    "Unit": {"DE": "Einheit", "FR": "Unité", "IT": "Unità", "ES": "Unidad", "NL": "Eenheid", "PT": "Unidade"},
+    "Unit price": {
+        "DE": "Einzelpreis",
+        "FR": "Prix unitaire",
+        "IT": "Prezzo unitario",
+        "ES": "Precio unitario",
+        "NL": "Stukprijs",
+        "PT": "Preço unitário",
+    },
+    "Net value": {
+        "DE": "Nettowert",
+        "FR": "Valeur nette",
+        "IT": "Valore netto",
+        "ES": "Valor neto",
+        "NL": "Nettowaarde",
+        "PT": "Valor líquido",
+    },
+    "Batch": {"DE": "Charge", "FR": "Lot", "IT": "Partita", "ES": "Lote", "NL": "Batch", "PT": "Lote"},
+    "Net price": {
+        "DE": "Nettopreis",
+        "FR": "Prix net",
+        "IT": "Prezzo netto",
+        "ES": "Precio neto",
+        "NL": "Nettoprijs",
+        "PT": "Preço líquido",
+    },
+    "Target quantity": {
+        "DE": "Zielmenge",
+        "FR": "Quantité cible",
+        "IT": "Quantità target",
+        "ES": "Cantidad prevista",
+        "NL": "Doelhoeveelheid",
+        "PT": "Quantidade prevista",
+    },
+    "Operation": {
+        "DE": "Vorgang",
+        "FR": "Opération",
+        "IT": "Operazione",
+        "ES": "Operación",
+        "NL": "Bewerking",
+        "PT": "Operação",
+    },
+    "Work center": {
+        "DE": "Arbeitsplatz",
+        "FR": "Poste de travail",
+        "IT": "Centro di lavoro",
+        "ES": "Puesto de trabajo",
+        "NL": "Werkplek",
+        "PT": "Centro de trabalho",
+    },
+    "Control key": {
+        "DE": "Steuerschlüssel",
+        "FR": "Clé de commande",
+        "IT": "Chiave di controllo",
+        "ES": "Clave de control",
+        "NL": "Stuursleutel",
+        "PT": "Chave de controle",
+    },
+    "Planned work": {
+        "DE": "Geplante Arbeit",
+        "FR": "Travail planifié",
+        "IT": "Lavoro pianificato",
+        "ES": "Trabajo planificado",
+        "NL": "Gepland werk",
+        "PT": "Trabalho planejado",
+    },
+    "Movement type": {
+        "DE": "Bewegungsart",
+        "FR": "Type de mouvement",
+        "IT": "Tipo movimento",
+        "ES": "Clase de movimiento",
+        "NL": "Bewegingssoort",
+        "PT": "Tipo de movimento",
+    },
+    "Storage location": {
+        "DE": "Lagerort",
+        "FR": "Magasin",
+        "IT": "Ubicazione",
+        "ES": "Almacén",
+        "NL": "Opslaglocatie",
+        "PT": "Depósito",
+    },
+    "Start": {"DE": "Start", "FR": "Début", "IT": "Inizio", "ES": "Inicio", "NL": "Start", "PT": "Início"},
+    "Finish": {"DE": "Ende", "FR": "Fin", "IT": "Fine", "ES": "Fin", "NL": "Einde", "PT": "Fim"},
+    "Components": {
+        "DE": "Komponenten",
+        "FR": "Composants",
+        "IT": "Componenti",
+        "ES": "Componentes",
+        "NL": "Componenten",
+        "PT": "Componentes",
+    },
+    # Totals:
+    "Tax": {"DE": "Steuer", "FR": "Taxes", "IT": "Imposta", "ES": "Impuestos", "NL": "Belasting", "PT": "Impostos"},
+    "Total amount": {
+        "DE": "Gesamtbetrag",
+        "FR": "Montant total",
+        "IT": "Importo totale",
+        "ES": "Importe total",
+        "NL": "Totaalbedrag",
+        "PT": "Montante total",
+    },
+    "Total net value": {
+        "DE": "Gesamtnettowert",
+        "FR": "Valeur nette totale",
+        "IT": "Valore netto totale",
+        "ES": "Valor neto total",
+        "NL": "Totale nettowaarde",
+        "PT": "Valor líquido total",
+    },
+    "Net weight": {
+        "DE": "Nettogewicht",
+        "FR": "Poids net",
+        "IT": "Peso netto",
+        "ES": "Peso neto",
+        "NL": "Nettogewicht",
+        "PT": "Peso líquido",
+    },
+    "Gross weight": {
+        "DE": "Bruttogewicht",
+        "FR": "Poids brut",
+        "IT": "Peso lordo",
+        "ES": "Peso bruto",
+        "NL": "Brutogewicht",
+        "PT": "Peso bruto",
+    },
+    "Target value": {
+        "DE": "Zielwert",
+        "FR": "Valeur cible",
+        "IT": "Valore target",
+        "ES": "Valor previsto",
+        "NL": "Doelwaarde",
+        "PT": "Valor previsto",
+    },
+    # Notes, recipients and body labels:
+    "Terms of payment": {
+        "DE": "Zahlungsbedingungen",
+        "FR": "Conditions de paiement",
+        "IT": "Condizioni di pagamento",
+        "ES": "Condiciones de pago",
+        "NL": "Betalingsvoorwaarden",
+        "PT": "Condições de pagamento",
+    },
+    "Payment reference": {
+        "DE": "Zahlungsreferenz",
+        "FR": "Référence de paiement",
+        "IT": "Riferimento di pagamento",
+        "ES": "Referencia de pago",
+        "NL": "Betalingskenmerk",
+        "PT": "Referência de pagamento",
+    },
+    "Bill of lading": {
+        "DE": "Frachtbrief",
+        "FR": "Lettre de voiture",
+        "IT": "Lettera di vettura",
+        "ES": "Carta de porte",
+        "NL": "Vrachtbrief",
+        "PT": "Conhecimento de embarque",
+    },
+    "Delivery to": {
+        "DE": "Lieferung an",
+        "FR": "Livraison à",
+        "IT": "Consegna a",
+        "ES": "Entrega a",
+        "NL": "Levering aan",
+        "PT": "Entrega em",
+    },
+    "Customer": {"DE": "Kunde", "FR": "Client", "IT": "Cliente", "ES": "Cliente", "NL": "Klant", "PT": "Cliente"},
+    "Supplier": {
+        "DE": "Lieferant",
+        "FR": "Fournisseur",
+        "IT": "Fornitore",
+        "ES": "Proveedor",
+        "NL": "Leverancier",
+        "PT": "Fornecedor",
+    },
+    "Created by": {
+        "DE": "Erfasst von",
+        "FR": "Créé par",
+        "IT": "Creato da",
+        "ES": "Creado por",
+        "NL": "Aangemaakt door",
+        "PT": "Criado por",
+    },
+    "Technical object": {
+        "DE": "Technisches Objekt",
+        "FR": "Objet technique",
+        "IT": "Oggetto tecnico",
+        "ES": "Objeto técnico",
+        "NL": "Technisch object",
+        "PT": "Objeto técnico",
+    },
+    "Maintenance plan": {
+        "DE": "Wartungsplan",
+        "FR": "Plan d'entretien",
+        "IT": "Piano di manutenzione",
+        "ES": "Plan de mantenimiento",
+        "NL": "Onderhoudsplan",
+        "PT": "Plano de manutenção",
+    },
+    "Prices exclude taxes - they are added in the invoice.": {
+        "DE": "Die Preise verstehen sich zuzüglich Steuern - diese werden in der Rechnung ausgewiesen.",
+        "FR": "Les prix s'entendent hors taxes - celles-ci sont ajoutées sur la facture.",
+        "IT": "I prezzi si intendono al netto delle imposte, che vengono aggiunte in fattura.",
+        "ES": "Los precios no incluyen impuestos; estos se añaden en la factura.",
+        "NL": "Prijzen zijn exclusief belastingen - deze worden op de factuur toegevoegd.",
+        "PT": "Os preços não incluem impostos - eles são acrescentados na fatura.",
+    },
+    "Thank you for your order. We confirm it with the items and prices above.": {
+        "DE": "Vielen Dank für Ihren Auftrag. Wir bestätigen ihn mit den oben aufgeführten Positionen und Preisen.",
+        "FR": "Nous vous remercions de votre commande, que nous confirmons avec les postes et les prix ci-dessus.",
+        "IT": "Grazie per il vostro ordine, che confermiamo con le posizioni e i prezzi sopra indicati.",
+        "ES": "Gracias por su pedido. Se lo confirmamos con las posiciones y los precios indicados arriba.",
+        "NL": "Hartelijk dank voor uw order. Wij bevestigen deze met de bovenstaande posities en prijzen.",
+        "PT": "Agradecemos o seu pedido, que confirmamos com os itens e preços acima.",
+    },
+    "Please check the goods on receipt and report any damage or shortfall immediately.": {
+        "DE": "Bitte prüfen Sie die Ware bei Erhalt und melden Sie Schäden oder Fehlmengen umgehend.",
+        "FR": "Veuillez contrôler la marchandise à la réception et signaler immédiatement tout dommage ou manquant.",
+        "IT": "Si prega di controllare la merce al ricevimento e di segnalare subito eventuali danni o ammanchi.",
+        "ES": "Compruebe la mercancía a la recepción y comunique de inmediato cualquier daño o falta.",
+        "NL": "Controleer de goederen bij ontvangst en meld schade of tekorten onmiddellijk.",
+        "PT": "Verifique as mercadorias no recebimento e comunique imediatamente qualquer dano ou falta.",
+    },
+    "Please quote the purchase order number on all delivery notes and invoices.": {
+        "DE": "Bitte geben Sie die Bestellnummer auf allen Lieferscheinen und Rechnungen an.",
+        "FR": "Veuillez indiquer le numéro de commande sur tous les bons de livraison et toutes les factures.",
+        "IT": "Si prega di indicare il numero d'ordine su tutti i documenti di trasporto e le fatture.",
+        "ES": "Indique el número de pedido en todos los albaranes y facturas.",
+        "NL": "Vermeld het inkoopordernummer op alle pakbonnen en facturen.",
+        "PT": "Indique o número do pedido de compra em todas as notas de entrega e faturas.",
+    },
+    "Please quote the contract number on all orders that refer to this contract.": {
+        "DE": "Bitte geben Sie die Kontraktnummer auf allen Aufträgen zu diesem Kontrakt an.",
+        "FR": "Veuillez indiquer le numéro de contrat sur toutes les commandes relatives à ce contrat.",
+        "IT": "Si prega di indicare il numero di contratto su tutti gli ordini relativi a questo contratto.",
+        "ES": "Indique el número de contrato en todos los pedidos relativos a este contrato.",
+        "NL": "Vermeld het contractnummer op alle orders die op dit contract betrekking hebben.",
+        "PT": "Indique o número do contrato em todos os pedidos referentes a este contrato.",
+    },
+    "Please quote the contract number on all deliveries and invoices that refer to this contract.": {
+        "DE": "Bitte geben Sie die Kontraktnummer auf allen Lieferungen und Rechnungen zu diesem Kontrakt an.",
+        "FR": "Veuillez indiquer le numéro de contrat sur toutes les livraisons et factures relatives à ce contrat.",
+        "IT": "Si prega di indicare il numero di contratto su tutte le consegne e le fatture relative a questo contratto.",
+        "ES": "Indique el número de contrato en todas las entregas y facturas relativas a este contrato.",
+        "NL": "Vermeld het contractnummer op alle leveringen en facturen die op dit contract betrekking hebben.",
+        "PT": "Indique o número do contrato em todas as remessas e faturas referentes a este contrato.",
+    },
+    "Please confirm the work and the time spent per operation when the work is done.": {
+        "DE": "Bitte melden Sie nach Abschluss der Arbeiten die Arbeit und den Zeitaufwand je Vorgang zurück.",
+        "FR": "Veuillez confirmer le travail et le temps passé par opération une fois le travail terminé.",
+        "IT": "Si prega di confermare il lavoro e il tempo impiegato per ogni operazione al termine dei lavori.",
+        "ES": "Notifique el trabajo y el tiempo empleado por operación una vez finalizado el trabajo.",
+        "NL": "Meld na afronding van de werkzaamheden het werk en de bestede tijd per bewerking terug.",
+        "PT": "Confirme o trabalho e o tempo gasto por operação quando o trabalho estiver concluído.",
+    },
+    "Please confirm the yield and the activities per operation.": {
+        "DE": "Bitte melden Sie die Gutmenge und die Leistungen je Vorgang zurück.",
+        "FR": "Veuillez confirmer la quantité bonne et les activités par opération.",
+        "IT": "Si prega di confermare la quantità buona e le attività per ogni operazione.",
+        "ES": "Notifique la cantidad buena y las actividades por operación.",
+        "NL": "Meld de goedhoeveelheid en de activiteiten per bewerking terug.",
+        "PT": "Confirme a quantidade boa e as atividades por operação.",
+    },
+    # Templates with values:
+    "This contract is valid from {} to {}.": {
+        "DE": "Dieser Kontrakt gilt vom {} bis {}.",
+        "FR": "Ce contrat est valable du {} au {}.",
+        "IT": "Il presente contratto è valido dal {} al {}.",
+        "ES": "Este contrato es válido del {} al {}.",
+        "NL": "Dit contract is geldig van {} tot {}.",
+        "PT": "Este contrato é válido de {} a {}.",
+    },
+    "Page {} of {}": {
+        "DE": "Seite {} von {}",
+        "FR": "Page {} sur {}",
+        "IT": "Pagina {} di {}",
+        "ES": "Página {} de {}",
+        "NL": "Pagina {} van {}",
+        "PT": "Página {} de {}",
+    },
+    "{} {} of {}": {
+        "DE": "{} {} vom {}",
+        "FR": "{} {} du {}",
+        "IT": "{} {} del {}",
+        "ES": "{} {} del {}",
+        "NL": "{} {} van {}",
+        "PT": "{} {} de {}",
+    },
+    "Company code {}": {
+        "DE": "Buchungskreis {}",
+        "FR": "Société {}",
+        "IT": "Società {}",
+        "ES": "Sociedad {}",
+        "NL": "Bedrijfsnummer {}",
+        "PT": "Empresa {}",
+    },
+    "Sales organization {}": {
+        "DE": "Verkaufsorganisation {}",
+        "FR": "Organisation commerciale {}",
+        "IT": "Organizzazione commerciale {}",
+        "ES": "Organización de ventas {}",
+        "NL": "Verkooporganisatie {}",
+        "PT": "Organização de vendas {}",
+    },
+    "Shipping point {}": {
+        "DE": "Versandstelle {}",
+        "FR": "Point d'expédition {}",
+        "IT": "Punto di spedizione {}",
+        "ES": "Puesto de expedición {}",
+        "NL": "Verzendpunt {}",
+        "PT": "Local de expedição {}",
+    },
+    "Plant {}": {
+        "DE": "Werk {}",
+        "FR": "Division {}",
+        "IT": "Divisione {}",
+        "ES": "Centro {}",
+        "NL": "Vestiging {}",
+        "PT": "Centro {}",
+    },
+    "plant {}": {
+        "DE": "Werk {}",
+        "FR": "division {}",
+        "IT": "divisione {}",
+        "ES": "centro {}",
+        "NL": "vestiging {}",
+        "PT": "centro {}",
+    },
+    "Production plant {}": {
+        "DE": "Produktionswerk {}",
+        "FR": "Division de production {}",
+        "IT": "Divisione di produzione {}",
+        "ES": "Centro de producción {}",
+        "NL": "Productievestiging {}",
+        "PT": "Centro de produção {}",
+    },
+    "Work center {}": {
+        "DE": "Arbeitsplatz {}",
+        "FR": "Poste de travail {}",
+        "IT": "Centro di lavoro {}",
+        "ES": "Puesto de trabajo {}",
+        "NL": "Werkplek {}",
+        "PT": "Centro de trabalho {}",
+    },
+    "MRP controller {}": {
+        "DE": "Disponent {}",
+        "FR": "Gestionnaire MRP {}",
+        "IT": "Responsabile MRP {}",
+        "ES": "Planificador de necesidades {}",
+        "NL": "MRP-planner {}",
+        "PT": "Planejador MRP {}",
+    },
+    "Storage location {}": {
+        "DE": "Lagerort {}",
+        "FR": "Magasin {}",
+        "IT": "Ubicazione {}",
+        "ES": "Almacén {}",
+        "NL": "Opslaglocatie {}",
+        "PT": "Depósito {}",
+    },
+    "Equipment {}": {
+        "DE": "Equipment {}",
+        "FR": "Équipement {}",
+        "IT": "Apparecchiatura {}",
+        "ES": "Equipo {}",
+        "NL": "Equipment {}",
+        "PT": "Equipamento {}",
+    },
+    "Functional location {}": {
+        "DE": "Technischer Platz {}",
+        "FR": "Poste technique {}",
+        "IT": "Sede tecnica {}",
+        "ES": "Ubicación técnica {}",
+        "NL": "Technische plaats {}",
+        "PT": "Local de instalação {}",
+    },
+}
+
+
+def translate(text: str, language: str) -> str:
+    """Translate a text of the forms into the language of the document (see TRANSLATIONS).
+
+    Args:
+        text (str):
+            The English text or template, e.g. "Order Confirmation" or "Plant {}".
+        language (str):
+            The ISO language code of the document, e.g. "DE".
+
+    Returns:
+        str:
+            The translation - or the English text for English, other languages and texts without
+            a translation (e.g. values).
+
+    """
+
+    return TRANSLATIONS.get(text, {}).get(language, text)
+
+
+# end function translate
+
+
+def get_language(*languages: str | None) -> str:
+    """Get the language of a document - the first language that is set, e.g. the one of the recipient.
+
+    Args:
+        *languages (str | None):
+            The candidates in order of priority, as ISO codes (e.g. "DE") or SAP's one-letter
+            language keys (e.g. "D").
+
+    Returns:
+        str:
+            The ISO language code (upper case), "EN" if none is set.
+
+    """
+
+    for language in languages:
+        language = (language or "").strip().upper()
+        if language:
+            return SAP_LANGUAGE_KEYS.get(language, language)
+
+    return "EN"
+
+
+# end function get_language
+
+
+def get_partner_language(partner: SAPBusinessPartnerResponseModel | None) -> str | None:
+    """Get the correspondence language of a business partner - the one of its address, else its own.
+
+    Args:
+        partner (SAPBusinessPartnerResponseModel | None):
+            The business partner with its addresses.
+
+    Returns:
+        str | None:
+            The language key or None if not set.
+
+    """
+
+    if not partner:
+        return None
+    address = next(iter(partner.addresses or []), None)
+
+    return (address.language if address else None) or partner.language
+
+
+# end function get_partner_language
+
 
 @dataclass
 class SAPFormData:
@@ -111,6 +1107,9 @@ class SAPFormData:
         recipient_country (str):
             The country of the recipient - selects the paper size: US letter for North America,
             A4 for all other countries.
+        language (str):
+            The ISO language code of the document, e.g. "DE" - the texts above are given in English
+            and translated by render_form() (see TRANSLATIONS).
 
     """
 
@@ -129,6 +1128,7 @@ class SAPFormData:
     footer: str = ""
     country: str = ""
     recipient_country: str = ""
+    language: str = "EN"
 
 
 def format_date(value: date | datetime | None, country: str) -> str:
@@ -155,12 +1155,37 @@ def format_date(value: date | datetime | None, country: str) -> str:
 # end function format_date
 
 
-def format_amount(value: Decimal | float | str | None) -> str:
-    """Format an amount with thousands separators and two decimals, e.g. "8,901.00".
+def localize_number(number: str, country: str) -> str:
+    """Use the thousands and decimal separators of a country in a number formatted as "1,234.56".
+
+    Args:
+        number (str):
+            The number with "," as thousands and "." as decimal separator.
+        country (str):
+            The ISO country code of the sender (see NUMBER_SEPARATORS).
+
+    Returns:
+        str:
+            The number, e.g. "1.234,56" for Germany.
+
+    """
+
+    thousands, decimal = NUMBER_SEPARATORS.get(country, (",", "."))
+
+    return number.replace(",", "\0").replace(".", decimal).replace("\0", thousands)
+
+
+# end function localize_number
+
+
+def format_amount(value: Decimal | float | str | None, country: str = "") -> str:
+    """Format an amount with thousands separators and two decimals, e.g. "8,901.00" ("8.901,00" in Germany).
 
     Args:
         value (Decimal | float | str | None):
             The amount.
+        country (str, optional):
+            The ISO country code of the sender - selects the separators. Defaults to "" ("8,901.00").
 
     Returns:
         str:
@@ -171,18 +1196,20 @@ def format_amount(value: Decimal | float | str | None) -> str:
     if value is None or value == "":
         return ""
 
-    return "{:,.2f}".format(Decimal(str(value)))
+    return localize_number("{:,.2f}".format(Decimal(str(value))), country)
 
 
 # end function format_amount
 
 
-def format_quantity(value: Decimal | float | str | None) -> str:
-    """Format a quantity without decimals for whole numbers, e.g. "1" or "2.5".
+def format_quantity(value: Decimal | float | str | None, country: str = "") -> str:
+    """Format a quantity without decimals for whole numbers, e.g. "1" or "2.5" ("2,5" in Germany).
 
     Args:
         value (Decimal | float | str | None):
             The quantity.
+        country (str, optional):
+            The ISO country code of the sender - selects the separators. Defaults to "" ("2.5").
 
     Returns:
         str:
@@ -195,7 +1222,10 @@ def format_quantity(value: Decimal | float | str | None) -> str:
 
     quantity = Decimal(str(value))
 
-    return "{:,.0f}".format(quantity) if quantity == quantity.to_integral() else "{:,}".format(quantity.normalize())
+    return localize_number(
+        "{:,.0f}".format(quantity) if quantity == quantity.to_integral() else "{:,}".format(quantity.normalize()),
+        country,
+    )
 
 
 # end function format_quantity
@@ -268,6 +1298,11 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
     brand = colors.HexColor("#1f3a5f")
     company = data.sender[0] if data.sender else ""
     sender_line = " · ".join(data.sender)
+
+    def tr(text: str) -> str:
+        return translate(text, data.language)
+
+    title = tr(data.title)
     logo_image = load_logo(logo)
     if logo_image:
         # Scale the logo into the letterhead (at most 0.5" high and 2.2" wide) - keeping its aspect ratio:
@@ -299,7 +1334,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
                 self.drawRightString(
                     page_width - margin,
                     0.5 * inch,
-                    "Page {} of {}".format(self._pageNumber, len(self._saved_pages)),
+                    tr("Page {} of {}").format(self._pageNumber, len(self._saved_pages)),
                 )
                 super().showPage()
             super().save()
@@ -334,7 +1369,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
             pdf.drawString(
                 margin,
                 page_height - 1.1 * inch,
-                "{} {} of {}".format(data.title, data.number, format_date(data.document_date, data.country)),
+                tr("{} {} of {}").format(title, data.number, format_date(data.document_date, data.country)),
             )
         pdf.restoreState()
 
@@ -358,7 +1393,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
             y = top + 14 - index * 12.5
             pdf.setFont(FONT, 8)
             pdf.setFillColor(grey)
-            pdf.drawString(label_x, y, label)
+            pdf.drawString(label_x, y, tr(label))
             pdf.setFont(FONT, 8.5)
             pdf.setFillColor(colors.black)
             pdf.drawRightString(value_x, y, value or "-")
@@ -370,7 +1405,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
         pagesize=page_size,
         leftMargin=margin,
         rightMargin=margin,
-        title="{} {}".format(data.title, data.number),
+        title="{} {}".format(title, data.number),
         author=company,
     )
     doc.addPageTemplates(
@@ -388,7 +1423,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
         ]
     )
 
-    story = [NextPageTemplate("next"), Paragraph(data.title, title_style), Spacer(0, 4)]
+    story = [NextPageTemplate("next"), Paragraph(title, title_style), Spacer(0, 4)]
 
     def make_table(columns: list[str], table_rows: list[list[str]]) -> "Table":
         """Build a table in the SAP form style - the description takes the remaining width."""
@@ -398,7 +1433,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
         columns = [columns[index] for index in keep]
         table_rows = [[row[index] for index in keep] for row in table_rows]
         description = columns.index("Description") if "Description" in columns else -1
-        rows = [columns] + [
+        rows = [[tr(column) for column in columns]] + [
             [Paragraph(cell, normal) if index == description else cell for index, cell in enumerate(row)]
             for row in table_rows
         ]
@@ -443,10 +1478,12 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
 
     for heading, columns, table_rows in data.tables:
         if table_rows:
-            story += [Paragraph(heading, heading_style), make_table(columns, table_rows), Spacer(0, 10)]
+            story += [Paragraph(tr(heading), heading_style), make_table(columns, table_rows), Spacer(0, 10)]
 
     if data.totals:
-        totals = Table(data.totals, colWidths=[1.6 * inch, 1.4 * inch], hAlign="RIGHT")
+        totals = Table(
+            [(tr(label), value) for label, value in data.totals], colWidths=[1.6 * inch, 1.4 * inch], hAlign="RIGHT"
+        )
         totals.setStyle(
             TableStyle(
                 [
@@ -461,7 +1498,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
         story += [totals, Spacer(0, 18)]
 
     story += [
-        Paragraph("<b>{}:</b> {}".format(label, value) if label else value, notes_style)
+        Paragraph("<b>{}:</b> {}".format(tr(label), value) if label else tr(value), notes_style)
         for label, value in data.notes
         if value
     ]
@@ -474,7 +1511,9 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
 # end function render_form
 
 
-def get_sender_lines(company_code: SAPCompanyCodeResponseModel | None, company_code_id: str | None) -> list[str]:
+def get_sender_lines(
+    company_code: SAPCompanyCodeResponseModel | None, company_code_id: str | None, language: str = "EN"
+) -> list[str]:
     """Get the sender (company) lines of a document: name and city / country of the company code.
 
     Args:
@@ -482,6 +1521,8 @@ def get_sender_lines(company_code: SAPCompanyCodeResponseModel | None, company_c
             The company code (master data), if it could be read.
         company_code_id (str | None):
             The company code number - printed if the master data is not available.
+        language (str, optional):
+            The ISO language code of the document. Defaults to "EN".
 
     Returns:
         list[str]:
@@ -495,7 +1536,7 @@ def get_sender_lines(company_code: SAPCompanyCodeResponseModel | None, company_c
         if lines:
             return lines
 
-    return ["Company code {}".format(company_code_id)] if company_code_id else []
+    return [translate("Company code {}", language).format(company_code_id)] if company_code_id else []
 
 
 # end function get_sender_lines
@@ -582,7 +1623,7 @@ def sort_items[T](items: list[T]) -> list[T]:
 # end function sort_items
 
 
-def get_footer(sender: list[str], company_code_id: str | None) -> str:
+def get_footer(sender: list[str], company_code_id: str | None, language: str = "EN") -> str:
     """Get the footer line: the sender and the company code.
 
     Args:
@@ -590,6 +1631,8 @@ def get_footer(sender: list[str], company_code_id: str | None) -> str:
             The sender lines (see get_sender_lines()).
         company_code_id (str | None):
             The company code number.
+        language (str, optional):
+            The ISO language code of the document. Defaults to "EN".
 
     Returns:
         str:
@@ -598,8 +1641,9 @@ def get_footer(sender: list[str], company_code_id: str | None) -> str:
     """
 
     parts = list(sender)
-    if company_code_id and "Company code {}".format(company_code_id) not in parts:
-        parts.append("Company code {}".format(company_code_id))
+    company_code_line = translate("Company code {}", language).format(company_code_id)
+    if company_code_id and company_code_line not in parts:
+        parts.append(company_code_line)
 
     return " · ".join(parts)
 
@@ -654,6 +1698,7 @@ def render_billing_document_pdf(
     billing_document: SAPBillingDocumentResponseModel,
     customer: SAPBusinessPartnerResponseModel | None = None,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP billing document (invoice, credit memo, ...) like the SAP standard form.
@@ -666,6 +1711,9 @@ def render_billing_document_pdf(
             Defaults to None (only the customer number is printed).
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the billing document (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            customer's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None
             (company name as text).
@@ -681,12 +1729,13 @@ def render_billing_document_pdf(
     """
 
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(customer), company_code.language if company_code else None)
     currency = billing_document.currency or ""
     customer_id = billing_document.payer or billing_document.sold_to_party or ""
     title = billing_document.category_name or "Billing Document"
 
-    sender = get_sender_lines(company_code, billing_document.company_code)
-    recipient = get_address_lines(customer, "Customer", customer_id)
+    sender = get_sender_lines(company_code, billing_document.company_code, language)
+    recipient = get_address_lines(customer, translate("Customer", language), customer_id)
     items = sort_items(billing_document.items or [])
     first_item = items[0] if items else None
     rows = [
@@ -694,10 +1743,10 @@ def render_billing_document_pdf(
             get_item_number(item.item),
             item.material or "",
             item.text or "",
-            format_quantity(item.quantity),
+            format_quantity(item.quantity, country),
             item.unit or "",
-            format_amount(get_unit_price(item.net_amount, item.quantity)),
-            format_amount(item.net_amount),
+            format_amount(get_unit_price(item.net_amount, item.quantity), country),
+            format_amount(item.net_amount, country),
         ]
         for item in items
     ]
@@ -720,16 +1769,17 @@ def render_billing_document_pdf(
         columns=["Item", "Material", "Description", "Quantity", "Unit", "Unit price", "Net value"],
         rows=rows,
         totals=[
-            ("Net value", "{} {}".format(format_amount(billing_document.total_net_amount), currency)),
-            ("Tax", "{} {}".format(format_amount(billing_document.tax_amount), currency)),
-            ("Total amount", "{} {}".format(format_amount(billing_document.total_gross_amount), currency)),
+            ("Net value", "{} {}".format(format_amount(billing_document.total_net_amount, country), currency)),
+            ("Tax", "{} {}".format(format_amount(billing_document.tax_amount, country), currency)),
+            ("Total amount", "{} {}".format(format_amount(billing_document.total_gross_amount, country), currency)),
         ],
         notes=[
             ("Terms of payment", billing_document.payment_terms or ""),
             ("Payment reference", billing_document.payment_reference or billing_document.billing_document_id),
         ],
-        footer=get_footer(sender, billing_document.company_code),
+        footer=get_footer(sender, billing_document.company_code, language),
         country=country,
+        language=language,
         recipient_country=get_partner_country(customer),
     )
 
@@ -743,6 +1793,7 @@ def render_sales_order_pdf(
     sales_order: SAPSalesOrderResponseModel,
     customer: SAPBusinessPartnerResponseModel | None = None,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP sales order as order confirmation (like the SAP standard form).
@@ -754,6 +1805,9 @@ def render_sales_order_pdf(
             The business partner of the sold-to party with its addresses (recipient). Defaults to None.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the sales organization (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            customer's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -768,10 +1822,11 @@ def render_sales_order_pdf(
     """
 
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(customer), company_code.language if company_code else None)
     currency = sales_order.currency or ""
     company_code_id = company_code.company_code if company_code else None
-    sender = get_sender_lines(company_code, company_code_id) or [
-        "Sales organization {}".format(sales_order.sales_organization or "")
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Sales organization {}", language).format(sales_order.sales_organization or "")
     ]
     # Rejected items are not confirmed:
     items = sort_items([item for item in sales_order.items or [] if not item.rejection_reason])
@@ -781,7 +1836,7 @@ def render_sales_order_pdf(
         number=sales_order.order_id,
         document_date=sales_order.order_date,
         sender=sender,
-        recipient=get_address_lines(customer, "Customer", sales_order.sold_to_party),
+        recipient=get_address_lines(customer, translate("Customer", language), sales_order.sold_to_party),
         info=[
             ("Order number", sales_order.order_id),
             ("Order date", format_date(sales_order.order_date, country)),
@@ -797,21 +1852,22 @@ def render_sales_order_pdf(
                 get_item_number(item.item),
                 item.material or "",
                 item.text or "",
-                format_quantity(item.quantity),
+                format_quantity(item.quantity, country),
                 item.unit or "",
-                format_amount(get_unit_price(item.net_amount, item.quantity)),
-                format_amount(item.net_amount),
+                format_amount(get_unit_price(item.net_amount, item.quantity), country),
+                format_amount(item.net_amount, country),
             ]
             for item in items
         ],
-        totals=[("Total net value", "{} {}".format(format_amount(sales_order.total_net_amount), currency))],
+        totals=[("Total net value", "{} {}".format(format_amount(sales_order.total_net_amount, country), currency))],
         notes=[
             ("Terms of payment", sales_order.payment_terms or ""),
             ("", "Prices exclude taxes - they are added in the invoice."),
             ("", "Thank you for your order. We confirm it with the items and prices above."),
         ],
-        footer=get_footer(sender, company_code_id),
+        footer=get_footer(sender, company_code_id, language),
         country=country,
+        language=language,
         recipient_country=get_partner_country(customer),
     )
 
@@ -825,6 +1881,7 @@ def render_outbound_delivery_pdf(
     delivery: SAPOutboundDeliveryResponseModel,
     ship_to: SAPBusinessPartnerResponseModel | None = None,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP outbound delivery as delivery note (like the SAP standard form).
@@ -836,6 +1893,9 @@ def render_outbound_delivery_pdf(
             The business partner of the ship-to party with its addresses (recipient). Defaults to None.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the sales organization (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            ship-to party's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -850,9 +1910,10 @@ def render_outbound_delivery_pdf(
     """
 
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(ship_to), company_code.language if company_code else None)
     company_code_id = company_code.company_code if company_code else None
-    sender = get_sender_lines(company_code, company_code_id) or [
-        "Shipping point {}".format(delivery.shipping_point or "")
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Shipping point {}", language).format(delivery.shipping_point or "")
     ]
     items = sort_items(
         [item for item in delivery.items or [] if item.quantity not in (None, "") and Decimal(str(item.quantity))]
@@ -866,7 +1927,7 @@ def render_outbound_delivery_pdf(
         number=delivery.delivery_id,
         document_date=delivery.delivery_date,
         sender=sender,
-        recipient=get_address_lines(ship_to, "Ship-to party", delivery.ship_to_party),
+        recipient=get_address_lines(ship_to, translate("Ship-to party", language), delivery.ship_to_party),
         info=[
             ("Delivery number", delivery.delivery_id),
             ("Delivery date", format_date(delivery.delivery_date, country)),
@@ -885,14 +1946,14 @@ def render_outbound_delivery_pdf(
                 get_item_number(item.item),
                 item.material or "",
                 item.text or "",
-                format_quantity(item.quantity),
+                format_quantity(item.quantity, country),
                 item.unit or "",
             ]
             + ([item.batch or ""] if has_batches else [])
             for item in items
         ],
         totals=[
-            (label, "{} {}".format(format_quantity(value), weight_unit))
+            (label, "{} {}".format(format_quantity(value, country), weight_unit))
             for label, value in (("Net weight", delivery.net_weight), ("Gross weight", delivery.gross_weight))
             if value not in (None, "") and Decimal(str(value))
         ],
@@ -900,8 +1961,9 @@ def render_outbound_delivery_pdf(
             ("Bill of lading", delivery.bill_of_lading or ""),
             ("", "Please check the goods on receipt and report any damage or shortfall immediately."),
         ],
-        footer=get_footer(sender, company_code_id),
+        footer=get_footer(sender, company_code_id, language),
         country=country,
+        language=language,
         recipient_country=get_partner_country(ship_to),
     )
 
@@ -915,6 +1977,7 @@ def render_purchase_order_pdf(
     purchase_order: SAPPurchaseOrderResponseModel,
     supplier: SAPBusinessPartnerResponseModel | None = None,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP purchase order as sent to the supplier (like the SAP standard form).
@@ -926,6 +1989,9 @@ def render_purchase_order_pdf(
             The business partner of the supplier with its addresses (recipient). Defaults to None.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the purchase order (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            supplier's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -940,8 +2006,9 @@ def render_purchase_order_pdf(
     """
 
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(supplier), company_code.language if company_code else None)
     currency = purchase_order.currency or ""
-    sender = get_sender_lines(company_code, purchase_order.company_code)
+    sender = get_sender_lines(company_code, purchase_order.company_code, language)
     # Deleted items are not ordered:
     items = sort_items([item for item in purchase_order.items or [] if not item.deletion_code])
     total = sum((Decimal(str(item.net_amount)) for item in items if item.net_amount not in (None, "")), Decimal(0))
@@ -956,7 +2023,7 @@ def render_purchase_order_pdf(
         number=purchase_order.order_id,
         document_date=purchase_order.order_date,
         sender=sender,
-        recipient=get_address_lines(supplier, "Supplier", purchase_order.supplier),
+        recipient=get_address_lines(supplier, translate("Supplier", language), purchase_order.supplier),
         info=[
             ("Purchase order number", purchase_order.order_id),
             ("Date", format_date(purchase_order.order_date, country)),
@@ -972,22 +2039,23 @@ def render_purchase_order_pdf(
                 get_item_number(item.item),
                 item.material or "",
                 item.text or "",
-                format_quantity(item.quantity),
+                format_quantity(item.quantity, country),
                 item.unit or "",
                 delivery_date(item),
-                format_amount(item.net_price),
-                format_amount(item.net_amount),
+                format_amount(item.net_price, country),
+                format_amount(item.net_amount, country),
             ]
             for item in items
         ],
-        totals=[("Total net value", "{} {}".format(format_amount(total), currency))],
+        totals=[("Total net value", "{} {}".format(format_amount(total, country), currency))],
         notes=[
             ("Terms of payment", purchase_order.payment_terms or ""),
-            ("Delivery to", ", ".join("plant {}".format(plant) for plant in plants)),
+            ("Delivery to", ", ".join(translate("plant {}", language).format(plant) for plant in plants)),
             ("", "Please quote the purchase order number on all delivery notes and invoices."),
         ],
-        footer=get_footer(sender, purchase_order.company_code),
+        footer=get_footer(sender, purchase_order.company_code, language),
         country=country,
+        language=language,
         recipient_country=get_partner_country(supplier),
     )
 
@@ -1001,6 +2069,7 @@ def render_sales_contract_pdf(
     sales_contract: SAPSalesContractResponseModel,
     customer: SAPBusinessPartnerResponseModel | None = None,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP sales contract (outline agreement with a customer) as contract confirmation.
@@ -1012,6 +2081,9 @@ def render_sales_contract_pdf(
             The business partner of the sold-to party with its addresses (recipient). Defaults to None.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the sales organization (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            customer's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -1026,10 +2098,11 @@ def render_sales_contract_pdf(
     """
 
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(customer), company_code.language if company_code else None)
     currency = sales_contract.currency or ""
     company_code_id = company_code.company_code if company_code else None
-    sender = get_sender_lines(company_code, company_code_id) or [
-        "Sales organization {}".format(sales_contract.sales_organization or "")
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Sales organization {}", language).format(sales_contract.sales_organization or "")
     ]
     valid_from = format_date(sales_contract.validity_start_date, country)
     valid_to = format_date(sales_contract.validity_end_date, country)
@@ -1039,7 +2112,7 @@ def render_sales_contract_pdf(
         number=sales_contract.contract_id,
         document_date=sales_contract.contract_date,
         sender=sender,
-        recipient=get_address_lines(customer, "Customer", sales_contract.sold_to_party),
+        recipient=get_address_lines(customer, translate("Customer", language), sales_contract.sold_to_party),
         info=[
             ("Contract number", sales_contract.contract_id),
             ("Contract date", format_date(sales_contract.contract_date, country)),
@@ -1055,25 +2128,28 @@ def render_sales_contract_pdf(
                 get_item_number(item.item),
                 item.material or "",
                 item.text or "",
-                format_quantity(item.quantity),
+                format_quantity(item.quantity, country),
                 item.unit or "",
-                format_amount(item.net_amount if item.net_amount not in (None, "") else item.target_amount),
+                format_amount(item.net_amount if item.net_amount not in (None, "") else item.target_amount, country),
             ]
             for item in sort_items(sales_contract.items or [])
         ],
-        totals=[("Total net value", "{} {}".format(format_amount(sales_contract.total_net_amount), currency))]
+        totals=[("Total net value", "{} {}".format(format_amount(sales_contract.total_net_amount, country), currency))]
         if sales_contract.total_net_amount not in (None, "")
         else [],
         notes=[
             ("Terms of payment", sales_contract.payment_terms or ""),
             (
                 "",
-                "This contract is valid from {} to {}.".format(valid_from, valid_to) if valid_from and valid_to else "",
+                translate("This contract is valid from {} to {}.", language).format(valid_from, valid_to)
+                if valid_from and valid_to
+                else "",
             ),
             ("", "Please quote the contract number on all orders that refer to this contract."),
         ],
-        footer=get_footer(sender, company_code_id),
+        footer=get_footer(sender, company_code_id, language),
         country=country,
+        language=language,
         recipient_country=get_partner_country(customer),
     )
 
@@ -1087,6 +2163,7 @@ def render_purchase_contract_pdf(
     purchase_contract: SAPPurchaseContractResponseModel,
     supplier: SAPBusinessPartnerResponseModel | None = None,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP purchase contract (outline agreement with a supplier) as sent to the supplier.
@@ -1098,6 +2175,9 @@ def render_purchase_contract_pdf(
             The business partner of the supplier with its addresses (recipient). Defaults to None.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the purchase contract (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            supplier's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -1112,8 +2192,9 @@ def render_purchase_contract_pdf(
     """
 
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(supplier), company_code.language if company_code else None)
     currency = purchase_contract.currency or ""
-    sender = get_sender_lines(company_code, purchase_contract.company_code)
+    sender = get_sender_lines(company_code, purchase_contract.company_code, language)
     valid_from = format_date(purchase_contract.validity_start_date, country)
     valid_to = format_date(purchase_contract.validity_end_date, country)
 
@@ -1122,7 +2203,7 @@ def render_purchase_contract_pdf(
         number=purchase_contract.contract_id,
         document_date=purchase_contract.creation_date,
         sender=sender,
-        recipient=get_address_lines(supplier, "Supplier", purchase_contract.supplier),
+        recipient=get_address_lines(supplier, translate("Supplier", language), purchase_contract.supplier),
         info=[
             ("Contract number", purchase_contract.contract_id),
             ("Date", format_date(purchase_contract.creation_date, country)),
@@ -1138,13 +2219,13 @@ def render_purchase_contract_pdf(
                 get_item_number(item.item),
                 item.material or "",
                 item.text or "",
-                format_quantity(item.target_quantity),
+                format_quantity(item.target_quantity, country),
                 item.unit or "",
-                format_amount(item.net_price),
+                format_amount(item.net_price, country),
             ]
             for item in sort_items([item for item in purchase_contract.items or [] if not item.deletion_code])
         ],
-        totals=[("Target value", "{} {}".format(format_amount(purchase_contract.target_amount), currency))]
+        totals=[("Target value", "{} {}".format(format_amount(purchase_contract.target_amount, country), currency))]
         if purchase_contract.target_amount not in (None, "") and Decimal(str(purchase_contract.target_amount))
         else [],
         notes=[
@@ -1152,12 +2233,15 @@ def render_purchase_contract_pdf(
             ("Currency", currency),
             (
                 "",
-                "This contract is valid from {} to {}.".format(valid_from, valid_to) if valid_from and valid_to else "",
+                translate("This contract is valid from {} to {}.", language).format(valid_from, valid_to)
+                if valid_from and valid_to
+                else "",
             ),
             ("", "Please quote the contract number on all deliveries and invoices that refer to this contract."),
         ],
-        footer=get_footer(sender, purchase_contract.company_code),
+        footer=get_footer(sender, purchase_contract.company_code, language),
         country=country,
+        language=language,
         recipient_country=get_partner_country(supplier),
     )
 
@@ -1170,6 +2254,7 @@ def render_purchase_contract_pdf(
 def render_maintenance_order_pdf(
     maintenance_order: SAPMaintenanceOrderResponseModel,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP maintenance order as work order (shop paper) for the technicians or a contractor.
@@ -1179,6 +2264,9 @@ def render_maintenance_order_pdf(
             The maintenance order with its operations (and their components).
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the maintenance plant (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            company code in SAP, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -1194,8 +2282,11 @@ def render_maintenance_order_pdf(
 
     order = maintenance_order
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, company_code.language if company_code else None)
     company_code_id = company_code.company_code if company_code else order.company_code
-    sender = get_sender_lines(company_code, company_code_id) or ["Plant {}".format(order.planning_plant or "")]
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Plant {}", language).format(order.planning_plant or "")
+    ]
     operations = sorted(
         (operation for operation in order.operations or [] if not operation.is_marked_for_deletion),
         key=lambda operation: (operation.operation or "", operation.sub_operation or ""),
@@ -1205,8 +2296,8 @@ def render_maintenance_order_pdf(
     technical_object = " / ".join(
         part
         for part in (
-            "Equipment {}".format(order.equipment) if order.equipment else "",
-            "Functional location {}".format(functional_location) if functional_location else "",
+            translate("Equipment {}", language).format(order.equipment) if order.equipment else "",
+            translate("Functional location {}", language).format(functional_location) if functional_location else "",
         )
         if part
     )
@@ -1217,8 +2308,10 @@ def render_maintenance_order_pdf(
         document_date=order.creation_datetime,
         sender=sender,
         recipient=[
-            "Work center {}".format(order.main_work_center or ""),
-            "Plant {}".format(order.main_work_center_plant or order.maintenance_plant or order.planning_plant or ""),
+            translate("Work center {}", language).format(order.main_work_center or ""),
+            translate("Plant {}", language).format(
+                order.main_work_center_plant or order.maintenance_plant or order.planning_plant or ""
+            ),
         ],
         info=[
             ("Order number", order.order_id),
@@ -1231,8 +2324,12 @@ def render_maintenance_order_pdf(
         ],
         body=[
             "<b>{}</b>".format(order.description) if order.description else "",
-            "<b>Technical object:</b> {}".format(technical_object) if technical_object else "",
-            "<b>Maintenance plan:</b> {}".format(order.maintenance_plan) if order.maintenance_plan else "",
+            "<b>{}:</b> {}".format(translate("Technical object", language), technical_object)
+            if technical_object
+            else "",
+            "<b>{}:</b> {}".format(translate("Maintenance plan", language), order.maintenance_plan)
+            if order.maintenance_plan
+            else "",
         ],
         columns=["Operation", "Description", "Work center", "Control key", "Planned work", "Unit"],
         rows=[
@@ -1242,7 +2339,7 @@ def render_maintenance_order_pdf(
                 operation.description or "",
                 operation.work_center or "",
                 operation.control_key or "",
-                format_quantity(operation.planned_work),
+                format_quantity(operation.planned_work, country),
                 operation.planned_work_unit or "",
             ]
             for operation in operations
@@ -1256,7 +2353,7 @@ def render_maintenance_order_pdf(
                         get_item_number(operation.operation),
                         component.material or "",
                         component.text or "",
-                        format_quantity(component.required_quantity),
+                        format_quantity(component.required_quantity, country),
                         component.base_unit or "",
                         component.storage_location or "",
                     ]
@@ -1266,8 +2363,9 @@ def render_maintenance_order_pdf(
             )
         ],
         notes=[("", "Please confirm the work and the time spent per operation when the work is done.")],
-        footer=get_footer(sender, company_code_id),
+        footer=get_footer(sender, company_code_id, language),
         country=country,
+        language=language,
     )
 
     return render_form(data, logo=logo)
@@ -1279,6 +2377,7 @@ def render_maintenance_order_pdf(
 def render_production_order_pdf(
     production_order: SAPProductionOrderResponseModel,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP production order as production order papers (shop floor).
@@ -1288,6 +2387,9 @@ def render_production_order_pdf(
             The production order with its operations.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the production plant (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            company code in SAP, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -1303,8 +2405,11 @@ def render_production_order_pdf(
 
     order = production_order
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, company_code.language if company_code else None)
     company_code_id = company_code.company_code if company_code else None
-    sender = get_sender_lines(company_code, company_code_id) or ["Plant {}".format(order.plant or "")]
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Plant {}", language).format(order.plant or "")
+    ]
     operations = sorted(order.operations or [], key=lambda operation: operation.operation or "")
 
     data = SAPFormData(
@@ -1313,14 +2418,14 @@ def render_production_order_pdf(
         document_date=order.creation_date,
         sender=sender,
         recipient=[
-            "Production plant {}".format(order.plant or ""),
-            "MRP controller {}".format(order.mrp_controller) if order.mrp_controller else "",
+            translate("Production plant {}", language).format(order.plant or ""),
+            translate("MRP controller {}", language).format(order.mrp_controller) if order.mrp_controller else "",
         ],
         info=[
             ("Order number", order.order_id),
             ("Order type", order.order_type or ""),
             ("Material", order.material or ""),
-            ("Quantity", "{} {}".format(format_quantity(order.quantity), order.unit or "").strip()),
+            ("Quantity", "{} {}".format(format_quantity(order.quantity, country), order.unit or "").strip()),
             ("Planned start", format_date(order.planned_start_date, country)),
             ("Planned finish", format_date(order.planned_end_date, country)),
             ("Sales order", order.sales_order or ""),
@@ -1332,7 +2437,7 @@ def render_production_order_pdf(
                 get_item_number(operation.operation),
                 operation.text or "",
                 operation.work_center or "",
-                format_quantity(operation.planned_quantity),
+                format_quantity(operation.planned_quantity, country),
                 operation.unit or "",
                 format_date(operation.earliest_scheduled_start_date, country),
                 format_date(operation.earliest_scheduled_end_date, country),
@@ -1343,8 +2448,9 @@ def render_production_order_pdf(
             ("Storage location", order.storage_location or ""),
             ("", "Please confirm the yield and the activities per operation."),
         ],
-        footer=get_footer(sender, company_code_id),
+        footer=get_footer(sender, company_code_id, language),
         country=country,
+        language=language,
     )
 
     return render_form(data, logo=logo)
@@ -1386,6 +2492,7 @@ def get_goods_movement_title(goods_movement: SAPGoodsMovementResponseModel) -> s
 def render_goods_movement_pdf(
     goods_movement: SAPGoodsMovementResponseModel,
     company_code: SAPCompanyCodeResponseModel | None = None,
+    language: str | None = None,
     logo: str | bytes | None = None,
 ) -> bytes:
     """Render an SAP goods movement (material document) as goods receipt / issue slip.
@@ -1395,6 +2502,9 @@ def render_goods_movement_pdf(
             The goods movement with its items.
         company_code (SAPCompanyCodeResponseModel | None, optional):
             The company code of the plant (sender). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            company code in SAP, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
 
@@ -1410,11 +2520,12 @@ def render_goods_movement_pdf(
 
     movement = goods_movement
     country = (company_code.country if company_code else "") or ""
+    language = get_language(language, company_code.language if company_code else None)
     company_code_id = company_code.company_code if company_code else None
     items = sort_items(movement.items or [])
     first_item = items[0] if items else None
-    sender = get_sender_lines(company_code, company_code_id) or [
-        "Plant {}".format(first_item.plant if first_item else "")
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Plant {}", language).format(first_item.plant if first_item else "")
     ]
     has_batches = any(item.batch for item in items)
     purchase_orders = list(dict.fromkeys(item.purchase_order for item in items if item.purchase_order))
@@ -1427,8 +2538,8 @@ def render_goods_movement_pdf(
         document_date=movement.posting_date,
         sender=sender,
         recipient=[
-            "Plant {}".format(first_item.plant or "") if first_item else "",
-            "Storage location {}".format(first_item.storage_location)
+            translate("Plant {}", language).format(first_item.plant or "") if first_item else "",
+            translate("Storage location {}", language).format(first_item.storage_location)
             if first_item and first_item.storage_location
             else "",
         ],
@@ -1449,7 +2560,7 @@ def render_goods_movement_pdf(
                 get_item_number(item.item),
                 item.material or "",
                 item.text or "",
-                format_quantity(item.quantity),
+                format_quantity(item.quantity, country),
                 item.unit or "",
                 item.movement_type or "",
                 item.storage_location or "",
@@ -1461,8 +2572,9 @@ def render_goods_movement_pdf(
             ("Supplier", ", ".join(suppliers)),
             ("Created by", movement.created_by_user or ""),
         ],
-        footer=get_footer(sender, company_code_id),
+        footer=get_footer(sender, company_code_id, language),
         country=country,
+        language=language,
     )
 
     return render_form(data, logo=logo)

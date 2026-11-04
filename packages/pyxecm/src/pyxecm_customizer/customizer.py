@@ -9,8 +9,8 @@ __email__ = "mdiefenb@opentext.com"
 import logging
 import os
 import tempfile
-import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import requests
@@ -21,10 +21,12 @@ from opentelemetry import trace
 from pydantic import HttpUrl
 from pyxecm import AVTS, OTAC, OTAWP, OTCA, OTCS, OTDS, OTIV, OTKD, OTPD, CoreShare
 
+from .exceptions import WaitTimeoutError
 from .k8s import K8s
 from .m365 import M365
 from .payload import Payload
 from .settings import Settings
+from .wait import WaitBudget, wait_until
 
 tracer = trace.get_tracer(__name__)
 default_logger = logging.getLogger("pyxecm_customizer")
@@ -71,7 +73,77 @@ class Customizer:
         self.otkd_object: OTKD | None = None
         self.avts_object: AVTS | None = None
 
+        # Budget for the time all waits of a run may take together (wait_timeout_total):
+        self.wait_budget: WaitBudget | None = None
+
     # end initializer
+
+    def get_wait_timeout(self, service: str | None = None) -> int:
+        """Get the wait timeout for a service (per-service override or global default).
+
+        Args:
+            service (str | None, optional):
+                The name of the settings section of the service, e.g. "otcs" or "otac".
+                If None, the global wait_timeout is returned.
+
+        Returns:
+            int:
+                The timeout in seconds. 0 = wait forever.
+
+        """
+
+        if service:
+            service_settings = getattr(self.settings, service, None)
+            timeout = getattr(service_settings, "wait_timeout", None)
+            if timeout is not None:
+                return timeout
+
+        return self.settings.wait_timeout
+
+    # end method definition
+
+    def wait_for[T](
+        self,
+        check: Callable[[], T | None],
+        what: str,
+        service: str | None = None,
+        pod_name: str | None = None,
+    ) -> T | None:
+        """Wait until check() returns a truthy value or the configured timeout is reached.
+
+        Args:
+            check (Callable[[], T | None]):
+                Function that is called repeatedly until it returns a truthy value.
+            what (str):
+                Description of what we are waiting for (used in log messages).
+            service (str | None, optional):
+                The settings section of the service to determine the timeout, e.g. "otac".
+            pod_name (str | None, optional):
+                Kubernetes pod of the service. If given, pod diagnostics are logged on timeout.
+
+        Returns:
+            T | None:
+                The result of check() or None if the timeout was reached.
+
+        """
+
+        on_timeout = None
+        if pod_name and self.k8s_object:
+
+            def on_timeout() -> None:
+                self.k8s_object.log_pod_diagnostics(pod_name)
+
+        return wait_until(
+            check=check,
+            what=what,
+            timeout=self.get_wait_timeout(service),
+            interval=self.settings.wait_interval,
+            budget=self.wait_budget,
+            on_timeout=on_timeout,
+            logger=self.logger,
+        )
+
+    # end method definition
 
     def log_header(self, text: str, char: str = "=", length: int = 120) -> None:
         """Output a section header in the log file.
@@ -664,11 +736,8 @@ class Customizer:
         )
 
         self.logger.info("Authenticating to OTDS...")
-        otds_cookie = otds_object.authenticate()
-        while otds_cookie is None:
-            self.logger.info("Waiting 30 seconds for OTDS to become ready...")
-            time.sleep(30)
-            otds_cookie = otds_object.authenticate()
+        if not self.wait_for(otds_object.authenticate, "OTDS authentication", service="otds"):
+            return None
         self.logger.info("OTDS is ready now.")
 
         self.logger.info("Enable OTDS audit...")
@@ -724,11 +793,13 @@ class Customizer:
         )
 
         self.logger.info("Authenticating to OTAC...")
-        otac_cookie = otac_object.authenticate()
-        while otac_cookie is None:
-            self.logger.info("Waiting 30 seconds for OTAC to become ready...")
-            time.sleep(30)
-            otac_cookie = otac_object.authenticate()
+        if not self.wait_for(
+            otac_object.authenticate,
+            "OTAC authentication",
+            service="otac",
+            pod_name=self.settings.k8s.pod_otac,
+        ):
+            return None
         self.logger.info("OTAC is ready now.")
 
         # This is a work-around as OTCS container automation is not
@@ -746,7 +817,14 @@ class Customizer:
         if otac_object and self.settings.otac.known_server != "":
             # wait until the OTAC pod is in ready state
             self.logger.info("Waiting for Archive Center to become ready...")
-            self.k8s_object.wait_pod_condition(self.settings.k8s.pod_otac, "Ready")
+            if not self.k8s_object.wait_pod_condition(
+                self.settings.k8s.pod_otac,
+                "Ready",
+                sleep_time=self.settings.wait_interval,
+                timeout=self.get_wait_timeout("otac"),
+                budget=self.wait_budget,
+            ):
+                return None
 
             self.logger.info("Configure known host for Archive Center...")
             response = otac_object.exec_command(
@@ -850,19 +928,26 @@ class Customizer:
         # It is important to wait for OTCS to be configured - otherwise we
         # may interfere with the OTCS container automation and run into errors
         self.logger.info("Wait for OTCS -> '%s' to be configured...", otcs_object.hostname())
-        otcs_configured = otcs_object.is_configured()
-        while not otcs_configured:
-            self.logger.warning("OTCS -> '%s' is not configured yet. Waiting 30 seconds...", otcs_object.hostname())
-            time.sleep(30)
-            otcs_configured = otcs_object.is_configured()
+        # The backend URL host is the admin pod name (e.g. otcs-admin-0), for the frontend
+        # service there is no single pod, so no pod diagnostics are collected:
+        pod_name = otcs_object.hostname() if otcs_object.hostname() == self.settings.k8s.svc_otcs_admin else None
+        if not self.wait_for(
+            otcs_object.is_configured,
+            f"OTCS -> '{otcs_object.hostname()}' configuration",
+            service="otcs",
+            pod_name=pod_name,
+        ):
+            return None
         self.logger.info("OTCS -> '%s' is configured now.", otcs_object.hostname())
 
         self.logger.info("Authenticating to OTCS -> '%s'...", otcs_object.hostname())
-        otcs_cookie = otcs_object.authenticate()
-        while otcs_cookie is None:
-            self.logger.info("Waiting 30 seconds for OTCS -> '%s' to become ready...", otcs_object.hostname())
-            time.sleep(30)
-            otcs_cookie = otcs_object.authenticate()
+        if not self.wait_for(
+            otcs_object.authenticate,
+            f"OTCS -> '{otcs_object.hostname()}' authentication",
+            service="otcs",
+            pod_name=pod_name,
+        ):
+            return None
         self.logger.info(
             "OTCS -> '%s' is ready now (version -> %s).",
             otcs_object.hostname(),
@@ -948,16 +1033,14 @@ class Customizer:
             logger=self.logger,
         )
 
-        otiv_resource = self.otds_object.get_resource(self.settings.otiv.resource_name)
-        while otiv_resource is None:
-            self.logger.info(
-                "OTDS Resource -> %s for Intelligent Viewing not found. OTIV may not be ready. Wait 30 sec...",
-                self.settings.otiv.resource_name,
-            )
-            time.sleep(30)
-            otiv_resource = self.otds_object.get_resource(
-                self.settings.otiv.resource_name,
-            )
+        otiv_resource = self.wait_for(
+            lambda: self.otds_object.get_resource(self.settings.otiv.resource_name),
+            f"OTDS resource -> '{self.settings.otiv.resource_name}' for Intelligent Viewing",
+            service="otiv",
+        )
+        if not otiv_resource:
+            msg = f"OTDS resource -> '{self.settings.otiv.resource_name}' for Intelligent Viewing not available!"
+            raise WaitTimeoutError(msg)
 
         otiv_license = self.otds_object.add_license_to_resource(
             path_to_license_file=self.settings.otiv.license_file,
@@ -974,20 +1057,19 @@ class Customizer:
             return None
 
         # Workaround for VAT-4580 (24.2.0)
-        update_publisher = self.otds_object.update_user(
-            partition="Content Server Service Users",
-            user_id="iv-publisher",
-            attribute_name="oTType",
-            attribute_value="ServiceUser",
-        )
-        while update_publisher is None:
-            update_publisher = self.otds_object.update_user(
+        update_publisher = self.wait_for(
+            lambda: self.otds_object.update_user(
                 partition="Content Server Service Users",
                 user_id="iv-publisher",
                 attribute_name="oTType",
                 attribute_value="ServiceUser",
-            )
-            time.sleep(30)
+            ),
+            "OTDS user -> 'iv-publisher'",
+            service="otiv",
+        )
+        if not update_publisher:
+            msg = "Cannot update OTDS user -> 'iv-publisher' for Intelligent Viewing!"
+            raise WaitTimeoutError(msg)
 
         self.logger.info("OTDS user iv-publisher -> updating oTType=ServiceUser")
 
@@ -1031,7 +1113,14 @@ class Customizer:
         # wait until the OTPD pod is in ready state
         if self.k8s_object:
             self.logger.info("Waiting for PowerDocs to become ready...")
-            self.k8s_object.wait_pod_condition(self.settings.k8s.pod_otpd, "Ready")
+            if not self.k8s_object.wait_pod_condition(
+                self.settings.k8s.pod_otpd,
+                "Ready",
+                sleep_time=self.settings.wait_interval,
+                timeout=self.get_wait_timeout("otpd"),
+                budget=self.wait_budget,
+            ):
+                return None
 
         # We have a race condition here. Even if the pod is ready
         # it may not yet have fully initialized its database.
@@ -1094,16 +1183,13 @@ class Customizer:
 
         # Loop to wait for OTCS to create its OTDS resource
         # (we need it to update the AppWorks K8s Config Map):
-        otcs_resource = self.otds_object.get_resource(self.settings.otcs.resource_name)
-        while otcs_resource is None:
-            self.logger.warning(
-                "OTDS resource for Content Server with name -> '%s' does not exist yet. Waiting...",
-                self.settings.otcs.resource_name,
-            )
-            time.sleep(30)
-            otcs_resource = self.otds_object.get_resource(
-                self.settings.otcs.resource_name,
-            )
+        otcs_resource = self.wait_for(
+            lambda: self.otds_object.get_resource(self.settings.otcs.resource_name),
+            f"OTDS resource for Content Server with name -> '{self.settings.otcs.resource_name}'",
+            service="otawp",
+        )
+        if not otcs_resource:
+            return None
 
         otcs_resource_id = otcs_resource["resourceID"]
 
@@ -1212,21 +1298,13 @@ class Customizer:
         )
 
         # Loop to wait for OTCS to create its OTDS user partition:
-        otcs_partition = self.otds_object.get_partition(
-            name=self.settings.otcs.partition,
-            show_error=False,
+        otcs_partition = self.wait_for(
+            lambda: self.otds_object.get_partition(name=self.settings.otcs.partition, show_error=False),
+            f"OTDS user partition -> '{self.settings.otcs.partition}' for Content Server",
+            service="otawp",
         )
-        while otcs_partition is None:
-            self.logger.warning(
-                "OTDS user partition -> '%s' for Content Server does not exist yet. Waiting...",
-                self.settings.otcs.partition,
-            )
-
-            time.sleep(30)
-            otcs_partition = self.otds_object.get_partition(
-                name=self.settings.otcs.partition,
-                show_error=False,
-            )
+        if not otcs_partition:
+            return None
 
         # Add the OTDS user partition for OTCS to the AppWorks Platform Access Role in OTDS.
         # This will effectively sync all OTCS users with AppWorks Platform:
@@ -1279,15 +1357,15 @@ class Customizer:
         self,
         backend: OTCS,
         frontend: OTCS,
-        extra_wait_time: int = 60,
+        extra_wait_time: int = 10,
     ) -> None:
-        """Zero-downtime restart of OTCS using Kubernetes-native rolling restarts.
+        """Restart OTCS StatefulSets concurrently using Kubernetes-native rolling restarts.
 
         This implementation:
         - Uses StatefulSet rolling restarts
         - Relies on readiness probes for traffic control
-        - Ensures pods are removed from Services before restart
-        - Guarantees zero-downtime behavior
+        - Triggers all configured StatefulSets before waiting for any rollout
+        - Monitors rollouts and service endpoints together without worker threads
         - Avoids exec into containers
         - Avoids liveness probe manipulation
 
@@ -1297,7 +1375,7 @@ class Customizer:
             frontend (OTCS):
                 The OTCS frontend object (for re-authentication after restart).
             extra_wait_time (int, optional):
-                Additional wait time in seconds after restart for full stabilization. Defaults to 60.
+                Additional wait time in seconds after restart for full stabilization. Defaults to 10.
 
         """
 
@@ -1307,26 +1385,7 @@ class Customizer:
             )
             return
 
-        self.logger.info("Starting (zero-downtime) OTCS rolling restart...")
-
-        # ------------------------------------------------------------------
-        # Helper to restart a single StatefulSet (used by threads below)
-        # ------------------------------------------------------------------
-        def _restart_sts(
-            header: str,
-            sts_name: str,
-            error_msg: str,
-            endpoint_service_name: str | None = None,
-        ) -> None:
-            self.log_header(text=header, char="-")
-            kwargs: dict = {"sts_name": sts_name, "wait": True}
-            if endpoint_service_name is not None:
-                kwargs["endpoint_service_name"] = endpoint_service_name
-            success = self.k8s_object.restart_stateful_set(**kwargs)
-            if not success:
-                self.logger.error(error_msg, sts_name)
-
-        # end method _restart_sts definition
+        self.logger.info("Starting concurrent OTCS rolling restarts...")
 
         # Build the list of restart tasks that are actually configured
         restart_tasks: list[dict] = []
@@ -1360,34 +1419,62 @@ class Customizer:
                 }
             )
 
-        # Execute all restart tasks in parallel
-        threads: list[threading.Thread] = []
+        # Kubernetes runs the rollouts concurrently. Do not wait between patch requests.
+        targets = {}
+        endpoint_services = {}
+        failed = []
         for task in restart_tasks:
-            t = threading.Thread(target=_restart_sts, kwargs=task, name=task["sts_name"])
-            t.start()
-            threads.append(t)
+            name = task["sts_name"]
+            if name in targets:
+                continue
+            self.log_header(text=task["header"], char="-")
+            target = self.k8s_object.trigger_stateful_set_restart(name)
+            if target is None:
+                self.logger.error(task["error_msg"], name)
+                failed.append(name)
+                continue
+            targets[name] = target
+            if task.get("endpoint_service_name"):
+                endpoint_services[name] = task["endpoint_service_name"]
 
-        for t in threads:
-            t.join()
+        # Even if one trigger failed, finish monitoring rollouts already in progress.
+        completed = self.k8s_object.wait_stateful_set_restarts(
+            targets,
+            endpoint_services=endpoint_services,
+            timeout=self.get_wait_timeout("otcs"),
+            interval=self.settings.wait_interval,
+            budget=self.wait_budget,
+        )
+        if failed:
+            msg = f"Failed to trigger OTCS rolling restarts for: {', '.join(failed)}."
+            raise RuntimeError(msg)
+        if not completed:
+            msg = "OTCS rolling restarts did not complete within the configured timeout!"
+            raise WaitTimeoutError(msg)
 
         # ------------------------------------------------------------------
         # Re-authentication after restart
         # ------------------------------------------------------------------
         self.log_header(text="Re-authentication to OTCS", char="-")
         self.logger.info("Re-authenticating to OTCS frontend after rolling restart...")
-        otcs_cookie = frontend.authenticate(revalidate=True)
-        while otcs_cookie is None:
-            self.logger.info("Waiting 30 seconds for OTCS frontend to become ready...")
-            time.sleep(30)
-            otcs_cookie = frontend.authenticate(revalidate=True)
+        if not self.wait_for(
+            lambda: frontend.authenticate(revalidate=True),
+            "OTCS frontend re-authentication after restart",
+            service="otcs",
+        ):
+            msg = "OTCS frontend did not become ready again after restart!"
+            raise WaitTimeoutError(msg)
         self.logger.info("OTCS frontend is ready again.")
 
         self.logger.info("Re-authenticating to OTCS backend after rolling restart...")
-        otcs_cookie = backend.authenticate(revalidate=True)
-        while otcs_cookie is None:
-            self.logger.info("Waiting 30 seconds for OTCS backend to become ready...")
-            time.sleep(30)
-            otcs_cookie = backend.authenticate(revalidate=True)
+        if not self.wait_for(
+            lambda: backend.authenticate(revalidate=True),
+            "OTCS backend re-authentication after restart",
+            service="otcs",
+            pod_name=self.settings.k8s.svc_otcs_admin,
+        ):
+            msg = "OTCS backend did not become ready again after restart!"
+            raise WaitTimeoutError(msg)
         self.logger.info("OTCS backend is ready again.")
 
         # ------------------------------------------------------------------
@@ -1400,7 +1487,7 @@ class Customizer:
             )
             time.sleep(extra_wait_time)
 
-        self.logger.info("Zero-downtime OTCS rolling restart completed successfully.")
+        self.logger.info("Concurrent OTCS rolling restarts completed successfully.")
 
     # end method definition
 
@@ -1592,6 +1679,9 @@ class Customizer:
 
             # Configure required OTDS resources as AppWorks doesn't do this on its own:
             self.otawp_object = self.init_otawp()
+            if not self.otawp_object:
+                self.logger.error("Failed to initialize OTAWP - exiting...")
+                return False
         else:
             self.settings.placeholder_values["OTAWP_RESOURCE_ID"] = ""
 
@@ -1700,23 +1790,16 @@ class Customizer:
 
     # end method definition
 
-    @tracer.start_as_current_span("customization_run")
-    def customization_run(self) -> bool:
-        """Central method to initiate the customization."""
+    def process_payload_files(self) -> bool:
+        """Collect the payload files and process them one after the other.
+
+        Returns:
+            bool:
+                True = success. False = error.
+
+        """
 
         success = True
-
-        # Set Timer for duration calculation
-        self.customizer_start_time = datetime.now(UTC)
-
-        if not self.init_customizer():
-            self.logger.error("Initialization of customizer failed!")
-            return False
-
-        # Put Frontend in Maintenance mode to make sure nobody interferes
-        # during customization:
-        if self.settings.otcs.maintenance_mode:
-            self.set_maintenance_mode(enable=True)
 
         self.log_header("Collect payload files to process")
 
@@ -1793,6 +1876,7 @@ class Customizer:
                     otkd_object=self.otkd_object,
                     avts_object=self.avts_object,
                     settings=self.settings,
+                    wait_budget=self.wait_budget,
                     logger=self.logger,
                 )
                 # Load the payload file and initialize the payload sections:
@@ -1819,13 +1903,13 @@ class Customizer:
                 if self.settings.otcs.upload_config_files:
                     # Wait until OTCS is ready to accept uploads. Parallel running
                     # payload processing might be in the process of restarting OTCS:
-                    while not self.otcs_frontend_object.is_ready():
-                        self.logger.info(
-                            "OTCS -> '%s' is not ready. Cannot upload payload file -> '%s' to OTCS. Waiting 30 seconds and retry...",
-                            self.otcs_frontend_object.hostname(),
-                            os.path.basename(cust_payload),
-                        )
-                        time.sleep(30)
+                    if not self.wait_for(
+                        self.otcs_frontend_object.is_ready,
+                        f"OTCS -> '{self.otcs_frontend_object.hostname()}' (upload of payload file -> '{os.path.basename(cust_payload)}')",
+                        service="otcs",
+                    ):
+                        msg = f"OTCS -> '{self.otcs_frontend_object.hostname()}' is not ready. Cannot upload payload file!"
+                        raise WaitTimeoutError(msg)
 
                     self.log_header("Upload Payload file to OpenText Content Management")
                     response = self.otcs_frontend_object.get_node_from_nickname(
@@ -1899,8 +1983,39 @@ class Customizer:
                 )
         # end for cust_payload in cust_payload_list
 
+        return success
+
+    # end method definition
+
+    @tracer.start_as_current_span("customization_run")
+    def customization_run(self) -> bool:
+        """Central method to initiate the customization."""
+
+        # Set Timer for duration calculation
+        self.customizer_start_time = datetime.now(UTC)
+        self.wait_budget = (
+            WaitBudget(self.settings.wait_timeout_total) if self.settings.wait_timeout_total > 0 else None
+        )
+
+        if not self.init_customizer():
+            self.logger.error("Initialization of customizer failed!")
+            return False
+
+        # Put Frontend in Maintenance mode to make sure nobody interferes
+        # during customization:
         if self.settings.otcs.maintenance_mode:
-            self.set_maintenance_mode(enable=False)
+            self.set_maintenance_mode(enable=True)
+
+        try:
+            success = self.process_payload_files()
+        finally:
+            # Also leave the maintenance mode if the processing is aborted by an exception
+            # (e.g. a WaitTimeoutError) - otherwise users are stuck on the maintenance page:
+            if self.settings.otcs.maintenance_mode:
+                try:
+                    self.set_maintenance_mode(enable=False)
+                except Exception:
+                    self.logger.exception("Failed to disable the maintenance mode!")
 
         # Upload log file for later review to "Deployment" folder
         # in "Administration" folder in OTCS Enterprise volume:

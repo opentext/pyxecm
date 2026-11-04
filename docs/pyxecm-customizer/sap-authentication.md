@@ -13,21 +13,21 @@ Related docs: [SAP module reference](sap.md), [SAP APIs that must be activated](
 
 ## Terminology
 
-| Term                            | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Principal propagation           | A service calls a backend under the identity of the end user (the user's own SAP authorizations and change documents), not as a technical user.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `MYSAPSSO2`                     | SAP's logon ticket (cookie), issued by SAP after a user logged on.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| SAML 2.0 assertion              | A signed XML document in which an identity provider (IdP) states who a user is.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| SAML 2.0 Bearer Assertion grant | OAuth 2.0 flow (RFC 7522): a client posts a SAML assertion to the token endpoint and gets an access token for the user named in it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Transaction `SAML2`             | SAP's SAML 2.0 configuration: the SAP system's own *local provider* and the *trusted (identity) providers*, incl. how their users map to SAP users.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Transaction `SOAUTH2`           | SAP's OAuth 2.0 server configuration: OAuth clients, their grant types, trusted IdPs and scopes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Local provider                  | The SAML 2.0 identity of the SAP system itself, configured in SAP S/4HANA transaction `SAML2` by enabling SAML 2.0 ([step 2.1](#21-enable-saml-20-saml2-local-provider)). Its **local provider name** (e.g. `S4HCLNT100`) is the *audience* of pyxecm's assertions and must be set as `saml_audience` (`SAP__SAML_AUDIENCE`) in pyxecm. There is one local provider per SAP client, and it is required even if pyxecm is the only identity provider SAP trusts.                                                                                                                                              |
-| Trusted provider                | An entry in the *Trusted Providers* list of SAP S/4HANA transaction `SAML2` identifying an external identity provider SAP accepts assertions from - pyxecm registers itself here ([step 2.2](#22-add-pyxecm-as-trusted-provider-saml2)), using `saml_issuer` as its *entityID*/provider name.                                                                                                                                                                                                                                                                                                                |
-| OTDS ticket / OTDS access token | OTDS's session token (`*OTDSSSO*...`) / an RS256-signed JWT from OTDS's token endpoint (`/otdsws/oauth2/token`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| OAuth 2.0 client                | The application that requests access tokens from SAP's OAuth 2.0 server - here pyxecm. It is registered in SAP S/4HANA transaction `SOAUTH2` and authenticates with a client ID and a client secret ([step 2.5](#25-create-the-oauth-client-su01-soauth2)). Not to be confused with an *SAP client* (`sap-client`, e.g. `100`), the separate data area of an SAP system that all SAP-side settings belong to.                                                                                                                                                                                                |
-| System user                     | An SAP user of user type *System* (set in SAP S/4HANA transaction `SU01`) for machine-to-machine communication: it cannot log on interactively (no SAP GUI / Fiori logon) and its password does not expire. In SAP, every OAuth 2.0 client is backed by such a user: its user name is the **OAuth client ID** (`SAP__OAUTH_CLIENT_ID`, e.g. `PYXECM_OAUTH`), its password is the **OAuth client secret** (`SAP__OAUTH_CLIENT_SECRET`). It is not an end user and needs no business authorizations.                                                                                                           |
-| OAuth 2.0 scope                 | A named permission an access token carries - in SAP one scope per OData service, e.g. `ZAPI_MAINTENANCEORDER_0002`, created by enabling OAuth for the service ([step 2.4](#24-enable-oauth-per-service-iwfndmaint_service)). A token can only call the OData services whose scopes it was granted. SAP grants a scope only if it is assigned to the OAuth client (`SOAUTH2`) **and** the end user is authorized for it (authorization object `S_SCOPE`). pyxecm requests the scopes listed in `SAP__OAUTH_SCOPE`. Scopes limit what pyxecm can do with a token, on top of the end user's own authorizations. |
-| Transaction `PFCG`              | SAP's role maintenance: authorizations (e.g. `S_SERVICE` for OData services) are bundled in roles, and the roles are assigned to users. This is where the SAP administrator gives users the authorizations they need ([step 2.6](#26-authorize-the-end-users-pfcg)).                                                                                                                                                                                                                                                                                                                                         |
+| Term                            | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Principal propagation           | A service calls a backend under the identity of the end user (the user's own SAP authorizations and change documents), not as a technical user.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `MYSAPSSO2`                     | SAP's logon ticket (cookie), issued by SAP after a user logged on.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| SAML 2.0 assertion              | A signed XML document in which an identity provider (IdP) states who a user is.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| SAML 2.0 Bearer Assertion grant | OAuth 2.0 flow (RFC 7522): a client posts a SAML assertion to the token endpoint and gets an access token for the user named in it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Transaction `SAML2`             | SAP's SAML 2.0 configuration: the SAP system's own *local provider* and the *trusted (identity) providers*, incl. how their users map to SAP users.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Transaction `SOAUTH2`           | SAP's OAuth 2.0 server configuration: OAuth clients, their grant types, trusted IdPs and scopes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Local provider                  | The SAML 2.0 identity of the SAP system itself, configured in SAP S/4HANA transaction `SAML2` by enabling SAML 2.0 ([step 2.1](#21-enable-saml-20-saml2-local-provider)). Its **local provider name** (e.g. `S4HCLNT100`) is the *audience* of pyxecm's assertions and must be set as `saml_audience` (`SAP__SAML_AUDIENCE`) in pyxecm. There is one local provider per SAP client, and it is required even if pyxecm is the only identity provider SAP trusts.                                                                                                                                                                                                                                                                                    |
+| Trusted provider                | An entry in the *Trusted Providers* list of SAP S/4HANA transaction `SAML2` identifying an external identity provider SAP accepts assertions from - pyxecm registers itself here ([step 2.2](#22-add-pyxecm-as-trusted-provider-saml2)), using `saml_issuer` as its *entityID*/provider name.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| OTDS ticket / OTDS access token | OTDS's session token (`*OTDSSSO*...`) / an RS256-signed JWT from OTDS's token endpoint (`/otdsws/oauth2/token`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| OAuth 2.0 client                | The application that requests access tokens from SAP's OAuth 2.0 server - here pyxecm. It is registered in SAP S/4HANA transaction `SOAUTH2` and authenticates with a client ID and a client secret ([step 2.5](#25-create-the-oauth-client-su01-soauth2)). Not to be confused with an *SAP client* (`sap-client`, e.g. `100`), the separate data area of an SAP system that all SAP-side settings belong to.                                                                                                                                                                                                                                                                                                                                      |
+| System user                     | An SAP user of user type *System* (set in SAP S/4HANA transaction `SU01`) for machine-to-machine communication: it cannot log on interactively (no SAP GUI / Fiori logon) and its password does not expire. In SAP, every OAuth 2.0 client is backed by such a user: its user name is the **OAuth client ID** (`SAP__OAUTH_CLIENT_ID`, e.g. `PYXECM_OAUTH`), its password is the **OAuth client secret** (`SAP__OAUTH_CLIENT_SECRET`). It is not an end user and needs no business authorizations.                                                                                                                                                                                                                                                 |
+| OAuth 2.0 scope                 | A named permission an access token carries - in SAP one scope per OData service, e.g. `ZAPI_MAINTENANCEORDER_0002` (OData V2) or `OV4:API_PURCHASEORDER_2` (OData V4 service group), created by enabling OAuth for the service ([step 2.4](#24-enable-oauth-per-service-iwfndmaint_service)). A token can only call the OData services whose scopes it was granted. SAP grants a scope only if it is requested, assigned to the OAuth client (`SOAUTH2`) **and** the end user is authorized for it (authorization object `S_SCOPE`). By default, pyxecm requests the scopes of all services in `SAP_ODATA_SERVICES`; `SAP__OAUTH_SCOPE` overrides them. Scopes limit what pyxecm can do with a token, on top of the end user's own authorizations. |
+| Transaction `PFCG`              | SAP's role maintenance: authorizations (e.g. `S_SERVICE` for OData services) are bundled in roles, and the roles are assigned to users. This is where the SAP administrator gives users the authorizations they need ([step 2.6](#26-authorize-the-end-users-pfcg)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 Both must be configured in SAP S/4HANA transaction `SAML2` - they are two independent, separately-enabled things:
 the SAP system's **own** identity (*local provider*, [step 2.1](#21-enable-saml-20-saml2-local-provider)) and **pyxecm's** identity as
@@ -49,8 +49,9 @@ Everything that has to be done in S/4HANA, in this order. All of it is per SAP c
       [General activation steps](sap-apis.md#general-activation-steps-apply-to-every-odata-service)).
 - [ ] Check that the ICF nodes are active in SAP S/4HANA transaction `SICF` (`/sap/opu/odata/sap/<service>` for V2,
       `/sap/opu/odata4` for V4).
-- [ ] Authorizations (SAP S/4HANA transaction `PFCG`, role maintenance): `S_SERVICE` for the services plus the business
-      authorizations behind them. With principal propagation, every **end user** needs them
+- [ ] Authorizations (SAP S/4HANA transaction `PFCG`, role maintenance): `S_SERVICE` for the V2 services,
+      `S_START` for the V4 service groups (see [General activation steps](sap-apis.md#general-activation-steps-apply-to-every-odata-service)),
+      plus the business authorizations behind them. With principal propagation, every **end user** needs them
       in their own roles; with the [technical user](#fallback-technical-user), only that user.
 - [ ] Smoke test: `GET .../$metadata` of each service in SAP S/4HANA transaction `/IWFND/GW_CLIENT` returns HTTP 200.
 - [ ] Verify the actual status per service against your system with `SAP.check_odata_apis()`
@@ -60,7 +61,7 @@ Everything that has to be done in S/4HANA, in this order. All of it is per SAP c
       [troubleshooting](sap-apis.md#no-system-alias-found-for-service-iwfndcm_cos064-http-500)).
       `debug/debug_sap.py` does the same as part of its smoke test.
 
-### B. Principal propagation (SAML 2.0 + OAuth 2.0)
+### B. Principal propagation (SAML 2.0 and OAuth 2.0)
 
 Only needed if pyxecm (e.g. the Content Aviator SAP agents) calls SAP as the individual user.
 The step numbers refer to the [Setup](#setup) of [Direction 2](#direction-2-principal-propagation-into-sap)
@@ -79,16 +80,16 @@ below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP admin
 - [ ] Make sure the e-mail addresses are **unique** and end users **cannot change** their own
       address (`SU3`) - otherwise use an administrator-maintained alias (see
       [Security considerations](#security-considerations)).
-- [ ] `/IWFND/MAINT_SERVICE`: enable **OAuth** for every service of section A - this creates
-      the scope IDs for the OAuth client ([step 2.4](#24-enable-oauth-per-service-iwfndmaint_service)). For OData V4 service groups, follow
-      SAP's documentation of your release.
+- [ ] `/IWFND/MAINT_SERVICE`: enable **OAuth** for every V2 service of section A - this creates
+      the scope IDs for the OAuth client ([step 2.4](#24-enable-oauth-per-service-iwfndmaint_service)). OData V4 service groups
+      have the scope `OV4:<service group>` (e.g. `OV4:API_PURCHASEORDER_2`).
 - [ ] `SU01` + `SOAUTH2`: [system user](#terminology) (user type *System*) and **OAuth 2.0 client** with grant type *SAML 2.0
       Bearer Assertion*, pyxecm as *Trusted OAuth 2.0 IdP*, and only the needed scopes
       ([step 2.5](#25-create-the-oauth-client-su01-soauth2)).
 - [ ] `SOAUTH2`: access token lifetime of **at least 10 minutes** - the Content Aviator
       plugin reuses a token for up to 5 minutes (see [Operations](#operations)).
-- [ ] `PFCG`: the end users have `S_SERVICE`, `S_SCOPE` (OAuth client + scope IDs) and the
-      business authorizations ([step 2.6](#26-authorize-the-end-users-pfcg)).
+- [ ] `PFCG`: the end users have `S_SERVICE` (V2) / `S_START` (V4), `S_SCOPE` (OAuth client +
+      scope IDs) and the business authorizations ([step 2.6](#26-authorize-the-end-users-pfcg)).
 - [ ] Verify step by step with `SAP.check_oauth_token_endpoint()` (endpoint activated, no client needed
       yet) and then `SAP.check_principal_propagation()` (full round trip for a test user) - see
       [Testing the setup](#testing-the-setup).
@@ -103,7 +104,10 @@ below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP admin
 | NameID format (`SAML2`)                  | `SAP__SAML_NAMEID_FORMAT`                             |
 | OAuth client ID (`SOAUTH2`)              | `SAP__OAUTH_CLIENT_ID`                                |
 | Password of the OAuth client system user | `SAP__OAUTH_CLIENT_SECRET`                            |
-| Scope IDs                                | `SAP__OAUTH_SCOPE` (space-separated, **required**)    |
+| Scope IDs                                | `SAP__OAUTH_SCOPE` (space-separated, optional ²)      |
+
+² Only needed if the scope IDs of the SAP system differ from the defaults in `SAP_ODATA_SERVICES`
+(see [How SAP grants scopes](#how-sap-grants-scopes)).
 
 ### C. SSO from SAP into OTDS (optional)
 
@@ -240,25 +244,28 @@ section 2.1) and authenticates the SOAUTH2 client with HTTP basic authentication
 Principal propagation only works if these values are identical on both sides. SAP compares
 them as plain strings - apart from being unique and stable they carry no meaning.
 
-| #   | pyxecm side                                                               | SAP side                                                                                                               | Meaning                                                                | Chosen by                                                                                       |
-| --- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| 1   | `saml_issuer` = `entityID` of the metadata XML                            | Name of the trusted provider in SAP S/4HANA transaction `SAML2` (taken from the metadata)                              | pyxecm's SAML entity ID - **who issues** the assertion                 | You - e.g. `pyxecm-idp` or a URI; changing it later means registering the trust again           |
-| 2   | `saml_audience`                                                           | Local provider name in SAP S/4HANA transaction `SAML2`                                                                 | SAP's SAML entity ID - **who the assertion is for**                    | SAP administrator (see below)                                                                   |
-| 3   | `Recipient` = `base_url` + `/sap/bc/sec/oauth2/token?sap-client=<client>` | URL of the token endpoint as SAP receives the request - incl. `sap-client`                                             | The assertion is only valid at this endpoint                           | Given by the URL - pass `recipient` if SAP is reached via a reverse proxy                       |
-| 4   | Private key (`saml_idp_private_key`)                                      | Signing certificate of the trusted provider                                                                            | Proves that the assertion comes from pyxecm                            | You - pyxecm checks at startup that certificate and key belong together                         |
-| 5   | `nameid_format` and `user_id`                                             | *Identity Federation* of the trusted provider: allowed NameID format and its mapping                                   | Which SAP user the assertion stands for                                | Agreed with the SAP administrator; the value must exist on the SAP user (e.g. e-mail in `SU01`) |
-| 6   | `client_id` / `client_secret`                                             | OAuth client in SAP S/4HANA transaction `SOAUTH2` = [system user](#terminology) and its password                       | Authenticates pyxecm as the calling application (not the end user)     | SAP administrator                                                                               |
-| 7   | -                                                                         | *Trusted OAuth 2.0 IdP* of the OAuth client = the trusted provider of row 1                                            | Lets this OAuth client accept pyxecm's assertions                      | SAP administrator                                                                               |
-| 8   | `scope`, e.g. `API_MAINTENANCEORDER_0002`                                 | Scopes of the OAuth client - created by enabling OAuth for a service in SAP S/4HANA transaction `/IWFND/MAINT_SERVICE` | Which OData services the token may call (service name + `_` + version) | SAP naming, assigned by the SAP administrator                                                   |
-| 9   | `client` (`sap-client` of the token request)                              | The SAP client in which rows 1-8 are configured                                                                        | All of the above exists per SAP client                                 | Given                                                                                           |
+| #   | pyxecm side                                                               | SAP side                                                                                                               | Meaning                                                            | Chosen by                                                                                       |
+| --- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| 1   | `saml_issuer` = `entityID` of the metadata XML                            | Name of the trusted provider in SAP S/4HANA transaction `SAML2` (taken from the metadata)                              | pyxecm's SAML entity ID - **who issues** the assertion             | You - e.g. `pyxecm-idp` or a URI; changing it later means registering the trust again           |
+| 2   | `saml_audience`                                                           | Local provider name in SAP S/4HANA transaction `SAML2`                                                                 | SAP's SAML entity ID - **who the assertion is for**                | SAP administrator (see below)                                                                   |
+| 3   | `Recipient` = `base_url` + `/sap/bc/sec/oauth2/token?sap-client=<client>` | URL of the token endpoint as SAP receives the request - incl. `sap-client`                                             | The assertion is only valid at this endpoint                       | Given by the URL - `recipient` / `SAP__SAML_RECIPIENT` behind a reverse proxy                   |
+| 4   | Private key (`saml_idp_private_key`)                                      | Signing certificate of the trusted provider                                                                            | Proves that the assertion comes from pyxecm                        | You - pyxecm checks at startup that certificate and key belong together                         |
+| 5   | `nameid_format` and `user_id`                                             | *Identity Federation* of the trusted provider: allowed NameID format and its mapping                                   | Which SAP user the assertion stands for                            | Agreed with the SAP administrator; the value must exist on the SAP user (e.g. e-mail in `SU01`) |
+| 6   | `client_id` / `client_secret`                                             | OAuth client in SAP S/4HANA transaction `SOAUTH2` = [system user](#terminology) and its password                       | Authenticates pyxecm as the calling application (not the end user) | SAP administrator                                                                               |
+| 7   | -                                                                         | *Trusted OAuth 2.0 IdP* of the OAuth client = the trusted provider of row 1                                            | Lets this OAuth client accept pyxecm's assertions                  | SAP administrator                                                                               |
+| 8   | `scope`, e.g. `ZAPI_MAINTENANCEORDER_0002`                                | Scopes of the OAuth client - created by enabling OAuth for a service in SAP S/4HANA transaction `/IWFND/MAINT_SERVICE` | Which OData services the token may call                            | SAP naming, assigned by the SAP administrator                                                   |
+| 9   | `client` (`sap-client` of the token request)                              | The SAP client in which rows 1-8 are configured                                                                        | All of the above exists per SAP client                             | Given                                                                                           |
 
 Rows 1 and 2 mirror each other: the **Issuer** names pyxecm, the **Audience** names SAP.
 
-Row 8's scope ID is generated by SAP, not chosen freely - do not assume it is literally
-`<service>_<version>`. Depending on the system, SAP may generate it in a customer
-namespace with a `Z` or `Y` prefix (e.g. `ZAPI_MAINTENANCEORDER_0002` instead of
-`API_MAINTENANCEORDER_0002`). Always take the exact scope ID from the Scope Assignment
-list of the OAuth client (step 2.4/2.5) or from SAP S/4HANA transaction `/IWFND/MAINT_SERVICE`, never guess it.
+Row 8's scope ID is generated by SAP, not chosen freely. For OData V2 services it is
+`<service>_<version>`, which SAP may generate in a customer namespace with a `Z` or `Y`
+prefix (e.g. `ZAPI_MAINTENANCEORDER_0002` instead of `API_MAINTENANCEORDER_0002`). OData V4
+service groups have the scope `OV4:<service group>` (e.g. `OV4:API_PURCHASEORDER_2`).
+`SAP_ODATA_SERVICES` in `pyxecm_customizer.sap` holds a default scope ID per service
+(`Z` prefix for V2) - compare it with the Scope Assignment list of the OAuth client
+(step 2.4/2.5) or SAP S/4HANA transaction `/IWFND/MAINT_SERVICE`. If your system uses other
+IDs, set `SAP__OAUTH_SCOPE` to the exact IDs instead of guessing them.
 
 **Where SAP's local provider name comes from:** the SAP administrator chooses it once, when
 enabling SAML 2.0 for an SAP client in SAP S/4HANA transaction `SAML2`. The wizard proposes a name derived
@@ -292,9 +299,19 @@ chmod 600 saml-idp.key
   `SAML2` can hold the old and the new certificate at the same time, so the switch has no
   downtime.
 
-Some SAP releases accept a trusted provider only as a metadata file. This creates one from
-the certificate (`SingleSignOnService` is required by the SAML metadata schema but never
-called, as the bearer grant has no browser redirect):
+Some SAP releases accept a trusted provider only as a metadata file. The following code
+creates one from the certificate. `SingleSignOnService` is required by the SAML metadata
+schema; pyxecm has no such endpoint, as the bearer grant needs no browser redirect.
+
+> **IMPORTANT - this metadata can lock users out of the Fiori Launchpad**
+>
+> The `Location` below is a placeholder that no browser can reach. If SAP uses pyxecm as
+> a **SAML 2.0 identity provider for browser logon**, it sends every SAML-enabled logon
+> (e.g. the Fiori Launchpad) to this URL, and users can no longer log on.
+>
+> - Upload the file **only** under *OAuth 2.0 Identity Providers* in `SAML2`, never under *SAML 2.0 Identity Providers* (see [step 2.2](#22-add-pyxecm-as-trusted-provider-saml2)).
+> - Never make pyxecm the default identity provider of the SAP client.
+> - Do this in a test client first, and check that the Fiori Launchpad still opens.
 
 ```python
 from pathlib import Path
@@ -303,6 +320,8 @@ from lxml import etree
 
 MD = "urn:oasis:names:tc:SAML:2.0:metadata"
 DS = "http://www.w3.org/2000/09/xmldsig#"
+# Required by the SAML metadata schema but must never be called - see the warning above:
+UNUSED_SSO_LOCATION = "https://pyxecm.example.com/saml/sso-not-used"
 
 certificate_pem = Path("saml-idp.crt").read_text()
 certificate_body = "".join(line for line in certificate_pem.splitlines() if "CERTIFICATE" not in line)
@@ -319,7 +338,7 @@ etree.SubElement(
     idp,
     f"{{{MD}}}SingleSignOnService",
     Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
-    Location="https://pyxecm.example.com/saml/sso-not-used",
+    Location=UNUSED_SSO_LOCATION,
 )
 
 Path("pyxecm-idp-metadata.xml").write_bytes(
@@ -349,9 +368,21 @@ curl -s "https://s4.example.com:44300/sap/saml2/sp/metadata?sap-client=100" | gr
 
 ##### 2.2 Add pyxecm as trusted provider (`SAML2`)
 
-In transaction `SAML2`: *Trusted Providers* -> *Add* -> upload
-`pyxecm-idp-metadata.xml` (or add the provider manually with `saml-idp.crt` as
-signing certificate and `pyxecm-idp` as provider name). Make it available for OAuth 2.0.
+In transaction `SAML2`: *Trusted Providers* -> *Show* **OAuth 2.0 Identity Providers** ->
+*Add* -> upload `pyxecm-idp-metadata.xml` (or add the provider manually with
+`saml-idp.crt` as signing certificate and `pyxecm-idp` as provider name).
+
+> **IMPORTANT - OAuth 2.0 identity provider only**
+>
+> Do **not** add pyxecm under *SAML 2.0 Identity Providers* and do not enable it for
+> browser single sign-on. SAP would then redirect browser logons (e.g. the Fiori
+> Launchpad) to the unreachable `SingleSignOnService` URL of the metadata.
+>
+> **If users can no longer log on:** log on with a URL that bypasses SAML, e.g.
+> SAP GUI or `.../sap/bc/gui/sap/its/webgui?saml2=disabled`. Then, in `SAML2`, remove pyxecm from
+> *SAML 2.0 Identity Providers* (or disable it there). Add it again under
+> *OAuth 2.0 Identity Providers*, and check that the previous identity provider is
+> still the default.
 
 ##### 2.3 Map users (`SAML2` identity federation)
 
@@ -384,8 +415,10 @@ pyxecm calls. This creates the scope IDs that the OAuth client gets in
 [step 2.5](#25-create-the-oauth-client-su01-soauth2) - typically `<service>_<version>`
 (e.g. `API_MAINTENANCEORDER_0002`), but SAP may generate it with a customer namespace prefix
 instead (e.g. `ZAPI_MAINTENANCEORDER_0002`) - note the actual IDs shown by SAP rather than
-assuming the pattern. A service without OAuth has no scope: calls to it with a user's token
-fail with `scope_check_impossible` (see [Testing the setup](#testing-the-setup)).
+assuming the pattern. OData V4 service groups are not listed in `/IWFND/MAINT_SERVICE`; their
+scope is `OV4:<service group>` (e.g. `OV4:API_PURCHASEORDER_2`). A service without OAuth has
+no scope: calls to it with a user's token fail with `scope_check_impossible` (see
+[Testing the setup](#testing-the-setup)).
 
 ##### 2.5 Create the OAuth client (`SU01`, `SOAUTH2`)
 
@@ -422,7 +455,7 @@ slightly between SAP releases/Fiori apps; it has 5 steps):
    - *Description* = any free text identifying the consuming application, e.g.
      "Content Aviator SAP Agent".
    - *Token Lifetime* = the access token lifetime in seconds (SOAUTH2 setting mentioned
-     in the [checklist](#b-principal-propagation-saml-20--oauth-20) - at least 600s/10
+     in the [checklist](#b-principal-propagation-saml-20-and-oauth-20) - at least 600s/10
      minutes; the default of 3600s works well).
 2. **Client Authentication** (see the previous explanation above): enable *HTTP Basic*
    (may be labelled *Client User ID and Password* on some releases) and *Check Parameter
@@ -452,8 +485,9 @@ slightly between SAP releases/Fiori apps; it has 5 steps):
 ##### 2.6 Authorize the end users (`PFCG`)
 
 In SAP S/4HANA transaction `PFCG` (role maintenance, see [Terminology](#terminology)), give the propagated
-users the usual authorizations for the services (`S_SERVICE`) and the business
-transactions behind them - and authorization object `S_SCOPE` with the OAuth client ID
+users the usual authorizations for the services (`S_SERVICE` for V2 services, `S_START` for
+V4 service groups - see [General activation steps](sap-apis.md#general-activation-steps-apply-to-every-odata-service))
+and the business transactions behind them - and authorization object `S_SCOPE` with the OAuth client ID
 (`OA2_CLIENT`, e.g. `PYXECM_OAUTH`) and the scope IDs (`OA2_SCOPE`). A user gets only the
 requested scopes that are in their `S_SCOPE` (see [How SAP grants scopes](#how-sap-grants-scopes)):
 without any `S_SCOPE` for the OAuth client the token request fails with `invalid_scope`
@@ -464,7 +498,7 @@ another, this is the typical cause (check with `SU53`).
 
 When all steps are done, hand back to the pyxecm team: the local provider name (`saml_audience`), the agreed NameID
 format, the OAuth client ID, the OAuth client secret (over a secure channel, see the
-[checklist](#b-principal-propagation-saml-20--oauth-20)), and the scope IDs.
+[checklist](#b-principal-propagation-saml-20-and-oauth-20)), and the scope IDs.
 
 #### 3. Configure pyxecm
 
@@ -492,31 +526,36 @@ SAP__SAML_AUDIENCE=S4HCLNT100
 SAP__SAML_NAMEID_FORMAT=urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress  # default
 SAP__OAUTH_CLIENT_ID=PYXECM_OAUTH                    # SU01 system user of the SOAUTH2 client
 SAP__OAUTH_CLIENT_SECRET=...                         # its password - from a secret store
-SAP__OAUTH_SCOPE="API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"
+# SAP__OAUTH_SCOPE="ZAPI_MAINTENANCEORDER_0002 OV4:API_PURCHASEORDER_2"  # optional, see below
+# SAP__SAML_RECIPIENT=https://s4.internal.example.com:44300/sap/bc/sec/oauth2/token?sap-client=100  # only behind a reverse proxy
+# SAP__CA_BUNDLE=/run/config/sap-ca.pem             # only if SAP's certificate is issued by an internal CA
 ```
 
-`SAP__OAUTH_SCOPE` is **required** for principal propagation: S/4HANA answers a token
-request without `scope` with `invalid_scope` - it does not fall back to the scopes assigned
-to the OAuth client. List one scope per OData service the token is used for; calls to a
-service whose scope is not granted fail (see [How SAP grants scopes](#how-sap-grants-scopes)).
+S/4HANA answers a token request without `scope` with `invalid_scope` - it does not fall back
+to the scopes assigned to the OAuth client. So the token request must list one scope per OData
+service the token is used for. Leave `SAP__OAUTH_SCOPE` empty to request the scopes of all
+services in `SAP_ODATA_SERVICES` (`get_oauth_scope()`, as the Content Aviator plugin does) and
+set it only if the scope IDs of your SAP system differ from these defaults. Calls to a service
+whose scope is not granted fail (see [How SAP grants scopes](#how-sap-grants-scopes)).
 
 ##### How SAP grants scopes
 
 SAP grants the **intersection** of three scope sets - the token carries only the scopes that
 are in all of them:
 
-1. the scopes **requested** by pyxecm (`scope` parameter, `SAP__OAUTH_SCOPE`),
+1. the scopes **requested** by pyxecm (`scope` parameter: `SAP__OAUTH_SCOPE` or the defaults of
+   `SAP_ODATA_SERVICES`),
 2. the scopes **assigned to the OAuth client** (`SOAUTH2`, step 2.5), and
 3. the scopes **the SAP user is authorized for** (`S_SCOPE` in the user's roles, step 2.6).
 
 Example - pyxecm requests `API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001 API_SALES_ORDER_SRV_0001`,
 all three are assigned to the OAuth client:
 
-| The user's `S_SCOPE` covers                           | Result                                                                        |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------- |
-| All three scopes                                      | Token with all three scopes                                                   |
-| `API_SALES_ORDER_SRV_0001` only                       | Token with `API_SALES_ORDER_SRV_0001` - the other two are dropped silently    |
-| None of them (or no `S_SCOPE` for the OAuth client)   | No token - `invalid_scope`                                                    |
+| The user's `S_SCOPE` covers                         | Result                                                                     |
+| --------------------------------------------------- | -------------------------------------------------------------------------- |
+| All three scopes                                    | Token with all three scopes                                                |
+| `API_SALES_ORDER_SRV_0001` only                     | Token with `API_SALES_ORDER_SRV_0001` - the other two are dropped silently |
+| None of them (or no `S_SCOPE` for the OAuth client) | No token - `invalid_scope`                                                 |
 
 The same applies to requested scopes that are not assigned to the OAuth client or don't
 exist at all: they are dropped silently as long as at least one requested scope is granted.
@@ -530,16 +569,19 @@ What this means:
   with fewer scopes, and only calls to the services whose scopes are missing fail later -
   with HTTP `403` (`insufficient_scope`, see [Testing the setup](#testing-the-setup)).
 - **One scope list fits all users.** Request the scopes of all services pyxecm may call
-  (e.g. one `SAP__OAUTH_SCOPE` for all agents of the Content Aviator plugin); each user gets
+  (e.g. `get_oauth_scope()` for all agents of the Content Aviator plugin); each user gets
   the subset their roles allow - e.g. a sales user only the sales scopes. There is no need
   to request user- or role-specific scopes.
 - **Compare the granted scopes to find missing ones.** The token response lists the granted
   scopes (`scope`, space-separated). The difference to the requested scopes is exactly what
   the SOAUTH2 client or the user's `S_SCOPE` lacks - one token request per user is enough
-  to check a user's setup.
+  to check a user's setup. An SAP object created with `BearerAuth(token, scope=...)` returns
+  them as `granted_scopes`, so an application can skip calls to services the user has no
+  scope for (see [Usage](#usage)).
 - **A granted scope is not the whole authorization.** The user still needs `S_SERVICE` for
-  the service (OData V4: the service group) and the business authorizations (e.g. sales
-  organization, plant). Without `S_SERVICE` the call fails with HTTP `403` despite the scope.
+  the service (OData V4: `S_START` for the service group) and the business authorizations
+  (e.g. sales organization, plant). Without them the call fails with HTTP `403` despite the
+  scope - missing business authorizations for a document often show as HTTP `404`.
 
 Or directly (requires the `saml` extra: `pip install "pyxecm[saml]"`):
 
@@ -575,14 +617,14 @@ user's token. A user needs an SAP object of their own because SAP binds its sess
 and CSRF tokens to the user - a shared session could run requests as the wrong user.
 
 ```python
-from pyxecm_customizer.sap import SAP, BearerAuth
+from pyxecm_customizer.sap import SAP, BearerAuth, get_oauth_scope
 
 token = identity_provider.get_oauth_access_token_for_user(
     user_id="jane.smith@example.com",  # from the verified user session - never from request input
     nameid_format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
     client_id="PYXECM_OAUTH",
     client_secret="...",  # from a secret store
-    scope="API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001",
+    scope=get_oauth_scope(),  # all services in SAP_ODATA_SERVICES - SAP grants the allowed subset
 )
 if token is None:
     raise RuntimeError(identity_provider.last_error)
@@ -593,14 +635,18 @@ user_sap = SAP(
     system_id="S4H",
     client="100",
     base_url="https://s4.example.com:44300",
-    auth=BearerAuth(token["access_token"]),
+    auth=BearerAuth(token["access_token"], scope=token.get("scope")),
 )
-orders = user_sap.get_maintenance_orders()
+if get_oauth_scope(["API_MAINTENANCEORDER"]) in (user_sap.granted_scopes or set()):
+    orders = user_sap.get_maintenance_orders()
 ```
 
 `get_oauth_access_token_for_user()` is `get_saml_assertion()` followed by
 `get_oauth_access_token()`; the result is SAP's token response (`access_token`,
-`token_type`, `expires_in`, `scope`).
+`token_type`, `expires_in`, `scope`). Passing the granted `scope` to `BearerAuth` makes it
+available as `SAP.granted_scopes` (`None` for basic authentication or unknown scopes) - e.g. to
+leave out optional calls, such as reading the name of a work center, for users without the
+scope of that service instead of failing with HTTP `403`.
 
 - **Where the user ID comes from is the security boundary of this design.** Take it from a
   session the application has validated - e.g. the e-mail address of the user's OTCS ticket
@@ -617,9 +663,11 @@ orders = user_sap.get_maintenance_orders()
 
 **Example - Content Aviator plugin:** `get_sap_object_from_user()` of the plugin implements
 exactly this. It creates the identity provider once from the `SAP__SAML_*` settings, gets a
-token for the e-mail address of the user in the tool call context, and caches the user's SAP
-object for 5 minutes (well below the token lifetime). Users without an e-mail address in
-Content Server get an error instead of a fallback to another identity.
+token for the user in the tool call context - the NameID is the user's e-mail address or login,
+depending on `SAP__SAML_NAMEID_FORMAT` - with the scopes of `SAP__OAUTH_SCOPE` or, if empty, of
+all services in `SAP_ODATA_SERVICES`, and caches the user's SAP object for 5 minutes (well below
+the token lifetime). Users without the needed attribute (e.g. no e-mail address in Content
+Server) get an error instead of a fallback to another identity.
 
 ### Testing the setup
 
@@ -636,6 +684,8 @@ them in order, as a later step only makes sense once the earlier ones pass:
 | `SAP.check_principal_propagation()` | Section B, end-to-end: a SAML assertion is minted and actually exchanged for an access token for a real SAP user    | `saml_idp_private_key`/`saml_issuer`/`saml_audience` (identity provider) + a working OAuth client + SAML2 trust |
 
 ```python
+from pathlib import Path
+
 from pyxecm_customizer.sap import SAP
 
 # 1. OData layer (section A) - technical user, independent of principal propagation:
@@ -654,8 +704,8 @@ identity_provider = SAP(
     password="...",
     system_id="S4H",
     base_url="https://s4.example.com:44300",
-    saml_idp_private_key=open("saml-idp.key").read(),
-    saml_idp_certificate=open("saml-idp.crt").read(),
+    saml_idp_private_key=Path("saml-idp.key").read_text(),
+    saml_idp_certificate=Path("saml-idp.crt").read_text(),
     saml_issuer="pyxecm-idp",
     saml_audience="S4HCLNT100",
 )
@@ -672,7 +722,7 @@ print("principal propagation ->", "OK" if status.ok else "{} - {}".format(status
 Combine the three into a small health report - e.g. for a startup check or a support script:
 
 ```python
-from pyxecm_customizer.sap import SAML_NAMEID_FORMAT_EMAIL, SAP
+from pyxecm_customizer.sap import SAML_NAMEID_FORMAT_EMAIL, SAP, get_oauth_scope
 
 
 def sap_health_report(sap: SAP, test_user: str | None = None, client_id: str = "", client_secret: str = "") -> bool:
@@ -687,6 +737,7 @@ def sap_health_report(sap: SAP, test_user: str | None = None, client_id: str = "
             client_id=client_id,
             client_secret=client_secret,
             nameid_format=SAML_NAMEID_FORMAT_EMAIL,  # as configured in SAML2 (identity federation)
+            scope=get_oauth_scope(),  # without scope, SAP answers invalid_scope
         ).ok
         if test_user
         else None
@@ -720,17 +771,23 @@ a user can actually call the OData services with it, run `check_odata_apis()` wi
 token (section A + B combined, read-only):
 
 ```python
-from pyxecm_customizer.sap import SAP, BearerAuth
+from pyxecm_customizer.sap import SAP, BearerAuth, get_oauth_scope
 
 token = identity_provider.get_oauth_access_token_for_user(
     user_id="jane.smith@example.com",
     nameid_format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
     client_id="PYXECM_OAUTH",
     client_secret="...",
-    scope="API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001",
+    scope=get_oauth_scope(),  # all services that check_odata_apis() checks
 )
-user_sap = SAP(username="", password="", system_id="S4H", client="100",
-               base_url="https://s4.example.com:44300", auth=BearerAuth(token["access_token"]))
+user_sap = SAP(
+    username="",
+    password="",
+    system_id="S4H",
+    client="100",
+    base_url="https://s4.example.com:44300",
+    auth=BearerAuth(token["access_token"], scope=token.get("scope")),
+)
 for name, status in user_sap.check_odata_apis().items():
     print(name, "->", "OK" if status.active else "{} - {}".format(status.message, status.hint))
 ```
@@ -764,18 +821,21 @@ cause in the `WWW-Authenticate` response header. `check_odata_apis()` evaluates 
 
 ### Verified behavior
 
-Tested against an OTDS instance and an S/4HANA 2023 test system (SAP_BASIS 7.58), October 2026:
+Tested against an OTDS instance and an S/4HANA 2023 test system (SAP_BASIS 7.58):
 
-| Topic                                      | Result                                                                                                                                      |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assertion format                           | Valid against the OASIS SAML 2.0 assertion schema; signature verifies, a changed NameID or a foreign certificate fails verification.        |
-| SAP token endpoint                         | Active. Without a registered OAuth client it answers `401 invalid_client` (the client is checked before the assertion).                     |
-| SAP SAML 2.0 / OAuth support               | SAML 2.0 Bearer grant present (`CL_SAML20_BEARER_INBOUND`); no inbound JWT Bearer grant. SAML 2.0 was not yet enabled in the tested client. |
-| OTDS as SAML IdP                           | Not possible: SAML metadata has only an `SPSSODescriptor`; token exchange rejects `requested_token_type` `saml2`, `saml1` and `jwt`.        |
-| OTDS JWT sent to SAP OData                 | `401`, SAP offers only `Basic` in `WWW-Authenticate`.                                                                                       |
-| OTDS token exchange (`impersonate_user()`) | Works with a confidential OAuth client (`client_credentials`); a public client gets `invalid_request` / `wrong_client_type`.                |
-| OTDS token claims                          | `uid` = `login@partition`, `sub` = the user's GUID, `iss` = `{OTDS_URL}/otdsws`, RS256 (`kid` from the JWKS).                               |
-| Impersonation list of an OTDS client       | Restricts the **resources** the tokens can be used with - not which users can be impersonated.                                              |
+| Topic                                      | Result                                                                                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Assertion format                           | Valid against the OASIS SAML 2.0 assertion schema; signature verifies, a changed NameID or a foreign certificate fails verification.         |
+| SAP token endpoint                         | Active. Without a registered OAuth client it answers `401 invalid_client` (the client is checked before the assertion).                      |
+| SAP SAML 2.0 / OAuth support               | SAML 2.0 Bearer grant present (`CL_SAML20_BEARER_INBOUND`); no inbound JWT Bearer grant.                                                     |
+| Principal propagation end to end           | pyxecm's assertions are exchanged for access tokens of the mapped SAP users; OData calls run with these users' authorizations.               |
+| Granted scopes                             | Intersection of requested, OAuth client and `S_SCOPE` scopes; unknown or missing scopes are dropped silently, `invalid_scope` only if empty. |
+| OData V4 authorization                     | Service groups need `S_START` (`R3TR G4BA`); with `S_SERVICE` only, SAP answers `403` (`/IWBEP/CM_V4_COS/011`).                              |
+| OTDS as SAML IdP                           | Not possible: SAML metadata has only an `SPSSODescriptor`; token exchange rejects `requested_token_type` `saml2`, `saml1` and `jwt`.         |
+| OTDS JWT sent to SAP OData                 | `401`, SAP offers only `Basic` in `WWW-Authenticate`.                                                                                        |
+| OTDS token exchange (`impersonate_user()`) | Works with a confidential OAuth client (`client_credentials`); a public client gets `invalid_request` / `wrong_client_type`.                 |
+| OTDS token claims                          | `uid` = `login@partition`, `sub` = the user's GUID, `iss` = `{OTDS_URL}/otdsws`, RS256 (`kid` from the JWKS).                                |
+| Impersonation list of an OTDS client       | Restricts the **resources** the tokens can be used with - not which users can be impersonated.                                               |
 
 ### Alternatives
 
@@ -816,6 +876,10 @@ user's authorizations and records it as the author of all changes.
   address (`SU3`) and `SU01` does not enforce unique addresses. So make the attribute
   read-only for users on both sides (e.g. synchronized from the corporate directory) and
   unique - or map a dedicated, administrator-maintained attribute (SAP alias) instead.
+- **Keep TLS verification on**: the token requests carry the assertions and the OAuth client
+  secret. If the certificate of the SAP system is issued by an internal CA, configure its CA
+  certificates with `SAP__CA_BUNDLE` instead of disabling `SAP__VERIFY_SSL`. Unlike the
+  environment variable `REQUESTS_CA_BUNDLE`, it only applies to the SAP system.
 - **Short lifetimes**: assertions are valid for 120 seconds by default (at most 300). SAP
   access tokens should not be longer-lived than needed (SOAUTH2 client settings).
 - **Audit**: pyxecm logs every minted assertion with its ID, user, audience and expiry; SAP
@@ -835,7 +899,7 @@ user's authorizations and records it as the author of all changes.
 | SAP error             | Typical cause                                                                                                                                                                                                                                                                                                                                                  |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `invalid_client`      | Wrong OAuth client ID or secret, client user locked, or the client does not exist in this SAP client (`sap-client`).                                                                                                                                                                                                                                           |
-| `invalid_grant`       | The assertion was rejected: unknown issuer or certificate (`SAML2` trusted provider), wrong audience (must be the local provider name), expired (clock difference > 60 s), wrong recipient (reverse proxy - pass `recipient`), or no SAP user found for the NameID.                                                                                            |
+| `invalid_grant`       | The assertion was rejected: unknown issuer or certificate (`SAML2` trusted provider), wrong audience (must be the local provider name), expired (clock difference > 60 s), wrong recipient (reverse proxy - set `SAP__SAML_RECIPIENT`), or no SAP user found for the NameID.                                                                                   |
 | `unauthorized_client` | The SAML 2.0 Bearer grant is not enabled for the OAuth client, or pyxecm's provider is not its trusted OAuth 2.0 IdP.                                                                                                                                                                                                                                          |
 | `invalid_scope`       | **None** of the requested scopes can be granted: the user has no `S_SCOPE` for the OAuth client, none of the scopes is assigned to the OAuth client, OAuth is not enabled for the services (`/IWFND/MAINT_SERVICE`), or no `scope` was sent. Scopes that are only partly missing don't cause this error - see [How SAP grants scopes](#how-sap-grants-scopes). |
 

@@ -1123,9 +1123,7 @@ class OTDS:
 
         otds_ticket = "NotSet"
 
-        self.logger.debug(
-            "Requesting OTDS ticket from -> %s using grant type -> '%s'...", self.credential_url(), grant_type
-        )
+        self.logger.debug("Requesting OTDS ticket using grant type -> '%s'...", grant_type)
 
         response = None
 
@@ -1157,6 +1155,9 @@ class OTDS:
             else:
                 self.logger.error("Unsupported grant type -> '%s' - exit", grant_type, report=True)
                 return None
+
+            self.logger.debug("Requesting OTDS ticket from -> %s using grant type -> '%s'...", request_url, grant_type)
+
             response = requests.post(
                 url=request_url,
                 headers=headers,
@@ -1167,7 +1168,7 @@ class OTDS:
         except requests.exceptions.RequestException as exception:
             self.logger.warning(
                 "Unable to connect to OTDS authentication endpoint -> %s%s. OTDS service may not be ready yet.",
-                self.credential_url(),
+                request_url,
                 "; error -> {}".format(str(exception)) if str(exception) else "",
                 report=True,
             )

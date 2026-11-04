@@ -72,6 +72,12 @@ class CustomizerSettingsOTDS(BaseModel):
 
     bind_password: SecretStr = Field(default=None, description="Password for the OTDS bind user to LDAP")
 
+    wait_timeout: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max seconds to wait for OTDS to become ready. Overrides the global wait_timeout. 0 = wait forever.",
+    )
+
     @model_validator(mode="after")
     def fallback(self) -> Self:
         """Fallback implementation to read the URL from the environment."""
@@ -147,6 +153,12 @@ class CustomizerSettingsOTCS(BaseModel):
     upload_status_files: bool = Field(default=True, description="Upload the status files of the payload to OTCS.")
     upload_log_file: bool = Field(default=True, description="Upload the log file of the payload to OTCS.")
 
+    wait_timeout: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max seconds to wait for OTCS to become ready. Overrides the global wait_timeout. 0 = wait forever.",
+    )
+
     @model_validator(mode="after")
     def fallback(self) -> Self:
         """Fallback implementation to read the URL from the environment."""
@@ -200,6 +212,12 @@ class CustomizerSettingsOTAC(BaseModel):
 
     known_server: str = Field(default="", description="Known OTAC servers to add to OTAC")
 
+    wait_timeout: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max seconds to wait for OTAC to become ready. Overrides the global wait_timeout. 0 = wait forever.",
+    )
+
     @model_validator(mode="after")
     def fallback(self) -> Self:
         """Fallback implementation to read the URL from the environment."""
@@ -238,6 +256,12 @@ class CustomizerSettingsOTPD(BaseModel):
     db_importfile: str = Field(default="", description="Path to the OTPD import file")
     tenant: str = Field(default="Successfactors")
 
+    wait_timeout: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max seconds to wait for OTPD to become ready. Overrides the global wait_timeout. 0 = wait forever.",
+    )
+
     @model_validator(mode="after")
     def fallback(self) -> Self:
         """Fallback implementation to read the URL from the environment."""
@@ -264,6 +288,12 @@ class CustomizerSettingsOTIV(BaseModel):
         description="Description of the product for the license.",
     )
     resource_name: str = Field(default="iv", description="Name of the resource for OTIV")
+
+    wait_timeout: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max seconds to wait for OTIV to become ready. Overrides the global wait_timeout. 0 = wait forever.",
+    )
 
 
 class CustomizerSettingsOTMM(BaseModel):
@@ -327,6 +357,12 @@ class CustomizerSettingsOTAWP(BaseModel):
     public_url: str = Field("", description="Public URL address of the OTAWP service")
     port: int = int(os.environ.get("OTAWP_SERVICE_PORT", "8080"))
     protocol: str = Field(default="http", description="Protocol for the OTAWP service.")
+
+    wait_timeout: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max seconds to wait for OTAWP to become ready. Overrides the global wait_timeout. 0 = wait forever.",
+    )
 
 
 class CustomizerSettingsM365(BaseModel):
@@ -423,6 +459,15 @@ class CustomizerSettingsSAP(BaseModel):
         default=True,
         description="Verify the TLS certificate of the SAP system for OData calls",
     )
+    ca_bundle: str = Field(
+        default="",
+        description=(
+            "Path to a PEM file with the CA certificates the TLS certificate of the SAP system is verified "
+            "against, e.g. the internal CA of the customer (mounted from a ConfigMap or secret). Only used for "
+            "the SAP system - unlike REQUESTS_CA_BUNDLE. If set, the certificate is always verified "
+            "(verify_ssl is ignored). Empty = the default CA bundle (certifi)."
+        ),
+    )
     client: str = Field(default="100", description="SAP client ('Mandant'), used for RFC and OData")
     lang: str = Field(default="EN", description="Logon language as two-character ISO code, used for RFC and OData")
 
@@ -480,6 +525,15 @@ class CustomizerSettingsSAP(BaseModel):
             "Provider' tab), e.g. 'S4HCLNT100'. Required for principal propagation."
         ),
     )
+    saml_recipient: str = Field(
+        default="",
+        description=(
+            "Recipient of the SAML assertions: the URL of the OAuth 2.0 token endpoint as SAP sees it, e.g. "
+            "'https://s4.internal.example.com:44300/sap/bc/sec/oauth2/token?sap-client=100'. Only needed if "
+            "pyxecm reaches SAP via a reverse proxy (e.g. SAP Web Dispatcher) under a different URL. "
+            "Empty = the token endpoint of base_url."
+        ),
+    )
     saml_nameid_format: str = Field(
         default="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
         description=(
@@ -506,10 +560,11 @@ class CustomizerSettingsSAP(BaseModel):
         default="",
         description=(
             "Space-separated SAP OAuth 2.0 scope IDs requested for the access tokens, e.g. "
-            "'API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001' - one per OData service that is "
-            "called with the token. Required for principal propagation: S/4HANA answers a token "
-            "request without scope with 'invalid_scope' (it does not fall back to the scopes of "
-            "the OAuth client in SOAUTH2)."
+            "'ZAPI_MAINTENANCEORDER_0002 OV4:API_PURCHASEORDER_2' - one per OData service that is "
+            "called with the token. Empty = the scopes of all services in SAP_ODATA_SERVICES "
+            "(see get_oauth_scope()). SAP grants the requested scopes that the OAuth client (SOAUTH2) "
+            "and the user (S_SCOPE) are authorized for, so one list fits all users - set it only if "
+            "the scope IDs of the SAP system differ from the ones in SAP_ODATA_SERVICES."
         ),
     )
 
@@ -527,6 +582,20 @@ class ManagerPushSettings(BaseSettings):
     heartbeat_seconds: int = Field(default=60, gt=0)
     max_log_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
     queue_size: int = Field(default=100, gt=0)
+    push_snapshots: bool = Field(
+        default=True,
+        description="Push the pod status, pod output and OTCS logs when a payload fails (for the deployment analysis).",
+    )
+    max_snapshot_bytes: int = Field(
+        default=1024 * 1024 * 1024,
+        gt=0,
+        description="Largest snapshot file pushed (the manager's CUSTOMIZER_SNAPSHOT_MAX_BYTES).",
+    )
+    snapshot_interval_seconds: int = Field(
+        default=15 * 60,
+        ge=0,
+        description="Least time between two failure snapshots of a run.",
+    )
     artifacts_version_url: str = Field(
         default="http://customizer-artifacts/version.json",
         description="Where the payload image tells its commit (empty: not reported).",
@@ -582,6 +651,22 @@ class Settings(BaseSettings):
     )
 
     placeholder_values: dict = Field(default={})
+
+    wait_timeout: int = Field(
+        default=3600,
+        ge=0,
+        description="Max seconds to wait for a service / pod (OTDS, OTCS, OTAC, ...) to become ready. After the timeout the customizer run is marked as failed. Can be overridden per service (e.g. otac.wait_timeout). 0 = wait forever.",
+    )
+    wait_interval: int = Field(
+        default=30,
+        gt=0,
+        description="Seconds between two readiness checks while waiting for a service / pod.",
+    )
+    wait_timeout_total: int = Field(
+        default=0,
+        ge=0,
+        description="Optional limit in seconds for the time a customizer run may spend waiting for services / pods, summed up over all waits. Time in which the services are ready does not count. 0 = no overall limit.",
+    )
 
     profiling: bool = Field(
         default=False,

@@ -14,17 +14,22 @@ import queue
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import requests
+from requests_toolbelt import MultipartEncoder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     import pandas as pd
 
+    from pyxecm_customizer.failure_snapshot import SnapshotFile
+
+from pyxecm_customizer import failure_snapshot
+from pyxecm_customizer.k8s import K8s
 from pyxecm_customizer.settings import ManagerPushSettings
 from pyxecm_customizer.version import customizer_version
 
@@ -37,8 +42,13 @@ class ManagerPushClient:
         settings: ManagerPushSettings | None = None,
         logger: logging.Logger | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        collect_snapshot: Callable[[int], list[SnapshotFile]] | None = None,
     ) -> None:
-        """Initialize the optional manager transport and its worker."""
+        """Initialize the optional manager transport and its worker.
+
+        collect_snapshot(max_bytes) collects the files of a failure snapshot (default: from the
+        cluster, see failure_snapshot.collect).
+        """
 
         self.settings = settings or ManagerPushSettings()
         self.logger = logger or logging.getLogger(__name__)
@@ -48,6 +58,10 @@ class ManagerPushClient:
         self.session: requests.Session | None = None
         self._run_id = self.settings.run_id or (str(uuid.uuid4()) if self.settings.enabled else "")
         self._artifacts: dict[str, str] | None = None
+        self._collect_snapshot = collect_snapshot or self._collect_from_cluster
+        # One snapshot collection at a time, and not more often than snapshot_interval_seconds.
+        self._snapshot_lock = threading.Lock()
+        self._last_snapshot: float | None = None
 
         if self.settings.enabled:
             self.logger.info(
@@ -140,6 +154,48 @@ class ManagerPushClient:
 
         self._enqueue("log", (index, name, str(logfile_path), truncated))
 
+    def push_failure_snapshot(self, payload_index: int | None, reason: str) -> None:
+        """Collect the pod status, pod output and OTCS logs in the background and queue their upload.
+
+        For the manager's deployment analysis of clusters it cannot reach (VPN) - pods restart and
+        logs rotate soon after a failure. Never blocks or fails the deployment: skipped while a
+        collection runs or within snapshot_interval_seconds of the last one (a newer snapshot
+        replaces the older one in the manager).
+        """
+
+        if not self.settings.enabled or not self.settings.push_snapshots:
+            return
+        now = time.monotonic()
+        if self._last_snapshot is not None and now - self._last_snapshot < self.settings.snapshot_interval_seconds:
+            self.logger.debug("Skipping failure snapshot: the last one is too recent.")
+            return
+        if not self._snapshot_lock.acquire(blocking=False):
+            self.logger.debug("Skipping failure snapshot: another one is being collected.")
+            return
+        self._last_snapshot = now
+        taken_at = self._timestamp(datetime.now(UTC))
+        threading.Thread(
+            target=self._snapshot,
+            args=(payload_index, reason, taken_at),
+            daemon=True,
+            name="ManagerSnapshot",
+        ).start()
+
+    def _snapshot(self, payload_index: int | None, reason: str, taken_at: str | None) -> None:
+        try:
+            files = self._collect_snapshot(self.settings.max_snapshot_bytes)
+        except Exception:
+            self.logger.exception("Failure snapshot could not be collected")
+            return
+        finally:
+            self._snapshot_lock.release()
+        self.logger.info("Pushing failure snapshot (%s) with %d files to the manager.", reason, len(files))
+        for file in files:
+            self._enqueue("snapshot", (file, payload_index, reason, taken_at))
+
+    def _collect_from_cluster(self, max_bytes: int) -> list[SnapshotFile]:
+        return failure_snapshot.collect(K8s(logger=self.logger), max_bytes=max_bytes, logger=self.logger)
+
     def _enqueue(self, kind: str, payload: object) -> None:
         if self._queue is None:
             return
@@ -147,6 +203,8 @@ class ManagerPushClient:
             self._queue.put_nowait((kind, (payload,)))
         except queue.Full:
             self.logger.warning("Dropping manager push item because the queue is full: %s", kind)
+            if kind == "snapshot":
+                cast("tuple[SnapshotFile, ...]", payload)[0].path.unlink(missing_ok=True)
 
     def _worker_loop(self) -> None:
         if self._queue is None:
@@ -163,6 +221,8 @@ class ManagerPushClient:
                         f"/api/customizer/run/{self.run_id}/payload",
                         cast("dict[str, object]", args[0]),
                     )
+                elif kind == "snapshot":
+                    self._post_snapshot(*cast("tuple[SnapshotFile, int | None, str, str | None]", args[0]))
                 else:
                     self._post_log(*cast("tuple[int, str, str, bool]", args[0]))
             except Exception:
@@ -191,7 +251,45 @@ class ManagerPushClient:
             data=form,
         )
 
-    def _request_with_retry(self, method: str, path: str, timeout: tuple[int, int], **kwargs: object) -> None:
+    def _post_snapshot(self, file: SnapshotFile, payload_index: int | None, reason: str, taken_at: str | None) -> None:
+        fields = {
+            "kind": file.kind,
+            "name": file.name,
+            "container": file.container,
+            "previous": str(file.previous).lower(),
+            "payload_index": "" if payload_index is None else str(payload_index),
+            "reason": reason,
+            "taken_at": taken_at or "",
+            "truncated": str(file.truncated).lower(),
+        }
+        try:
+            with file.path.open("rb") as handle:
+
+                def body() -> dict[str, object]:
+                    # Streamed from the file (an OTCS archive can be hundreds of MB), anew for every attempt.
+                    handle.seek(0)
+                    encoder = MultipartEncoder(fields={**fields, "file": (file.path.name, handle, "application/gzip")})
+                    return {"data": encoder, "headers": {"Content-Type": encoder.content_type}}
+
+                self._request_with_retry(
+                    method="post",
+                    path=f"/api/customizer/run/{self.run_id}/snapshot",
+                    timeout=(5, 900),
+                    body=body,
+                )
+        finally:
+            file.path.unlink(missing_ok=True)
+
+    def _request_with_retry(
+        self,
+        method: str,
+        path: str,
+        timeout: tuple[int, int],
+        body: Callable[[], dict[str, object]] | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Send a request, retrying as the manager asks; body() returns fresh request arguments per attempt."""
+
         attempts = 0
         not_found_deadline = time.monotonic() + 30 * 60
         if self.session is None:
@@ -205,6 +303,7 @@ class ManagerPushClient:
                     url=self.settings.url.rstrip("/") + path,
                     timeout=timeout,
                     **kwargs,  # pyright: ignore[reportArgumentType]
+                    **(body() if body else {}),  # pyright: ignore[reportArgumentType]
                 )
             except requests.RequestException as error:
                 if attempts >= 4:
@@ -227,7 +326,7 @@ class ManagerPushClient:
                 self._sleep(min(2**attempts, 30))
                 continue
             if response.status_code == 413:
-                self.logger.warning("Manager rejected an oversized payload log: %s", path)
+                self.logger.warning("Manager rejected an oversized upload: %s", path)
             else:
                 self.logger.warning("Manager push returned HTTP %s: %s", response.status_code, path)
             return

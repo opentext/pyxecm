@@ -40,19 +40,24 @@ corresponding methods can be used. check_odata_apis() checks all of them.
 OData V2 - activate in /IWFND/MAINT_SERVICE ("Add Service", see above):
 * Plant Maintenance: API_MAINTENANCEORDER (version 0002), API_MAINTNOTIFICATION,
   API_MAINTORDERCONFIRMATION, API_MAINTENANCEPLAN
-* Sales: API_SALES_ORDER_SRV, API_SALES_CONTRACT_SRV
-* Purchasing: API_PURCHASECONTRACT_PROCESS_SRV
+* Sales: API_SALES_ORDER_SRV, API_SALES_CONTRACT_SRV, API_CREDIT_MEMO_REQUEST_SRV,
+  API_DEBIT_MEMO_REQUEST_SRV, API_OUTBOUND_DELIVERY_SRV (version 0002)
+* Billing: API_BILLING_DOCUMENT_SRV, API_BILLING_DOCUMENT_REQUEST_SRV
+* Purchasing: API_PURCHASECONTRACT_PROCESS_SRV, API_SUPPLIERINVOICE_PROCESS_SRV,
+  API_INBOUND_DELIVERY_SRV (version 0002)
 * Inventory Management: API_MATERIAL_DOCUMENT_SRV, API_MATERIAL_STOCK_SRV
 * Production: API_PRODUCTION_ORDER_2_SRV
-* Master data: API_PRODUCT_SRV, API_STORAGELOCATION_SRV, API_WORK_CENTERS,
-  API_EQUIPMENT, API_FUNCTIONALLOCATION, API_BUSINESS_PARTNER, API_COMPANYCODE_SRV,
-  API_SALESORGANIZATION_SRV, API_COSTCENTER_SRV, API_PROFITCENTER_SRV,
-  API_GLACCOUNTINCHARTOFACCOUNTS_SRV
+* Master data: API_PRODUCT_SRV, API_BILL_OF_MATERIAL_SRV (version 0002),
+  API_STORAGELOCATION_SRV, API_WORK_CENTERS, API_EQUIPMENT, API_FUNCTIONALLOCATION,
+  API_BUSINESS_PARTNER, API_COMPANYCODE_SRV, API_SALESORGANIZATION_SRV,
+  API_COSTCENTER_SRV, API_PROFITCENTER_SRV, API_GLACCOUNTINCHARTOFACCOUNTS_SRV
 
 OData V4 - publish the service group in /IWFND/V4_ADMIN ("Publish Service Groups"),
-the ICF node /sap/opu/odata4 must be active and S_SERVICE is granted per service group
-(role menu entry "TADIR Service" R3TR G4BA <service group>):
+the ICF node /sap/opu/odata4 must be active and the service group is authorized with
+object S_START, not S_SERVICE (role menu entry "TADIR Service" R3TR G4BA <service group>):
+* Plant Maintenance: API_MAINTENANCETASKLIST
 * Purchasing: API_PURCHASEORDER_2, API_PURCHASEREQUISITION_2
+* Warranty: API_WARRANTYCLAIM
 * Production: API_PLANNEDORDER
 * Master data: API_PLANT_2, API_PRODUCTION_VERSION, API_PURCHASINGORGANIZATION
 
@@ -102,6 +107,7 @@ __email__ = "mdiefenb@opentext.com"
 import base64
 import json
 import logging
+import os
 import platform
 import re
 import sys
@@ -141,9 +147,11 @@ from .sap_models import (
     SAPBillingDocumentRequestResponseModel,
     SAPBillingDocumentResponseModel,
     SAPBusinessObjectType,
+    SAPBusinessPartnerAddressModel,
     SAPBusinessPartnerModel,
     SAPBusinessPartnerQueryModel,
     SAPBusinessPartnerResponseModel,
+    SAPBusinessPartnerRoleModel,
     SAPCompanyCodeQueryModel,
     SAPCompanyCodeResponseModel,
     SAPCostCenterQueryModel,
@@ -153,7 +161,9 @@ from .sap_models import (
     SAPCreditMemoRequestModel,
     SAPCreditMemoRequestQueryModel,
     SAPCreditMemoRequestResponseModel,
+    SAPCustomerCompanyModel,
     SAPCustomerQueryModel,
+    SAPCustomerSalesAreaModel,
     SAPDebitMemoRequestItemModel,
     SAPDebitMemoRequestModel,
     SAPDebitMemoRequestQueryModel,
@@ -270,14 +280,27 @@ from .sap_models import (
     SAPSalesOrganizationResponseModel,
     SAPStorageLocationQueryModel,
     SAPStorageLocationResponseModel,
+    SAPSupplierCompanyModel,
+    SAPSupplierInvoiceGLAccountItemQueryModel,
+    SAPSupplierInvoiceGLAccountItemResponseModel,
+    SAPSupplierInvoiceItemQueryModel,
     SAPSupplierInvoiceModel,
+    SAPSupplierInvoicePurchaseOrderItemResponseModel,
     SAPSupplierInvoiceQueryModel,
     SAPSupplierInvoiceResponseModel,
+    SAPSupplierPurchasingOrgModel,
     SAPSupplierQueryModel,
     SAPTaskListModel,
     SAPTaskListOperationModel,
     SAPTaskListQueryModel,
     SAPTaskListResponseModel,
+    SAPWarrantyClaimItemModel,
+    SAPWarrantyClaimItemResponseModel,
+    SAPWarrantyClaimModel,
+    SAPWarrantyClaimQueryModel,
+    SAPWarrantyClaimResponseModel,
+    SAPWarrantyClaimVersionModel,
+    SAPWarrantyClaimVersionResponseModel,
     SAPWorkCenterQueryModel,
     SAPWorkCenterResponseModel,
     odata_literal,
@@ -290,7 +313,7 @@ tracer = trace.get_tracer(__name__)
 OTEL_TRACING_ATTRIBUTES = {"class": "sap"}
 
 try:
-    import pyrfc
+    import pyrfc  # pyright: ignore[reportMissingImports]
 
     _has_pyrfc = True
 
@@ -365,6 +388,13 @@ SAML_CERTIFICATE_EXPIRY_WARNING_DAYS = 30
 
 REQUEST_TIMEOUT = 60.0
 REQUEST_MAX_RETRIES = 3
+# Hint of the connection checks for TLS errors - an internal CA belongs into the CA bundle, switching off
+# the verification is only an option for test systems:
+TLS_ERROR_HINT = (
+    "TLS handshake failed. Check the certificate of the SAP system. If it is issued by an internal CA, "
+    "configure the CA certificates with ca_bundle (SAP__CA_BUNDLE). Set verify_ssl=False only for test "
+    "systems with self-signed certificates."
+)
 # Initial delay for exponential backoff on transient errors. It doubles
 # per retry but is capped at REQUEST_RETRY_DELAY:
 REQUEST_RETRY_BACKOFF = 1.0
@@ -600,7 +630,7 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         odata_version=2,
         oauth_scope="ZAPI_BILL_OF_MATERIAL_SRV_0002",
         entity_sets=["MaterialBOM", "MaterialBOMItem"],
-        description="Master Data - Material BOM (Create, Read)",
+        description="Master Data - Material BOM (Create, Read, Update, Create / Delete Items)",
     ),
     "API_PRODUCTION_VERSION": SAPODataServiceModel(
         name="API_PRODUCTION_VERSION",
@@ -706,21 +736,48 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         ],
         description="Purchasing - Purchase Order (Create, Read, Update, Delete)",
     ),
+    # OData V4 service (service group API_WARRANTYCLAIM, service "WarrantyClaim", version 0001). The service
+    # group must be published in /IWFND/V4_ADMIN. The OAuth scope follows the V4 naming of the other services -
+    # verify it with a token request (see SAP.get_oauth_access_token_for_user()) after activation:
+    "API_WARRANTYCLAIM": SAPODataServiceModel(
+        name="API_WARRANTYCLAIM",
+        path="/sap/opu/odata4/sap/api_warrantyclaim/srvd_a2x/sap/warrantyclaim/0001",
+        odata_version=4,
+        oauth_scope="OV4:API_WARRANTYCLAIM",
+        entity_sets=["WarrantyClaim", "WarrantyClaimVersion", "WarrantyClaimItem"],
+        description="Warranty - Warranty Claim for suppliers and customers (Create, Read, Update, Process)",
+    ),
 }
 
 
 def get_oauth_scope(services: list[str] | None = None) -> str:
     """Build the scope parameter of the OAuth token request from SAP_ODATA_SERVICES.
 
+    This is the list of scopes to **request** - it is read from the static service registry
+    SAP_ODATA_SERVICES of this module, without calling SAP. It is neither user specific nor
+    checked against the SAP system: by default it contains the scopes of all OData services the
+    SAP class knows, whether or not they are activated in SAP or the user is authorized for them.
+    SAP then grants only the requested scopes that the OAuth client (SOAUTH2) and the user
+    (authorization object S_SCOPE) are authorized for - so one request fits all users. The scopes
+    a user actually got are in the token response ("scope") and in SAP.granted_scopes.
+
+    The scope IDs in SAP_ODATA_SERVICES are defaults (e.g. "ZAPI_..._0001" for OData V2,
+    "OV4:<service group>" for OData V4). If an SAP system generated other IDs, request them
+    explicitly instead (setting SAP__OAUTH_SCOPE).
+
     Args:
         services (list[str] | None, optional):
-            Names of the OData services in SAP_ODATA_SERVICES to get the scopes for.
-            Defaults to None (all services in SAP_ODATA_SERVICES).
+            Names of the OData services in SAP_ODATA_SERVICES to get the scopes for, e.g.
+            ["API_MAINTENANCEORDER"]. Defaults to None (all services in SAP_ODATA_SERVICES).
 
     Returns:
         str:
             Space-separated scope IDs, e.g. "ZAPI_MAINTENANCEORDER_0002 ZAPI_MAINTNOTIFICATION_0001".
             Services that are not registered or have no scope are skipped.
+
+    Example:
+        >>> get_oauth_scope(["API_MAINTENANCEORDER", "API_PURCHASEORDER_2"])
+        'ZAPI_MAINTENANCEORDER_0002 OV4:API_PURCHASEORDER_2'
 
     """
 
@@ -761,6 +818,10 @@ BUSINESS_PARTNER_DETAILS_EXPAND = (
 # Namespace of the bound actions of the OData V4 planned order API (RAP services use
 # "com.sap.gateway.srvd_a2x.<service definition>.v<version>"):
 PLANNED_ORDER_ACTION_NAMESPACE = "com.sap.gateway.srvd_a2x.api_plannedorder.v0001"
+# Namespace of the bound actions of the OData V4 warranty claim API:
+WARRANTY_CLAIM_ACTION_NAMESPACE = "com.sap.gateway.srvd_a2x.api_warrantyclaim.v0001"
+# $expand option to read warranty claims with their versions and their items:
+WARRANTY_CLAIM_EXPAND_VERSIONS = "_WrntyClaimVersion($expand=_WrntyClaimItem)"
 
 
 @dataclass(frozen=True)
@@ -933,6 +994,12 @@ class BearerAuth(requests.auth.AuthBase):
     def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
         """Add the access token to a request (called by requests for every request).
 
+        __call__() makes BearerAuth objects callable - this is the interface of the requests
+        library for custom authentication (subclasses of requests.auth.AuthBase): requests calls
+        the auth object with each prepared request right before sending it. The SAP class sets
+        it as session.auth of its OData sessions (see SAP.__init__(auth=...)), so every OData
+        call carries the user's token instead of the basic authentication of the service user.
+
         Args:
             request (requests.PreparedRequest):
                 The request to authenticate.
@@ -950,9 +1017,13 @@ class BearerAuth(requests.auth.AuthBase):
     # end method definition
 
 
-# Maximum number of objects found by a text search (name / description) that are read - more
-# would make the $filter of the main query too long (see SAP._resolve_text_search()):
+# Maximum number of objects found by a text search (name / description) - the main query gets one
+# condition per object ("Product eq '...' or ..."), so more would make its URL too long. The text
+# search stops reading as soon as it has found them (see SAP._resolve_text_search()):
 TEXT_SEARCH_MAX_IDS = 100
+# The same for the documents found via their items (e.g. the deliveries of a material) - the
+# item search stops as soon as it has found them (see SAP._find_keys_via_items()):
+ITEM_SEARCH_MAX_IDS = 100
 
 
 @dataclass(frozen=True)
@@ -985,6 +1056,7 @@ class SAP:
         trace: str = "3",
         base_url: str = "",
         verify_ssl: bool = True,
+        ca_bundle: str = "",
         auth: requests.auth.AuthBase | None = None,
         saml_idp_private_key: str | None = None,
         saml_idp_certificate: str | None = None,
@@ -1026,6 +1098,13 @@ class SAP:
             verify_ssl (bool, optional):
                 Whether to verify the TLS certificate of the SAP system for OData calls.
                 Disable only for test systems with self-signed certificates. Defaults to True.
+            ca_bundle (str, optional):
+                Path to a PEM file with the CA certificates that the TLS certificate of the SAP
+                system is verified against (OData calls and token requests), e.g. the internal
+                CA of a customer. It only applies to this SAP object - in contrast to the
+                environment variable REQUESTS_CA_BUNDLE, which replaces the CA bundle of all
+                requests of the process. If set, the certificate is always verified (verify_ssl
+                is ignored). Defaults to "" (the CA bundle of requests, i.e. certifi).
             auth (requests.auth.AuthBase | None, optional):
                 Authentication for OData calls that replaces the basic authentication with
                 username and password, e.g. a bearer token of the individual user obtained
@@ -1084,7 +1163,8 @@ class SAP:
         self._auth = auth
         self._client = client
         self._lang = lang
-        self._verify_ssl = verify_ssl
+        # requests takes the path of a CA bundle in place of True for 'verify':
+        self._verify_ssl: bool | str = ca_bundle or verify_ssl
         # SAML 2.0 identity provider for principal propagation (see get_saml_assertion()).
         # Key, certificate and names are validated once here, so configuration errors
         # show up at startup and not with the first user request:
@@ -1155,7 +1235,15 @@ class SAP:
             self.logger.info(
                 "OData REST API calls are enabled for SAP system -> '%s' (client -> %s)", self._base_url, client
             )
-            if not verify_ssl:
+            if ca_bundle:
+                # requests only fails with the first call - report a wrong path at startup:
+                if os.path.isfile(ca_bundle):
+                    self.logger.info(
+                        "TLS certificates of the SAP system are verified with CA bundle -> '%s'", ca_bundle
+                    )
+                else:
+                    self.logger.error("CA bundle -> '%s' for the SAP system does not exist!", ca_bundle)
+            elif not verify_ssl:
                 self.logger.warning("TLS certificate verification for SAP OData calls is disabled!")
 
         # Set up connection parameters
@@ -2328,8 +2416,7 @@ class SAP:
                     url=url,
                     state=SAPODataServiceState.UNREACHABLE,
                     message=str(ssl_error),
-                    hint="TLS handshake failed. Check the certificate of the SAP system or set verify_ssl=False "
-                    "for test systems with self-signed certificates.",
+                    hint=TLS_ERROR_HINT,
                 )
             except requests.exceptions.RequestException as request_error:
                 status = SAPODataServiceStatusModel(
@@ -2600,8 +2687,7 @@ class SAP:
                 name=name,
                 state=SAPAuthCheckState.UNREACHABLE,
                 message=str(ssl_error),
-                hint="TLS handshake failed. Check the certificate of the SAP system or set verify_ssl=False "
-                "for test systems with self-signed certificates.",
+                hint=TLS_ERROR_HINT,
             )
         except requests.exceptions.RequestException as request_error:
             status = SAPAuthCheckStatusModel(
@@ -2844,6 +2930,27 @@ class SAP:
         """
 
         return str(value).replace("'", "''")
+
+    # end method definition
+
+    @staticmethod
+    def _v4_key_literal(value: str) -> str:
+        """Return a value as OData V4 key literal - GUIDs unquoted, everything else as quoted string.
+
+        Args:
+            value (str):
+                The key value, e.g. "216d7054-30a1-1fd1-b5e7-e019ce94fd05" or "4500000001".
+
+        Returns:
+            str:
+                The literal, e.g. "216d7054-30a1-1fd1-b5e7-e019ce94fd05" or "'4500000001'".
+
+        """
+
+        try:
+            return str(uuid.UUID(value)) if len(value) == 36 else "'{}'".format(SAP._quote_key(value))
+        except ValueError:
+            return "'{}'".format(SAP._quote_key(value))
 
     # end method definition
 
@@ -3136,10 +3243,13 @@ class SAP:
         params = query.to_odata(odata_version=odata_service.odata_version)
         top, page_size = query.limit, query.page_size
 
-        self.logger.info("Get SAP %s (query options -> %s, limit -> %s)...", label, str(params), str(top))
+        # The query options hold the search values (e.g. customer names) - business data only at debug level:
+        self.logger.info("Get SAP %s (limit -> %s)...", label, str(top))
+        self.logger.debug("SAP %s query options -> %s", label, str(params))
 
         def read_entities() -> Iterator[T]:
             count = 0  # entities returned so far
+            skipped = 0  # entities read but not accepted by the query (see SAPODataQueryModel.accepts())
             skip = 0  # $skip of the current page
             window_size = 0  # entities requested for the current page ($top)
             window_count = 0  # entities read for the current page (incl. server-driven sub-pages)
@@ -3149,7 +3259,9 @@ class SAP:
                     if next_link:
                         url, request_params = next_link, None
                     else:
-                        window_size = page_size if top is None else min(page_size, top - count)
+                        # Once entities have been skipped, the remaining ones can't be estimated - read full pages
+                        # instead of one request per skipped entity:
+                        window_size = page_size if top is None or skipped else min(page_size, top - count)
                         window_count = 0
                         url = collection_url
                         request_params = {**params, "$top": str(window_size)}
@@ -3177,6 +3289,9 @@ class SAP:
                         except ValidationError as validation_error:
                             self.log_error("Cannot interpret SAP %s; error -> %s", label, str(validation_error))
                             raise _ODataReadError from validation_error
+                        if not query.accepts(item):
+                            skipped += 1
+                            continue
                         yield item
                         count += 1
                         if top is not None and count >= top:
@@ -3200,8 +3315,29 @@ class SAP:
     def _resolve_text_search[Q: SAPODataQueryModel](self, service: str, query: Q, label: str) -> tuple[Q | None, bool]:
         """Resolve the name / description criterion of a query via the text entity set (see ODataTextSearch).
 
-        The texts are searched (in all languages, case-insensitively via the common spellings of the
-        term, see text_search_variants()) and the query is restricted to the IDs of the objects found.
+        Many SAP APIs keep names and descriptions in a separate text entity set (e.g. A_ProductDescription
+        with one entity per product and language) that the main entity set can't be filtered by. So the
+        texts are searched first - in all languages and case-insensitively via the common spellings of
+        the term (see text_search_variants()) - and the query is restricted to the IDs of the objects
+        found: the search criterion (e.g. description_contains) is replaced by the ID criterion (e.g.
+        product_ids).
+
+        Text entity sets can be large (e.g. tens of thousands of G/L account texts: one per account,
+        chart of accounts and language) and short terms match most of them. The search therefore reads
+        as little as possible:
+        * Only the key property of the texts is read ($select).
+        * The texts are read in pages sorted by the key, so the texts of an object are adjacent, and the
+          reading stops as soon as TEXT_SEARCH_MAX_IDS objects are found - usually after the first page.
+          Without the stop, all matching texts would be read (and then cut to TEXT_SEARCH_MAX_IDS).
+        * IDs given in the query (e.g. product_ids) and scope fields (e.g. controlling_area) are
+          conditions of the text query, so SAP only searches the texts of these objects.
+        * If the texts have a navigation to their object (ODataTextSearch.navigation), all criteria of
+          the query are conditions of the text query too - the IDs found match the whole query.
+
+        If more objects match, the first TEXT_SEARCH_MAX_IDS by ID are used (OData V2 can't sort by
+        relevance) - the caller should then ask for a more specific term. Without a navigation (e.g.
+        products), the main query can still filter some of them out (e.g. deleted products), so fewer
+        results than exist can be returned if more than TEXT_SEARCH_MAX_IDS objects match the text.
 
         Args:
             service (str):
@@ -3219,11 +3355,14 @@ class SAP:
         """
 
         search = type(query).TEXT_SEARCH
-        term = getattr(query, search.field, None) if search else None
+        term = (getattr(query, search.field, None) or "").strip() if search else ""
         if not search or not term:
             return query, False
 
         odata_version = SAP_ODATA_SERVICES[service].odata_version
+
+        # 1. The term in any of its spellings in any of the text properties - one condition, so SAP scans the
+        #    texts once, e.g. "substringof('pump', ProductDescription) or substringof('Pump', ProductDescription)":
         variants = text_search_variants(term)
         conditions = [
             " or ".join(
@@ -3233,40 +3372,173 @@ class SAP:
                 for text_property in search.properties
             )
         ]
+        # 2. The scope of the main query also applies to the texts (e.g. the controlling area of cost centers):
         for field_name, text_property in search.scope:
             value = getattr(query, field_name, None)
             if value:
                 conditions.append(ODataCondition(text_property).to_filter(value=value, odata_version=odata_version))
+        # 3. IDs given in the query: only the objects with these IDs and a matching text match - searching only
+        #    their texts is much cheaper than searching all texts and intersecting the IDs afterwards:
+        given_ids = getattr(query, search.ids_field, None)
+        if given_ids:
+            conditions.append(ODataCondition(search.key).to_filter(value=given_ids, odata_version=odata_version))
+        # 4. All other criteria via the navigation to the object (e.g. "to_CostCenter/CostCenterCategory eq 'F'"),
+        #    so only the objects matching the whole query are found - otherwise objects that the main query
+        #    filters out (e.g. deleted ones) could take places of the TEXT_SEARCH_MAX_IDS and results go missing:
+        if search.navigation:
+            conditions += query.to_odata_conditions(
+                odata_version=odata_version,
+                navigation=search.navigation,
+                exclude=(search.ids_field, *(field_name for field_name, _ in search.scope)),
+            )
 
+        # Only the key is needed. Sorted by the key, the texts of an object (one per language, chart of
+        # accounts, ...) are adjacent, and the paging of the iterator is stable:
         texts = self._iter_odata_collection(
             service=service,
             entity_set=search.entity_set,
             model=SAPODataTextResponseModel,
-            query=SAPODataTextQueryModel(conditions=conditions, order_by="{} asc".format(search.key)),
+            query=SAPODataTextQueryModel(
+                conditions=conditions, order_by="{} asc".format(search.key), select=search.key
+            ),
             label="{} texts".format(label),
         )
-        ids = list(dict.fromkeys(str((text.model_extra or {}).get(search.key, "")) for text in texts))
+        # The search term is business data - only logged at debug level (like all query options):
+        self.logger.debug("SAP %s text search term -> '%s'", label, term)
+
+        # The distinct IDs in the order read (a dict is an ordered set). The iterator reads the next page only
+        # when the current one is used up - stopping here ends the reading, no further pages are requested:
+        ids: dict[str, None] = {}
+        more = False
+        for text in texts:
+            object_id = str((text.model_extra or {}).get(search.key) or "")
+            if not object_id or object_id in ids:
+                continue
+            if len(ids) == TEXT_SEARCH_MAX_IDS:
+                more = True  # a further object matches - the IDs are complete
+                break
+            ids[object_id] = None
+        # The texts can't be read (e.g. missing authorization): don't run the main query without the criterion:
         if texts.failed:
             return None, True
-        ids = [object_id for object_id in ids if object_id]
-        # Combined with IDs given in the query, only the objects of both match:
-        given_ids = getattr(query, search.ids_field, None)
-        if given_ids:
-            ids = [object_id for object_id in ids if object_id in given_ids]
         if not ids:
-            self.logger.info("No SAP %s with a name containing -> '%s'.", label, term)
+            self.logger.info("No SAP %s match the text search.", label)
             return None, False
-        if len(ids) > TEXT_SEARCH_MAX_IDS:
+        if more:
             self.logger.warning(
-                "%d SAP %s have a name containing -> '%s' - only the first %d are read.",
-                len(ids),
+                "More than %d SAP %s match the text search - only the first %d (by ID) are read.",
+                TEXT_SEARCH_MAX_IDS,
                 label,
-                term,
                 TEXT_SEARCH_MAX_IDS,
             )
-            ids = ids[:TEXT_SEARCH_MAX_IDS]
 
-        return query.model_copy(update={search.ids_field: ids, search.field: None}), False
+        # The IDs replace the search criterion - the other criteria of the query stay:
+        return query.model_copy(update={search.ids_field: list(ids), search.field: None}), False
+
+    # end method definition
+
+    def _find_keys_via_items(
+        self,
+        service: str,
+        entity_set: str,
+        item_query: SAPODataQueryModel,
+        keys: tuple[str, ...],
+        label: str,
+        header_query: SAPODataQueryModel | None = None,
+        navigation: str = "",
+        exclude: tuple[str, ...] = (),
+    ) -> list[tuple[str, ...]] | None:
+        """Find the keys of the documents whose items match a query (e.g. the deliveries of a material).
+
+        Many SAP V2 APIs can't filter a header entity set by its items (OData V2 has no any()), so the
+        items are searched first and the headers are then read by the keys found (see e.g.
+        iter_outbound_deliveries()). Item entity sets are the largest ones of SAP (e.g. all goods
+        movement items of a plant) and their items have up to 100 properties, so the search reads as
+        little as possible:
+        * Only the key properties of the header are read ($select) - this also avoids SAP errors in
+          properties that are not needed (e.g. HTTP 500 for items with an invalid delivery
+          completion flag in a test system).
+        * The items are read with the filter of the item query, newest documents first (the item
+          query sorts by the header key), and the reading stops as soon as ITEM_SEARCH_MAX_IDS
+          documents are found - more would make the $filter of the header query too long anyway.
+        * If the items have a navigation to their header (e.g. to_MaterialDocumentHeader), the criteria
+          of the header query are conditions of the item query too - so only documents that match the
+          whole query are found. Otherwise headers that the header query filters out (e.g. other dates)
+          could take places of the ITEM_SEARCH_MAX_IDS, and fewer results than exist are returned.
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            entity_set (str):
+                The item entity set, e.g. "A_OutbDeliveryItem".
+            item_query (SAPODataQueryModel):
+                The search criteria of the items - its $filter and its sort order by the header key are used.
+            keys (tuple[str, ...]):
+                The OData properties of the header key in the items, e.g. ("DeliveryDocument",) or
+                ("MaterialDocument", "MaterialDocumentYear").
+            label (str):
+                The (plural) name of the items for log messages, e.g. "outbound delivery items".
+            header_query (SAPODataQueryModel | None, optional):
+                The header query whose criteria also restrict the items (via navigation). Defaults to None.
+            navigation (str, optional):
+                The to-one navigation property from the items to their header, e.g.
+                "to_MaterialDocumentHeader". Defaults to "" (header criteria not sent).
+            exclude (tuple[str, ...], optional):
+                Fields of the header query that the item query already has. Defaults to ().
+
+        Returns:
+            list[tuple[str, ...]] | None:
+                The distinct header keys (values in the order of 'keys'), newest first - empty if no item
+                matches, None in case of an error.
+
+        """
+
+        # The filter and the sort order (header key, newest first) of the item query - other query options
+        # (e.g. $expand) are not needed:
+        odata_version = SAP_ODATA_SERVICES[service].odata_version
+        params = item_query.model_copy(update={"sort_direction": "desc"}).to_odata(odata_version=odata_version)
+        conditions = [params["$filter"]] if params.get("$filter") else []
+        # The header criteria via the navigation to the header, e.g. "to_BillingDocument/SoldToParty eq '52001'":
+        if header_query is not None and navigation:
+            conditions += header_query.to_odata_conditions(
+                odata_version=odata_version, navigation=navigation, exclude=exclude
+            )
+        items = self._iter_odata_collection(
+            service=service,
+            entity_set=entity_set,
+            model=SAPODataTextResponseModel,
+            query=SAPODataTextQueryModel(
+                conditions=conditions,
+                order_by=params.get("$orderby", ""),
+                select=",".join(keys),
+            ),
+            label=label,
+        )
+
+        # The distinct keys in the order read (a dict is an ordered set). The items of a document are adjacent
+        # (sorted by the header key). Stopping here ends the reading - no further pages are requested:
+        found: dict[tuple[str, ...], None] = {}
+        more = False
+        for item in items:
+            values = item.model_extra or {}
+            key = tuple(str(values.get(name) or "") for name in keys)
+            if not all(key) or key in found:
+                continue
+            if len(found) == ITEM_SEARCH_MAX_IDS:
+                more = True  # a further document matches - the keys are complete
+                break
+            found[key] = None
+        if items.failed:
+            return None
+        if more:
+            self.logger.warning(
+                "More than %d documents have SAP %s matching the query - only the newest %d are read.",
+                ITEM_SEARCH_MAX_IDS,
+                label,
+                ITEM_SEARCH_MAX_IDS,
+            )
+
+        return list(found)
 
     # end method definition
 
@@ -3520,7 +3792,8 @@ class SAP:
             )
         headers["If-Match"] = etag or "*"
 
-        self.logger.info("Update SAP %s with -> %s ...", label, str(payload))
+        self.logger.info("Update SAP %s...", label)
+        self.logger.debug("SAP %s changes -> %s", label, str(payload))
         response = self.do_request(
             url=url,
             method="PATCH",
@@ -3600,7 +3873,7 @@ class SAP:
                 entity_path = "{}({})".format(
                     items.entity_set,
                     ",".join(
-                        "{}='{}'".format(key, self._quote_key(str(entry.get(key) or "")))
+                        "{}={}".format(key, self._v4_key_literal(str(entry.get(key) or "")))
                         for key in items.key_properties
                     ),
                 )
@@ -3779,6 +4052,72 @@ class SAP:
 
     # end method definition
 
+    def _create_document_item(
+        self,
+        service: str,
+        collection_path: str,
+        model: type[SAPODataCreateModel],
+        item: SAPODataCreateModel | dict,
+        existing_items: list[str],
+        number_step: int,
+        key_fields: list[str],
+        label: str,
+    ) -> dict | None:
+        """Add an item to an existing document - with the next free item number if none is given.
+
+        Args:
+            service (str):
+                The name of the OData service in SAP_ODATA_SERVICES.
+            collection_path (str):
+                The path of the item collection of the document, e.g. "A_SalesOrder('413')/to_Item".
+            model (type[SAPODataCreateModel]):
+                The create model of the item. Its item number field must be named "item".
+            item (SAPODataCreateModel | dict):
+                The new item. Without an item number, the next free number is used.
+            existing_items (list[str]):
+                The item numbers the document already has.
+            number_step (int):
+                The step between item numbers, e.g. 10 (10, 20, 30, ...) or 1 (1, 2, 3, ...).
+            key_fields (list[str]):
+                The OData key fields that must be filled in the response.
+            label (str):
+                The name of the item for log messages, e.g. "item of sales order -> '413'".
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP or None in case of an error.
+
+        """
+
+        numbers = [int(number) for number in existing_items if str(number).strip().isdigit()]
+        next_number = str((max(numbers) // number_step + 1) * number_step if numbers else number_step)
+        item_alias = model.model_fields["item"].alias
+        try:
+            if isinstance(item, dict):
+                if "item" not in item and item_alias not in item:
+                    item = {**item, "item": next_number}
+                item = model.model_validate(item)
+            elif "item" not in item.model_fields_set:
+                item = model.model_validate({**item.model_dump(exclude_unset=True), "item": next_number})
+        except ValidationError as validation_error:
+            self.log_error("Invalid %s data; error -> %s", label, str(validation_error))
+            return None
+
+        if int(item.item) in numbers:
+            self.log_error("Cannot add SAP %s - item number -> '%s' exists already!", label, item.item)
+            return None
+
+        return self._create_odata_entity(
+            service=service,
+            entity_set=collection_path,
+            model=model,
+            data=item,
+            key_fields=key_fields,
+            label=label,
+        )
+
+    # end method definition
+
     def create_maintenance_order(self, order: SAPMaintenanceOrderModel | dict) -> dict | None:
         """Create an SAP Plant Maintenance order (including its operations and their components).
 
@@ -3790,6 +4129,9 @@ class SAP:
         With a task list reference (SAPMaintenanceOrderModel.task_list), the operations and
         materials of the task list become the first operations and components of the order
         (see expand_maintenance_order_task_list()) - the API cannot include a task list.
+        SAP derives the order type from the notification type of the notification and the
+        planning plant, main work center, planner group and functional location from the
+        notification or the equipment - leave them empty to get the values of SAP.
 
         Args:
             order (SAPMaintenanceOrderModel | dict):
@@ -4098,9 +4440,11 @@ class SAP:
             case "BUS2034":
                 return self.get_sales_contract(contract_id=keys[0])
             case "BUS2094":
-                return self.get_credit_memo_request(credit_memo_request_id=keys[0])
+                return self.get_credit_memo_request(request_id=keys[0])
             case "BUS2096":
-                return self.get_debit_memo_request(debit_memo_request_id=keys[0])
+                return self.get_debit_memo_request(request_id=keys[0])
+            case "BUS2222":
+                return self.get_warranty_claim(claim_id=keys[0])
             case "VBRK" | "BUS2037":
                 return self.get_billing_document(billing_document_id=keys[0])
             case "LIKP":
@@ -4127,6 +4471,19 @@ class SAP:
                 return self.get_supplier(supplier_id=keys[0])
             case "BUS0002":
                 return self.get_company_code(company_code=keys[0])
+            case "BUS0008":
+                return self.get_plant(plant_id=keys[0])
+            case "BUS0006":
+                return self.get_sales_organization(sales_organization=keys[0])
+            case "BUS0007":
+                return self.get_purchasing_organization(purchasing_organization=keys[0])
+            case "BUS3006":
+                # The reference has the company code, the OData API the chart of accounts of the company code:
+                company_code = self.get_company_code(company_code=keys[0])
+                if company_code is None or not company_code.chart_of_accounts:
+                    self.log_error("Cannot get the chart of accounts of SAP company code -> '%s'.", keys[0])
+                    return None
+                return self.get_gl_account(chart_of_accounts=company_code.chart_of_accounts, gl_account=keys[1])
             case "BUS0012":
                 return self.get_cost_center(controlling_area=keys[0], cost_center=keys[1])
             case "BUS0015":
@@ -5048,6 +5405,47 @@ class SAP:
 
     # end method definition
 
+    def create_maintenance_notification_item(
+        self, notification_id: str, item: SAPMaintenanceNotificationItemModel | dict
+    ) -> dict | None:
+        """Add an item (damage / object part) to an existing SAP maintenance notification.
+
+        SAP does not allow deleting notification items via the API.
+
+        Args:
+            notification_id (str):
+                The maintenance notification number, e.g. "10000250".
+            item (SAPMaintenanceNotificationItemModel | dict):
+                The new item. Without an item number, the next free number is used (1, 2, 3, ...).
+                A dictionary is validated against SAPMaintenanceNotificationItemModel.
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP (including "MaintenanceNotificationItem") or None in
+                case of an error.
+
+        """
+
+        label = "item of maintenance notification -> '{}'".format(notification_id)
+        notification = self.get_maintenance_notification(notification_id=notification_id)
+        if notification is None:
+            if not self.last_error:
+                self.log_error("Cannot add SAP %s - the maintenance notification does not exist!", label)
+            return None
+
+        return self._create_document_item(
+            service="API_MAINTNOTIFICATION",
+            collection_path="MaintenanceNotification('{}')/to_Item".format(self._quote_key(notification_id)),
+            model=SAPMaintenanceNotificationItemModel,
+            item=item,
+            existing_items=[existing.item for existing in notification.items or []],
+            number_step=1,
+            key_fields=["MaintenanceNotification", "MaintenanceNotificationItem"],
+            label=label,
+        )
+
+    # end method definition
+
     def create_sales_order(self, order: SAPSalesOrderModel | dict) -> dict | None:
         """Create an SAP sales order (including its items).
 
@@ -5250,6 +5648,71 @@ class SAP:
             service="API_SALES_ORDER_SRV",
             entity_path="A_SalesOrder('{}')".format(order_id.replace("'", "''")),
             label="sales order -> '{}'".format(order_id),
+        )
+
+    # end method definition
+
+    def create_sales_order_item(self, order_id: str, item: SAPSalesOrderItemModel | dict) -> dict | None:
+        """Add an item to an existing SAP sales order.
+
+        Args:
+            order_id (str):
+                The sales order number, e.g. "413".
+            item (SAPSalesOrderItemModel | dict):
+                The new item, e.g. {"material": "P-100", "quantity": 2, "unit": "PC"}. Without an
+                item number, the next free number is used (in steps of 10). A dictionary is
+                validated against SAPSalesOrderItemModel.
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP (including "SalesOrderItem") or None in case of an error.
+
+        """
+
+        label = "item of sales order -> '{}'".format(order_id)
+        order = self.get_sales_order(order_id=order_id)
+        if order is None:
+            if not self.last_error:
+                self.log_error("Cannot add SAP %s - the sales order does not exist!", label)
+            return None
+
+        return self._create_document_item(
+            service="API_SALES_ORDER_SRV",
+            collection_path="A_SalesOrder('{}')/to_Item".format(self._quote_key(order_id)),
+            model=SAPSalesOrderItemModel,
+            item=item,
+            existing_items=[existing.item for existing in order.items or []],
+            number_step=10,
+            key_fields=["SalesOrder", "SalesOrderItem"],
+            label=label,
+        )
+
+    # end method definition
+
+    def delete_sales_order_item(self, order_id: str, item: str) -> bool:
+        """Delete an item of an SAP sales order.
+
+        SAP refuses to delete items that have follow-on documents (e.g. a delivery) - reject them
+        with a rejection reason instead (update_sales_order() with item_changes).
+
+        Args:
+            order_id (str):
+                The sales order number, e.g. "413".
+            item (str):
+                The item number, e.g. "20".
+
+        Returns:
+            bool:
+                True if the item has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_SALES_ORDER_SRV",
+            entity_path="A_SalesOrderItem(SalesOrder='{}',SalesOrderItem='{}')".format(
+                self._quote_key(order_id), self._quote_key(pad_number(item, 6))
+            ),
+            label="item -> '{}' of sales order -> '{}'".format(item, order_id),
         )
 
     # end method definition
@@ -5527,13 +5990,25 @@ class SAP:
 
         """
 
-        return self._iter_odata_collection(
+        query = query or SAPPurchaseContractQueryModel()
+        contracts = self._iter_odata_collection(
             service="API_PURCHASECONTRACT_PROCESS_SRV",
             entity_set="A_PurchaseContract",
             model=SAPPurchaseContractResponseModel,
-            query=query or SAPPurchaseContractQueryModel(),
+            query=query,
             label="purchase contracts",
         )
+        if query.expand_items or query.is_marked_for_deletion is None:
+            return contracts
+
+        # The items have only been read for the deletion filter (see SAPPurchaseContractQueryModel.accepts()):
+        def without_items() -> Iterator[SAPPurchaseContractResponseModel]:
+            for contract in contracts:
+                yield contract.model_copy(update={"items": None})
+            if contracts.failed:
+                raise _ODataReadError
+
+        return SAPODataIterator(without_items())
 
     # end method definition
 
@@ -5703,6 +6178,44 @@ class SAP:
 
     # end method definition
 
+    def create_purchase_contract_item(self, contract_id: str, item: SAPPurchaseContractItemModel | dict) -> dict | None:
+        """Add an item to an existing SAP purchase contract.
+
+        Args:
+            contract_id (str):
+                The purchase contract number, e.g. "4600000074".
+            item (SAPPurchaseContractItemModel | dict):
+                The new item. Without an item number, the next free number is used (in steps of 10).
+                A dictionary is validated against SAPPurchaseContractItemModel.
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP (including "PurchaseContractItem") or None in case of
+                an error.
+
+        """
+
+        label = "item of purchase contract -> '{}'".format(contract_id)
+        contract = self.get_purchase_contract(contract_id=contract_id)
+        if contract is None:
+            if not self.last_error:
+                self.log_error("Cannot add SAP %s - the purchase contract does not exist!", label)
+            return None
+
+        return self._create_document_item(
+            service="API_PURCHASECONTRACT_PROCESS_SRV",
+            collection_path="A_PurchaseContract('{}')/to_PurchaseContractItem".format(self._quote_key(contract_id)),
+            model=SAPPurchaseContractItemModel,
+            item=item,
+            existing_items=[existing.item for existing in contract.items or []],
+            number_step=10,
+            # SAP returns the item number, but an empty PurchaseContract:
+            key_fields=["PurchaseContractItem"],
+            label=label,
+        )
+
+    # end method definition
+
     def delete_purchase_contract(self, contract_id: str, items: list[str] | None = None) -> bool:
         """Delete an SAP purchase contract or some of its items (set their deletion indicator).
 
@@ -5781,8 +6294,9 @@ class SAP:
             ...     "description": "Notebook web cams",
             ...     "items": [
             ...         {
-            ...             "material": "R-9010",
+            ...             "material": "KT-4402",
             ...             "quantity": "10",
+            ...             "unit": "PC",
             ...             "plant": "3000",
             ...             "purchasing_group": "003",
             ...             "delivery_date": "2026-11-01",
@@ -5951,6 +6465,636 @@ class SAP:
             ),
             item_model=SAPPurchaseRequisitionItemModel,
         )
+
+    # end method definition
+
+    def create_purchase_requisition_item(
+        self, requisition_id: str, item: SAPPurchaseRequisitionItemModel | dict
+    ) -> dict | None:
+        """Add an item to an existing SAP purchase requisition.
+
+        Args:
+            requisition_id (str):
+                The purchase requisition number, e.g. "10000191".
+            item (SAPPurchaseRequisitionItemModel | dict):
+                The new item. Without an item number, the next free number is used (in steps of 10).
+                A dictionary is validated against SAPPurchaseRequisitionItemModel.
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP (including "PurchaseRequisitionItem") or None in case
+                of an error.
+
+        """
+
+        label = "item of purchase requisition -> '{}'".format(requisition_id)
+        requisition = self.get_purchase_requisition(requisition_id=requisition_id)
+        if requisition is None:
+            if not self.last_error:
+                self.log_error("Cannot add SAP %s - the purchase requisition does not exist!", label)
+            return None
+
+        return self._create_document_item(
+            service="API_PURCHASEREQUISITION_2",
+            collection_path="PurchaseReqn('{}')/_PurchaseRequisitionItem".format(self._quote_key(requisition_id)),
+            model=SAPPurchaseRequisitionItemModel,
+            item=item,
+            existing_items=[existing.item for existing in requisition.items or []],
+            number_step=10,
+            # SAP returns the item number, but an empty PurchaseRequisition:
+            key_fields=["PurchaseRequisitionItem"],
+            label=label,
+        )
+
+    # end method definition
+
+    def delete_purchase_requisition_item(self, requisition_id: str, item: str) -> bool:
+        """Delete an item of an SAP purchase requisition (set its deletion indicator).
+
+        API_PURCHASEREQUISITION_2 does not allow DELETE - like in SAP GUI (ME52N), items are
+        deleted by setting their deletion indicator (IsDeleted). It can be reset with
+        update_purchase_requisition() and the item change {"IsDeleted": False}.
+
+        Args:
+            requisition_id (str):
+                The purchase requisition number, e.g. "10000191".
+            item (str):
+                The item number, e.g. "20" or "00020".
+
+        Returns:
+            bool:
+                True if the item has been deleted, False in case of an error.
+
+        """
+
+        return self.update_purchase_requisition(requisition_id=requisition_id, item_changes={item: {"IsDeleted": True}})
+
+    # end method definition
+
+    def delete_purchase_requisition(self, requisition_id: str) -> bool:
+        """Delete an SAP purchase requisition (set the deletion indicator of all its items).
+
+        API_PURCHASEREQUISITION_2 does not allow DELETE - a purchase requisition is deleted by
+        setting the deletion indicator (IsDeleted) of all its items, like in SAP GUI (ME52N).
+
+        Args:
+            requisition_id (str):
+                The purchase requisition number, e.g. "10000191".
+
+        Returns:
+            bool:
+                True if the purchase requisition has been deleted, False in case of an error.
+
+        """
+
+        requisition = self.get_purchase_requisition(requisition_id=requisition_id)
+        if requisition is None:
+            if not self.last_error:
+                self.log_error("Cannot delete SAP purchase requisition -> '%s' - it does not exist!", requisition_id)
+            return False
+
+        item_changes = {item.item: {"IsDeleted": True} for item in requisition.items or [] if not item.is_deleted}
+        if not item_changes:
+            self.logger.info("SAP purchase requisition -> '%s' is already deleted.", requisition_id)
+            return True
+
+        return self.update_purchase_requisition(requisition_id=requisition_id, item_changes=item_changes)
+
+    # end method definition
+
+    def create_warranty_claim(self, claim: SAPWarrantyClaimModel | dict) -> dict | None:
+        """Create an SAP warranty claim including its versions and items.
+
+        Uses the OData V4 API API_WARRANTYCLAIM with a deep create, so the claim, its versions and
+        items are created (and committed) in one request. The claim number is assigned by SAP. SAP
+        ignores item prices in the deep create - they are set with a second request afterwards.
+
+        Args:
+            claim (SAPWarrantyClaimModel | dict):
+                The warranty claim data. A dictionary is validated against the SAPWarrantyClaimModel and
+                can use either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created claim as returned by SAP (including the number in "WarrantyClaimNumber") or
+                None in case of an error.
+
+        Example:
+            >>> sap.create_warranty_claim(
+            ... {
+            ...     "claim_type": "<claim type>",  # system specific
+            ...     "supplier": "30050",
+            ...     "supplier_role": "<partner function>",  # system specific
+            ...     "versions": [{"items": [{"item_type": "<item type>", "material": "P-100", "quantity": 1}]}],
+            ... }
+            ... )
+
+        """
+
+        created = self._create_odata_entity(
+            service="API_WARRANTYCLAIM",
+            entity_set="WarrantyClaim",
+            model=SAPWarrantyClaimModel,
+            data=claim,
+            key_fields=["WrntyClaimHeaderUUID", "WarrantyClaimNumber"],
+            label="warranty claim",
+        )
+        if created is None:
+            return None
+
+        # SAP ignores the item prices of a deep create (the version has no pricing document yet) - set them
+        # again on the created items (matched by position, SAP numbers them in the given order):
+        if isinstance(claim, dict):
+            claim = SAPWarrantyClaimModel.model_validate(claim)
+        claim_id = created.get("WarrantyClaimNumber", "")
+        repriced = False
+        for claim_version, created_version in zip(
+            claim.versions or [], created.get("_WrntyClaimVersion") or [], strict=False
+        ):
+            created_items = sorted(
+                created_version.get("_WrntyClaimItem") or [],
+                key=lambda item: int(item.get("WarrantyClaimItemNumber") or 0),
+            )
+            item_changes = {
+                created_item["WarrantyClaimItemNumber"]: {
+                    "price_amount": item.price_amount,
+                    "price_currency": item.price_currency or claim_version.currency,
+                }
+                for item, created_item in zip(claim_version.items or [], created_items, strict=False)
+                if item.price_amount is not None
+            }
+            if not item_changes:
+                continue
+            if self.update_warranty_claim_version(
+                claim_id, created_version.get("WrntyVersionNumber", ""), item_changes=item_changes
+            ):
+                repriced = True
+            else:
+                self.logger.warning("Created SAP warranty claim -> '%s', but could not set its item prices!", claim_id)
+        if not repriced:
+            return created
+
+        refreshed = self.get_warranty_claim(claim_id)
+
+        return refreshed.model_dump(by_alias=True) if refreshed else created
+
+    # end method definition
+
+    def iter_warranty_claims(
+        self, query: SAPWarrantyClaimQueryModel | None = None
+    ) -> SAPODataIterator[SAPWarrantyClaimResponseModel]:
+        """Iterate over SAP warranty claims - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPWarrantyClaimQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all warranty claims).
+
+        Returns:
+            SAPODataIterator[SAPWarrantyClaimResponseModel]:
+                The iterator over the warranty claims.
+
+        """
+
+        query = query or SAPWarrantyClaimQueryModel()
+        return self._iter_odata_collection(
+            service="API_WARRANTYCLAIM",
+            entity_set="WarrantyClaim",
+            model=SAPWarrantyClaimResponseModel,
+            query=query,
+            label="warranty claims",
+        )
+
+    # end method definition
+
+    def get_warranty_claims(
+        self, query: SAPWarrantyClaimQueryModel | None = None
+    ) -> list[SAPWarrantyClaimResponseModel] | None:
+        """Get SAP warranty claims as a list.
+
+        All matching warranty claims are read (page by page, see iter_warranty_claims()) and returned at once.
+        For very large result sets prefer iter_warranty_claims().
+
+        Args:
+            query (SAPWarrantyClaimQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all warranty claims).
+
+        Returns:
+            list[SAPWarrantyClaimResponseModel] | None:
+                The warranty claims (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_warranty_claims(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP warranty claims.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_warranty_claim(self, claim_id: str, expand_versions: bool = True) -> SAPWarrantyClaimResponseModel | None:
+        """Get a single SAP warranty claim by its number.
+
+        Args:
+            claim_id (str):
+                The warranty claim number, e.g. "10000001".
+            expand_versions (bool, optional):
+                Whether to read the versions with their items as well. Defaults to True.
+
+        Returns:
+            SAPWarrantyClaimResponseModel | None:
+                The warranty claim or None if it does not exist or in case of an error.
+
+        """
+
+        query = SAPWarrantyClaimQueryModel(claim_ids=[claim_id], expand_items=expand_versions, limit=1)
+        claims = self.get_warranty_claims(query=query)
+        if claims is None:
+            return None
+        if not claims:
+            self.log_error("Cannot get SAP warranty claim -> '%s' - it does not exist!", claim_id)
+            return None
+
+        return claims[0]
+
+    # end method definition
+
+    def update_warranty_claim(self, claim_id: str, changes: dict) -> bool:
+        """Update individual header fields of an SAP warranty claim.
+
+        Versions and items are changed with update_warranty_claim_version(). The changes are validated
+        first - otherwise nothing is changed.
+
+        Args:
+            claim_id (str):
+                The warranty claim number, e.g. "10000001".
+            changes (dict):
+                The header fields to change - snake case attribute names of SAPWarrantyClaimModel or OData
+                property names, e.g. {"plant": "3000"}.
+
+        Returns:
+            bool:
+                True if the warranty claim has been updated, False in case of an error.
+
+        """
+
+        claim = self.get_warranty_claim(claim_id, expand_versions=False)
+        if claim is None:
+            return False
+
+        return self._update_odata_document(
+            service="API_WARRANTYCLAIM",
+            label="warranty claim -> '{}'".format(claim_id),
+            header_path="WarrantyClaim({})".format(claim.claim_uuid),
+            header_model=SAPWarrantyClaimModel,
+            changes=changes,
+            item_changes=None,
+            items=None,
+        )
+
+    # end method definition
+
+    def update_warranty_claim_version(
+        self,
+        claim_id: str,
+        version_number: str,
+        changes: dict | None = None,
+        item_changes: dict[str, dict] | None = None,
+    ) -> bool:
+        """Update individual fields of a version of an SAP warranty claim and of its items.
+
+        All changes are validated first and the items must belong to the version - otherwise nothing is
+        changed. The items are changed first, the version last (see _update_odata_document()).
+
+        Args:
+            claim_id (str):
+                The warranty claim number, e.g. "10000001".
+            version_number (str):
+                The version number, e.g. "1" or "0001".
+            changes (dict | None, optional):
+                The version fields to change - snake case attribute names of SAPWarrantyClaimVersionModel or
+                OData property names. Defaults to None (version unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"000010": {"decision_code": "<code>"}} (snake case attribute
+                names of SAPWarrantyClaimItemModel or OData property names). Defaults to None (items unchanged).
+
+        Returns:
+            bool:
+                True if the version (and its items) have been updated, False in case of an error.
+
+        """
+
+        claim = self.get_warranty_claim(claim_id, expand_versions=True)
+        if claim is None:
+            return False
+
+        version = self._find_warranty_claim_version(claim, version_number)
+        if version is None:
+            return False
+
+        return self._update_odata_document(
+            service="API_WARRANTYCLAIM",
+            label="version '{}' of warranty claim -> '{}'".format(version_number, claim_id),
+            header_path="WarrantyClaimVersion({})".format(version.version_uuid),
+            header_model=SAPWarrantyClaimVersionModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="WarrantyClaimItem",
+                params={"$filter": "WrntyVersionUUID eq {}".format(version.version_uuid)},
+                entity_set="WarrantyClaimItem",
+                key_properties=("WrntyItemUUID",),
+                number_property="WarrantyClaimItemNumber",
+                text_property="Material",
+                label="item",
+            ),
+            item_model=SAPWarrantyClaimItemModel,
+        )
+
+    # end method definition
+
+    def process_supplier_claim(
+        self,
+        claim_id: str,
+        action_code: str,
+        version_number: str | None = None,
+        claim_type: str | None = None,
+    ) -> SAPWarrantyClaimResponseModel | None:
+        """Process a supplier warranty claim with an action of SAP (e.g. to send it to the supplier).
+
+        Args:
+            claim_id (str):
+                The warranty claim number, e.g. "10000001".
+            action_code (str):
+                The warranty claim action code - system specific.
+            version_number (str | None, optional):
+                The version the action applies to. Defaults to None (SAP uses its default version).
+            claim_type (str | None, optional):
+                The warranty claim type. Defaults to None (the type of the claim).
+
+        Returns:
+            SAPWarrantyClaimResponseModel | None:
+                The processed claim or None in case of an error.
+
+        """
+
+        return self._process_warranty_claim(
+            claim_id=claim_id,
+            action="ProcessSupplierClaim",
+            action_code=action_code,
+            version_number=version_number,
+            claim_type=claim_type,
+        )
+
+    # end method definition
+
+    def process_customer_claim(
+        self,
+        claim_id: str,
+        action_code: str,
+        version_number: str | None = None,
+        claim_type: str | None = None,
+    ) -> SAPWarrantyClaimResponseModel | None:
+        """Process a customer warranty claim with an action of SAP (e.g. to accept or reject it).
+
+        Args:
+            claim_id (str):
+                The warranty claim number, e.g. "10000001".
+            action_code (str):
+                The warranty claim action code - system specific.
+            version_number (str | None, optional):
+                The version the action applies to. Defaults to None (SAP uses its default version).
+            claim_type (str | None, optional):
+                The warranty claim type. Defaults to None (the type of the claim).
+
+        Returns:
+            SAPWarrantyClaimResponseModel | None:
+                The processed claim or None in case of an error.
+
+        """
+
+        return self._process_warranty_claim(
+            claim_id=claim_id,
+            action="ProcessCustomerClaim",
+            action_code=action_code,
+            version_number=version_number,
+            claim_type=claim_type,
+        )
+
+    # end method definition
+
+    def start_supplier_process_from_customer_claim(
+        self,
+        claim_id: str,
+        supplier: str,
+        purchasing_organization: str,
+        sales_organization: str,
+        distribution_channel: str,
+        division: str,
+        currency: str,
+        responsible_person: str,
+        version_number: str | None = None,
+    ) -> SAPWarrantyClaimResponseModel | None:
+        """Start the supplier process of a customer warranty claim - the claim is passed on to a supplier.
+
+        Args:
+            claim_id (str):
+                The customer warranty claim number, e.g. "10000001".
+            supplier (str):
+                The supplier (vendor number) the claim is passed on to.
+            purchasing_organization (str):
+                The purchasing organization of the supplier process; see get_purchasing_organizations().
+            sales_organization (str):
+                The sales organization of the customer claim; see get_sales_organizations().
+            distribution_channel (str):
+                The distribution channel of the sales area.
+            division (str):
+                The division of the sales area.
+            currency (str):
+                The currency of the supplier process, ISO code e.g. "EUR".
+            responsible_person (str):
+                The SAP user responsible for the supplier claim.
+            version_number (str | None, optional):
+                The version the process starts from. Defaults to None (SAP uses its default version).
+
+        Returns:
+            SAPWarrantyClaimResponseModel | None:
+                The claim with the supplier process started or None in case of an error.
+
+        """
+
+        claim = self.get_warranty_claim(claim_id, expand_versions=True)
+        if claim is None:
+            return None
+        version_uuid = self._warranty_claim_version_uuid(claim, version_number)
+        if version_number and version_uuid is None:
+            return None
+
+        result = self._call_odata_bound_action(
+            service="API_WARRANTYCLAIM",
+            entity_path="WarrantyClaim({})".format(claim.claim_uuid),
+            action="StartSuplrProcFromCustClaim",
+            namespace=WARRANTY_CLAIM_ACTION_NAMESPACE,
+            parameters={
+                "WrntyVersionUUID": version_uuid,
+                "WrntySupplier": supplier,
+                "PurchasingOrganization": purchasing_organization,
+                "SalesOrganization": sales_organization,
+                "DistributionChannel": distribution_channel,
+                "Division": division,
+                "WrntyCurrencyCode": currency,
+                "WrntySuplrClaimRespPerson": responsible_person,
+            },
+            label="start supplier process of warranty claim -> '{}'".format(claim_id),
+        )
+        if result is None:
+            return None
+
+        return SAPWarrantyClaimResponseModel.model_validate(result)
+
+    # end method definition
+
+    def confirm_customer_return_parts(
+        self, claim_id: str, item_number: str
+    ) -> SAPWarrantyClaimItemResponseModel | None:
+        """Confirm the return of the parts of a customer warranty claim item (parts sent back by the customer).
+
+        Args:
+            claim_id (str):
+                The customer warranty claim number, e.g. "10000001".
+            item_number (str):
+                The item number, e.g. "000010" or "10" (with or without leading zeros).
+
+        Returns:
+            SAPWarrantyClaimItemResponseModel | None:
+                The confirmed item or None in case of an error.
+
+        """
+
+        claim = self.get_warranty_claim(claim_id, expand_versions=True)
+        if claim is None:
+            return None
+
+        # The V4 API returns item numbers without leading zeros (e.g. "1"):
+        number = item_number.strip().lstrip("0")
+        item = next(
+            (
+                item
+                for version in claim.versions or []
+                for item in version.items or []
+                if (item.item or "").lstrip("0") == number
+            ),
+            None,
+        )
+        if item is None:
+            self.log_error(
+                "Cannot confirm return of parts - item -> '%s' not found in claim -> '%s'!", item_number, claim_id
+            )
+            return None
+
+        result = self._call_odata_bound_action(
+            service="API_WARRANTYCLAIM",
+            entity_path="WarrantyClaimItem({})".format(item.item_uuid),
+            action="ConfirmCustomerReturnParts",
+            namespace=WARRANTY_CLAIM_ACTION_NAMESPACE,
+            parameters={},
+            label="confirm return of parts of warranty claim -> '{}' item -> '{}'".format(claim_id, number),
+        )
+        if result is None:
+            return None
+
+        return SAPWarrantyClaimItemResponseModel.model_validate(result)
+
+    # end method definition
+
+    def _process_warranty_claim(
+        self,
+        claim_id: str,
+        action: str,
+        action_code: str,
+        version_number: str | None,
+        claim_type: str | None,
+    ) -> SAPWarrantyClaimResponseModel | None:
+        """Call one of the actions that process a warranty claim (supplier or customer claim).
+
+        Args:
+            claim_id (str):
+                The warranty claim number.
+            action (str):
+                The name of the bound action, e.g. "ProcessSupplierClaim".
+            action_code (str):
+                The warranty claim action code.
+            version_number (str | None):
+                The version the action applies to (None = SAP default).
+            claim_type (str | None):
+                The warranty claim type (None = the type of the claim).
+
+        Returns:
+            SAPWarrantyClaimResponseModel | None:
+                The processed claim or None in case of an error.
+
+        """
+
+        claim = self.get_warranty_claim(claim_id, expand_versions=True)
+        if claim is None:
+            return None
+        version_uuid = self._warranty_claim_version_uuid(claim, version_number)
+        if version_number and version_uuid is None:
+            return None
+
+        result = self._call_odata_bound_action(
+            service="API_WARRANTYCLAIM",
+            entity_path="WarrantyClaim({})".format(claim.claim_uuid),
+            action=action,
+            namespace=WARRANTY_CLAIM_ACTION_NAMESPACE,
+            parameters={
+                "WarrantyClaimActionCode": action_code,
+                "WrntyVersionUUID": version_uuid,
+                "WarrantyClaimType": claim_type or claim.claim_type,
+            },
+            label="{} -> '{}' with action code '{}'".format(action, claim_id, action_code),
+        )
+        if result is None:
+            return None
+
+        return SAPWarrantyClaimResponseModel.model_validate(result)
+
+    # end method definition
+
+    def _find_warranty_claim_version(
+        self, claim: SAPWarrantyClaimResponseModel, version_number: str
+    ) -> SAPWarrantyClaimVersionResponseModel | None:
+        """Return the version of a warranty claim with the given number (None if it does not exist)."""
+
+        # The V4 API returns version numbers without leading zeros (e.g. "1"):
+        number = version_number.strip().lstrip("0")
+        version = next(
+            (version for version in claim.versions or [] if (version.number or "").lstrip("0") == number), None
+        )
+        if version is None:
+            self.log_error("Warranty claim -> '%s' has no version -> '%s'!", claim.claim_id, version_number)
+
+        return version
+
+    # end method definition
+
+    def _warranty_claim_version_uuid(
+        self, claim: SAPWarrantyClaimResponseModel, version_number: str | None
+    ) -> str | None:
+        """Return the key of a version of a warranty claim (None if no version is given or it does not exist)."""
+
+        if not version_number:
+            return None
+        version = self._find_warranty_claim_version(claim, version_number)
+
+        return version.version_uuid if version else None
 
     # end method definition
 
@@ -6507,14 +7651,21 @@ class SAP:
         if query.sales_orders:
             # A_BillingDocument cannot be filtered by its items (OData V2 has no any()) - find the
             # billing documents of the sales orders via their items, then read them by their IDs:
-            items = self.iter_billing_document_items(
-                query=SAPBillingDocumentItemQueryModel(
+            keys = self._find_keys_via_items(
+                service="API_BILLING_DOCUMENT_SRV",
+                entity_set="A_BillingDocumentItem",
+                item_query=SAPBillingDocumentItemQueryModel(
                     sales_orders=query.sales_orders, billing_document_ids=query.billing_document_ids
-                )
+                ),
+                keys=("BillingDocument",),
+                label="billing document items",
+                header_query=query,
+                navigation="to_BillingDocument",
+                exclude=("billing_document_ids",),
             )
-            billing_document_ids = list(dict.fromkeys(item.billing_document_id for item in items))
-            if items.failed:
+            if keys is None:
                 return SAPODataIterator(_failed_odata_read())
+            billing_document_ids = [billing_document_id for (billing_document_id,) in keys]
             if not billing_document_ids:
                 self.logger.info("No SAP billing documents for sales orders -> %s.", str(query.sales_orders))
                 return SAPODataIterator(iter([]))
@@ -6745,14 +7896,18 @@ class SAP:
         if query.has_item_criteria:
             # A_OutbDeliveryHeader cannot be filtered by its items (OData V2 has no any()) - find the
             # deliveries of the sales orders / materials via their items, then read them by their IDs:
-            items = self.iter_outbound_delivery_items(
-                query=SAPOutboundDeliveryItemQueryModel(
+            keys = self._find_keys_via_items(
+                service="API_OUTBOUND_DELIVERY_SRV",
+                entity_set="A_OutbDeliveryItem",
+                item_query=SAPOutboundDeliveryItemQueryModel(
                     sales_orders=query.sales_orders, materials=query.materials, delivery_ids=query.delivery_ids
-                )
+                ),
+                keys=("DeliveryDocument",),
+                label="outbound delivery items",
             )
-            delivery_ids = list(dict.fromkeys(item.delivery_id for item in items if item.delivery_id))
-            if items.failed:
+            if keys is None:
                 return SAPODataIterator(_failed_odata_read())
+            delivery_ids = [delivery_id for (delivery_id,) in keys]
             if not delivery_ids:
                 self.logger.info(
                     "No SAP outbound deliveries for sales orders -> %s / materials -> %s.",
@@ -7037,14 +8192,18 @@ class SAP:
         if query.has_item_criteria:
             # A_InbDeliveryHeader cannot be filtered by its items (OData V2 has no any()) - find the
             # deliveries of the purchase orders / materials via their items, then read them by their IDs:
-            items = self.iter_inbound_delivery_items(
-                query=SAPInboundDeliveryItemQueryModel(
+            keys = self._find_keys_via_items(
+                service="API_INBOUND_DELIVERY_SRV",
+                entity_set="A_InbDeliveryItem",
+                item_query=SAPInboundDeliveryItemQueryModel(
                     purchase_orders=query.purchase_orders, materials=query.materials, delivery_ids=query.delivery_ids
-                )
+                ),
+                keys=("DeliveryDocument",),
+                label="inbound delivery items",
             )
-            delivery_ids = list(dict.fromkeys(item.delivery_id for item in items if item.delivery_id))
-            if items.failed:
+            if keys is None:
                 return SAPODataIterator(_failed_odata_read())
+            delivery_ids = [delivery_id for (delivery_id,) in keys]
             if not delivery_ids:
                 self.logger.info(
                     "No SAP inbound deliveries for purchase orders -> %s / materials -> %s.",
@@ -7382,6 +8541,73 @@ class SAP:
 
     # end method definition
 
+    def get_supplier_invoice_items(
+        self, query: SAPSupplierInvoiceItemQueryModel | None = None
+    ) -> list[SAPSupplierInvoicePurchaseOrderItemResponseModel] | None:
+        """Get the purchase order items of SAP supplier invoices, e.g. to find the invoices of purchase orders.
+
+        The items carry no reversal status - read the invoices (get_supplier_invoices()) for IsReversed and
+        ReverseDocument: reversed invoices and their reversal documents are returned too.
+
+        Args:
+            query (SAPSupplierInvoiceItemQueryModel | None, optional):
+                The search criteria, e.g. the purchase orders of the items. Defaults to None (all items).
+
+        Returns:
+            list[SAPSupplierInvoicePurchaseOrderItemResponseModel] | None:
+                The invoice items (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self._iter_odata_collection(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            entity_set="A_SuplrInvcItemPurOrdRef",
+            model=SAPSupplierInvoicePurchaseOrderItemResponseModel,
+            query=query or SAPSupplierInvoiceItemQueryModel(),
+            label="supplier invoice items",
+        )
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP supplier invoice items.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_supplier_invoice_gl_account_items(
+        self, query: SAPSupplierInvoiceGLAccountItemQueryModel | None = None
+    ) -> list[SAPSupplierInvoiceGLAccountItemResponseModel] | None:
+        """Get the G/L account items of SAP supplier invoices, e.g. the items of a cost center.
+
+        Args:
+            query (SAPSupplierInvoiceGLAccountItemQueryModel | None, optional):
+                The search criteria, e.g. company code and cost centers. Defaults to None (all items).
+
+        Returns:
+            list[SAPSupplierInvoiceGLAccountItemResponseModel] | None:
+                The invoice items (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self._iter_odata_collection(
+            service="API_SUPPLIERINVOICE_PROCESS_SRV",
+            entity_set="A_SupplierInvoiceItemGLAcct",
+            model=SAPSupplierInvoiceGLAccountItemResponseModel,
+            query=query or SAPSupplierInvoiceGLAccountItemQueryModel(),
+            label="supplier invoice G/L account items",
+        )
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP supplier invoice G/L account items.", len(results))
+
+        return results
+
+    # end method definition
+
     def get_supplier_invoice(
         self, invoice_id: str, fiscal_year: str, expand_items: bool = True
     ) -> SAPSupplierInvoiceResponseModel | None:
@@ -7617,13 +8843,19 @@ class SAP:
                 "plants": query.plants,
                 "movement_types": query.movement_types,
             }
-            items = self.iter_goods_movement_items(
-                query=SAPGoodsMovementItemQueryModel(
+            keys = self._find_keys_via_items(
+                service="API_MATERIAL_DOCUMENT_SRV",
+                entity_set="A_MaterialDocumentItem",
+                item_query=SAPGoodsMovementItemQueryModel(
                     **item_criteria, document_year=query.document_year, documents=query.documents
-                )
+                ),
+                keys=("MaterialDocument", "MaterialDocumentYear"),
+                label="material document items",
+                header_query=query,
+                navigation="to_MaterialDocumentHeader",
+                exclude=("documents", "document_year"),
             )
-            keys = list(dict.fromkeys((item.document, item.document_year) for item in items))
-            if items.failed:
+            if keys is None:
                 return SAPODataIterator(_failed_odata_read())
             if not keys:
                 self.logger.info(
@@ -8090,12 +9322,16 @@ class SAP:
                 "functional_location_labels": query.functional_location_labels,
                 "equipment_ids": query.equipment_ids,
             }
-            items = self.iter_maintenance_plan_items(
-                query=SAPMaintenancePlanItemQueryModel(**item_criteria, plan_ids=query.plan_ids)
+            keys = self._find_keys_via_items(
+                service="API_MAINTENANCEPLAN",
+                entity_set="MaintenanceItem",
+                item_query=SAPMaintenancePlanItemQueryModel(**item_criteria, plan_ids=query.plan_ids),
+                keys=("MaintenancePlan",),
+                label="maintenance items",
             )
-            plan_ids = list(dict.fromkeys(item.plan_id for item in items if item.plan_id))
-            if items.failed:
+            if keys is None:
                 return SAPODataIterator(_failed_odata_read())
+            plan_ids = [plan_id for (plan_id,) in keys]
             if not plan_ids:
                 self.logger.info(
                     "No SAP maintenance plans with items matching -> %s.",
@@ -8251,6 +9487,7 @@ class SAP:
         plan_id: str,
         action: SAPMaintenancePlanAction,
         parameters: dict | None = None,
+        scheduling_start_date: date | str | None = None,
     ) -> bool:
         """Change the status of an SAP maintenance plan (e.g. start scheduling, activate or deactivate).
 
@@ -8261,6 +9498,10 @@ class SAP:
                 The status action, e.g. SAPMaintenancePlanAction.START_SCHEDULING.
             parameters (dict | None, optional):
                 Additional (optional) parameters of the action with their OData names. Defaults to None.
+            scheduling_start_date (date | str | None, optional):
+                The start of the cycle for (re)starting the scheduling, e.g. "2026-12-01". SAP does not
+                take it from the plan (the scheduling start date of a new plan is not stored) - without
+                it, the scheduling starts today. Defaults to None.
 
         Returns:
             bool:
@@ -8268,10 +9509,25 @@ class SAP:
 
         """
 
+        parameters = dict(parameters or {})
+        if scheduling_start_date:
+            # Function import parameters need the OData literal of the type - a date, not a text:
+            try:
+                parameters["SchedulingStartDate"] = (
+                    date.fromisoformat(scheduling_start_date)
+                    if isinstance(scheduling_start_date, str)
+                    else scheduling_start_date
+                )
+            except ValueError:
+                self.log_error(
+                    "Invalid scheduling start date -> '%s' (expected e.g. '2026-12-01')", scheduling_start_date
+                )
+                return False
+
         result = self._call_odata_function(
             service="API_MAINTENANCEPLAN",
             function=str(action),
-            parameters={"MaintenancePlan": plan_id, **(parameters or {})},
+            parameters={"MaintenancePlan": plan_id, **parameters},
             label="{} maintenance plan -> '{}'".format(action.name.lower().replace("_", " "), plan_id),
             # RAP based service - its functions need the ETag of the plan (428 Precondition required otherwise):
             etag_entity_path="MaintenancePlan('{}')".format(self._quote_key(plan_id)),
@@ -9716,6 +10972,53 @@ class SAP:
 
     # end method definition
 
+    def _get_material_bom_path(self, material: str, plant: str, usage: str, alternative: str, label: str) -> str | None:
+        """Get the entity path of a material BOM - it has 7 key fields (e.g. the internal BOM number).
+
+        Args:
+            material (str):
+                The material (product) of the BOM, e.g. "P-100".
+            plant (str):
+                The plant of the BOM, e.g. "3000".
+            usage (str):
+                The BOM usage, e.g. "1" (production) or "4" (plant maintenance / spare parts).
+            alternative (str):
+                The alternative BOM, e.g. "1".
+            label (str):
+                The name of the BOM for log messages.
+
+        Returns:
+            str | None:
+                The entity path relative to the service root, e.g. "MaterialBOM(BillOfMaterial='00000123',...)",
+                or None if the BOM doesn't exist or can't be read.
+
+        """
+
+        response = self.do_request(
+            url=self.service_url("API_BILL_OF_MATERIAL_SRV") + "/MaterialBOM",
+            params={
+                "$filter": "Material eq '{}' and Plant eq '{}' and BillOfMaterialVariantUsage eq '{}' and "
+                "BillOfMaterialVariant eq '{}'".format(
+                    self._quote_key(material),
+                    self._quote_key(plant),
+                    self._quote_key(usage),
+                    self._quote_key(alternative),
+                ),
+                "$select": "BillOfMaterial",
+            },
+            show_error=False,
+            show_warning=True,
+            warning_message="Cannot get SAP {}".format(label),
+        )
+        boms = (response or {}).get("d", {}).get("results", [])
+        if not boms:
+            self.log_error("Cannot find SAP %s!", label)
+            return None
+
+        return boms[0]["__metadata"]["uri"].rsplit("/", 1)[-1]
+
+    # end method definition
+
     def update_material_bom(
         self,
         material: str,
@@ -9761,28 +11064,11 @@ class SAP:
             self.log_error("No changes given for SAP %s!", label)
             return False
 
-        # The BOM has 7 key fields (e.g. the internal BOM number) - take its entity path from the BOM:
-        response = self.do_request(
-            url=self.service_url("API_BILL_OF_MATERIAL_SRV") + "/MaterialBOM",
-            params={
-                "$filter": "Material eq '{}' and Plant eq '{}' and BillOfMaterialVariantUsage eq '{}' and "
-                "BillOfMaterialVariant eq '{}'".format(
-                    self._quote_key(material),
-                    self._quote_key(plant),
-                    self._quote_key(usage),
-                    self._quote_key(alternative),
-                ),
-                "$select": "BillOfMaterial",
-            },
-            show_error=False,
-            show_warning=True,
-            warning_message="Cannot get SAP {}".format(label),
+        header_path = self._get_material_bom_path(
+            material=material, plant=plant, usage=usage, alternative=alternative, label=label
         )
-        boms = (response or {}).get("d", {}).get("results", [])
-        if not boms:
-            self.log_error("Cannot find SAP %s!", label)
+        if header_path is None:
             return False
-        header_path = boms[0]["__metadata"]["uri"].rsplit("/", 1)[-1]
 
         return self._update_odata_document(
             service="API_BILL_OF_MATERIAL_SRV",
@@ -9800,6 +11086,130 @@ class SAP:
                 label="item",
             ),
             item_model=SAPMaterialBOMItemModel,
+        )
+
+    # end method definition
+
+    def create_material_bom_item(
+        self,
+        material: str,
+        plant: str,
+        item: SAPMaterialBOMItemModel | dict,
+        usage: str = "1",
+        alternative: str = "1",
+    ) -> dict | None:
+        """Add an item (component) to an existing material BOM.
+
+        BOMs with engineering change management (change numbers) are not supported.
+
+        Args:
+            material (str):
+                The material (product) of the BOM, e.g. "EP-300".
+            plant (str):
+                The plant of the BOM, e.g. "3000".
+            item (SAPMaterialBOMItemModel | dict):
+                The new item, e.g. {"BillOfMaterialComponent": "KT-4402C", "BillOfMaterialItemQuantity": 1}.
+                A dictionary is validated against SAPMaterialBOMItemModel.
+            usage (str, optional):
+                The BOM usage, e.g. "1" (production) or "4" (plant maintenance / spare parts). Defaults to "1".
+            alternative (str, optional):
+                The alternative BOM. Defaults to "1".
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP or None in case of an error.
+
+        """
+
+        label = "item of material BOM -> '{}' (plant -> '{}', usage -> '{}', alternative -> '{}')".format(
+            material, plant, usage, alternative
+        )
+        header_path = self._get_material_bom_path(
+            material=material, plant=plant, usage=usage, alternative=alternative, label=label
+        )
+        if header_path is None:
+            return None
+
+        return self._create_odata_entity(
+            service="API_BILL_OF_MATERIAL_SRV",
+            entity_set=header_path + "/to_BillOfMaterialItem",
+            model=SAPMaterialBOMItemModel,
+            data=item,
+            key_fields=["BillOfMaterialItemNodeNumber"],
+            label=label,
+        )
+
+    # end method definition
+
+    def delete_material_bom_item(
+        self,
+        material: str,
+        plant: str,
+        item: str,
+        usage: str = "1",
+        alternative: str = "1",
+    ) -> bool:
+        """Delete an item (component) of a material BOM.
+
+        BOMs with engineering change management (change numbers) are not supported.
+
+        Args:
+            material (str):
+                The material (product) of the BOM, e.g. "EP-300".
+            plant (str):
+                The plant of the BOM, e.g. "3000".
+            item (str):
+                The item number (e.g. "0020") or the component (e.g. "KT-4402") of the item to delete -
+                a component must be unique in the BOM.
+            usage (str, optional):
+                The BOM usage. Defaults to "1".
+            alternative (str, optional):
+                The alternative BOM. Defaults to "1".
+
+        Returns:
+            bool:
+                True if the item has been deleted, False in case of an error.
+
+        """
+
+        label = "item -> '{}' of material BOM -> '{}' (plant -> '{}', usage -> '{}', alternative -> '{}')".format(
+            item, material, plant, usage, alternative
+        )
+        header_path = self._get_material_bom_path(
+            material=material, plant=plant, usage=usage, alternative=alternative, label=label
+        )
+        if header_path is None:
+            return False
+
+        response = self.do_request(
+            url=self.service_url("API_BILL_OF_MATERIAL_SRV") + "/" + header_path + "/to_BillOfMaterialItem",
+            params={"$select": "BillOfMaterialItemNumber,BillOfMaterialComponent"},
+            failure_message="Failed to read the items of SAP {}".format(label),
+        )
+        entries = (response or {}).get("d", {}).get("results", [])
+        number = item.strip().zfill(4) if item.strip().isdigit() else None
+        matches = [
+            entry
+            for entry in entries
+            if (number and entry.get("BillOfMaterialItemNumber") == number)
+            or (not number and entry.get("BillOfMaterialComponent", "").casefold() == item.strip().casefold())
+        ]
+        if len(matches) != 1:
+            self.log_error(
+                "Cannot delete SAP %s - %s!",
+                label,
+                "it is not unique, items -> {}".format(
+                    ", ".join(entry.get("BillOfMaterialItemNumber", "") for entry in matches)
+                )
+                if matches
+                else "no such item",
+            )
+            return False
+
+        return self._delete_odata_entity(
+            service="API_BILL_OF_MATERIAL_SRV",
+            entity_path=matches[0]["__metadata"]["uri"].rsplit("/", 1)[-1],
+            label=label,
         )
 
     # end method definition
@@ -10201,6 +11611,133 @@ class SAP:
 
     # end method definition
 
+    def install_equipment(
+        self,
+        equipment_id: str,
+        functional_location_id: str | None = None,
+        superordinate_equipment: str | None = None,
+        position: str | None = None,
+        installation_date: date | None = None,
+    ) -> bool:
+        """Install an SAP equipment in a functional location or a superordinate equipment.
+
+        An equipment that is installed elsewhere is moved to the new location. SAP itself does
+        not check the target (an unknown functional location is accepted) - so the target is read
+        first and the equipment is only installed if it exists. Equipment data is time dependent:
+        SAP starts a new time segment at the installation date.
+
+        Args:
+            equipment_id (str):
+                The equipment number, e.g. "10000007".
+            functional_location_id (str | None, optional):
+                The functional location to install the equipment in, e.g. "CW-PMP-05". Defaults to None.
+            superordinate_equipment (str | None, optional):
+                The equipment to install the equipment in (instead of a functional location). Defaults to None.
+            position (str | None, optional):
+                The installation position in the target, e.g. "1". Defaults to None.
+            installation_date (date | None, optional):
+                The installation date. Defaults to None (today).
+
+        Returns:
+            bool:
+                True if the equipment has been installed, False in case of an error.
+
+        """
+
+        label = "install equipment -> '{}' in {}".format(
+            equipment_id,
+            "functional location -> '{}'".format(functional_location_id)
+            if functional_location_id
+            else "equipment -> '{}'".format(superordinate_equipment),
+        )
+        if bool(functional_location_id) == bool(superordinate_equipment):
+            self.log_error("Cannot %s - give either a functional location or a superordinate equipment!", label)
+            return False
+
+        # SAP doesn't check the target - an unknown one would be stored as installation location:
+        target = (
+            self.get_functional_location(functional_location_id=functional_location_id)
+            if functional_location_id
+            else self.get_equipment(equipment_id=superordinate_equipment)
+        )
+        if target is None:
+            if not self.last_error:
+                self.log_error("Cannot %s - the target does not exist!", label)
+            return False
+
+        equipment = self.get_equipment(equipment_id=equipment_id)
+        if equipment is None:
+            if not self.last_error:
+                self.log_error("Cannot %s - the equipment does not exist!", label)
+            return False
+
+        result = self._call_odata_function(
+            service="API_EQUIPMENT",
+            function="InstallEquipment",
+            parameters={
+                "Equipment": equipment_id,
+                "ValidityEndDate": equipment.validity_end_date,
+                "FunctionalLocation": functional_location_id,
+                "SuperordinateEquipment": superordinate_equipment,
+                "EquipInstallationPositionNmbr": position,
+                "EquipmentInstallationDate": installation_date,
+            },
+            label=label,
+            etag_entity_path="Equipment(Equipment='{}',ValidityEndDate={})".format(
+                self._quote_key(equipment_id), odata_literal(equipment.validity_end_date)
+            ),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def dismantle_equipment(self, equipment_id: str, dismantle_date: date | None = None) -> bool:
+        """Dismantle an installed SAP equipment from its functional location or superordinate equipment.
+
+        Equipment data is time dependent: SAP starts a new time segment at the dismantle date.
+
+        Args:
+            equipment_id (str):
+                The equipment number, e.g. "10000007".
+            dismantle_date (date | None, optional):
+                The dismantle date. Defaults to None (today).
+
+        Returns:
+            bool:
+                True if the equipment has been dismantled, False in case of an error.
+
+        """
+
+        label = "dismantle equipment -> '{}'".format(equipment_id)
+        equipment = self.get_equipment(equipment_id=equipment_id)
+        if equipment is None:
+            if not self.last_error:
+                self.log_error("Cannot %s - the equipment does not exist!", label)
+            return False
+        if not equipment.functional_location_id and not equipment.superordinate_equipment:
+            self.log_error("Cannot %s - it is not installed!", label)
+            return False
+
+        result = self._call_odata_function(
+            service="API_EQUIPMENT",
+            function="DismantleEquipment",
+            parameters={
+                "Equipment": equipment_id,
+                "ValidityEndDate": equipment.validity_end_date,
+                # The dismantle date is passed in the parameter of the installation date:
+                "EquipmentInstallationDate": dismantle_date,
+            },
+            label=label,
+            etag_entity_path="Equipment(Equipment='{}',ValidityEndDate={})".format(
+                self._quote_key(equipment_id), odata_literal(equipment.validity_end_date)
+            ),
+        )
+
+        return result is not None
+
+    # end method definition
+
     def create_functional_location(self, functional_location: SAPFunctionalLocationModel | dict) -> dict | None:
         """Create an SAP functional location (master data).
 
@@ -10392,6 +11929,86 @@ class SAP:
 
     # end method definition
 
+    def install_functional_location(
+        self,
+        functional_location_id: str,
+        superior_functional_location_id: str,
+        position: str | None = None,
+        installation_date: date | None = None,
+    ) -> bool:
+        """Install an SAP functional location in a superior functional location.
+
+        The superior functional location is read first - the functional location is only
+        installed if it exists.
+
+        Args:
+            functional_location_id (str):
+                The internal ID of the functional location to install, e.g. "CW-PMP-05".
+            superior_functional_location_id (str):
+                The internal ID of the superior functional location, e.g. "CW-PMP".
+            position (str | None, optional):
+                The position in the superior functional location. Defaults to None.
+            installation_date (date | None, optional):
+                The installation date. Defaults to None (today).
+
+        Returns:
+            bool:
+                True if the functional location has been installed, False in case of an error.
+
+        """
+
+        label = "install functional location -> '{}' in functional location -> '{}'".format(
+            functional_location_id, superior_functional_location_id
+        )
+        if self.get_functional_location(functional_location_id=superior_functional_location_id) is None:
+            if not self.last_error:
+                self.log_error("Cannot %s - the superior functional location does not exist!", label)
+            return False
+
+        result = self._call_odata_function(
+            service="API_FUNCTIONALLOCATION",
+            function="InstallFunctionalLocation",
+            parameters={
+                "FunctionalLocation": functional_location_id,
+                "SuperiorFunctionalLocation": superior_functional_location_id,
+                "FuncLocInstallationPosNmbr": position,
+                "FuncLocInstallationDate": installation_date,
+            },
+            label=label,
+            etag_entity_path="FunctionalLocation('{}')".format(self._quote_key(functional_location_id)),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def dismantle_functional_location(self, functional_location_id: str, dismantle_date: date | None = None) -> bool:
+        """Dismantle an SAP functional location from its superior functional location.
+
+        Args:
+            functional_location_id (str):
+                The internal ID of the functional location, e.g. "CW-PMP-05".
+            dismantle_date (date | None, optional):
+                The dismantle date. Defaults to None (today).
+
+        Returns:
+            bool:
+                True if the functional location has been dismantled, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_FUNCTIONALLOCATION",
+            function="DismantleFunctionalLocation",
+            parameters={"FunctionalLocation": functional_location_id, "FuncLocDismantleDate": dismantle_date},
+            label="dismantle functional location -> '{}'".format(functional_location_id),
+            etag_entity_path="FunctionalLocation('{}')".format(self._quote_key(functional_location_id)),
+        )
+
+        return result is not None
+
+    # end method definition
+
     def create_business_partner(self, business_partner: SAPBusinessPartnerModel | dict) -> dict | None:
         """Create an SAP business partner (organization) with its addresses, roles and supplier / customer data.
 
@@ -10507,6 +12124,238 @@ class SAP:
             model=SAPBusinessPartnerResponseModel,
             params={"$expand": BUSINESS_PARTNER_DETAILS_EXPAND} if expand_items else None,
             label="business partner -> '{}'".format(business_partner_id),
+        )
+
+    # end method definition
+
+    def update_business_partner(self, business_partner_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP business partner (general data).
+
+        The changes are validated with the field definitions of SAPBusinessPartnerModel; OData
+        properties of A_BusinessPartner that are not modelled can be passed with their OData name
+        (e.g. "SearchTerm2"). Addresses, roles and the customer / supplier data are changed with
+        their own methods (update_business_partner_address(), create_business_partner_role(),
+        create_customer_sales_area(), ...).
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            business_partner_id (str):
+                The business partner number, e.g. "30090".
+            changes (dict):
+                The fields to change, e.g. {"organization_name": "Delta Pump Manufacturing Inc."} or
+                {"SearchTerm2": "PUMPS"}.
+
+        Returns:
+            bool:
+                True if the business partner has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_path="A_BusinessPartner('{}')".format(self._quote_key(business_partner_id)),
+            model=SAPBusinessPartnerModel,
+            changes=changes,
+            label="business partner -> '{}'".format(business_partner_id),
+        )
+
+    # end method definition
+
+    def update_business_partner_address(self, business_partner_id: str, address_id: str, changes: dict) -> bool:
+        """Update individual fields of an address of an SAP business partner.
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            business_partner_id (str):
+                The business partner number, e.g. "30090".
+            address_id (str):
+                The address number - see the addresses of get_business_partner(), e.g. "25385".
+            changes (dict):
+                The fields to change, e.g. {"street": "Main Street", "house_number": "12"}. The changes
+                are validated with the field definitions of SAPBusinessPartnerAddressModel.
+
+        Returns:
+            bool:
+                True if the address has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_path="A_BusinessPartnerAddress(BusinessPartner='{}',AddressID='{}')".format(
+                self._quote_key(business_partner_id), self._quote_key(address_id)
+            ),
+            model=SAPBusinessPartnerAddressModel,
+            changes=changes,
+            label="address -> '{}' of business partner -> '{}'".format(address_id, business_partner_id),
+        )
+
+    # end method definition
+
+    def create_business_partner_role(
+        self, business_partner_id: str, role: SAPBusinessPartnerRoleModel | dict | str
+    ) -> dict | None:
+        """Add a role to an existing SAP business partner.
+
+        Roles make a business partner usable in a business process, e.g. FLVN00 / FLVN01 (supplier
+        for financial accounting / purchasing) or FLCU00 / FLCU01 (customer for financial
+        accounting / sales). The supplier or customer data itself (purchasing organizations, sales
+        areas, company codes) is added with create_supplier_purchasing_org(),
+        create_customer_sales_area(), ...
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            business_partner_id (str):
+                The business partner number, e.g. "30090".
+            role (SAPBusinessPartnerRoleModel | dict | str):
+                The role, e.g. "FLCU01" or {"role": "FLCU01"}.
+
+        Returns:
+            dict | None:
+                The created role as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_BusinessPartner('{}')/to_BusinessPartnerRole".format(self._quote_key(business_partner_id)),
+            model=SAPBusinessPartnerRoleModel,
+            data={"role": role} if isinstance(role, str) else role,
+            key_fields=["BusinessPartner", "BusinessPartnerRole"],
+            label="role of business partner -> '{}'".format(business_partner_id),
+        )
+
+    # end method definition
+
+    def create_customer_sales_area(self, customer_id: str, sales_area: SAPCustomerSalesAreaModel | dict) -> dict | None:
+        """Extend an existing SAP customer to a sales area (sales organization, distribution channel, division).
+
+        Sales orders for the customer can only be created in sales areas the customer is extended to.
+        The business partner needs the customer role FLCU01 (see create_business_partner_role()).
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            customer_id (str):
+                The customer number, e.g. "52001" - it can differ from the business partner number.
+            sales_area (SAPCustomerSalesAreaModel | dict):
+                The sales area data, e.g. {"sales_organization": "3000", "distribution_channel": "10",
+                "division": "00", "currency": "USD", ...}. SAP checks the required fields of the sales
+                area (customizing) and names the missing ones.
+
+        Returns:
+            dict | None:
+                The created sales area data as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_Customer('{}')/to_CustomerSalesArea".format(self._quote_key(customer_id)),
+            model=SAPCustomerSalesAreaModel,
+            data=sales_area,
+            key_fields=["Customer", "SalesOrganization"],
+            label="sales area of customer -> '{}'".format(customer_id),
+        )
+
+    # end method definition
+
+    def create_customer_company(self, customer_id: str, company: SAPCustomerCompanyModel | dict) -> dict | None:
+        """Extend an existing SAP customer to a company code (accounting data, e.g. the reconciliation account).
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            customer_id (str):
+                The customer number, e.g. "52001".
+            company (SAPCustomerCompanyModel | dict):
+                The company code data, e.g. {"company_code": "3000", "reconciliation_account": "12100000"}.
+
+        Returns:
+            dict | None:
+                The created company code data as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_Customer('{}')/to_CustomerCompany".format(self._quote_key(customer_id)),
+            model=SAPCustomerCompanyModel,
+            data=company,
+            key_fields=["Customer", "CompanyCode"],
+            label="company code data of customer -> '{}'".format(customer_id),
+        )
+
+    # end method definition
+
+    def create_supplier_purchasing_org(
+        self, supplier_id: str, purchasing_organization: SAPSupplierPurchasingOrgModel | dict
+    ) -> dict | None:
+        """Extend an existing SAP supplier to a purchasing organization.
+
+        Purchase orders to the supplier can only be created in purchasing organizations the
+        supplier is extended to (together with the company code data, see create_supplier_company()).
+        The business partner needs the supplier role FLVN01 (see create_business_partner_role()).
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            supplier_id (str):
+                The supplier number, e.g. "30090" - it can differ from the business partner number.
+            purchasing_organization (SAPSupplierPurchasingOrgModel | dict):
+                The purchasing data, e.g. {"purchasing_organization": "3000", "order_currency": "USD"}.
+
+        Returns:
+            dict | None:
+                The created purchasing data as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_Supplier('{}')/to_SupplierPurchasingOrg".format(self._quote_key(supplier_id)),
+            model=SAPSupplierPurchasingOrgModel,
+            data=purchasing_organization,
+            key_fields=["Supplier", "PurchasingOrganization"],
+            label="purchasing organization data of supplier -> '{}'".format(supplier_id),
+        )
+
+    # end method definition
+
+    def create_supplier_company(self, supplier_id: str, company: SAPSupplierCompanyModel | dict) -> dict | None:
+        """Extend an existing SAP supplier to a company code (accounting data, e.g. the reconciliation account).
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            supplier_id (str):
+                The supplier number, e.g. "30090".
+            company (SAPSupplierCompanyModel | dict):
+                The company code data, e.g. {"company_code": "3000", "reconciliation_account": "21100000"}.
+
+        Returns:
+            dict | None:
+                The created company code data as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_Supplier('{}')/to_SupplierCompany".format(self._quote_key(supplier_id)),
+            model=SAPSupplierCompanyModel,
+            data=company,
+            key_fields=["Supplier", "CompanyCode"],
+            label="company code data of supplier -> '{}'".format(supplier_id),
         )
 
     # end method definition

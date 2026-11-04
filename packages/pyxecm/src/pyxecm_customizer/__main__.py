@@ -48,6 +48,9 @@ def main() -> int:
     my_customizer = Customizer(logger=logger, settings=customizer_settings)
 
     try:
-        my_customizer.customization_run()
+        success = my_customizer.customization_run()
     except KeyboardInterrupt:
         logger.warning("KeyboardInterrupt - exiting")
+        return 130
+
+    return 0 if success else 1

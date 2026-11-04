@@ -1220,6 +1220,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#warranty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warranty
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#inventory-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1242,10 +1253,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#master-data-read-only" class="md-nav__link">
+  <a href="#master-data" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Master Data (read-only)
+        Master Data
       
     </span>
   </a>
@@ -1490,6 +1501,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#warranty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warranty
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#inventory-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1512,10 +1534,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#master-data-read-only" class="md-nav__link">
+  <a href="#master-data" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Master Data (read-only)
+        Master Data
       
     </span>
   </a>
@@ -1591,9 +1613,14 @@ live system - it reports exactly which of the steps below is still missing per s
 <li>V4: "Publish Service Groups" for the service group (e.g. <code>API_PURCHASEORDER_2</code>).</li>
 <li><strong><code>SICF</code></strong>: the ICF node of the service must be active (<code>/sap/opu/odata/sap/&lt;service&gt;</code>
    for V2, <code>/sap/opu/odata4</code> for V4).</li>
-<li><strong><code>PFCG</code></strong>: the calling user needs authorization object <strong><code>S_SERVICE</code></strong> for the
-   service (role menu entry of type <code>IWSG</code>), plus the business authorizations for the
-   underlying transaction (e.g. as for <code>IW31</code> to create maintenance orders).</li>
+<li><strong><code>PFCG</code></strong>: the calling user needs the start authorization for the service plus the
+   business authorizations for the underlying transaction (e.g. as for <code>IW31</code> to create
+   maintenance orders):</li>
+<li>V2: authorization object <strong><code>S_SERVICE</code></strong> (role menu entry of type <code>IWSG</code>, e.g.
+     <code>R3TR IWSV API_MAINTNOTIFICATION 0001</code>).</li>
+<li>V4: authorization object <strong><code>S_START</code></strong> for the service group (role menu entry
+     "TADIR Service" <code>R3TR G4BA &lt;service group&gt;</code>, e.g. <code>API_PURCHASEORDER_2</code>) - <strong>not</strong>
+     <code>S_SERVICE</code>. Without it, SAP answers HTTP 403 with message <code>/IWBEP/CM_V4_COS/011</code>.</li>
 <li><strong><code>/IWFND/GW_CLIENT</code></strong>: <code>GET /sap/opu/odata/sap/&lt;service&gt;/$metadata</code> (or the V4
    equivalent) should return HTTP 200 as a smoke test.</li>
 </ol>
@@ -1623,8 +1650,9 @@ and business object references in Extended ECM. All types were checked in the S/
 reference system; "-" means there is no BOR object type for the entity.</p>
 <p>The business object types that business workspaces are typically linked to are also available
 in code: <code>SAP_BUSINESS_OBJECT_TYPES</code> in <code>pyxecm_customizer.sap_models</code> (name and key structure),
-and <code>get_sap_key_fields()</code> converts a business object ID (SAP's internal format, e.g.
-<code>"49000001232026"</code>) into the key fields the OData APIs expect (e.g. <code>("4900000123", "2026")</code>).</p>
+and <code>SAPBusinessObjectType.get(bo_type).get_key_fields(bo_id)</code> converts a business object ID
+(SAP's internal format, e.g. <code>"49000001232026"</code> for <code>BUS2017</code>) into the key fields the OData
+APIs expect (e.g. <code>("4900000123", "2026")</code>).</p>
 <p>¹ <code>BUS0008001</code> is the BOR object type "Plant storage area" - the storage location of a plant.</p>
 <h3 id="plant-maintenance">Plant Maintenance<a class="headerlink" href="#plant-maintenance" title="Permanent link">&para;</a></h3>
 <table>
@@ -1801,6 +1829,27 @@ and <code>get_sap_key_fields()</code> converts a business object ID (SAP's inter
 </tr>
 </tbody>
 </table>
+<h3 id="warranty">Warranty<a class="headerlink" href="#warranty" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>BO Type</th>
+<th>Version</th>
+<th>Entity Sets</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>API_WARRANTYCLAIM</code></td>
+<td><code>BUS2222</code></td>
+<td>V4</td>
+<td><code>WarrantyClaim</code>, <code>WarrantyClaimVersion</code>, <code>WarrantyClaimItem</code></td>
+<td>Create / Read / Update / Process warranty claims from customers and against suppliers</td>
+</tr>
+</tbody>
+</table>
 <h3 id="inventory-management">Inventory Management<a class="headerlink" href="#inventory-management" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1857,7 +1906,7 @@ and <code>get_sap_key_fields()</code> converts a business object ID (SAP's inter
 </tr>
 </tbody>
 </table>
-<h3 id="master-data-read-only">Master Data (read-only)<a class="headerlink" href="#master-data-read-only" title="Permanent link">&para;</a></h3>
+<h3 id="master-data">Master Data<a class="headerlink" href="#master-data" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -1874,98 +1923,105 @@ and <code>get_sap_key_fields()</code> converts a business object ID (SAP's inter
 <td><code>BUS0008</code></td>
 <td>V4</td>
 <td><code>Plant</code></td>
-<td>Plants</td>
+<td>Read plants</td>
 </tr>
 <tr>
 <td><code>API_STORAGELOCATION_SRV</code></td>
 <td><code>BUS0008001</code> ¹</td>
 <td>V2</td>
 <td><code>StorageLocation</code></td>
-<td>Storage locations</td>
+<td>Read storage locations</td>
 </tr>
 <tr>
 <td><code>API_PRODUCT_SRV</code></td>
 <td><code>BUS1001006</code> (generic: <code>BUS1001</code>)</td>
 <td>V2</td>
 <td><code>A_Product</code>, <code>A_ProductPlant</code>, <code>A_ProductDescription</code></td>
-<td>Products / materials</td>
+<td>Create / Read products (materials)</td>
+</tr>
+<tr>
+<td><code>API_BILL_OF_MATERIAL_SRV</code></td>
+<td><code>BUS1080</code></td>
+<td>V2 (<code>;v=0002</code>)</td>
+<td><code>MaterialBOM</code>, <code>MaterialBOMItem</code></td>
+<td>Create / Read / Update material BOMs, add / delete items</td>
 </tr>
 <tr>
 <td><code>API_PRODUCTION_VERSION</code></td>
 <td>-</td>
 <td>V4</td>
 <td><code>ProductionVersion</code></td>
-<td>Production versions</td>
+<td>Read production versions</td>
 </tr>
 <tr>
 <td><code>API_WORK_CENTERS</code></td>
 <td><code>BUS0011</code></td>
 <td>V2</td>
 <td><code>A_WorkCenters</code></td>
-<td>Work centers</td>
+<td>Read work centers</td>
 </tr>
 <tr>
 <td><code>API_EQUIPMENT</code></td>
 <td><code>EQUI</code></td>
 <td>V2</td>
 <td><code>Equipment</code></td>
-<td>Equipment master</td>
+<td>Create / Read equipment</td>
 </tr>
 <tr>
 <td><code>API_FUNCTIONALLOCATION</code></td>
 <td><code>BUS0010</code></td>
 <td>V2</td>
 <td><code>FunctionalLocation</code></td>
-<td>Functional location master</td>
+<td>Create / Read functional locations</td>
 </tr>
 <tr>
 <td><code>API_BUSINESS_PARTNER</code></td>
 <td><code>BUS1006</code> (customer: <code>KNA1</code>, supplier: <code>LFA1</code>)</td>
 <td>V2</td>
 <td><code>A_BusinessPartner</code>, <code>A_BusinessPartnerRole</code></td>
-<td>Business partners</td>
+<td>Create / Read business partners (customers, suppliers)</td>
 </tr>
 <tr>
 <td><code>API_COMPANYCODE_SRV</code></td>
 <td><code>BUS0002</code></td>
 <td>V2</td>
 <td><code>A_CompanyCode</code></td>
-<td>Company codes</td>
+<td>Read company codes</td>
 </tr>
 <tr>
 <td><code>API_SALESORGANIZATION_SRV</code></td>
 <td><code>BUS0006</code></td>
 <td>V2</td>
 <td><code>A_SalesOrganization</code></td>
-<td>Sales organizations</td>
+<td>Read sales organizations</td>
 </tr>
 <tr>
 <td><code>API_PURCHASINGORGANIZATION</code></td>
 <td><code>BUS0007</code></td>
 <td>V4</td>
 <td><code>A_PurchasingOrganization</code></td>
-<td>Purchasing organizations</td>
+<td>Read purchasing organizations</td>
 </tr>
 <tr>
 <td><code>API_COSTCENTER_SRV</code></td>
 <td><code>BUS0012</code></td>
 <td>V2</td>
 <td><code>A_CostCenter</code></td>
-<td>Cost centers</td>
+<td>Read cost centers</td>
 </tr>
 <tr>
 <td><code>API_PROFITCENTER_SRV</code></td>
 <td><code>BUS0015</code></td>
 <td>V2</td>
 <td><code>A_ProfitCenter</code></td>
-<td>Profit centers</td>
+<td>Read profit centers</td>
 </tr>
 <tr>
 <td><code>API_GLACCOUNTINCHARTOFACCOUNTS_SRV</code></td>
 <td><code>BUS3006</code></td>
 <td>V2</td>
 <td><code>A_GLAccountInChartOfAccounts</code></td>
-<td>G/L accounts</td>
+<td>Read G/L accounts</td>
 </tr>
 </tbody>
 </table>

@@ -1198,10 +1198,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b-principal-propagation-saml-20-oauth-20" class="md-nav__link">
+  <a href="#b-principal-propagation-saml-20-and-oauth-20" class="md-nav__link">
     <span class="md-ellipsis">
       
-        B. Principal propagation (SAML 2.0 + OAuth 2.0)
+        B. Principal propagation (SAML 2.0 and OAuth 2.0)
       
     </span>
   </a>
@@ -1656,10 +1656,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b-principal-propagation-saml-20-oauth-20" class="md-nav__link">
+  <a href="#b-principal-propagation-saml-20-and-oauth-20" class="md-nav__link">
     <span class="md-ellipsis">
       
-        B. Principal propagation (SAML 2.0 + OAuth 2.0)
+        B. Principal propagation (SAML 2.0 and OAuth 2.0)
       
     </span>
   </a>
@@ -2095,7 +2095,7 @@ each other, and what <code>pyxecm</code> provides for it:</p>
 </tr>
 <tr>
 <td>OAuth 2.0 scope</td>
-<td>A named permission an access token carries - in SAP one scope per OData service, e.g. <code>ZAPI_MAINTENANCEORDER_0002</code>, created by enabling OAuth for the service (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>). A token can only call the OData services whose scopes it was granted. SAP grants a scope only if it is assigned to the OAuth client (<code>SOAUTH2</code>) <strong>and</strong> the end user is authorized for it (authorization object <code>S_SCOPE</code>). pyxecm requests the scopes listed in <code>SAP__OAUTH_SCOPE</code>. Scopes limit what pyxecm can do with a token, on top of the end user's own authorizations.</td>
+<td>A named permission an access token carries - in SAP one scope per OData service, e.g. <code>ZAPI_MAINTENANCEORDER_0002</code> (OData V2) or <code>OV4:API_PURCHASEORDER_2</code> (OData V4 service group), created by enabling OAuth for the service (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>). A token can only call the OData services whose scopes it was granted. SAP grants a scope only if it is requested, assigned to the OAuth client (<code>SOAUTH2</code>) <strong>and</strong> the end user is authorized for it (authorization object <code>S_SCOPE</code>). By default, pyxecm requests the scopes of all services in <code>SAP_ODATA_SERVICES</code>; <code>SAP__OAUTH_SCOPE</code> overrides them. Scopes limit what pyxecm can do with a token, on top of the end user's own authorizations.</td>
 </tr>
 <tr>
 <td>Transaction <code>PFCG</code></td>
@@ -2120,8 +2120,9 @@ OAuth 2.0 IdP</em> can still fail everything if the <em>local provider</em> itse
       <a href="../sap-apis/#general-activation-steps-apply-to-every-odata-service">General activation steps</a>).</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Check that the ICF nodes are active in SAP S/4HANA transaction <code>SICF</code> (<code>/sap/opu/odata/sap/&lt;service&gt;</code> for V2,
       <code>/sap/opu/odata4</code> for V4).</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Authorizations (SAP S/4HANA transaction <code>PFCG</code>, role maintenance): <code>S_SERVICE</code> for the services plus the business
-      authorizations behind them. With principal propagation, every <strong>end user</strong> needs them
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Authorizations (SAP S/4HANA transaction <code>PFCG</code>, role maintenance): <code>S_SERVICE</code> for the V2 services,
+      <code>S_START</code> for the V4 service groups (see <a href="../sap-apis/#general-activation-steps-apply-to-every-odata-service">General activation steps</a>),
+      plus the business authorizations behind them. With principal propagation, every <strong>end user</strong> needs them
       in their own roles; with the <a href="#fallback-technical-user">technical user</a>, only that user.</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Smoke test: <code>GET .../$metadata</code> of each service in SAP S/4HANA transaction <code>/IWFND/GW_CLIENT</code> returns HTTP 200.</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Verify the actual status per service against your system with <code>SAP.check_odata_apis()</code>
@@ -2131,7 +2132,7 @@ OAuth 2.0 IdP</em> can still fail everything if the <em>local provider</em> itse
       <a href="../sap-apis/#no-system-alias-found-for-service-iwfndcm_cos064-http-500">troubleshooting</a>).
       <code>debug/debug_sap.py</code> does the same as part of its smoke test.</li>
 </ul>
-<h3 id="b-principal-propagation-saml-20-oauth-20">B. Principal propagation (SAML 2.0 + OAuth 2.0)<a class="headerlink" href="#b-principal-propagation-saml-20-oauth-20" title="Permanent link">&para;</a></h3>
+<h3 id="b-principal-propagation-saml-20-and-oauth-20">B. Principal propagation (SAML 2.0 and OAuth 2.0)<a class="headerlink" href="#b-principal-propagation-saml-20-and-oauth-20" title="Permanent link">&para;</a></h3>
 <p>Only needed if pyxecm (e.g. the Content Aviator SAP agents) calls SAP as the individual user.
 The step numbers refer to the <a href="#setup">Setup</a> of <a href="#direction-2-principal-propagation-into-sap">Direction 2</a>
 below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP administrator
@@ -2149,16 +2150,16 @@ below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP admin
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Make sure the e-mail addresses are <strong>unique</strong> and end users <strong>cannot change</strong> their own
       address (<code>SU3</code>) - otherwise use an administrator-maintained alias (see
       <a href="#security-considerations">Security considerations</a>).</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>/IWFND/MAINT_SERVICE</code>: enable <strong>OAuth</strong> for every service of section A - this creates
-      the scope IDs for the OAuth client (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>). For OData V4 service groups, follow
-      SAP's documentation of your release.</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>/IWFND/MAINT_SERVICE</code>: enable <strong>OAuth</strong> for every V2 service of section A - this creates
+      the scope IDs for the OAuth client (<a href="#24-enable-oauth-per-service-iwfndmaint_service">step 2.4</a>). OData V4 service groups
+      have the scope <code>OV4:&lt;service group&gt;</code> (e.g. <code>OV4:API_PURCHASEORDER_2</code>).</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>SU01</code> + <code>SOAUTH2</code>: <a href="#terminology">system user</a> (user type <em>System</em>) and <strong>OAuth 2.0 client</strong> with grant type <em>SAML 2.0
       Bearer Assertion</em>, pyxecm as <em>Trusted OAuth 2.0 IdP</em>, and only the needed scopes
       (<a href="#25-create-the-oauth-client-su01-soauth2">step 2.5</a>).</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>SOAUTH2</code>: access token lifetime of <strong>at least 10 minutes</strong> - the Content Aviator
       plugin reuses a token for up to 5 minutes (see <a href="#operations">Operations</a>).</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>PFCG</code>: the end users have <code>S_SERVICE</code>, <code>S_SCOPE</code> (OAuth client + scope IDs) and the
-      business authorizations (<a href="#26-authorize-the-end-users-pfcg">step 2.6</a>).</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>PFCG</code>: the end users have <code>S_SERVICE</code> (V2) / <code>S_START</code> (V4), <code>S_SCOPE</code> (OAuth client +
+      scope IDs) and the business authorizations (<a href="#26-authorize-the-end-users-pfcg">step 2.6</a>).</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Verify step by step with <code>SAP.check_oauth_token_endpoint()</code> (endpoint activated, no client needed
       yet) and then <code>SAP.check_principal_propagation()</code> (full round trip for a test user) - see
       <a href="#testing-the-setup">Testing the setup</a>.</li>
@@ -2193,10 +2194,12 @@ below - step 1 is done by the pyxecm team, the steps 2.1 to 2.6 by the SAP admin
 </tr>
 <tr>
 <td>Scope IDs</td>
-<td><code>SAP__OAUTH_SCOPE</code> (space-separated, <strong>required</strong>)</td>
+<td><code>SAP__OAUTH_SCOPE</code> (space-separated, optional ²)</td>
 </tr>
 </tbody>
 </table>
+<p>² Only needed if the scope IDs of the SAP system differ from the defaults in <code>SAP_ODATA_SERVICES</code>
+(see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>).</p>
 <h3 id="c-sso-from-sap-into-otds-optional">C. SSO from SAP into OTDS (optional)<a class="headerlink" href="#c-sso-from-sap-into-otds-optional" title="Permanent link">&para;</a></h3>
 <ul class="task-list">
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>STRUST</code>: export SAP's ticket-signing certificate (system PSE) as <code>.pse</code> file and
@@ -2385,7 +2388,7 @@ them as plain strings - apart from being unique and stable they carry no meaning
 <td><code>Recipient</code> = <code>base_url</code> + <code>/sap/bc/sec/oauth2/token?sap-client=&lt;client&gt;</code></td>
 <td>URL of the token endpoint as SAP receives the request - incl. <code>sap-client</code></td>
 <td>The assertion is only valid at this endpoint</td>
-<td>Given by the URL - pass <code>recipient</code> if SAP is reached via a reverse proxy</td>
+<td>Given by the URL - <code>recipient</code> / <code>SAP__SAML_RECIPIENT</code> behind a reverse proxy</td>
 </tr>
 <tr>
 <td>4</td>
@@ -2417,9 +2420,9 @@ them as plain strings - apart from being unique and stable they carry no meaning
 </tr>
 <tr>
 <td>8</td>
-<td><code>scope</code>, e.g. <code>API_MAINTENANCEORDER_0002</code></td>
+<td><code>scope</code>, e.g. <code>ZAPI_MAINTENANCEORDER_0002</code></td>
 <td>Scopes of the OAuth client - created by enabling OAuth for a service in SAP S/4HANA transaction <code>/IWFND/MAINT_SERVICE</code></td>
-<td>Which OData services the token may call (service name + <code>_</code> + version)</td>
+<td>Which OData services the token may call</td>
 <td>SAP naming, assigned by the SAP administrator</td>
 </tr>
 <tr>
@@ -2432,11 +2435,14 @@ them as plain strings - apart from being unique and stable they carry no meaning
 </tbody>
 </table>
 <p>Rows 1 and 2 mirror each other: the <strong>Issuer</strong> names pyxecm, the <strong>Audience</strong> names SAP.</p>
-<p>Row 8's scope ID is generated by SAP, not chosen freely - do not assume it is literally
-<code>&lt;service&gt;_&lt;version&gt;</code>. Depending on the system, SAP may generate it in a customer
-namespace with a <code>Z</code> or <code>Y</code> prefix (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code> instead of
-<code>API_MAINTENANCEORDER_0002</code>). Always take the exact scope ID from the Scope Assignment
-list of the OAuth client (step 2.4/2.5) or from SAP S/4HANA transaction <code>/IWFND/MAINT_SERVICE</code>, never guess it.</p>
+<p>Row 8's scope ID is generated by SAP, not chosen freely. For OData V2 services it is
+<code>&lt;service&gt;_&lt;version&gt;</code>, which SAP may generate in a customer namespace with a <code>Z</code> or <code>Y</code>
+prefix (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code> instead of <code>API_MAINTENANCEORDER_0002</code>). OData V4
+service groups have the scope <code>OV4:&lt;service group&gt;</code> (e.g. <code>OV4:API_PURCHASEORDER_2</code>).
+<code>SAP_ODATA_SERVICES</code> in <code>pyxecm_customizer.sap</code> holds a default scope ID per service
+(<code>Z</code> prefix for V2) - compare it with the Scope Assignment list of the OAuth client
+(step 2.4/2.5) or SAP S/4HANA transaction <code>/IWFND/MAINT_SERVICE</code>. If your system uses other
+IDs, set <code>SAP__OAUTH_SCOPE</code> to the exact IDs instead of guessing them.</p>
 <p><strong>Where SAP's local provider name comes from:</strong> the SAP administrator chooses it once, when
 enabling SAML 2.0 for an SAP client in SAP S/4HANA transaction <code>SAML2</code>. The wizard proposes a name derived
 from system ID and client (e.g. <code>S4HCLNT100</code>); any other unique name, e.g. a URL, is
@@ -2466,37 +2472,50 @@ possible. It is the SAP system's SAML entity ID, so:</p>
   <code>SAML2</code> can hold the old and the new certificate at the same time, so the switch has no
   downtime.</li>
 </ul>
-<p>Some SAP releases accept a trusted provider only as a metadata file. This creates one from
-the certificate (<code>SingleSignOnService</code> is required by the SAML metadata schema but never
-called, as the bearer grant has no browser redirect):</p>
+<p>Some SAP releases accept a trusted provider only as a metadata file. The following code
+creates one from the certificate. <code>SingleSignOnService</code> is required by the SAML metadata
+schema; pyxecm has no such endpoint, as the bearer grant needs no browser redirect.</p>
+<blockquote>
+<p><strong>IMPORTANT - this metadata can lock users out of the Fiori Launchpad</strong></p>
+<p>The <code>Location</code> below is a placeholder that no browser can reach. If SAP uses pyxecm as
+a <strong>SAML 2.0 identity provider for browser logon</strong>, it sends every SAML-enabled logon
+(e.g. the Fiori Launchpad) to this URL, and users can no longer log on.</p>
+<ul>
+<li>Upload the file <strong>only</strong> under <em>OAuth 2.0 Identity Providers</em> in <code>SAML2</code>, never under <em>SAML 2.0 Identity Providers</em> (see <a href="#22-add-pyxecm-as-trusted-provider-saml2">step 2.2</a>).</li>
+<li>Never make pyxecm the default identity provider of the SAP client.</li>
+<li>Do this in a test client first, and check that the Fiori Launchpad still opens.</li>
+</ul>
+</blockquote>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">lxml</span><span class="w"> </span><span class="kn">import</span> <span class="n">etree</span>
 </span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
 </span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">MD</span> <span class="o">=</span> <span class="s2">"urn:oasis:names:tc:SAML:2.0:metadata"</span>
 </span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">DS</span> <span class="o">=</span> <span class="s2">"http://www.w3.org/2000/09/xmldsig#"</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">certificate_pem</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"saml-idp.crt"</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">()</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">certificate_body</span> <span class="o">=</span> <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">certificate_pem</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span> <span class="k">if</span> <span class="s2">"CERTIFICATE"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">line</span><span class="p">)</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">entity</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">Element</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">EntityDescriptor"</span><span class="p">,</span> <span class="n">nsmap</span><span class="o">=</span><span class="p">{</span><span class="s2">"md"</span><span class="p">:</span> <span class="n">MD</span><span class="p">,</span> <span class="s2">"ds"</span><span class="p">:</span> <span class="n">DS</span><span class="p">},</span> <span class="n">entityID</span><span class="o">=</span><span class="s2">"pyxecm-idp"</span><span class="p">)</span>
-</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">idp</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span>
-</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">entity</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">IDPSSODescriptor"</span><span class="p">,</span> <span class="n">protocolSupportEnumeration</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:2.0:protocol"</span>
-</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="p">)</span>
-</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="n">key_descriptor</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">idp</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">KeyDescriptor"</span><span class="p">,</span> <span class="n">use</span><span class="o">=</span><span class="s2">"signing"</span><span class="p">)</span>
-</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="n">x509_data</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">key_descriptor</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">DS</span><span class="si">}</span><span class="se">}}</span><span class="s2">KeyInfo"</span><span class="p">),</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">DS</span><span class="si">}</span><span class="se">}}</span><span class="s2">X509Data"</span><span class="p">)</span>
-</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">x509_data</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">DS</span><span class="si">}</span><span class="se">}}</span><span class="s2">X509Certificate"</span><span class="p">)</span><span class="o">.</span><span class="n">text</span> <span class="o">=</span> <span class="n">certificate_body</span>
-</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">idp</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">NameIDFormat"</span><span class="p">)</span><span class="o">.</span><span class="n">text</span> <span class="o">=</span> <span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span>
-</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span>
-</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>    <span class="n">idp</span><span class="p">,</span>
-</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>    <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">SingleSignOnService"</span><span class="p">,</span>
-</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>    <span class="n">Binding</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"</span><span class="p">,</span>
-</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>    <span class="n">Location</span><span class="o">=</span><span class="s2">"https://pyxecm.example.com/saml/sso-not-used"</span><span class="p">,</span>
-</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="p">)</span>
-</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>
-</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="n">Path</span><span class="p">(</span><span class="s2">"pyxecm-idp-metadata.xml"</span><span class="p">)</span><span class="o">.</span><span class="n">write_bytes</span><span class="p">(</span>
-</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>    <span class="n">etree</span><span class="o">.</span><span class="n">tostring</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">xml_declaration</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"UTF-8"</span><span class="p">,</span> <span class="n">pretty_print</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="p">)</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Required by the SAML metadata schema but must never be called - see the warning above:</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">UNUSED_SSO_LOCATION</span> <span class="o">=</span> <span class="s2">"https://pyxecm.example.com/saml/sso-not-used"</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">certificate_pem</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"saml-idp.crt"</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">()</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">certificate_body</span> <span class="o">=</span> <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">certificate_pem</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span> <span class="k">if</span> <span class="s2">"CERTIFICATE"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">line</span><span class="p">)</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">entity</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">Element</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">EntityDescriptor"</span><span class="p">,</span> <span class="n">nsmap</span><span class="o">=</span><span class="p">{</span><span class="s2">"md"</span><span class="p">:</span> <span class="n">MD</span><span class="p">,</span> <span class="s2">"ds"</span><span class="p">:</span> <span class="n">DS</span><span class="p">},</span> <span class="n">entityID</span><span class="o">=</span><span class="s2">"pyxecm-idp"</span><span class="p">)</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="n">idp</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="n">entity</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">IDPSSODescriptor"</span><span class="p">,</span> <span class="n">protocolSupportEnumeration</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:2.0:protocol"</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="p">)</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="n">key_descriptor</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">idp</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">KeyDescriptor"</span><span class="p">,</span> <span class="n">use</span><span class="o">=</span><span class="s2">"signing"</span><span class="p">)</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="n">x509_data</span> <span class="o">=</span> <span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">key_descriptor</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">DS</span><span class="si">}</span><span class="se">}}</span><span class="s2">KeyInfo"</span><span class="p">),</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">DS</span><span class="si">}</span><span class="se">}}</span><span class="s2">X509Data"</span><span class="p">)</span>
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">x509_data</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">DS</span><span class="si">}</span><span class="se">}}</span><span class="s2">X509Certificate"</span><span class="p">)</span><span class="o">.</span><span class="n">text</span> <span class="o">=</span> <span class="n">certificate_body</span>
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span><span class="n">idp</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">NameIDFormat"</span><span class="p">)</span><span class="o">.</span><span class="n">text</span> <span class="o">=</span> <span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span>
+</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="n">etree</span><span class="o">.</span><span class="n">SubElement</span><span class="p">(</span>
+</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>    <span class="n">idp</span><span class="p">,</span>
+</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>    <span class="sa">f</span><span class="s2">"</span><span class="se">{{</span><span class="si">{</span><span class="n">MD</span><span class="si">}</span><span class="se">}}</span><span class="s2">SingleSignOnService"</span><span class="p">,</span>
+</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="n">Binding</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"</span><span class="p">,</span>
+</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>    <span class="n">Location</span><span class="o">=</span><span class="n">UNUSED_SSO_LOCATION</span><span class="p">,</span>
+</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="p">)</span>
+</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
+</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="n">Path</span><span class="p">(</span><span class="s2">"pyxecm-idp-metadata.xml"</span><span class="p">)</span><span class="o">.</span><span class="n">write_bytes</span><span class="p">(</span>
+</span><span id="__span-4-29"><a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>    <span class="n">etree</span><span class="o">.</span><span class="n">tostring</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">xml_declaration</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"UTF-8"</span><span class="p">,</span> <span class="n">pretty_print</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-4-30"><a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>The <code>entityID</code> must be the same value as <code>saml_issuer</code>. Use the <code>NameIDFormat</code> you agree
 on with the SAP administrator (see <a href="#23-map-users-saml2-identity-federation">step 2.3</a>).</p>
@@ -2512,9 +2531,20 @@ enabled. The <strong>provider name</strong> (e.g. <code>S4HCLNT100</code>) becom
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">"https://s4.example.com:44300/sap/saml2/sp/metadata?sap-client=100"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-o<span class="w"> </span><span class="s1">'entityID="[^"]*"'</span>
 </span></code></pre></div>
 <h5 id="22-add-pyxecm-as-trusted-provider-saml2">2.2 Add pyxecm as trusted provider (<code>SAML2</code>)<a class="headerlink" href="#22-add-pyxecm-as-trusted-provider-saml2" title="Permanent link">&para;</a></h5>
-<p>In transaction <code>SAML2</code>: <em>Trusted Providers</em> -&gt; <em>Add</em> -&gt; upload
-<code>pyxecm-idp-metadata.xml</code> (or add the provider manually with <code>saml-idp.crt</code> as
-signing certificate and <code>pyxecm-idp</code> as provider name). Make it available for OAuth 2.0.</p>
+<p>In transaction <code>SAML2</code>: <em>Trusted Providers</em> -&gt; <em>Show</em> <strong>OAuth 2.0 Identity Providers</strong> -&gt;
+<em>Add</em> -&gt; upload <code>pyxecm-idp-metadata.xml</code> (or add the provider manually with
+<code>saml-idp.crt</code> as signing certificate and <code>pyxecm-idp</code> as provider name).</p>
+<blockquote>
+<p><strong>IMPORTANT - OAuth 2.0 identity provider only</strong></p>
+<p>Do <strong>not</strong> add pyxecm under <em>SAML 2.0 Identity Providers</em> and do not enable it for
+browser single sign-on. SAP would then redirect browser logons (e.g. the Fiori
+Launchpad) to the unreachable <code>SingleSignOnService</code> URL of the metadata.</p>
+<p><strong>If users can no longer log on:</strong> log on with a URL that bypasses SAML, e.g.
+SAP GUI or <code>.../sap/bc/gui/sap/its/webgui?saml2=disabled</code>. Then, in <code>SAML2</code>, remove pyxecm from
+<em>SAML 2.0 Identity Providers</em> (or disable it there). Add it again under
+<em>OAuth 2.0 Identity Providers</em>, and check that the previous identity provider is
+still the default.</p>
+</blockquote>
 <h5 id="23-map-users-saml2-identity-federation">2.3 Map users (<code>SAML2</code> identity federation)<a class="headerlink" href="#23-map-users-saml2-identity-federation" title="Permanent link">&para;</a></h5>
 <p>On the trusted provider, add the NameID format pyxecm sends and how SAP finds the user
 for it (<em>User ID Mapping Mode</em>). The NameID format must be the same on both sides - in
@@ -2557,8 +2587,10 @@ pyxecm calls. This creates the scope IDs that the OAuth client gets in
 <a href="#25-create-the-oauth-client-su01-soauth2">step 2.5</a> - typically <code>&lt;service&gt;_&lt;version&gt;</code>
 (e.g. <code>API_MAINTENANCEORDER_0002</code>), but SAP may generate it with a customer namespace prefix
 instead (e.g. <code>ZAPI_MAINTENANCEORDER_0002</code>) - note the actual IDs shown by SAP rather than
-assuming the pattern. A service without OAuth has no scope: calls to it with a user's token
-fail with <code>scope_check_impossible</code> (see <a href="#testing-the-setup">Testing the setup</a>).</p>
+assuming the pattern. OData V4 service groups are not listed in <code>/IWFND/MAINT_SERVICE</code>; their
+scope is <code>OV4:&lt;service group&gt;</code> (e.g. <code>OV4:API_PURCHASEORDER_2</code>). A service without OAuth has
+no scope: calls to it with a user's token fail with <code>scope_check_impossible</code> (see
+<a href="#testing-the-setup">Testing the setup</a>).</p>
 <h5 id="25-create-the-oauth-client-su01-soauth2">2.5 Create the OAuth client (<code>SU01</code>, <code>SOAUTH2</code>)<a class="headerlink" href="#25-create-the-oauth-client-su01-soauth2" title="Permanent link">&para;</a></h5>
 <p><code>SOAUTH2</code> (the OAuth 2.0 Client Administration transaction) does not let you invent an
 arbitrary client ID/secret pair - an OAuth 2.0 client's identity in SAP must be backed by
@@ -2592,7 +2624,7 @@ slightly between SAP releases/Fiori apps; it has 5 steps):</p>
 <li><em>Description</em> = any free text identifying the consuming application, e.g.
      "Content Aviator SAP Agent".</li>
 <li><em>Token Lifetime</em> = the access token lifetime in seconds (SOAUTH2 setting mentioned
-     in the <a href="#b-principal-propagation-saml-20--oauth-20">checklist</a> - at least 600s/10
+     in the <a href="#b-principal-propagation-saml-20-and-oauth-20">checklist</a> - at least 600s/10
      minutes; the default of 3600s works well).</li>
 <li><strong>Client Authentication</strong> (see the previous explanation above): enable <em>HTTP Basic</em>
    (may be labelled <em>Client User ID and Password</em> on some releases) and <em>Check Parameter
@@ -2621,8 +2653,9 @@ slightly between SAP releases/Fiori apps; it has 5 steps):</p>
 </ol>
 <h5 id="26-authorize-the-end-users-pfcg">2.6 Authorize the end users (<code>PFCG</code>)<a class="headerlink" href="#26-authorize-the-end-users-pfcg" title="Permanent link">&para;</a></h5>
 <p>In SAP S/4HANA transaction <code>PFCG</code> (role maintenance, see <a href="#terminology">Terminology</a>), give the propagated
-users the usual authorizations for the services (<code>S_SERVICE</code>) and the business
-transactions behind them - and authorization object <code>S_SCOPE</code> with the OAuth client ID
+users the usual authorizations for the services (<code>S_SERVICE</code> for V2 services, <code>S_START</code> for
+V4 service groups - see <a href="../sap-apis/#general-activation-steps-apply-to-every-odata-service">General activation steps</a>)
+and the business transactions behind them - and authorization object <code>S_SCOPE</code> with the OAuth client ID
 (<code>OA2_CLIENT</code>, e.g. <code>PYXECM_OAUTH</code>) and the scope IDs (<code>OA2_SCOPE</code>). A user gets only the
 requested scopes that are in their <code>S_SCOPE</code> (see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>):
 without any <code>S_SCOPE</code> for the OAuth client the token request fails with <code>invalid_scope</code>
@@ -2632,7 +2665,7 @@ services fail with HTTP <code>403</code>. If principal propagation works for one
 another, this is the typical cause (check with <code>SU53</code>).</p>
 <p>When all steps are done, hand back to the pyxecm team: the local provider name (<code>saml_audience</code>), the agreed NameID
 format, the OAuth client ID, the OAuth client secret (over a secure channel, see the
-<a href="#b-principal-propagation-saml-20--oauth-20">checklist</a>), and the scope IDs.</p>
+<a href="#b-principal-propagation-saml-20-and-oauth-20">checklist</a>), and the scope IDs.</p>
 <h4 id="3-configure-pyxecm">3. Configure pyxecm<a class="headerlink" href="#3-configure-pyxecm" title="Permanent link">&para;</a></h4>
 <p>In the payload, add the <code>saml_*</code> fields to the SAP entry of <code>externalSystems</code> (see
 <a href="../payload-syntax/#externalsystems">payload syntax</a>) - <code>base_url</code> must be set as well, as
@@ -2653,17 +2686,22 @@ variables of the <code>SAP</code> settings group (<code>CustomizerSettingsSAP</c
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nv">SAP__SAML_NAMEID_FORMAT</span><span class="o">=</span>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress<span class="w">  </span><span class="c1"># default</span>
 </span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nv">SAP__OAUTH_CLIENT_ID</span><span class="o">=</span>PYXECM_OAUTH<span class="w">                    </span><span class="c1"># SU01 system user of the SOAUTH2 client</span>
 </span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nv">SAP__OAUTH_CLIENT_SECRET</span><span class="o">=</span>...<span class="w">                         </span><span class="c1"># its password - from a secret store</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="nv">SAP__OAUTH_SCOPE</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># SAP__OAUTH_SCOPE="ZAPI_MAINTENANCEORDER_0002 OV4:API_PURCHASEORDER_2"  # optional, see below</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># SAP__SAML_RECIPIENT=https://s4.internal.example.com:44300/sap/bc/sec/oauth2/token?sap-client=100  # only behind a reverse proxy</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># SAP__CA_BUNDLE=/run/config/sap-ca.pem             # only if SAP's certificate is issued by an internal CA</span>
 </span></code></pre></div>
-<p><code>SAP__OAUTH_SCOPE</code> is <strong>required</strong> for principal propagation: S/4HANA answers a token
-request without <code>scope</code> with <code>invalid_scope</code> - it does not fall back to the scopes assigned
-to the OAuth client. List one scope per OData service the token is used for; calls to a
-service whose scope is not granted fail (see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>).</p>
+<p>S/4HANA answers a token request without <code>scope</code> with <code>invalid_scope</code> - it does not fall back
+to the scopes assigned to the OAuth client. So the token request must list one scope per OData
+service the token is used for. Leave <code>SAP__OAUTH_SCOPE</code> empty to request the scopes of all
+services in <code>SAP_ODATA_SERVICES</code> (<code>get_oauth_scope()</code>, as the Content Aviator plugin does) and
+set it only if the scope IDs of your SAP system differ from these defaults. Calls to a service
+whose scope is not granted fail (see <a href="#how-sap-grants-scopes">How SAP grants scopes</a>).</p>
 <h5 id="how-sap-grants-scopes">How SAP grants scopes<a class="headerlink" href="#how-sap-grants-scopes" title="Permanent link">&para;</a></h5>
 <p>SAP grants the <strong>intersection</strong> of three scope sets - the token carries only the scopes that
 are in all of them:</p>
 <ol>
-<li>the scopes <strong>requested</strong> by pyxecm (<code>scope</code> parameter, <code>SAP__OAUTH_SCOPE</code>),</li>
+<li>the scopes <strong>requested</strong> by pyxecm (<code>scope</code> parameter: <code>SAP__OAUTH_SCOPE</code> or the defaults of
+   <code>SAP_ODATA_SERVICES</code>),</li>
 <li>the scopes <strong>assigned to the OAuth client</strong> (<code>SOAUTH2</code>, step 2.5), and</li>
 <li>the scopes <strong>the SAP user is authorized for</strong> (<code>S_SCOPE</code> in the user's roles, step 2.6).</li>
 </ol>
@@ -2702,16 +2740,19 @@ exist at all: they are dropped silently as long as at least one requested scope 
   with fewer scopes, and only calls to the services whose scopes are missing fail later -
   with HTTP <code>403</code> (<code>insufficient_scope</code>, see <a href="#testing-the-setup">Testing the setup</a>).</li>
 <li><strong>One scope list fits all users.</strong> Request the scopes of all services pyxecm may call
-  (e.g. one <code>SAP__OAUTH_SCOPE</code> for all agents of the Content Aviator plugin); each user gets
+  (e.g. <code>get_oauth_scope()</code> for all agents of the Content Aviator plugin); each user gets
   the subset their roles allow - e.g. a sales user only the sales scopes. There is no need
   to request user- or role-specific scopes.</li>
 <li><strong>Compare the granted scopes to find missing ones.</strong> The token response lists the granted
   scopes (<code>scope</code>, space-separated). The difference to the requested scopes is exactly what
   the SOAUTH2 client or the user's <code>S_SCOPE</code> lacks - one token request per user is enough
-  to check a user's setup.</li>
+  to check a user's setup. An SAP object created with <code>BearerAuth(token, scope=...)</code> returns
+  them as <code>granted_scopes</code>, so an application can skip calls to services the user has no
+  scope for (see <a href="#usage">Usage</a>).</li>
 <li><strong>A granted scope is not the whole authorization.</strong> The user still needs <code>S_SERVICE</code> for
-  the service (OData V4: the service group) and the business authorizations (e.g. sales
-  organization, plant). Without <code>S_SERVICE</code> the call fails with HTTP <code>403</code> despite the scope.</li>
+  the service (OData V4: <code>S_START</code> for the service group) and the business authorizations
+  (e.g. sales organization, plant). Without them the call fails with HTTP <code>403</code> despite the
+  scope - missing business authorizations for a document often show as HTTP <code>404</code>.</li>
 </ul>
 <p>Or directly (requires the <code>saml</code> extra: <code>pip install "pyxecm[saml]"</code>):</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
@@ -2740,14 +2781,14 @@ wrong, it logs an error and <code>get_saml_assertion()</code> returns <code>None
 provider (with the key pair, see above) and one SAP object <strong>per user</strong> that carries the
 user's token. A user needs an SAP object of their own because SAP binds its session cookies
 and CSRF tokens to the user - a shared session could run requests as the wrong user.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">BearerAuth</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">BearerAuth</span><span class="p">,</span> <span class="n">get_oauth_scope</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">token</span> <span class="o">=</span> <span class="n">identity_provider</span><span class="o">.</span><span class="n">get_oauth_access_token_for_user</span><span class="p">(</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">"jane.smith@example.com"</span><span class="p">,</span>  <span class="c1"># from the verified user session - never from request input</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">nameid_format</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span><span class="p">,</span>
 </span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">"PYXECM_OAUTH"</span><span class="p">,</span>
 </span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>  <span class="c1"># from a secret store</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">scope</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"</span><span class="p">,</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">scope</span><span class="o">=</span><span class="n">get_oauth_scope</span><span class="p">(),</span>  <span class="c1"># all services in SAP_ODATA_SERVICES - SAP grants the allowed subset</span>
 </span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="p">)</span>
 </span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="k">if</span> <span class="n">token</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 </span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="n">identity_provider</span><span class="o">.</span><span class="n">last_error</span><span class="p">)</span>
@@ -2758,13 +2799,17 @@ and CSRF tokens to the user - a shared session could run requests as the wrong u
 </span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span>
 </span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="n">client</span><span class="o">=</span><span class="s2">"100"</span><span class="p">,</span>
 </span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">,</span>
-</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>    <span class="n">auth</span><span class="o">=</span><span class="n">BearerAuth</span><span class="p">(</span><span class="n">token</span><span class="p">[</span><span class="s2">"access_token"</span><span class="p">]),</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>    <span class="n">auth</span><span class="o">=</span><span class="n">BearerAuth</span><span class="p">(</span><span class="n">token</span><span class="p">[</span><span class="s2">"access_token"</span><span class="p">],</span> <span class="n">scope</span><span class="o">=</span><span class="n">token</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"scope"</span><span class="p">)),</span>
 </span><span id="__span-9-20"><a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="p">)</span>
-</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="n">orders</span> <span class="o">=</span> <span class="n">user_sap</span><span class="o">.</span><span class="n">get_maintenance_orders</span><span class="p">()</span>
+</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="k">if</span> <span class="n">get_oauth_scope</span><span class="p">([</span><span class="s2">"API_MAINTENANCEORDER"</span><span class="p">])</span> <span class="ow">in</span> <span class="p">(</span><span class="n">user_sap</span><span class="o">.</span><span class="n">granted_scopes</span> <span class="ow">or</span> <span class="nb">set</span><span class="p">()):</span>
+</span><span id="__span-9-22"><a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>    <span class="n">orders</span> <span class="o">=</span> <span class="n">user_sap</span><span class="o">.</span><span class="n">get_maintenance_orders</span><span class="p">()</span>
 </span></code></pre></div>
 <p><code>get_oauth_access_token_for_user()</code> is <code>get_saml_assertion()</code> followed by
 <code>get_oauth_access_token()</code>; the result is SAP's token response (<code>access_token</code>,
-<code>token_type</code>, <code>expires_in</code>, <code>scope</code>).</p>
+<code>token_type</code>, <code>expires_in</code>, <code>scope</code>). Passing the granted <code>scope</code> to <code>BearerAuth</code> makes it
+available as <code>SAP.granted_scopes</code> (<code>None</code> for basic authentication or unknown scopes) - e.g. to
+leave out optional calls, such as reading the name of a work center, for users without the
+scope of that service instead of failing with HTTP <code>403</code>.</p>
 <ul>
 <li><strong>Where the user ID comes from is the security boundary of this design.</strong> Take it from a
   session the application has validated - e.g. the e-mail address of the user's OTCS ticket
@@ -2781,9 +2826,11 @@ and CSRF tokens to the user - a shared session could run requests as the wrong u
 </ul>
 <p><strong>Example - Content Aviator plugin:</strong> <code>get_sap_object_from_user()</code> of the plugin implements
 exactly this. It creates the identity provider once from the <code>SAP__SAML_*</code> settings, gets a
-token for the e-mail address of the user in the tool call context, and caches the user's SAP
-object for 5 minutes (well below the token lifetime). Users without an e-mail address in
-Content Server get an error instead of a fallback to another identity.</p>
+token for the user in the tool call context - the NameID is the user's e-mail address or login,
+depending on <code>SAP__SAML_NAMEID_FORMAT</code> - with the scopes of <code>SAP__OAUTH_SCOPE</code> or, if empty, of
+all services in <code>SAP_ODATA_SERVICES</code>, and caches the user's SAP object for 5 minutes (well below
+the token lifetime). Users without the needed attribute (e.g. no e-mail address in Content
+Server) get an error instead of a fallback to another identity.</p>
 <h3 id="testing-the-setup">Testing the setup<a class="headerlink" href="#testing-the-setup" title="Permanent link">&para;</a></h3>
 <p>The <code>SAP</code> class has three <code>check_*()</code> methods that each verify one layer of the setup
 without requiring a full application - run them from a Python shell (or <code>debug/debug_sap.py</code>)
@@ -2816,40 +2863,42 @@ them in order, as a later step only makes sense once the earlier ones pass:</p>
 </tr>
 </tbody>
 </table>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># 1. OData layer (section A) - technical user, independent of principal propagation:</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">sap</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span> <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="s2">"100"</span><span class="p">,</span> <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">)</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">status</span> <span class="ow">in</span> <span class="n">sap</span><span class="o">.</span><span class="n">check_odata_apis</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="s2">"-&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">active</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> (</span><span class="si">{}</span><span class="s2">)"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># 2. OAuth token endpoint (section B, infrastructure) - no OAuth client needed:</span>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">status</span> <span class="o">=</span> <span class="n">sap</span><span class="o">.</span><span class="n">check_oauth_token_endpoint</span><span class="p">()</span>
-</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"token endpoint -&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">ok</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
-</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
-</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="c1"># 3. Full principal propagation round trip (section B, end-to-end) - needs the identity</span>
-</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1">#    provider's key pair and a working OAuth client. Use a dedicated test user:</span>
-</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="n">identity_provider</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span>
-</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    <span class="n">username</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
-</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>    <span class="n">password</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
-</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span>
-</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">,</span>
-</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>    <span class="n">saml_idp_private_key</span><span class="o">=</span><span class="nb">open</span><span class="p">(</span><span class="s2">"saml-idp.key"</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span>
-</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>    <span class="n">saml_idp_certificate</span><span class="o">=</span><span class="nb">open</span><span class="p">(</span><span class="s2">"saml-idp.crt"</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span>
-</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>    <span class="n">saml_issuer</span><span class="o">=</span><span class="s2">"pyxecm-idp"</span><span class="p">,</span>
-</span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>    <span class="n">saml_audience</span><span class="o">=</span><span class="s2">"S4HCLNT100"</span><span class="p">,</span>
-</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a><span class="p">)</span>
-</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a><span class="n">status</span> <span class="o">=</span> <span class="n">identity_provider</span><span class="o">.</span><span class="n">check_principal_propagation</span><span class="p">(</span>
-</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">"jane.smith@example.com"</span><span class="p">,</span>
-</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a>    <span class="n">nameid_format</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span><span class="p">,</span>
-</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">"PYXECM_OAUTH"</span><span class="p">,</span>
-</span><span id="__span-10-28"><a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
-</span><span id="__span-10-29"><a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a>    <span class="n">scope</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002"</span><span class="p">,</span>
-</span><span id="__span-10-30"><a id="__codelineno-10-30" name="__codelineno-10-30" href="#__codelineno-10-30"></a><span class="p">)</span>
-</span><span id="__span-10-31"><a id="__codelineno-10-31" name="__codelineno-10-31" href="#__codelineno-10-31"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"principal propagation -&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">ok</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># 1. OData layer (section A) - technical user, independent of principal propagation:</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">sap</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span> <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="s2">"100"</span><span class="p">,</span> <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">)</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">status</span> <span class="ow">in</span> <span class="n">sap</span><span class="o">.</span><span class="n">check_odata_apis</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="s2">"-&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">active</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> (</span><span class="si">{}</span><span class="s2">)"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1"># 2. OAuth token endpoint (section B, infrastructure) - no OAuth client needed:</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">status</span> <span class="o">=</span> <span class="n">sap</span><span class="o">.</span><span class="n">check_oauth_token_endpoint</span><span class="p">()</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"token endpoint -&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">ok</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1"># 3. Full principal propagation round trip (section B, end-to-end) - needs the identity</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1">#    provider's key pair and a working OAuth client. Use a dedicated test user:</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="n">identity_provider</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="n">username</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>    <span class="n">password</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
+</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>    <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span>
+</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">,</span>
+</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>    <span class="n">saml_idp_private_key</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">"saml-idp.key"</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">(),</span>
+</span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>    <span class="n">saml_idp_certificate</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">"saml-idp.crt"</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">(),</span>
+</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>    <span class="n">saml_issuer</span><span class="o">=</span><span class="s2">"pyxecm-idp"</span><span class="p">,</span>
+</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="n">saml_audience</span><span class="o">=</span><span class="s2">"S4HCLNT100"</span><span class="p">,</span>
+</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a><span class="p">)</span>
+</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="n">status</span> <span class="o">=</span> <span class="n">identity_provider</span><span class="o">.</span><span class="n">check_principal_propagation</span><span class="p">(</span>
+</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">"jane.smith@example.com"</span><span class="p">,</span>
+</span><span id="__span-10-28"><a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a>    <span class="n">nameid_format</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span><span class="p">,</span>
+</span><span id="__span-10-29"><a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">"PYXECM_OAUTH"</span><span class="p">,</span>
+</span><span id="__span-10-30"><a id="__codelineno-10-30" name="__codelineno-10-30" href="#__codelineno-10-30"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
+</span><span id="__span-10-31"><a id="__codelineno-10-31" name="__codelineno-10-31" href="#__codelineno-10-31"></a>    <span class="n">scope</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002"</span><span class="p">,</span>
+</span><span id="__span-10-32"><a id="__codelineno-10-32" name="__codelineno-10-32" href="#__codelineno-10-32"></a><span class="p">)</span>
+</span><span id="__span-10-33"><a id="__codelineno-10-33" name="__codelineno-10-33" href="#__codelineno-10-33"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"principal propagation -&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">ok</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
 </span></code></pre></div>
 <p>Combine the three into a small health report - e.g. for a startup check or a support script:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAML_NAMEID_FORMAT_EMAIL</span><span class="p">,</span> <span class="n">SAP</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAML_NAMEID_FORMAT_EMAIL</span><span class="p">,</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">get_oauth_scope</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
 </span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
 </span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">sap_health_report</span><span class="p">(</span><span class="n">sap</span><span class="p">:</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">test_user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">client_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span><span class="p">,</span> <span class="n">client_secret</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
@@ -2864,17 +2913,18 @@ them in order, as a later step only makes sense once the earlier ones pass:</p>
 </span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>            <span class="n">client_id</span><span class="o">=</span><span class="n">client_id</span><span class="p">,</span>
 </span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>            <span class="n">client_secret</span><span class="o">=</span><span class="n">client_secret</span><span class="p">,</span>
 </span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>            <span class="n">nameid_format</span><span class="o">=</span><span class="n">SAML_NAMEID_FORMAT_EMAIL</span><span class="p">,</span>  <span class="c1"># as configured in SAML2 (identity federation)</span>
-</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>        <span class="p">)</span><span class="o">.</span><span class="n">ok</span>
-</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>        <span class="k">if</span> <span class="n">test_user</span>
-</span><span id="__span-11-18"><a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        <span class="k">else</span> <span class="kc">None</span>
-</span><span id="__span-11-19"><a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>    <span class="p">)</span>
-</span><span id="__span-11-20"><a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>
-</span><span id="__span-11-21"><a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"OData services:"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">odata_ok</span> <span class="k">else</span> <span class="s2">"FAILED"</span><span class="p">)</span>
-</span><span id="__span-11-22"><a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"OAuth token endpoint:"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">token_ok</span> <span class="k">else</span> <span class="s2">"FAILED"</span><span class="p">)</span>
-</span><span id="__span-11-23"><a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>    <span class="k">if</span> <span class="n">oauth_ok</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-11-24"><a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Principal propagation:"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">oauth_ok</span> <span class="k">else</span> <span class="s2">"FAILED"</span><span class="p">)</span>
-</span><span id="__span-11-25"><a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>
-</span><span id="__span-11-26"><a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>    <span class="k">return</span> <span class="n">odata_ok</span> <span class="ow">and</span> <span class="n">token_ok</span> <span class="ow">and</span> <span class="p">(</span><span class="n">oauth_ok</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>            <span class="n">scope</span><span class="o">=</span><span class="n">get_oauth_scope</span><span class="p">(),</span>  <span class="c1"># without scope, SAP answers invalid_scope</span>
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>        <span class="p">)</span><span class="o">.</span><span class="n">ok</span>
+</span><span id="__span-11-18"><a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        <span class="k">if</span> <span class="n">test_user</span>
+</span><span id="__span-11-19"><a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>        <span class="k">else</span> <span class="kc">None</span>
+</span><span id="__span-11-20"><a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>    <span class="p">)</span>
+</span><span id="__span-11-21"><a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>
+</span><span id="__span-11-22"><a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"OData services:"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">odata_ok</span> <span class="k">else</span> <span class="s2">"FAILED"</span><span class="p">)</span>
+</span><span id="__span-11-23"><a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"OAuth token endpoint:"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">token_ok</span> <span class="k">else</span> <span class="s2">"FAILED"</span><span class="p">)</span>
+</span><span id="__span-11-24"><a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>    <span class="k">if</span> <span class="n">oauth_ok</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-11-25"><a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Principal propagation:"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">oauth_ok</span> <span class="k">else</span> <span class="s2">"FAILED"</span><span class="p">)</span>
+</span><span id="__span-11-26"><a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>
+</span><span id="__span-11-27"><a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a>    <span class="k">return</span> <span class="n">odata_ok</span> <span class="ow">and</span> <span class="n">token_ok</span> <span class="ow">and</span> <span class="p">(</span><span class="n">oauth_ok</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">False</span><span class="p">)</span>
 </span></code></pre></div>
 <p>Each check is independent and safe to run repeatedly - none of them creates, changes or
 deletes business data. <code>check_principal_propagation()</code> gets a real access token (SAP records it like any
@@ -2891,19 +2941,25 @@ the SAP side. Pass <code>recipient</code> if SAP is reached via a reverse proxy,
 <p>A token from <code>check_principal_propagation()</code> only proves that SAP issues it - to verify that
 a user can actually call the OData services with it, run <code>check_odata_apis()</code> with the user's
 token (section A + B combined, read-only):</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">BearerAuth</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyxecm_customizer.sap</span><span class="w"> </span><span class="kn">import</span> <span class="n">SAP</span><span class="p">,</span> <span class="n">BearerAuth</span><span class="p">,</span> <span class="n">get_oauth_scope</span>
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
 </span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">token</span> <span class="o">=</span> <span class="n">identity_provider</span><span class="o">.</span><span class="n">get_oauth_access_token_for_user</span><span class="p">(</span>
 </span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">"jane.smith@example.com"</span><span class="p">,</span>
 </span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">nameid_format</span><span class="o">=</span><span class="s2">"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"</span><span class="p">,</span>
 </span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">"PYXECM_OAUTH"</span><span class="p">,</span>
 </span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">"..."</span><span class="p">,</span>
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="n">scope</span><span class="o">=</span><span class="s2">"API_MAINTENANCEORDER_0002 API_MAINTNOTIFICATION_0001"</span><span class="p">,</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="n">scope</span><span class="o">=</span><span class="n">get_oauth_scope</span><span class="p">(),</span>  <span class="c1"># all services that check_odata_apis() checks</span>
 </span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="p">)</span>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="n">user_sap</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="s2">"100"</span><span class="p">,</span>
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>               <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">,</span> <span class="n">auth</span><span class="o">=</span><span class="n">BearerAuth</span><span class="p">(</span><span class="n">token</span><span class="p">[</span><span class="s2">"access_token"</span><span class="p">]))</span>
-</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">status</span> <span class="ow">in</span> <span class="n">user_sap</span><span class="o">.</span><span class="n">check_odata_apis</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="s2">"-&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">active</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="n">user_sap</span> <span class="o">=</span> <span class="n">SAP</span><span class="p">(</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="n">username</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span>
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>    <span class="n">password</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span>
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    <span class="n">system_id</span><span class="o">=</span><span class="s2">"S4H"</span><span class="p">,</span>
+</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    <span class="n">client</span><span class="o">=</span><span class="s2">"100"</span><span class="p">,</span>
+</span><span id="__span-12-15"><a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">"https://s4.example.com:44300"</span><span class="p">,</span>
+</span><span id="__span-12-16"><a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>    <span class="n">auth</span><span class="o">=</span><span class="n">BearerAuth</span><span class="p">(</span><span class="n">token</span><span class="p">[</span><span class="s2">"access_token"</span><span class="p">],</span> <span class="n">scope</span><span class="o">=</span><span class="n">token</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"scope"</span><span class="p">)),</span>
+</span><span id="__span-12-17"><a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="p">)</span>
+</span><span id="__span-12-18"><a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">status</span> <span class="ow">in</span> <span class="n">user_sap</span><span class="o">.</span><span class="n">check_odata_apis</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+</span><span id="__span-12-19"><a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="s2">"-&gt;"</span><span class="p">,</span> <span class="s2">"OK"</span> <span class="k">if</span> <span class="n">status</span><span class="o">.</span><span class="n">active</span> <span class="k">else</span> <span class="s2">"</span><span class="si">{}</span><span class="s2"> - </span><span class="si">{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">message</span><span class="p">,</span> <span class="n">status</span><span class="o">.</span><span class="n">hint</span><span class="p">))</span>
 </span></code></pre></div>
 <p>With a token, SAP answers OAuth problems with a generic HTML error page and names the actual
 cause in the <code>WWW-Authenticate</code> response header. <code>check_odata_apis()</code> evaluates it:</p>
@@ -2952,7 +3008,7 @@ cause in the <code>WWW-Authenticate</code> response header. <code>check_odata_ap
   twice towards locking the SAP user.</li>
 </ul>
 <h3 id="verified-behavior">Verified behavior<a class="headerlink" href="#verified-behavior" title="Permanent link">&para;</a></h3>
-<p>Tested against an OTDS instance and an S/4HANA 2023 test system (SAP_BASIS 7.58), October 2026:</p>
+<p>Tested against an OTDS instance and an S/4HANA 2023 test system (SAP_BASIS 7.58):</p>
 <table>
 <thead>
 <tr>
@@ -2971,7 +3027,19 @@ cause in the <code>WWW-Authenticate</code> response header. <code>check_odata_ap
 </tr>
 <tr>
 <td>SAP SAML 2.0 / OAuth support</td>
-<td>SAML 2.0 Bearer grant present (<code>CL_SAML20_BEARER_INBOUND</code>); no inbound JWT Bearer grant. SAML 2.0 was not yet enabled in the tested client.</td>
+<td>SAML 2.0 Bearer grant present (<code>CL_SAML20_BEARER_INBOUND</code>); no inbound JWT Bearer grant.</td>
+</tr>
+<tr>
+<td>Principal propagation end to end</td>
+<td>pyxecm's assertions are exchanged for access tokens of the mapped SAP users; OData calls run with these users' authorizations.</td>
+</tr>
+<tr>
+<td>Granted scopes</td>
+<td>Intersection of requested, OAuth client and <code>S_SCOPE</code> scopes; unknown or missing scopes are dropped silently, <code>invalid_scope</code> only if empty.</td>
+</tr>
+<tr>
+<td>OData V4 authorization</td>
+<td>Service groups need <code>S_START</code> (<code>R3TR G4BA</code>); with <code>S_SERVICE</code> only, SAP answers <code>403</code> (<code>/IWBEP/CM_V4_COS/011</code>).</td>
 </tr>
 <tr>
 <td>OTDS as SAML IdP</td>
@@ -3056,6 +3124,10 @@ user's authorizations and records it as the author of all changes.</p>
   address (<code>SU3</code>) and <code>SU01</code> does not enforce unique addresses. So make the attribute
   read-only for users on both sides (e.g. synchronized from the corporate directory) and
   unique - or map a dedicated, administrator-maintained attribute (SAP alias) instead.</li>
+<li><strong>Keep TLS verification on</strong>: the token requests carry the assertions and the OAuth client
+  secret. If the certificate of the SAP system is issued by an internal CA, configure its CA
+  certificates with <code>SAP__CA_BUNDLE</code> instead of disabling <code>SAP__VERIFY_SSL</code>. Unlike the
+  environment variable <code>REQUESTS_CA_BUNDLE</code>, it only applies to the SAP system.</li>
 <li><strong>Short lifetimes</strong>: assertions are valid for 120 seconds by default (at most 300). SAP
   access tokens should not be longer-lived than needed (SOAUTH2 client settings).</li>
 <li><strong>Audit</strong>: pyxecm logs every minted assertion with its ID, user, audience and expiry; SAP
@@ -3084,7 +3156,7 @@ user's authorizations and records it as the author of all changes.</p>
 </tr>
 <tr>
 <td><code>invalid_grant</code></td>
-<td>The assertion was rejected: unknown issuer or certificate (<code>SAML2</code> trusted provider), wrong audience (must be the local provider name), expired (clock difference &gt; 60 s), wrong recipient (reverse proxy - pass <code>recipient</code>), or no SAP user found for the NameID.</td>
+<td>The assertion was rejected: unknown issuer or certificate (<code>SAML2</code> trusted provider), wrong audience (must be the local provider name), expired (clock difference &gt; 60 s), wrong recipient (reverse proxy - set <code>SAP__SAML_RECIPIENT</code>), or no SAP user found for the NameID.</td>
 </tr>
 <tr>
 <td><code>unauthorized_client</code></td>

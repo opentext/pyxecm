@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="https://avatars.githubusercontent.com/u/6463527?s=200&v=4">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1800,6 +1800,34 @@ APIs expect (e.g. <code>("4900000123", "2026")</code>).</p>
 <td>Create / Read / Update purchase contracts</td>
 </tr>
 <tr>
+<td><code>API_RFQ_PROCESS_SRV</code></td>
+<td><code>BUS2010</code></td>
+<td>V2</td>
+<td><code>A_RequestForQuotation</code>, <code>A_RequestForQuotationItem</code>, <code>A_RequestForQuotationBidder</code></td>
+<td>Create / Read / Update / Delete requests for quotation, complete / cancel</td>
+</tr>
+<tr>
+<td><code>API_QTN_PROCESS_SRV</code></td>
+<td><code>BUS2011</code></td>
+<td>V2</td>
+<td><code>A_SupplierQuotation</code>, <code>A_SupplierQuotationItem</code></td>
+<td>Create from RFQ / Read / Update / Delete supplier quotations, submit</td>
+</tr>
+<tr>
+<td><code>API_INFORECORD_PROCESS_SRV</code></td>
+<td>-</td>
+<td>V2</td>
+<td><code>A_PurchasingInfoRecord</code>, <code>A_PurgInfoRecdOrgPlantData</code></td>
+<td>Create / Read / Update / Delete (indicator) purchasing info records</td>
+</tr>
+<tr>
+<td><code>API_PURCHASING_SOURCE_SRV</code></td>
+<td>-</td>
+<td>V2</td>
+<td><code>A_PurchasingSource</code></td>
+<td>Create / Read / Update / Delete source list records</td>
+</tr>
+<tr>
 <td><code>API_PURCHASEREQUISITION_2</code></td>
 <td><code>BUS2105</code> (item: <code>BUS2009</code>)</td>
 <td>V4</td>
@@ -1829,6 +1857,24 @@ APIs expect (e.g. <code>("4900000123", "2026")</code>).</p>
 </tr>
 </tbody>
 </table>
+<p>Activating the sourcing services is enough for reading and for source list records. Creating
+documents also needs this customizing:</p>
+<ul>
+<li><strong>Requests for quotation</strong> use the new output management without a NAST fallback. Without
+  the BRF+ content of application object type <code>REQUEST_FOR_QUOTATION</code> (SAP Note 2248229, import
+  in transaction <code>BRFPLUS</code>), every create fails with <code>APOC_OR_MESSAGES/051</code> "ID ... is initial,
+  unknown, or it does not have the correct object type". An empty output determination (<code>OPD</code>)
+  is enough - SAP then only warns "No output parameters could be determined".</li>
+<li><strong>Supplier quotations</strong> (<code>CreateFromRFQ</code>) get the document type of the RFQ with category <code>Q</code>:
+  that type must exist for category <code>Q</code> (<code>T161</code>) and have follow-on document types
+  (<code>V_MMPUR_FOLL_DTY</code>, e.g. <code>F</code> / <code>NB</code> and <code>K</code> / <code>MK</code>), otherwise <code>MM_PUR_QTN/002</code>
+  "Follow-on doc. is inconsistent".</li>
+<li><strong>Purchasing info records</strong> with a price need a price condition type whose access sequence
+  contains the info record tables <code>017</code> and <code>018</code> (as the standard <code>0002</code>), otherwise
+  <code>CND_MAINT_LTD_API/009</code>. SAP takes the planned delivery time from the supplier's purchasing
+  organization data and ignores the API value (KBA 3696517) - the supplier needs one, otherwise
+  <code>APPL_MM_PUR_INFOREC/010</code>.</li>
+</ul>
 <h3 id="warranty">Warranty<a class="headerlink" href="#warranty" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2148,7 +2194,7 @@ such as <code>BAPI_USER_CREATE1</code>), OData activation is not relevant. Inste
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.action.edit", "content.code.copy", "content.tabs.link", "content.tooltips", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

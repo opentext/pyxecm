@@ -43,7 +43,8 @@ OData V2 - activate in /IWFND/MAINT_SERVICE ("Add Service", see above):
 * Sales: API_SALES_ORDER_SRV, API_SALES_CONTRACT_SRV, API_CREDIT_MEMO_REQUEST_SRV,
   API_DEBIT_MEMO_REQUEST_SRV, API_OUTBOUND_DELIVERY_SRV (version 0002)
 * Billing: API_BILLING_DOCUMENT_SRV, API_BILLING_DOCUMENT_REQUEST_SRV
-* Purchasing: API_PURCHASECONTRACT_PROCESS_SRV, API_SUPPLIERINVOICE_PROCESS_SRV,
+* Purchasing: API_PURCHASECONTRACT_PROCESS_SRV, API_RFQ_PROCESS_SRV, API_QTN_PROCESS_SRV,
+  API_INFORECORD_PROCESS_SRV, API_PURCHASING_SOURCE_SRV, API_SUPPLIERINVOICE_PROCESS_SRV,
   API_INBOUND_DELIVERY_SRV (version 0002)
 * Inventory Management: API_MATERIAL_DOCUMENT_SRV, API_MATERIAL_STOCK_SRV
 * Production: API_PRODUCTION_ORDER_2_SRV
@@ -137,6 +138,7 @@ from pyxecm.errors import (
 
 from .sap_metadata import ODataEntityType, parse_odata_metadata, to_odata_value
 from .sap_models import (
+    PERSONNEL_NUMBER_IDENTIFICATION_TYPE,
     ODataCondition,
     SAPAuthCheckState,
     SAPAuthCheckStatusModel,
@@ -148,6 +150,7 @@ from .sap_models import (
     SAPBillingDocumentResponseModel,
     SAPBusinessObjectType,
     SAPBusinessPartnerAddressModel,
+    SAPBusinessPartnerIdentificationResponseModel,
     SAPBusinessPartnerModel,
     SAPBusinessPartnerQueryModel,
     SAPBusinessPartnerResponseModel,
@@ -232,6 +235,8 @@ from .sap_models import (
     SAPOutboundDeliveryModel,
     SAPOutboundDeliveryQueryModel,
     SAPOutboundDeliveryResponseModel,
+    SAPPersonQueryModel,
+    SAPPersonResponseModel,
     SAPPlannedOrderComponentModel,
     SAPPlannedOrderModel,
     SAPPlannedOrderQueryModel,
@@ -266,8 +271,18 @@ from .sap_models import (
     SAPPurchaseRequisitionModel,
     SAPPurchaseRequisitionQueryModel,
     SAPPurchaseRequisitionResponseModel,
+    SAPPurchasingInfoRecordDataModel,
+    SAPPurchasingInfoRecordModel,
+    SAPPurchasingInfoRecordQueryModel,
+    SAPPurchasingInfoRecordResponseModel,
     SAPPurchasingOrganizationQueryModel,
     SAPPurchasingOrganizationResponseModel,
+    SAPRequestForQuotationAction,
+    SAPRequestForQuotationBidderModel,
+    SAPRequestForQuotationItemModel,
+    SAPRequestForQuotationModel,
+    SAPRequestForQuotationQueryModel,
+    SAPRequestForQuotationResponseModel,
     SAPSalesContractItemModel,
     SAPSalesContractModel,
     SAPSalesContractQueryModel,
@@ -278,6 +293,9 @@ from .sap_models import (
     SAPSalesOrderResponseModel,
     SAPSalesOrganizationQueryModel,
     SAPSalesOrganizationResponseModel,
+    SAPSourceListRecordModel,
+    SAPSourceListRecordQueryModel,
+    SAPSourceListRecordResponseModel,
     SAPStorageLocationQueryModel,
     SAPStorageLocationResponseModel,
     SAPSupplierCompanyModel,
@@ -290,6 +308,11 @@ from .sap_models import (
     SAPSupplierInvoiceResponseModel,
     SAPSupplierPurchasingOrgModel,
     SAPSupplierQueryModel,
+    SAPSupplierQuotationAction,
+    SAPSupplierQuotationItemModel,
+    SAPSupplierQuotationModel,
+    SAPSupplierQuotationQueryModel,
+    SAPSupplierQuotationResponseModel,
     SAPTaskListModel,
     SAPTaskListOperationModel,
     SAPTaskListQueryModel,
@@ -387,6 +410,10 @@ SAML_MIN_KEY_SIZE = 2048
 SAML_CERTIFICATE_EXPIRY_WARNING_DAYS = 30
 
 REQUEST_TIMEOUT = 60.0
+# Reads (GET, HEAD, OPTIONS) answer within seconds - a read that hangs is retried after this time instead of
+# blocking for the full REQUEST_TIMEOUT. Changes keep REQUEST_TIMEOUT (they are not retried after a read
+# timeout), as do $metadata downloads and PDFs that SAP renders on a GET:
+REQUEST_READ_TIMEOUT = 20.0
 REQUEST_MAX_RETRIES = 3
 # Hint of the connection checks for TLS errors - an internal CA belongs into the CA bundle, switching off
 # the verification is only an option for test systems:
@@ -509,6 +536,38 @@ SAP_ODATA_SERVICES: dict[str, SAPODataServiceModel] = {
         oauth_scope="ZAPI_PURCHASECONTRACT_PROCESS_SRV_0001",
         entity_sets=["A_PurchaseContract", "A_PurchaseContractItem"],
         description="Purchasing - Purchase Contract (Create, Read, Update, Delete Items)",
+    ),
+    "API_RFQ_PROCESS_SRV": SAPODataServiceModel(
+        name="API_RFQ_PROCESS_SRV",
+        path="/sap/opu/odata/sap/API_RFQ_PROCESS_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_RFQ_PROCESS_SRV_0001",
+        entity_sets=["A_RequestForQuotation", "A_RequestForQuotationItem", "A_RequestForQuotationBidder"],
+        description="Purchasing - Request for Quotation (Create, Read, Update, Delete, Complete, Cancel)",
+    ),
+    "API_QTN_PROCESS_SRV": SAPODataServiceModel(
+        name="API_QTN_PROCESS_SRV",
+        path="/sap/opu/odata/sap/API_QTN_PROCESS_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_QTN_PROCESS_SRV_0001",
+        entity_sets=["A_SupplierQuotation", "A_SupplierQuotationItem"],
+        description="Purchasing - Supplier Quotation (Create from RFQ, Read, Update, Delete, Submit, Complete, Cancel)",
+    ),
+    "API_INFORECORD_PROCESS_SRV": SAPODataServiceModel(
+        name="API_INFORECORD_PROCESS_SRV",
+        path="/sap/opu/odata/sap/API_INFORECORD_PROCESS_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_INFORECORD_PROCESS_SRV_0001",
+        entity_sets=["A_PurchasingInfoRecord", "A_PurgInfoRecdOrgPlantData"],
+        description="Purchasing - Purchasing Info Record (Create, Read, Update, Delete via deletion indicator)",
+    ),
+    "API_PURCHASING_SOURCE_SRV": SAPODataServiceModel(
+        name="API_PURCHASING_SOURCE_SRV",
+        path="/sap/opu/odata/sap/API_PURCHASING_SOURCE_SRV",
+        odata_version=2,
+        oauth_scope="ZAPI_PURCHASING_SOURCE_SRV_0001",
+        entity_sets=["A_PurchasingSource"],
+        description="Purchasing - Source List (Create, Read, Update, Delete)",
     ),
     # OData V4 successor of the V2 API API_PURCHASEREQ_PROCESS_SRV (service group
     # API_PURCHASEREQUISITION_2, service "PurchaseRequisition", version 0001):
@@ -1038,7 +1097,7 @@ class SAP:
 
     # Every assigned logger is wrapped in a ReportingLogger, so that
     # self.logger.error(..., report=True) records the error for capture_errors():
-    logger = ReportingLoggerAttribute(default_logger, error_class=SAPError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=SAPError)
 
     def __init__(
         self,
@@ -2016,7 +2075,7 @@ class SAP:
         headers: dict | None = None,
         params: dict | None = None,
         json_data: dict | None = None,
-        timeout: float | None = REQUEST_TIMEOUT,
+        timeout: float | None = None,
         show_error: bool = True,
         show_warning: bool = False,
         warning_message: str = "",
@@ -2053,7 +2112,8 @@ class SAP:
             json_data (dict | None, optional):
                 Request payload that is sent as JSON. Defaults to None.
             timeout (float | None, optional):
-                Timeout for the request in seconds. Defaults to REQUEST_TIMEOUT.
+                Timeout for the request in seconds. Defaults to None = REQUEST_READ_TIMEOUT for reads
+                (GET, HEAD, OPTIONS), REQUEST_TIMEOUT for all other methods.
             show_error (bool, optional):
                 Whether or not an error should be logged in case of a failed REST call.
                 If False, a warning is logged if show_warning is True, otherwise only
@@ -2102,6 +2162,8 @@ class SAP:
             return None
 
         method = method.upper()
+        if timeout is None:
+            timeout = REQUEST_READ_TIMEOUT if method in ("GET", "HEAD", "OPTIONS") else REQUEST_TIMEOUT
         failure_message = failure_message or "Failed to call SAP OData API -> {} {}".format(method, url)
         request_headers = dict(headers) if headers else {}
         is_idempotent = method in IDEMPOTENT_METHODS
@@ -3606,6 +3668,7 @@ class SAP:
             response = self.do_request(
                 url=self.service_url(service) + "/$metadata",
                 headers={"Accept": "application/xml"},
+                timeout=REQUEST_TIMEOUT,
                 show_error=False,
                 show_warning=True,
                 warning_message="Cannot read the $metadata of SAP OData service -> '{}'".format(service),
@@ -4202,6 +4265,20 @@ class SAP:
                             component.material, operation.operation, self.last_error
                         )
                     )
+        # The long text needs the new order as well (TD/605 in the deep insert). Text ID KOPF = header long text:
+        if order.long_text:
+            long_text = self.do_request(
+                url=self.service_url("API_MAINTENANCEORDER")
+                + "/MaintenanceOrder('{}')/to_MaintenanceOrderLongText".format(created["MaintenanceOrder"]),
+                method="POST",
+                json_data={"TextObjectType": "KOPF", "Language": "EN", "MaintenanceOrderLongText": order.long_text},
+                failure_message="Failed to create the long text of maintenance order -> '{}'".format(
+                    created["MaintenanceOrder"]
+                ),
+            )
+            if not long_text:
+                component_errors.append("long text: {}".format(self.last_error))
+
         if component_errors:
             self.log_error(
                 "Maintenance order -> %s has been created, but %d component(s) could not be created -> %s",
@@ -4527,6 +4604,7 @@ class SAP:
         self,
         order_id: str,
         expand_operations: bool = True,
+        expand_object_list: bool = False,
     ) -> SAPMaintenanceOrderResponseModel | None:
         """Get a single SAP Plant Maintenance order by its order number.
 
@@ -4535,6 +4613,10 @@ class SAP:
                 The maintenance order number, e.g. "4000340".
             expand_operations (bool, optional):
                 Whether to read the operations of the order as well. Defaults to True.
+            expand_object_list (bool, optional):
+                Whether to read the object list of the order as well - the further maintenance
+                notifications and technical objects of the order (see
+                assign_maintenance_notification_to_order()). Defaults to False.
 
         Returns:
             SAPMaintenanceOrderResponseModel | None:
@@ -4544,11 +4626,12 @@ class SAP:
 
         # Single quotes in OData key values are escaped by doubling them:
         url = self.service_url("API_MAINTENANCEORDER") + "/MaintenanceOrder('{}')".format(order_id.replace("'", "''"))
-        params = (
-            {"$expand": "to_MaintenanceOrderOperation,to_MaintenanceOrderOperation/to_MaintOrderOpComponent_2"}
-            if expand_operations
-            else None
-        )
+        expand = []
+        if expand_operations:
+            expand += ["to_MaintenanceOrderOperation", "to_MaintenanceOrderOperation/to_MaintOrderOpComponent_2"]
+        if expand_object_list:
+            expand.append("to_MaintOrderObjectListItem")
+        params = {"$expand": ",".join(expand)} if expand else None
 
         response = self.do_request(
             url=url,
@@ -4583,13 +4666,48 @@ class SAP:
                 The maintenance order number, e.g. "4000340".
             changes (dict):
                 The fields to change - snake case attribute names of SAPMaintenanceOrderModel or OData
-                property names, e.g. {"description": "Replace pump seal", "priority": "1"}.
+                property names, e.g. {"description": "Replace pump seal", "priority": "1"}. The long text
+                ("long_text") is changed in its own entity - created if the order has none yet.
 
         Returns:
             bool:
                 True if the maintenance order has been updated, False in case of an error.
 
         """
+
+        # The long text is an entity of its own (text ID KOPF) - changing it is a PATCH of that entity, or a POST
+        # if the order has none yet:
+        changes = dict(changes)
+        long_text = changes.pop("long_text", changes.pop("MaintenanceOrderLongText", None))
+        if long_text is not None:
+            long_text_url = self.service_url("API_MAINTENANCEORDER") + "/MaintenanceOrderLongText"
+            long_text_key = "(MaintenanceOrder='{}',TextObjectType='KOPF',Language='EN')".format(
+                order_id.replace("'", "''")
+            )
+            exists = self.do_request(
+                url=long_text_url + long_text_key, method="GET", failure_message="No long text yet", show_error=False
+            )
+            if exists:
+                updated = self.do_request(
+                    url=long_text_url + long_text_key,
+                    method="PATCH",
+                    headers={"If-Match": "*"},
+                    json_data={"MaintenanceOrderLongText": long_text},
+                    parse_request_response=False,
+                    failure_message="Failed to change the long text of maintenance order -> '{}'".format(order_id),
+                )
+            else:
+                updated = self.do_request(
+                    url=self.service_url("API_MAINTENANCEORDER")
+                    + "/MaintenanceOrder('{}')/to_MaintenanceOrderLongText".format(order_id.replace("'", "''")),
+                    method="POST",
+                    json_data={"TextObjectType": "KOPF", "Language": "EN", "MaintenanceOrderLongText": long_text},
+                    failure_message="Failed to create the long text of maintenance order -> '{}'".format(order_id),
+                )
+            if not updated:
+                return False
+            if not changes:
+                return True
 
         return self._update_odata_entity(
             service="API_MAINTENANCEORDER",
@@ -4628,6 +4746,52 @@ class SAP:
             function=str(action),
             parameters={"MaintenanceOrder": order_id, **(parameters or {})},
             label="{} maintenance order -> '{}'".format(action.name.lower().replace("_", " "), order_id),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def assign_maintenance_notification_to_order(
+        self,
+        order_id: str,
+        notification_id: str,
+        as_header_notification: bool = False,
+    ) -> bool:
+        """Assign an existing SAP maintenance notification to an existing maintenance order.
+
+        Uses the function import AssignMaintNotificationToOrder of API_MAINTENANCEORDER. By default the
+        notification is added to the object list of the order (see get_maintenance_order() with
+        expand_object_list=True) - the notification of the order header stays. This links e.g. a
+        malfunction report to the order that repairs it, also if SAP created an own notification
+        for the order (order types with a notification type, e.g. PM01).
+
+        Args:
+            order_id (str):
+                The maintenance order number, e.g. "4000411".
+            notification_id (str):
+                The maintenance notification number, e.g. "10000235".
+            as_header_notification (bool, optional):
+                Whether the notification becomes the notification of the order header instead of an
+                object list entry. Defaults to False.
+
+        Returns:
+            bool:
+                True if the notification has been assigned, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_MAINTENANCEORDER",
+            function="AssignMaintNotificationToOrder",
+            parameters={
+                "MaintenanceOrder": order_id,
+                "MaintenanceNotification": notification_id,
+                "NotificationIsHeaderNotif": as_header_notification,
+            },
+            label="assign maintenance notification -> '{}' to maintenance order -> '{}'".format(
+                notification_id, order_id
+            ),
         )
 
         return result is not None
@@ -4692,8 +4856,9 @@ class SAP:
         * Created (CRTD, not released): "do not execute" - closes the order as not
           performed (CLSD NCMP).
         * Released (REL): technically complete (TECO) and close (CLSD). This needs a
-          settlement rule of the order - SAP rejects it otherwise with
-          "account assignment not maintained".
+          settlement rule of the order - SAP generates a default rule to the cost center
+          of the order (taken from its technical object) and rejects orders without a
+          cost center with "account assignment not maintained".
         The deletion flag can be removed again with SAPMaintenanceOrderAction.RESET_MARKED_FOR_DELETION.
 
         Args:
@@ -4730,6 +4895,30 @@ class SAP:
                 return False
 
         return True
+
+    # end method definition
+
+    def get_maintenance_orders_deletion_steps(
+        self, order_ids: list[str]
+    ) -> dict[str, list[SAPMaintenanceOrderAction] | None]:
+        """Return the status actions needed to delete several SAP maintenance orders.
+
+        Args:
+            order_ids (list[str]):
+                The maintenance order numbers, e.g. ["4000340", "4000341"]. Duplicates are ignored.
+
+        Returns:
+            dict[str, list[SAPMaintenanceOrderAction] | None]:
+                Per order number (in the given order) the result of get_maintenance_order_deletion_steps():
+                the steps, an empty list if the order already has the deletion flag, or None if the
+                order does not exist or in case of an error.
+
+        """
+
+        return {
+            order_id: self.get_maintenance_order_deletion_steps(order_id=order_id)
+            for order_id in dict.fromkeys(order_ids)
+        }
 
     # end method definition
 
@@ -5084,6 +5273,41 @@ class SAP:
 
     # end method definition
 
+    def is_purchase_order_deleted(self, order_id: str) -> bool | None:
+        """Check whether an SAP purchase order is deleted.
+
+        SAP deletes a purchase order by setting the deletion indicator of its items (like ME22N) - the
+        deletion indicator of the header (EKKO-LOEKZ, OData "PurchaseOrderDeletionCode") stays empty, also
+        when all items are deleted. It is only used for documents archived as a whole, so it can't tell
+        whether a purchase order is deleted.
+
+        The deletion indicator of the items can't be read either: the OData V4 API API_PURCHASEORDER_2
+        leaves items with a deletion indicator out of "_PurchaseOrderItem". A purchase order is therefore
+        deleted if SAP returns it without any items (a purchase order can't be saved without items).
+
+        A second DELETE of such a purchase order fails with the technical message
+        MMPUR_POHANDLER_TECH/024 "PO RAP Facade: purchase order item or control id is empty". This message
+        is not specific to deleted purchase orders, so check with this method instead of interpreting it.
+
+        Args:
+            order_id (str):
+                The purchase order number, e.g. "4500001539".
+
+        Returns:
+            bool | None:
+                True if all items of the purchase order are deleted, False if it has active items,
+                None if the purchase order does not exist or can't be read.
+
+        """
+
+        order = self.get_purchase_order(order_id=order_id, expand_items=True)
+        if order is None:
+            return None
+
+        return not order.items
+
+    # end method definition
+
     def update_purchase_order(
         self, order_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
     ) -> bool:
@@ -5133,15 +5357,26 @@ class SAP:
     def delete_purchase_order(self, order_id: str) -> bool:
         """Delete an SAP purchase order.
 
+        SAP sets the deletion indicator of all items. A purchase order that is already deleted is not
+        deleted again - SAP would reject the DELETE with MMPUR_POHANDLER_TECH/024 (see
+        is_purchase_order_deleted()).
+
         Args:
             order_id (str):
                 The purchase order number, e.g. "4500001539".
 
         Returns:
             bool:
-                True if the purchase order has been deleted, False in case of an error.
+                True if the purchase order has been deleted (now or before), False in case of an error.
 
         """
+
+        is_deleted = self.is_purchase_order_deleted(order_id=order_id)
+        if is_deleted is None:
+            return False
+        if is_deleted:
+            self.logger.info("SAP purchase order -> '%s' is already deleted.", order_id)
+            return True
 
         return self._delete_odata_entity(
             service="API_PURCHASEORDER_2",
@@ -6562,6 +6797,1136 @@ class SAP:
 
     # end method definition
 
+    def create_request_for_quotation(self, rfq: SAPRequestForQuotationModel | dict) -> dict | None:
+        """Create an SAP request for quotation (RFQ) including its items and bidders.
+
+        Uses the OData V2 API API_RFQ_PROCESS_SRV with a deep insert, so the RFQ, all items and all
+        bidders are created (and committed) in one request. The RFQ is created in preparation - it is
+        published to the bidders with the action SubmitForApproval (SAP's approval workflow publishes it
+        when it is approved or no approval is needed) - see change_request_for_quotation_status().
+
+        Args:
+            rfq (SAPRequestForQuotationModel | dict):
+                The RFQ data. A dictionary is validated against the SAPRequestForQuotationModel
+                and can use either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created RFQ as returned by SAP (including the number in "RequestForQuotation") or None in
+                case of an error.
+
+        Example:
+            >>> sap.create_request_for_quotation(
+            ... {
+            ...     "company_code": "3000",
+            ...     "document_type": "RQ",  # system specific
+            ...     "currency": "USD",
+            ...     "purchasing_organization": "3000",
+            ...     "purchasing_group": "001",
+            ...     "name": "Pumps 2027",
+            ...     "submission_deadline": "2026-12-15",
+            ...     "items": [
+            ...         {"material": "EP-300", "plant": "3000", "quantity": 100, "unit": "PC", "delivery_date": "2026-12-20"}
+            ...     ],
+            ...     "bidders": [{"supplier": "30090"}],
+            ... }
+            ... )
+
+        """
+
+        return self._create_odata_entity(
+            service="API_RFQ_PROCESS_SRV",
+            entity_set="A_RequestForQuotation",
+            model=SAPRequestForQuotationModel,
+            data=rfq,
+            key_fields=["RequestForQuotation"],
+            label="request for quotation",
+        )
+
+    # end method definition
+
+    def iter_requests_for_quotation(
+        self, query: SAPRequestForQuotationQueryModel | None = None
+    ) -> SAPODataIterator[SAPRequestForQuotationResponseModel]:
+        """Iterate over SAP requests for quotation - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPRequestForQuotationQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all RFQs).
+
+        Returns:
+            SAPODataIterator[SAPRequestForQuotationResponseModel]:
+                The iterator over the requests for quotation.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_RFQ_PROCESS_SRV",
+            entity_set="A_RequestForQuotation",
+            model=SAPRequestForQuotationResponseModel,
+            query=query or SAPRequestForQuotationQueryModel(),
+            label="requests for quotation",
+        )
+
+    # end method definition
+
+    def get_requests_for_quotation(
+        self, query: SAPRequestForQuotationQueryModel | None = None
+    ) -> list[SAPRequestForQuotationResponseModel] | None:
+        """Get SAP requests for quotation as a list.
+
+        All matching RFQs are read (page by page, see iter_requests_for_quotation()) and returned at once.
+        For very large result sets prefer iter_requests_for_quotation().
+
+        Args:
+            query (SAPRequestForQuotationQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all RFQs).
+
+        Returns:
+            list[SAPRequestForQuotationResponseModel] | None:
+                The requests for quotation (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_requests_for_quotation(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP requests for quotation.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_request_for_quotation(
+        self,
+        rfq_id: str,
+        expand_items: bool = True,
+    ) -> SAPRequestForQuotationResponseModel | None:
+        """Get a single SAP request for quotation by its number.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            expand_items (bool, optional):
+                Whether to read the items and bidders as well. Defaults to True.
+
+        Returns:
+            SAPRequestForQuotationResponseModel | None:
+                The request for quotation or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_RFQ_PROCESS_SRV",
+            entity_path="A_RequestForQuotation('{}')".format(self._quote_key(rfq_id)),
+            model=SAPRequestForQuotationResponseModel,
+            params={"$expand": SAPRequestForQuotationQueryModel.EXPAND} if expand_items else None,
+            label="request for quotation -> '{}'".format(rfq_id),
+        )
+
+    # end method definition
+
+    def update_request_for_quotation(
+        self, rfq_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP request for quotation and of its items.
+
+        All changes are validated first and the items must belong to the RFQ - otherwise
+        nothing is changed. The items are changed first, the header last (see _update_odata_document()).
+        Bidders cannot be changed - use create_request_for_quotation_bidder() and
+        delete_request_for_quotation_bidder().
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPRequestForQuotationModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"quantity": 50}} (snake case attribute names of
+                SAPRequestForQuotationItemModel or OData property names). Defaults to None (items unchanged).
+
+        Returns:
+            bool:
+                True if the RFQ (and its items) have been updated, False in case of an error.
+
+        """
+
+        key = self._quote_key(rfq_id)
+
+        return self._update_odata_document(
+            service="API_RFQ_PROCESS_SRV",
+            label="request for quotation -> '{}'".format(rfq_id),
+            header_path="A_RequestForQuotation('{}')".format(key),
+            header_model=SAPRequestForQuotationModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_RequestForQuotation('{}')/to_RequestForQuotationItem".format(key),
+                entity_set="A_RequestForQuotationItem",
+                key_properties=("RequestForQuotationItem", "RequestForQuotation"),
+                number_property="RequestForQuotationItem",
+                text_property="PurchasingDocumentItemText",
+                label="item",
+            ),
+            item_model=SAPRequestForQuotationItemModel,
+        )
+
+    # end method definition
+
+    def create_request_for_quotation_item(
+        self, rfq_id: str, item: SAPRequestForQuotationItemModel | dict
+    ) -> dict | None:
+        """Add an item to an existing SAP request for quotation.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            item (SAPRequestForQuotationItemModel | dict):
+                The new item, e.g. {"material": "EP-300", "plant": "3000", "quantity": 10, "unit": "PC"}.
+                Without an item number, the next free number is used (in steps of 10). A dictionary is
+                validated against SAPRequestForQuotationItemModel.
+
+        Returns:
+            dict | None:
+                The created item as returned by SAP (including "RequestForQuotationItem") or None in case of
+                an error.
+
+        """
+
+        label = "item of request for quotation -> '{}'".format(rfq_id)
+        rfq = self.get_request_for_quotation(rfq_id=rfq_id)
+        if rfq is None:
+            if not self.last_error:
+                self.log_error("Cannot add SAP %s - the request for quotation does not exist!", label)
+            return None
+
+        return self._create_document_item(
+            service="API_RFQ_PROCESS_SRV",
+            collection_path="A_RequestForQuotation('{}')/to_RequestForQuotationItem".format(self._quote_key(rfq_id)),
+            model=SAPRequestForQuotationItemModel,
+            item=item,
+            existing_items=[existing.item for existing in rfq.items or []],
+            number_step=10,
+            key_fields=["RequestForQuotationItem"],
+            label=label,
+        )
+
+    # end method definition
+
+    def delete_request_for_quotation_item(self, rfq_id: str, item: str) -> bool:
+        """Delete an item of an SAP request for quotation.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            item (str):
+                The item number, e.g. "20" or "00020".
+
+        Returns:
+            bool:
+                True if the item has been deleted, False in case of an error.
+
+        """
+
+        label = "item -> '{}' of request for quotation -> '{}'".format(item, rfq_id)
+        try:
+            item = pad_number(item, length=5)
+        except ValueError as value_error:
+            self.log_error("Invalid key of SAP %s; error -> %s", label, str(value_error))
+            return False
+
+        return self._delete_odata_entity(
+            service="API_RFQ_PROCESS_SRV",
+            entity_path="A_RequestForQuotationItem(RequestForQuotationItem='{}',RequestForQuotation='{}')".format(
+                item, self._quote_key(rfq_id)
+            ),
+            label=label,
+        )
+
+    # end method definition
+
+    def create_request_for_quotation_bidder(
+        self, rfq_id: str, bidder: SAPRequestForQuotationBidderModel | dict
+    ) -> dict | None:
+        """Add a bidder (a supplier asked for a quotation) to an existing SAP request for quotation.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            bidder (SAPRequestForQuotationBidderModel | dict):
+                The bidder, e.g. {"supplier": "30090"}. A dictionary is validated against
+                SAPRequestForQuotationBidderModel.
+
+        Returns:
+            dict | None:
+                The created bidder as returned by SAP (including "PartnerCounter") or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_RFQ_PROCESS_SRV",
+            entity_set="A_RequestForQuotation('{}')/to_RequestForQuotationBidder".format(self._quote_key(rfq_id)),
+            model=SAPRequestForQuotationBidderModel,
+            data=bidder,
+            key_fields=["PartnerCounter"],
+            label="bidder of request for quotation -> '{}'".format(rfq_id),
+        )
+
+    # end method definition
+
+    def delete_request_for_quotation_bidder(self, rfq_id: str, supplier: str) -> bool:
+        """Remove a bidder (supplier) from an SAP request for quotation.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            supplier (str):
+                The supplier number of the bidder, e.g. "30090".
+
+        Returns:
+            bool:
+                True if the bidder has been removed, False in case of an error.
+
+        """
+
+        rfq = self.get_request_for_quotation(rfq_id=rfq_id)
+        if rfq is None:
+            return False
+
+        bidders = rfq.bidders or []
+        matches = [bidder for bidder in bidders if (bidder.supplier or "").casefold() == supplier.strip().casefold()]
+        if not matches:
+            self.log_error(
+                "SAP request for quotation -> '%s' has no bidder -> '%s'! Its bidders are -> %s",
+                rfq_id,
+                supplier,
+                ", ".join(bidder.supplier or "?" for bidder in bidders) or "none",
+            )
+            return False
+
+        for bidder in matches:
+            # Stop at the first error - a later successful request would reset last_error:
+            if not self._delete_odata_entity(
+                service="API_RFQ_PROCESS_SRV",
+                entity_path="A_RequestForQuotationBidder(RequestForQuotation='{}',PartnerCounter='{}')".format(
+                    self._quote_key(rfq_id), self._quote_key(bidder.counter)
+                ),
+                label="bidder -> '{}' of request for quotation -> '{}'".format(supplier, rfq_id),
+            ):
+                return False
+
+        return True
+
+    # end method definition
+
+    def delete_request_for_quotation(self, rfq_id: str) -> bool:
+        """Delete an SAP request for quotation.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+
+        Returns:
+            bool:
+                True if the request for quotation has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_RFQ_PROCESS_SRV",
+            entity_path="A_RequestForQuotation('{}')".format(self._quote_key(rfq_id)),
+            label="request for quotation -> '{}'".format(rfq_id),
+        )
+
+    # end method definition
+
+    def change_request_for_quotation_status(self, rfq_id: str, action: SAPRequestForQuotationAction | str) -> bool:
+        """Change the status of an SAP request for quotation (e.g. submit it to publish it to the bidders).
+
+        The function imports require the current ETag of the RFQ (If-Match header), so the RFQ is read first.
+
+        Args:
+            rfq_id (str):
+                The RFQ number, e.g. "7000000000".
+            action (SAPRequestForQuotationAction | str):
+                The status action, e.g. SAPRequestForQuotationAction.SUBMIT_FOR_APPROVAL - or the name of another
+                function of the API.
+
+        Returns:
+            bool:
+                True if the status has been changed, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_RFQ_PROCESS_SRV",
+            function=str(action),
+            parameters={"RequestForQuotation": rfq_id},
+            label="{} request for quotation -> '{}'".format(str(action), rfq_id),
+            etag_entity_path="A_RequestForQuotation('{}')".format(self._quote_key(rfq_id)),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def create_supplier_quotation_from_rfq(
+        self, rfq_id: str, supplier: str, submission_date: date | None = None
+    ) -> dict | None:
+        """Create an SAP supplier quotation for a request for quotation and a bidder.
+
+        This is the only way to create a supplier quotation - the API does not support a direct create. SAP copies
+        the items of the RFQ into the quotation - the supplier's prices are set with
+        update_supplier_quotation() afterwards.
+
+        Args:
+            rfq_id (str):
+                The RFQ number the quotation answers, e.g. "7000000000".
+            supplier (str):
+                The supplier number of the bidder, e.g. "30090".
+            submission_date (date | None, optional):
+                The date the supplier submitted the quotation. Defaults to None (today) - SAP's function
+                import requires the parameter ("Invalid Function Import Parameter" without it).
+
+        Returns:
+            dict | None:
+                The created quotation as returned by SAP (including the number in "SupplierQuotation") or None
+                in case of an error.
+
+        """
+
+        label = "supplier quotation for request for quotation -> '{}' and supplier -> '{}'".format(rfq_id, supplier)
+        result = self._call_odata_function(
+            service="API_QTN_PROCESS_SRV",
+            function="CreateFromRFQ",
+            parameters={
+                "RequestForQuotation": rfq_id,
+                "Supplier": supplier,
+                "QuotationSubmissionDate": submission_date or datetime.now(tz=UTC).date(),
+            },
+            label="create " + label,
+        )
+        if result is None:
+            return None
+
+        created = result.get("CreateFromRFQ", result)
+        if not created.get("SupplierQuotation"):
+            self.log_error("SAP did not create the %s (no key returned)!", label)
+            self.logger.debug("Response -> %s", str(created))
+            return None
+
+        return created
+
+    # end method definition
+
+    def iter_supplier_quotations(
+        self, query: SAPSupplierQuotationQueryModel | None = None
+    ) -> SAPODataIterator[SAPSupplierQuotationResponseModel]:
+        """Iterate over SAP supplier quotations - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPSupplierQuotationQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all quotations).
+
+        Returns:
+            SAPODataIterator[SAPSupplierQuotationResponseModel]:
+                The iterator over the supplier quotations.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_QTN_PROCESS_SRV",
+            entity_set="A_SupplierQuotation",
+            model=SAPSupplierQuotationResponseModel,
+            query=query or SAPSupplierQuotationQueryModel(),
+            label="supplier quotations",
+        )
+
+    # end method definition
+
+    def get_supplier_quotations(
+        self, query: SAPSupplierQuotationQueryModel | None = None
+    ) -> list[SAPSupplierQuotationResponseModel] | None:
+        """Get SAP supplier quotations as a list.
+
+        All matching quotations are read (page by page, see iter_supplier_quotations()) and returned at once.
+        For very large result sets prefer iter_supplier_quotations().
+
+        Args:
+            query (SAPSupplierQuotationQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all quotations).
+
+        Returns:
+            list[SAPSupplierQuotationResponseModel] | None:
+                The supplier quotations (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_supplier_quotations(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP supplier quotations.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_supplier_quotation(
+        self,
+        quotation_id: str,
+        expand_items: bool = True,
+    ) -> SAPSupplierQuotationResponseModel | None:
+        """Get a single SAP supplier quotation by its number.
+
+        Args:
+            quotation_id (str):
+                The supplier quotation number, e.g. "8000000012".
+            expand_items (bool, optional):
+                Whether to read the items as well. Defaults to True.
+
+        Returns:
+            SAPSupplierQuotationResponseModel | None:
+                The supplier quotation or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_QTN_PROCESS_SRV",
+            entity_path="A_SupplierQuotation('{}')".format(self._quote_key(quotation_id)),
+            model=SAPSupplierQuotationResponseModel,
+            params={"$expand": SAPSupplierQuotationQueryModel.EXPAND} if expand_items else None,
+            label="supplier quotation -> '{}'".format(quotation_id),
+        )
+
+    # end method definition
+
+    def update_supplier_quotation(
+        self, quotation_id: str, changes: dict | None = None, item_changes: dict[str, dict] | None = None
+    ) -> bool:
+        """Update individual fields of an SAP supplier quotation and of its items.
+
+        This is how the prices of a quotation created from an RFQ are set. All changes are validated first
+        and the items must belong to the quotation - otherwise nothing is changed. The items are changed
+        first, the header last (see _update_odata_document()).
+
+        Args:
+            quotation_id (str):
+                The supplier quotation number, e.g. "8000000012".
+            changes (dict | None, optional):
+                The header fields to change - snake case attribute names of SAPSupplierQuotationModel or OData
+                property names. Defaults to None (header unchanged).
+            item_changes (dict[str, dict] | None, optional):
+                The changes per item number, e.g. {"10": {"net_price": 925.00}} (snake case attribute names of
+                SAPSupplierQuotationItemModel or OData property names). Defaults to None (items unchanged).
+
+        Returns:
+            bool:
+                True if the quotation (and its items) have been updated, False in case of an error.
+
+        """
+
+        key = self._quote_key(quotation_id)
+
+        return self._update_odata_document(
+            service="API_QTN_PROCESS_SRV",
+            label="supplier quotation -> '{}'".format(quotation_id),
+            header_path="A_SupplierQuotation('{}')".format(key),
+            header_model=SAPSupplierQuotationModel,
+            changes=changes,
+            item_changes=item_changes,
+            items=SAPODataItemSet(
+                collection_path="A_SupplierQuotation('{}')/to_SupplierQuotationItem".format(key),
+                entity_set="A_SupplierQuotationItem",
+                key_properties=("SupplierQuotation", "SupplierQuotationItem"),
+                number_property="SupplierQuotationItem",
+                text_property="PurchasingDocumentItemText",
+                label="item",
+            ),
+            item_model=SAPSupplierQuotationItemModel,
+        )
+
+    # end method definition
+
+    def delete_supplier_quotation(self, quotation_id: str) -> bool:
+        """Delete an SAP supplier quotation.
+
+        Args:
+            quotation_id (str):
+                The supplier quotation number, e.g. "8000000012".
+
+        Returns:
+            bool:
+                True if the supplier quotation has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_QTN_PROCESS_SRV",
+            entity_path="A_SupplierQuotation('{}')".format(self._quote_key(quotation_id)),
+            label="supplier quotation -> '{}'".format(quotation_id),
+        )
+
+    # end method definition
+
+    def change_supplier_quotation_status(self, quotation_id: str, action: SAPSupplierQuotationAction | str) -> bool:
+        """Change the status of an SAP supplier quotation (e.g. submit or complete it).
+
+        The function imports require the current ETag of the quotation (If-Match header), so the
+        quotation is read first.
+
+        Args:
+            quotation_id (str):
+                The supplier quotation number, e.g. "8000000012".
+            action (SAPSupplierQuotationAction | str):
+                The status action, e.g. SAPSupplierQuotationAction.SUBMIT - or the name of another
+                function of the API.
+
+        Returns:
+            bool:
+                True if the status has been changed, False in case of an error.
+
+        """
+
+        result = self._call_odata_function(
+            service="API_QTN_PROCESS_SRV",
+            function=str(action),
+            parameters={"SupplierQuotation": quotation_id},
+            label="{} supplier quotation -> '{}'".format(str(action), quotation_id),
+            etag_entity_path="A_SupplierQuotation('{}')".format(self._quote_key(quotation_id)),
+        )
+
+        return result is not None
+
+    # end method definition
+
+    def create_purchasing_info_record(self, info_record: SAPPurchasingInfoRecordModel | dict) -> dict | None:
+        """Create an SAP purchasing info record including its purchasing organization / plant data.
+
+        Uses the OData V2 API API_INFORECORD_PROCESS_SRV with a deep insert, so the info record and its
+        purchasing data (e.g. the price) are created (and committed) in one request.
+
+        SAP takes the planned delivery time of new purchasing data from the supplier's purchasing organization
+        data and ignores the value given here - if the supplier has none, SAP rejects the purchasing data with
+        "Enter a planned delivery time" (set it with update_supplier_purchasing_org()).
+
+        Args:
+            info_record (SAPPurchasingInfoRecordModel | dict):
+                The info record data. A dictionary is validated against the SAPPurchasingInfoRecordModel
+                and can use either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created info record as returned by SAP (including the number in "PurchasingInfoRecord") or
+                None in case of an error.
+
+        Example:
+            >>> sap.create_purchasing_info_record(
+            ... {
+            ...     "supplier": "30090",
+            ...     "material": "EP-300",
+            ...     "purchasing_data": [
+            ...         {
+            ...             "purchasing_organization": "3000",
+            ...             "plant": "3000",
+            ...             "currency": "USD",
+            ...             "net_price": "950.00",
+            ...             "standard_quantity": 1,
+            ...             "planned_delivery_days": 21,
+            ...         }
+            ...     ],
+            ... }
+            ... )
+
+        """
+
+        return self._create_odata_entity(
+            service="API_INFORECORD_PROCESS_SRV",
+            entity_set="A_PurchasingInfoRecord",
+            model=SAPPurchasingInfoRecordModel,
+            data=info_record,
+            key_fields=["PurchasingInfoRecord"],
+            label="purchasing info record",
+        )
+
+    # end method definition
+
+    def iter_purchasing_info_records(
+        self, query: SAPPurchasingInfoRecordQueryModel | None = None
+    ) -> SAPODataIterator[SAPPurchasingInfoRecordResponseModel]:
+        """Iterate over SAP purchasing info records - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPPurchasingInfoRecordQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all info records).
+
+        Returns:
+            SAPODataIterator[SAPPurchasingInfoRecordResponseModel]:
+                The iterator over the purchasing info records.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_INFORECORD_PROCESS_SRV",
+            entity_set="A_PurchasingInfoRecord",
+            model=SAPPurchasingInfoRecordResponseModel,
+            query=query or SAPPurchasingInfoRecordQueryModel(),
+            label="purchasing info records",
+        )
+
+    # end method definition
+
+    def get_purchasing_info_records(
+        self, query: SAPPurchasingInfoRecordQueryModel | None = None
+    ) -> list[SAPPurchasingInfoRecordResponseModel] | None:
+        """Get SAP purchasing info records as a list.
+
+        All matching info records are read (page by page, see iter_purchasing_info_records()) and returned at once.
+        For very large result sets prefer iter_purchasing_info_records().
+
+        Args:
+            query (SAPPurchasingInfoRecordQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all info records).
+
+        Returns:
+            list[SAPPurchasingInfoRecordResponseModel] | None:
+                The purchasing info records (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_purchasing_info_records(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP purchasing info records.", len(results))
+
+        return results
+
+    # end method definition
+
+    def get_purchasing_info_record(
+        self,
+        info_record_id: str,
+        expand_items: bool = True,
+    ) -> SAPPurchasingInfoRecordResponseModel | None:
+        """Get a single SAP purchasing info record by its number.
+
+        Args:
+            info_record_id (str):
+                The info record number, e.g. "5300000100".
+            expand_items (bool, optional):
+                Whether to read the purchasing organization / plant data (e.g. the price) as well.
+                Defaults to True.
+
+        Returns:
+            SAPPurchasingInfoRecordResponseModel | None:
+                The purchasing info record or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_INFORECORD_PROCESS_SRV",
+            entity_path="A_PurchasingInfoRecord('{}')".format(self._quote_key(info_record_id)),
+            model=SAPPurchasingInfoRecordResponseModel,
+            params={"$expand": SAPPurchasingInfoRecordQueryModel.EXPAND} if expand_items else None,
+            label="purchasing info record -> '{}'".format(info_record_id),
+        )
+
+    # end method definition
+
+    def update_purchasing_info_record(self, info_record_id: str, changes: dict) -> bool:
+        """Update individual fields of an SAP purchasing info record (the general data).
+
+        The purchasing organization / plant data (e.g. the price) are changed with
+        update_purchasing_info_record_data().
+
+        Args:
+            info_record_id (str):
+                The info record number, e.g. "5300000100".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPPurchasingInfoRecordModel or OData
+                property names, e.g. {"supplier_material_number": "EP-300-100"}.
+
+        Returns:
+            bool:
+                True if the info record has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_INFORECORD_PROCESS_SRV",
+            entity_path="A_PurchasingInfoRecord('{}')".format(self._quote_key(info_record_id)),
+            model=SAPPurchasingInfoRecordModel,
+            changes=changes,
+            label="purchasing info record -> '{}'".format(info_record_id),
+        )
+
+    # end method definition
+
+    def create_purchasing_info_record_data(
+        self, info_record_id: str, data: SAPPurchasingInfoRecordDataModel | dict
+    ) -> dict | None:
+        """Add purchasing organization / plant data (e.g. a price) to an existing SAP purchasing info record.
+
+        Like create_purchasing_info_record(), SAP takes the planned delivery time from the supplier's purchasing
+        organization data (see update_supplier_purchasing_org()).
+
+        Args:
+            info_record_id (str):
+                The info record number, e.g. "5300000100".
+            data (SAPPurchasingInfoRecordDataModel | dict):
+                The data, e.g. {"purchasing_organization": "3000", "plant": "3000", "net_price": "950.00"}.
+                A dictionary is validated against SAPPurchasingInfoRecordDataModel.
+
+        Returns:
+            dict | None:
+                The created data as returned by SAP or None in case of an error.
+
+        """
+
+        return self._create_odata_entity(
+            service="API_INFORECORD_PROCESS_SRV",
+            entity_set="A_PurchasingInfoRecord('{}')/to_PurgInfoRecdOrgPlantData".format(
+                self._quote_key(info_record_id)
+            ),
+            model=SAPPurchasingInfoRecordDataModel,
+            # SAP needs the info record in the data (the key in the URL is not enough):
+            data=(
+                {**data, "info_record_id": info_record_id}
+                if isinstance(data, dict)
+                else data.model_copy(update={"info_record_id": info_record_id})
+            ),
+            key_fields=["PurchasingInfoRecord", "PurchasingOrganization"],
+            label="purchasing data of purchasing info record -> '{}'".format(info_record_id),
+        )
+
+    # end method definition
+
+    def _purchasing_info_record_data_path(
+        self, info_record_id: str, purchasing_organization: str, plant: str, category: str
+    ) -> str:
+        """Return the entity path of the purchasing organization / plant data of an info record."""
+
+        return (
+            "A_PurgInfoRecdOrgPlantData(PurchasingInfoRecord='{}',PurchasingInfoRecordCategory='{}',"
+            "PurchasingOrganization='{}',Plant='{}')".format(
+                self._quote_key(info_record_id),
+                self._quote_key(category),
+                self._quote_key(purchasing_organization),
+                self._quote_key(plant),
+            )
+        )
+
+    # end method definition
+
+    def update_purchasing_info_record_data(
+        self,
+        info_record_id: str,
+        purchasing_organization: str,
+        changes: dict,
+        plant: str = "",
+        category: str = "0",
+    ) -> bool:
+        """Update individual fields of the purchasing organization / plant data of an SAP purchasing info record.
+
+        Args:
+            info_record_id (str):
+                The info record number, e.g. "5300000100".
+            purchasing_organization (str):
+                The purchasing organization of the data, e.g. "3000".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPPurchasingInfoRecordDataModel or OData
+                property names, e.g. {"planned_delivery_days": 14}.
+            plant (str, optional):
+                The plant of the data. Defaults to "" (the data of the whole purchasing organization).
+            category (str, optional):
+                The info record category. Defaults to "0" (standard).
+
+        Returns:
+            bool:
+                True if the data have been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_INFORECORD_PROCESS_SRV",
+            entity_path=self._purchasing_info_record_data_path(
+                info_record_id, purchasing_organization, plant, category
+            ),
+            model=SAPPurchasingInfoRecordDataModel,
+            changes=changes,
+            label="purchasing data -> '{}/{}' of purchasing info record -> '{}'".format(
+                purchasing_organization, plant, info_record_id
+            ),
+        )
+
+    # end method definition
+
+    def delete_purchasing_info_record_data(
+        self, info_record_id: str, purchasing_organization: str, plant: str = "", category: str = "0"
+    ) -> bool:
+        """Delete the purchasing organization / plant data of an SAP purchasing info record (set their deletion indicator).
+
+        API_INFORECORD_PROCESS_SRV does not allow DELETE - like in SAP GUI (ME12), the data are deleted by
+        setting their deletion indicator. It can be reset with update_purchasing_info_record_data() and the change
+        {"is_marked_for_deletion": False}.
+
+        Args:
+            info_record_id (str):
+                The info record number, e.g. "5300000100".
+            purchasing_organization (str):
+                The purchasing organization of the data, e.g. "3000".
+            plant (str, optional):
+                The plant of the data. Defaults to "" (the data of the whole purchasing organization).
+            category (str, optional):
+                The info record category. Defaults to "0" (standard).
+
+        Returns:
+            bool:
+                True if the data have been deleted, False in case of an error.
+
+        """
+
+        return self.update_purchasing_info_record_data(
+            info_record_id=info_record_id,
+            purchasing_organization=purchasing_organization,
+            plant=plant,
+            category=category,
+            changes={"is_marked_for_deletion": True},
+        )
+
+    # end method definition
+
+    def delete_purchasing_info_record(self, info_record_id: str) -> bool:
+        """Delete an SAP purchasing info record (set its deletion indicator).
+
+        API_INFORECORD_PROCESS_SRV does not allow DELETE - like in SAP GUI (ME15), an info record is deleted by
+        setting its deletion indicator (IsDeleted). It can be reset with update_purchasing_info_record() and the
+        change {"is_marked_for_deletion": False}.
+
+        Args:
+            info_record_id (str):
+                The info record number, e.g. "5300000100".
+
+        Returns:
+            bool:
+                True if the info record has been deleted, False in case of an error.
+
+        """
+
+        return self.update_purchasing_info_record(
+            info_record_id=info_record_id, changes={"is_marked_for_deletion": True}
+        )
+
+    # end method definition
+
+    def create_source_list_record(self, record: SAPSourceListRecordModel | dict) -> dict | None:
+        """Create an SAP source list record (which supplier may supply a material to a plant).
+
+        Uses the OData V2 API API_PURCHASING_SOURCE_SRV. The number of the record within the material
+        and plant is assigned by SAP.
+
+        Args:
+            record (SAPSourceListRecordModel | dict):
+                The source list record data. A dictionary is validated against the SAPSourceListRecordModel
+                and can use either the snake case attribute names or the OData property names.
+
+        Returns:
+            dict | None:
+                The created record as returned by SAP (including "SourceListRecord") or None in case of an error.
+
+        Example:
+            >>> sap.create_source_list_record(
+            ... {
+            ...     "material": "EP-300",
+            ...     "plant": "3000",
+            ...     "validity_start_date": "2026-11-01",
+            ...     "validity_end_date": "2027-10-31",
+            ...     "supplier": "30090",
+            ...     "purchasing_organization": "3000",
+            ... }
+            ... )
+
+        """
+
+        return self._create_odata_entity(
+            service="API_PURCHASING_SOURCE_SRV",
+            entity_set="A_PurchasingSource",
+            model=SAPSourceListRecordModel,
+            data=record,
+            key_fields=["Material", "Plant", "SourceListRecord"],
+            label="source list record",
+        )
+
+    # end method definition
+
+    def iter_source_list_records(
+        self, query: SAPSourceListRecordQueryModel | None = None
+    ) -> SAPODataIterator[SAPSourceListRecordResponseModel]:
+        """Iterate over SAP source list records - reading them page by page from SAP.
+
+        Use this for large result sets: only one page is held in memory at a time.
+        Errors are logged and end the iteration (check the 'failed' attribute of the
+        returned iterator afterwards).
+
+        Args:
+            query (SAPSourceListRecordQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all records).
+
+        Returns:
+            SAPODataIterator[SAPSourceListRecordResponseModel]:
+                The iterator over the source list records.
+
+        """
+
+        return self._iter_odata_collection(
+            service="API_PURCHASING_SOURCE_SRV",
+            entity_set="A_PurchasingSource",
+            model=SAPSourceListRecordResponseModel,
+            query=query or SAPSourceListRecordQueryModel(),
+            label="source list records",
+        )
+
+    # end method definition
+
+    def get_source_list_records(
+        self, query: SAPSourceListRecordQueryModel | None = None
+    ) -> list[SAPSourceListRecordResponseModel] | None:
+        """Get SAP source list records as a list.
+
+        All matching records are read (page by page, see iter_source_list_records()) and returned at once.
+        For very large result sets prefer iter_source_list_records().
+
+        Args:
+            query (SAPSourceListRecordQueryModel | None, optional):
+                The search criteria (filters, sort order, limit, page size). Defaults to None (all records).
+
+        Returns:
+            list[SAPSourceListRecordResponseModel] | None:
+                The source list records (an empty list if none match) or None in case of an error.
+
+        """
+
+        entries = self.iter_source_list_records(query=query)
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP source list records.", len(results))
+
+        return results
+
+    # end method definition
+
+    @staticmethod
+    def _source_list_record_path(material: str, plant: str, record: str) -> str:
+        """Return the entity path of a source list record."""
+
+        return "A_PurchasingSource(Material='{}',Plant='{}',SourceListRecord='{}')".format(
+            SAP._quote_key(material), SAP._quote_key(plant), SAP._quote_key(record)
+        )
+
+    # end method definition
+
+    def get_source_list_record(self, material: str, plant: str, record: str) -> SAPSourceListRecordResponseModel | None:
+        """Get a single SAP source list record.
+
+        Args:
+            material (str):
+                The material (product) number, e.g. "EP-300".
+            plant (str):
+                The plant, e.g. "3000".
+            record (str):
+                The number of the record within the material and plant, e.g. "1".
+
+        Returns:
+            SAPSourceListRecordResponseModel | None:
+                The source list record or None if it does not exist or in case of an error.
+
+        """
+
+        return self._get_odata_entity(
+            service="API_PURCHASING_SOURCE_SRV",
+            entity_path=self._source_list_record_path(material, plant, record),
+            model=SAPSourceListRecordResponseModel,
+            params=None,
+            label="source list record -> {}/{}/{}".format(material, plant, record),
+        )
+
+    # end method definition
+
+    def update_source_list_record(self, material: str, plant: str, record: str, changes: dict) -> bool:
+        """Update individual fields of an SAP source list record.
+
+        Args:
+            material (str):
+                The material (product) number, e.g. "EP-300".
+            plant (str):
+                The plant, e.g. "3000".
+            record (str):
+                The number of the record within the material and plant, e.g. "1".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPSourceListRecordModel or OData
+                property names, e.g. {"validity_end_date": "2028-10-31"}.
+
+        Returns:
+            bool:
+                True if the record has been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_PURCHASING_SOURCE_SRV",
+            entity_path=self._source_list_record_path(material, plant, record),
+            model=SAPSourceListRecordModel,
+            changes=changes,
+            label="source list record -> {}/{}/{}".format(material, plant, record),
+        )
+
+    # end method definition
+
+    def delete_source_list_record(self, material: str, plant: str, record: str) -> bool:
+        """Delete an SAP source list record.
+
+        Args:
+            material (str):
+                The material (product) number, e.g. "EP-300".
+            plant (str):
+                The plant, e.g. "3000".
+            record (str):
+                The number of the record within the material and plant, e.g. "1".
+
+        Returns:
+            bool:
+                True if the record has been deleted, False in case of an error.
+
+        """
+
+        return self._delete_odata_entity(
+            service="API_PURCHASING_SOURCE_SRV",
+            entity_path=self._source_list_record_path(material, plant, record),
+            label="source list record -> {}/{}/{}".format(material, plant, record),
+        )
+
+    # end method definition
+
     def create_warranty_claim(self, claim: SAPWarrantyClaimModel | dict) -> dict | None:
         """Create an SAP warranty claim including its versions and items.
 
@@ -7823,6 +9188,7 @@ class SAP:
         response = self.do_request(
             url=self.service_url("API_BILLING_DOCUMENT_SRV") + "/GetPDF",
             params={"BillingDocument": odata_literal(billing_document_id)},
+            timeout=REQUEST_TIMEOUT,
             failure_message="Failed to get the PDF of SAP billing document -> '{}'".format(billing_document_id),
         )
         if response is None:
@@ -12070,6 +13436,99 @@ class SAP:
 
     # end method definition
 
+    def get_person(self, personnel_number: str) -> SAPPersonResponseModel | None:
+        """Get a single person by the personnel number - with the e-mail address, phone number and address.
+
+        Args:
+            personnel_number (str):
+                The personnel number, e.g. "00001004" (or "1004").
+
+        Returns:
+            SAPPersonResponseModel | None:
+                The person or None if there is none with this personnel number or in case of an error.
+
+        """
+
+        persons = self.get_persons(
+            SAPPersonQueryModel(personnel_numbers=[personnel_number], expand_items=True, limit=1)
+        )
+
+        return persons[0] if persons else None
+
+    # end method definition
+
+    def get_persons(self, query: SAPPersonQueryModel | None = None) -> list[SAPPersonResponseModel] | None:
+        """Get the persons with a personnel number - e.g. to find the person responsible of a maintenance order.
+
+        The persons are the business partners of category person that have a personnel number (identification
+        type HCM001, the HR integration) - HR master data, independent of the SAP users. The personnel number is
+        the value of SAPMaintenanceOrderModel.person_responsible. Names are searched case-insensitively.
+
+        Args:
+            query (SAPPersonQueryModel | None, optional):
+                The search criteria (names, personnel numbers, limit). Defaults to None (all persons).
+
+        Returns:
+            list[SAPPersonResponseModel] | None:
+                The persons (an empty list if none match) or None in case of an error.
+
+        Example:
+            >>> sap.get_persons(SAPPersonQueryModel(last_name_contains="Ramos"))
+
+        """
+
+        query = query or SAPPersonQueryModel()
+
+        # SAP can't filter the business partners by their identifications (OData V2) - the personnel numbers are
+        # resolved to business partners first:
+        if query.personnel_numbers:
+            identifications = self._iter_odata_collection(
+                service="API_BUSINESS_PARTNER",
+                entity_set="A_BuPaIdentification",
+                model=SAPBusinessPartnerIdentificationResponseModel,
+                query=SAPODataTextQueryModel(
+                    conditions=[
+                        "BPIdentificationType eq '{}'".format(PERSONNEL_NUMBER_IDENTIFICATION_TYPE),
+                        # Personnel numbers have 8 digits - '1004' is '00001004':
+                        ODataCondition("BPIdentificationNumber").to_filter(
+                            value=[
+                                number.zfill(8) if number.isdigit() else number for number in query.personnel_numbers
+                            ],
+                            odata_version=2,
+                        ),
+                    ],
+                    order_by="BusinessPartner asc",
+                ),
+                label="person identifications",
+            )
+            business_partner_ids = [identification.business_partner_id for identification in identifications]
+            if identifications.failed:
+                return None
+            if not business_partner_ids:
+                return []
+            if query.business_partner_ids:
+                business_partner_ids = [id_ for id_ in business_partner_ids if id_ in query.business_partner_ids]
+                if not business_partner_ids:
+                    return []
+            query = query.model_copy(update={"business_partner_ids": business_partner_ids})
+
+        entries = self._iter_odata_collection(
+            service="API_BUSINESS_PARTNER",
+            entity_set="A_BusinessPartner",
+            model=SAPPersonResponseModel,
+            query=query,
+            label="persons",
+        )
+        results = list(entries)
+        if entries.failed:
+            return None
+
+        self.logger.info("Got %d SAP persons.", len(results))
+
+        return results
+
+    # end method definition
+
     def get_business_partners(
         self, query: SAPBusinessPartnerQueryModel | None = None
     ) -> list[SAPBusinessPartnerResponseModel] | None:
@@ -12327,6 +13786,45 @@ class SAP:
             data=purchasing_organization,
             key_fields=["Supplier", "PurchasingOrganization"],
             label="purchasing organization data of supplier -> '{}'".format(supplier_id),
+        )
+
+    # end method definition
+
+    def update_supplier_purchasing_org(self, supplier_id: str, purchasing_organization: str, changes: dict) -> bool:
+        """Update individual fields of the purchasing organization data of an SAP supplier.
+
+        SAP copies the planned delivery time of the supplier into new purchasing info records and overwrites the
+        value given there - set it here first (e.g. {"planned_delivery_days": 14}) if info record purchasing data
+        fail with "Enter a planned delivery time".
+
+        SAP locks the business partner for a few seconds after a change - a change right after
+        it can fail with "R1/084 Business partner ... is currently being processed"; repeat it then.
+
+        Args:
+            supplier_id (str):
+                The supplier number, e.g. "30090".
+            purchasing_organization (str):
+                The purchasing organization, e.g. "3000".
+            changes (dict):
+                The fields to change - snake case attribute names of SAPSupplierPurchasingOrgModel or OData
+                property names, e.g. {"planned_delivery_days": 14}.
+
+        Returns:
+            bool:
+                True if the purchasing data have been updated, False in case of an error.
+
+        """
+
+        return self._update_odata_entity(
+            service="API_BUSINESS_PARTNER",
+            entity_path="A_SupplierPurchasingOrg(Supplier='{}',PurchasingOrganization='{}')".format(
+                self._quote_key(supplier_id), self._quote_key(purchasing_organization)
+            ),
+            model=SAPSupplierPurchasingOrgModel,
+            changes=changes,
+            label="purchasing organization -> '{}' data of supplier -> '{}'".format(
+                purchasing_organization, supplier_id
+            ),
         )
 
     # end method definition

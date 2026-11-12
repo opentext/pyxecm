@@ -13,7 +13,11 @@ Terms used throughout this module:
 * A record start is a line carrying a level marker (see `RECORD_RE`). The level of a line is
   the level of the nearest record start at or before it, `CRITICAL` counting as `ERROR`.
 * Only complete lines are served. The unterminated end of the file is a line only once the
-  payload is no longer running.
+  payload is no longer running. While it is running, a client can opt in (`partial`) to get
+  the unterminated end as a provisional last line, flagged `partial`. It has the next line
+  number and passes the filters like any other line, but the cursor stays in front of it: the
+  `end` of the response is the start of the provisional line, so following the log from `end`
+  returns that line again, longer or completed.
 """
 
 __author__ = "Dr. Marc Diefenbruch"
@@ -192,6 +196,9 @@ class LogLinesRequest:
             The search query. None lets every line pass.
         count_only (bool):
             Count the passing lines instead of returning them.
+        partial (bool):
+            Serve the unterminated end of a log that is still being written as a provisional
+            last line (see `_has_partial`).
 
     """
 
@@ -203,6 +210,7 @@ class LogLinesRequest:
     levels: int | None = None
     query: LogQuery | None = None
     count_only: bool = False
+    partial: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,6 +683,7 @@ def build_lines_request(
     case: bool = False,
     word: bool = False,
     count_only: bool = False,
+    partial: bool = False,
 ) -> LogLinesRequest:
     """Check and convert the parameters of a request for log lines.
 
@@ -701,6 +710,8 @@ def build_lines_request(
             Match whole words only.
         count_only (bool, optional):
             Count the passing lines instead of returning them.
+        partial (bool, optional):
+            Serve the unterminated end of a running log as a provisional last line.
 
     Raises:
         ValueError:
@@ -737,6 +748,7 @@ def build_lines_request(
         levels=parse_levels(levels),
         query=compile_query(q, regex=regex, case=case, word=word),
         count_only=count_only,
+        partial=partial,
     )
 
 
@@ -1101,6 +1113,7 @@ class _Scan:
         request: LogLinesRequest,
         *,
         tail: bool,
+        partial: bool = False,
         deadline: float,
         budget_bytes: int,
         cancel: threading.Event | None,
@@ -1116,6 +1129,9 @@ class _Scan:
                 The request.
             tail (bool):
                 Whether the unterminated end of the file counts as a line.
+            partial (bool, optional):
+                Whether the unterminated end of the file is served as a provisional line.
+                The scan then reads it like a tail; the caller moves the cursors back.
             deadline (float):
                 The monotonic time at which the scan has to stop.
             budget_bytes (int):
@@ -1128,9 +1144,10 @@ class _Scan:
         self.file = file
         self.view = view
         self.request = request
-        self.tail = tail
+        self.tail = tail or partial
+        self.partial = partial
         # The end of the lines this scan may serve.
-        self.end = view.size if tail else view.indexed_bytes
+        self.end = view.size if self.tail else view.indexed_bytes
         self.deadline = deadline
         self.budget_bytes = budget_bytes
         self.cancel = cancel
@@ -1203,6 +1220,10 @@ class _Scan:
             return self.end if view.complete else None
 
         offset = request.offset
+        if self.partial and offset >= indexed:
+            # Every offset at or past the start of the provisional line means that line: the
+            # end cursor of a response stays at its start while the line grows.
+            return indexed
         if offset >= self.end:
             return self.end if view.complete or offset == indexed else None
         if offset >= indexed:
@@ -1297,14 +1318,16 @@ class _Scan:
             if self.lines and self.text_bytes + len(raw) > self.max_bytes:
                 # The line does not fit any more: the next request starts with it.
                 return block.base + (following if reverse else start)
-            self.lines.append(
-                {
-                    "n": block.number_of(start),
-                    "offset": block.base + start,
-                    "level": LEVEL_NAMES[block.level_of(start)],
-                    "text": decode_line(raw),
-                }
-            )
+            line = {
+                "n": block.number_of(start),
+                "offset": block.base + start,
+                "level": LEVEL_NAMES[block.level_of(start)],
+                "text": decode_line(raw),
+            }
+            # Everything from the end of the indexed lines on is the provisional line.
+            if self.partial and line["offset"] >= self.view.indexed_bytes:
+                line["partial"] = True
+            self.lines.append(line)
             self.matched += 1
             self.text_bytes += len(raw)
             if self.matched >= request.limit or self.text_bytes >= self.max_bytes:
@@ -1403,6 +1426,17 @@ def _has_tail(view: IndexView, running: bool) -> bool:
     return not running and view.complete and view.size > view.indexed_bytes
 
 
+def _has_partial(view: IndexView, running: bool, request: LogLinesRequest) -> bool:
+    """Check whether the unterminated end of the file is served as a provisional line.
+
+    This is the case if the request asks for it and the end is not a line yet because the log
+    is still being written. Once the log is no longer running, the end is a normal line (see
+    `_has_tail`), with or without the request asking for it.
+    """
+
+    return request.partial and running and view.complete and view.size > view.indexed_bytes
+
+
 def read_log_info(path: str, running: bool, wait: float = INDEX_WAIT_SECONDS) -> dict:
     """Describe a log file and the progress of its index.
 
@@ -1496,11 +1530,13 @@ def read_log_lines(
         file, view = _open_log(path, wait)
         with file:
             tail = _has_tail(view, running)
+            partial = _has_partial(view, running, request)
             scan = _Scan(
                 file,
                 view,
                 request,
                 tail=tail,
+                partial=partial,
                 deadline=deadline,
                 budget_bytes=SCAN_BUDGET_BYTES if budget_bytes is None else budget_bytes,
                 cancel=cancel,
@@ -1520,6 +1556,13 @@ def read_log_lines(
                 else:
                     covered = True
                     start, end = scan.run(position)
+                eof = view.complete and end >= scan.end
+                if partial:
+                    # The provisional line is not part of the covered range: a client that
+                    # follows the log from the end cursor gets it again, longer or completed.
+                    # The end of the log is reached nevertheless if the scan looked at it.
+                    start = min(start, view.indexed_bytes)
+                    end = min(end, view.indexed_bytes)
             except LogChangedError:
                 if attempt:
                     raise
@@ -1533,7 +1576,7 @@ def read_log_lines(
         "start": start,
         "end": end,
         "bof": start == 0,
-        "eof": view.complete and end >= scan.end,
+        "eof": eof,
         "size": view.size,
         "indexing": not view.complete,
         "indexed_bytes": view.size if tail else view.indexed_bytes,

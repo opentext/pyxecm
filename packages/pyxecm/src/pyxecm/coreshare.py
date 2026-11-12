@@ -74,7 +74,7 @@ class CoreShare:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger = ReportingLoggerAttribute(default_logger, error_class=CoreShareError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=CoreShareError)
 
     def __init__(
         self,

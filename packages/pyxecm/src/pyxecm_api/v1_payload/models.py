@@ -79,6 +79,9 @@ class PayloadLogLine(BaseModel):
     offset: int
     level: str | None
     text: str
+    # The unterminated end of a log that is still being written, served on request (`partial`)
+    # as a provisional last line. It is served again, longer or completed, from the end cursor.
+    partial: bool = False
 
 
 class PayloadLogLines(BaseModel):

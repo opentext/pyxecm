@@ -158,7 +158,7 @@ class OTCS:
 
     # Every assigned logger is wrapped in a ReportingLogger, so that
     # self.logger.error(..., report=True) records the error for capture_errors():
-    logger = ReportingLoggerAttribute(default_logger, error_class=OTCSError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=OTCSError)
 
     VOLUME_TYPE_BOT_CONFIGURATION = 898
     VOLUME_TYPE_BUSINESS_WORKSPACES = 862
@@ -2898,6 +2898,14 @@ class OTCS:
         Returns:
             dict | None: Ticket data if the hashed ticket is valid, otherwise None.
 
+        Example:
+            The dictionary is built locally from the input (the server only answers HTTP 200):
+            ```json
+            {
+                'otcsticket': '<hashed ticket passed in>'
+            }
+            ```
+
         """
         try:
             response = self.do_request(
@@ -4041,6 +4049,57 @@ class OTCS:
             dict | None:
                 Information for the current (authenticated) user.
 
+        Example:
+            ```json
+            {
+                'data': {
+                    'birth_date': None,
+                    'business_email': None,
+                    'business_fax': None,
+                    'business_phone': None,
+                    'cell_phone': None,
+                    'deleted': False,
+                    'display_language': '',
+                    'display_name': 'Admin',
+                    'first_name': None,
+                    'gender': None,
+                    'group_id': 999,
+                    'home_address_1': None,
+                    'home_address_2': None,
+                    'home_fax': None,
+                    'home_phone': None,
+                    'id': 1000,
+                    'initials': 'A',
+                    'last_name': None,
+                    'middle_name': None,
+                    'name': 'Admin',
+                    'office_location': None,
+                    'pager': None,
+                    'personal_email': None,
+                    'personal_interests': None,
+                    'personal_url_1': None,
+                    'personal_url_2': None,
+                    'personal_url_3': None,
+                    'personal_website': None,
+                    'photo_id': 429653,
+                    'photo_url': 'api/v1/members/1000/photo?v=429653.1',
+                    'privilege_content_manager': True,
+                    'privilege_grant_discovery': True,
+                    'privilege_login': True,
+                    'privilege_modify_groups': True,
+                    'privilege_modify_users': True,
+                    'privilege_public_access': True,
+                    'privilege_system_admin_rights': True,
+                    'privilege_user_admin_rights': True,
+                    'proxy_proxy_user_id': None,
+                    'time_zone': None,
+                    'title': None,
+                    'type': 0,
+                    'type_name': 'User'
+                }
+            }
+            ```
+
         """
 
         request_url = self.config()["authenticationUrl"]
@@ -4207,6 +4266,65 @@ class OTCS:
         Returns:
             dict | None:
                 User profile settings or None if the request failed.
+
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/preferences',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'config_name': 'SmartUI',
+                            'preferences': {
+                                'accessibleMode': False,
+                                'jatoTheme': 'light',
+                                'purgeMyContributions': '0',
+                                'responsiveContainerMessageMode': True,
+                                'responsiveContainerMode': True,
+                                'theme': 'jato'
+                            }
+                        }
+                    },
+                    {
+                        'data': {
+                            'config_name': 'General',
+                            'preferences': {
+                                'ContentMgrModeExpires': None,
+                                'ContentMgrTimeout': 30,
+                                'dftStartPage': 1,
+                                'emaillink': 1,
+                                'enableEDiscovery': False,
+                                'HasContentMgrPriv': True,
+                                'IsInContentMgrMode': False,
+                                'itemDescription': False,
+                                'linkBehavior': 3,
+                                'localeType': '',
+                                'metadataLang': 'en',
+                                'metadataLangType': '',
+                                'modIndDuration': 7,
+                                'newIndDuration': 2,
+                                'shortlinkClient': 2,
+                                'sidebarDefaultState': True,
+                                'sidebarLocation': 0,
+                                'useJava': True,
+                                'viewType': -1
+                            }
+                        }
+                    },
+                    ...
+                ]
+            }
+            ```
 
         """
 
@@ -4556,7 +4674,11 @@ class OTCS:
 
         Args:
             where_name (str | None, optional):
-                Name of the user (login).
+                Filter on the item name (verified with OTCS 26.4): the item name contains the value as one
+                contiguous substring - case-insensitive also for non-ASCII letters and accent-insensitive
+                ('fuhrerschein' finds 'führerschein.jpg'), surrounding whitespace is trimmed, '%' is a wildcard for
+                any characters, '_' and '*' are literal. There is no exact match and no 'contains_' / 'startswith_'
+                prefix (taken literally, they match nothing) - like get_nodes_by_parent_and_filters().
             expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
@@ -4586,13 +4708,116 @@ class OTCS:
                 then asc will be assumed.
                 Default is None.
             limit (int, optional):
-                The maximum number of results per page.
+                The maximum number of results per page - at most 250 (verified with OTCS 26.4): a larger limit is
+                reduced silently (the response has "limit": 250 in collection.paging for a requested 500).
             page (int, optional):
                 The page number to retrieve.
 
         Returns:
             dict | None:
                 Request response or None if the favorite request has failed.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 2,
+                        'links': {
+                            'data': {
+                                'next': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'href': '/api/v2/members/favorites?fields=properties&limit=2&page=2&sort=asc_order',
+                                    'method': 'GET',
+                                    'name': 'Next'
+                                }
+                            }
+                        },
+                        'page': 1,
+                        'page_total': 4,
+                        'range_max': 2,
+                        'range_min': 1,
+                        'total_count': 8
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_order'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/favorites?fields=properties&limit=2&page=1&sort=asc_order',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 3,
+                                'create_date': '2019-06-24T17:59:45Z',
+                                'create_user_id': 1000,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'id': 32968,
+                                'mime_type': None,
+                                'modify_date': '2026-10-18T15:35:28Z',
+                                'name': 'Records Management',
+                                'parent_id': 2111,
+                                'size': 3,
+                                'type': 0,
+                                'type_name': 'Folder',
+                                'volume_id': -2111,
+                                ...
+                            }
+                        }
+                    },
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 26,
+                                'create_date': '2017-03-22T19:12:39Z',
+                                'create_user_id': 1000,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'id': 32656,
+                                'mime_type': None,
+                                'modify_date': '2026-11-03T16:52:17Z',
+                                'name': 'Equipment',
+                                'parent_id': 32492,
+                                'size': 26,
+                                'type': 0,
+                                'type_name': 'Folder',
+                                'volume_id': -2111,
+                                ...
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -4773,7 +4998,11 @@ class OTCS:
 
         Args:
             where_name (str | None, optional):
-                Name of the user (login).
+                Filter on the item name (verified with OTCS 26.4): the item name contains the value as one
+                contiguous substring - case-insensitive also for non-ASCII letters and accent-insensitive
+                ('fuhrerschein' finds 'führerschein.jpg'), surrounding whitespace is trimmed, '%' is a wildcard for
+                any characters, '_' and '*' are literal. There is no exact match and no 'contains_' / 'startswith_'
+                prefix (taken literally, they match nothing) - like get_nodes_by_parent_and_filters().
             where_type (list[int] | None, optional):
                 List of node types to filter the results by.
                 (144 for document, 749 for email and so on)
@@ -4808,13 +5037,121 @@ class OTCS:
                 then asc will be assumed.
                 Default is None.
             limit (int, optional):
-                The maximum number of results per page.
+                The maximum number of results per page - at most 200 (verified with OTCS 26.4): a larger limit
+                fails with HTTP 500 "Could not set feature Page Size, the value 250 is greater than the maximum
+                value (200)" and this method returns None.
             page (int, optional):
                 The page number to retrieve.
 
         Returns:
             dict | None:
                 Request response or None if the recently accessed items request has failed.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 2,
+                        'links': {
+                            'data': {
+                                'next': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'href': '/api/v2/members/accessed?fields=properties&limit=2&page=2&sort=desc_Ev...',
+                                    'method': 'GET',
+                                    'name': 'Next'
+                                }
+                            }
+                        },
+                        'page': 1,
+                        'page_total': 98,
+                        'total_count': 195
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'desc_EventDate'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/accessed?fields=properties&limit=2&page=1&sort=desc_EventDate',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': False,
+                                'container': False,
+                                'container_size': 0,
+                                'create_date': '2026-10-18T15:47:34Z',
+                                'create_user_id': 1000,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'id': 65970,
+                                'mime_type': 'application/pdf',
+                                'modify_date': '2026-10-18T15:47:35Z',
+                                'name': 'Lounge Invitation_20261018-154731551.pdf',
+                                'parent_id': 63187,
+                                'size': 48262,
+                                'type': 144,
+                                'type_name': 'Document',
+                                'volume_id': 61129,
+                                ...
+                            },
+                            'properties_user': {
+                                'access_date_last': '2026-11-06T16:42:26Z'
+                            }
+                        }
+                    },
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 14,
+                                'create_date': '2026-10-18T15:46:49Z',
+                                'create_user_id': 24275,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'id': 61129,
+                                'mime_type': None,
+                                'modify_date': '2026-10-18T15:48:26Z',
+                                'name': '(株) 菱井インダストリー (710004)',
+                                'parent_id': 33797,
+                                'size': 14,
+                                'type': 848,
+                                'type_name': 'Business Workspace',
+                                'volume_id': -2111,
+                                'wksp_type_name': 'Customer',
+                                ...
+                            },
+                            'properties_user': {
+                                'access_date_last': '2026-11-06T16:42:25Z'
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -4913,6 +5250,23 @@ class OTCS:
             dict | None:
                 Request response or None if the mytodo request has failed.
 
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 2,
+                        'page': 1,
+                        'page_total': 1,
+                        'range_max': 2,
+                        'range_min': 0,
+                        'total_count': 0
+                    }
+                },
+                'results': []
+            }
+            ```
+
         """
 
         # Add query parameters (embedded in the URL)
@@ -4968,7 +5322,11 @@ class OTCS:
 
         Args:
             where_name (str | None, optional):
-                Name of the user (login).
+                Filter on the item name (presumably like get_user_favorites() - the same /v2/members API; not verified, the test user had no reserved nodes): the item name contains the value as one
+                contiguous substring - case-insensitive also for non-ASCII letters and accent-insensitive
+                ('fuhrerschein' finds 'führerschein.jpg'), surrounding whitespace is trimmed, '%' is a wildcard for
+                any characters, '_' and '*' are literal. There is no exact match and no 'contains_' / 'startswith_'
+                prefix (taken literally, they match nothing) - like get_nodes_by_parent_and_filters().
             expand (str | None, optional):
                 Resolve individual fields (e.g. expand=properties{id,parent_id}&expand=versions{file_name})
                 or entire sections (eg. expand=properties) that contain known identifiers (nodes, members, etc.).
@@ -4998,13 +5356,50 @@ class OTCS:
                 then asc will be assumed.
                 Default is None.
             limit (int, optional):
-                The maximum number of results per page.
+                The maximum number of results per page. A limit of 500 is accepted (verified with OTCS 26.4: the
+                response has "limit": 500 in collection.paging).
             page (int, optional):
                 The page number to retrieve.
 
         Returns:
             dict | None:
                 Request response or None if the reserved nodes request has failed.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 2,
+                        'page': 1,
+                        'page_total': 0,
+                        'range_max': 0,
+                        'range_min': 0,
+                        'total_count': 0
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_name'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/reserved?fields=properties&limit=2&page=1&sort=asc_name',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': []
+            }
+            ```
 
         """
 
@@ -5822,6 +6217,58 @@ class OTCS:
             dict | None:
                 Response with signing groups (type 101) or None if the request fails.
 
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 5,
+                        'page': 1,
+                        'page_total': None,
+                        'range_max': 5,
+                        'range_min': 1,
+                        'total_count': None
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_id'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/signingusers?limit=5&query=',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'deleted': False,
+                                'id': 270462,
+                                'initials': 'S',
+                                'leader_id': None,
+                                'name': 'SigningGroup',
+                                'name_formatted': 'SigningGroup',
+                                'node_id': None,
+                                'type': 101,
+                                'type_name': 'Signing Group'
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
+
         """
 
         query_params = {"limit": limit, "query": query}
@@ -5895,6 +6342,108 @@ class OTCS:
         Returns:
             dict | None:
                 Group members or None if the group members couldn't be found.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 2,
+                        'links': {
+                            'data': {
+                                'next': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'href': '/api/v2/members/2001/members?limit=2&page=2&where_type=0',
+                                    'method': 'GET',
+                                    'name': 'Next'
+                                }
+                            }
+                        },
+                        'page': 1,
+                        'page_total': 2,
+                        'range_max': 2,
+                        'range_min': 1,
+                        'total_count': 4
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_name'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/members/2001/members?limit=2&page=1&where_type=0',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'birth_date': None,
+                                'business_email': None,
+                                'business_fax': None,
+                                'business_phone': None,
+                                'cell_phone': None,
+                                'deleted': False,
+                                'display_language': '',
+                                'first_name': None,
+                                'gender': None,
+                                'group_id': 999,
+                                'home_address_1': None,
+                                'home_address_2': None,
+                                'home_fax': None,
+                                'home_phone': None,
+                                'id': 1000,
+                                'initials': 'A',
+                                'last_name': None,
+                                'name': 'Admin',
+                                'type': 0,
+                                'type_name': 'User',
+                                ...
+                            }
+                        }
+                    },
+                    {
+                        'data': {
+                            'properties': {
+                                'birth_date': None,
+                                'business_email': None,
+                                'business_fax': None,
+                                'business_phone': None,
+                                'cell_phone': None,
+                                'deleted': False,
+                                'display_language': None,
+                                'first_name': None,
+                                'gender': None,
+                                'group_id': 1001,
+                                'home_address_1': None,
+                                'home_address_2': None,
+                                'home_fax': None,
+                                'home_phone': None,
+                                'id': 54854,
+                                'initials': 'O',
+                                'last_name': None,
+                                'name': 'OAuthIntCenter',
+                                'type': 0,
+                                'type_name': 'User',
+                                ...
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -6837,6 +7386,165 @@ class OTCS:
             dict | None:
                 Node information as a dictionary, or None if the nodes cannot be retrieved.
 
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nodes/list',
+                            'method': 'POST',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'boattachinfo': {
+                                'show': True
+                            },
+                            'bwsinfo': {
+                                'id': 61129,
+                                'up': None
+                            },
+                            'cadxref_doc_info': {
+                                'has_relation': False
+                            },
+                            'categories': [
+                                {
+                                    '25220_2_1_18': None,
+                                    '25220_2_1_19': None,
+                                    '25220_2_1_20': None,
+                                    '25220_2_1_21': None,
+                                    '25220_2_1_22': None,
+                                    '25220_2_1_23': None,
+                                    '25220_2_1_24': None,
+                                    '25220_2_1_25': None,
+                                    ...
+                                },
+                                {
+                                    '25486_25': 'Customer',
+                                    '25486_28': '710004',
+                                    '25486_29': '(株) 菱井インダストリー',
+                                    '25486_30': '高島 ２丁目１６番地１号',
+                                    '25486_31': 'Japan',
+                                    '25486_32': '220-0011',
+                                    '25486_33': ['4000'],
+                                    '25486_34': '横浜市 西区',
+                                    ...
+                                }
+                            ],
+                            'categories_inheritance': [
+                                {
+                                    '25220_inheritance': False
+                                },
+                                {
+                                    '25486_inheritance': False
+                                }
+                            ],
+                            'claimed_doc_info': {
+                                'is_claimed': False
+                            },
+                            'permissions': [
+                                {
+                                    'permissions': ['add_items', 'delete', ...],
+                                    'right_id': 24275,
+                                    'type': 'owner'
+                                },
+                                {
+                                    'permissions': ['see', 'see_contents'],
+                                    'right_id': 999,
+                                    'type': 'group'
+                                },
+                                ...
+                            ],
+                            'properties': {
+                                'create_date': '2026-10-18T15:46:49Z',
+                                'id': 61129,
+                                'mime_type': None,
+                                'modify_date': '2026-10-18T15:48:26Z',
+                                'name': '(株) 菱井インダストリー (710004)',
+                                'parent_id': 33797,
+                                'size': 14,
+                                'type': 848,
+                                'type_name': 'Business Workspace',
+                                'volume_id': -2111,
+                                'wksp_type_name': 'Customer',
+                                ...
+                            },
+                            ...
+                        }
+                    },
+                    {
+                        'data': {
+                            'boattachinfo': {
+                                'show': True
+                            },
+                            'bwsinfo': {
+                                'id': 61129,
+                                'up': True
+                            },
+                            'cadxref_doc_info': {
+                                'has_relation': False
+                            },
+                            'categories': [
+                                {
+                                    '3540_2': '2026-10-18T00:00:00',
+                                    '3540_3': None
+                                }
+                            ],
+                            'categoryaudit': {
+                                'isValidNode': True
+                            },
+                            'permissions': [
+                                {
+                                    'permissions': ['add_items', 'delete', ...],
+                                    'right_id': 1000,
+                                    'type': 'owner'
+                                },
+                                {
+                                    'permissions': ['see', 'see_contents'],
+                                    'right_id': 999,
+                                    'type': 'group'
+                                },
+                                ...
+                            ],
+                            'properties': {
+                                'create_date': '2026-10-18T15:47:34Z',
+                                'id': 65970,
+                                'mime_type': 'application/pdf',
+                                'modify_date': '2026-10-18T15:47:35Z',
+                                'name': 'Lounge Invitation_20261018-154731551.pdf',
+                                'parent_id': 63187,
+                                'size': 48262,
+                                'type': 144,
+                                'type_name': 'Document',
+                                'volume_id': 61129,
+                                ...
+                            },
+                            'versions': [
+                                {
+                                    'create_date': '2026-10-18T15:47:34Z',
+                                    'description': None,
+                                    'external_create_date': None,
+                                    'id': 65970,
+                                    'mime_type': 'application/pdf',
+                                    'modify_date': '2026-10-18T15:47:35Z',
+                                    'name': 'Lounge Invitation_20261018-154731551.pdf',
+                                    'version_number': 1,
+                                    ...
+                                }
+                            ],
+                            ...
+                        }
+                    }
+                ]
+            }
+            ```
+
         """
 
         request_url = self.config()["nodesUrlv2"] + "/list"
@@ -6914,6 +7622,97 @@ class OTCS:
                 is found under the specified parent.
                 To access the node ID, use:
                 `response["results"][0]["data"]["properties"]["id"]`.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'filtering': {
+                        'filter': [
+                            {
+                                'key': 'where_name',
+                                'value': 'Administration'
+                            }
+                        ]
+                    },
+                    'paging': {
+                        'limit': 100,
+                        'page': 1,
+                        'page_total': 1,
+                        'range_max': 1,
+                        'range_min': 1,
+                        'total_count': 1
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_name'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nodes/2111/nodes?fields=properties&limit=100&page=1&sort=asc_name',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 30,
+                                'create_date': '2022-06-09T14:00:29Z',
+                                'create_user_id': 1000,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'external_source': '',
+                                'favorite': False,
+                                'hidden': False,
+                                'icon': '/cssupport/webdoc/folder.gif',
+                                'icon_large': '/cssupport/webdoc/folder_large.gif',
+                                'id': 28980,
+                                'mime_type': None,
+                                'modify_date': '2026-11-05T15:41:34Z',
+                                'modify_user_id': 1000,
+                                'name': 'Administration',
+                                'name_multilingual': {'en': 'Administration', ...},
+                                'owner': 'Admin',
+                                'owner_group_id': 999,
+                                'owner_user_id': 1000,
+                                'parent_id': 2111,
+                                'permissions_model': 'advanced',
+                                'reserved': False,
+                                'reserved_date': None,
+                                'reserved_shared_collaboration': False,
+                                'reserved_user_id': 0,
+                                'show_read_only': False,
+                                'size': 30,
+                                'size_formatted': '30 Items',
+                                'status': None,
+                                'type': 0,
+                                'type_name': 'Folder',
+                                'versionable': False,
+                                'versions_control_advanced': False,
+                                'volume_id': -2111
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -7381,6 +8180,69 @@ class OTCS:
             dict | None:
                 Node information or None if no node with this nickname is found.
 
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nicknames/web_report_set_user_privilege/nodes',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': {
+                        'properties': {
+                            'advanced_versioning': False,
+                            'container': False,
+                            'container_size': 0,
+                            'create_date': '2022-11-04T18:27:06Z',
+                            'create_user_id': 1000,
+                            'description': '',
+                            'description_multilingual': {'en': '', ...},
+                            'external_create_date': None,
+                            'external_identity': '',
+                            'external_identity_type': '',
+                            'external_modify_date': None,
+                            'external_source': '',
+                            'favorite': False,
+                            'hidden': False,
+                            'icon': '/cssupport/webreports/webreports.gif',
+                            'icon_large': '/cssupport/webreports/webreports_large.gif',
+                            'id': 49871,
+                            'mime_type': 'text/html',
+                            'modify_date': '2026-10-18T15:33:18Z',
+                            'modify_user_id': 2535,
+                            'name': 'Set User Privilege',
+                            'name_multilingual': {'en': 'Set User Privilege', ...},
+                            'owner': 'Admin',
+                            'owner_group_id': 999,
+                            'owner_user_id': 1000,
+                            'parent_id': 49817,
+                            'permissions_model': 'advanced',
+                            'reserved': False,
+                            'reserved_date': None,
+                            'reserved_shared_collaboration': False,
+                            'reserved_user_id': 0,
+                            'show_read_only': False,
+                            'size': 293,
+                            'size_formatted': '1 KB',
+                            'status': None,
+                            'type': 30303,
+                            'type_name': 'WebReport',
+                            'versionable': True,
+                            'versions_control_advanced': False,
+                            'volume_id': -2111
+                        }
+                    }
+                }
+            }
+            ```
+
         """
 
         request_url = self.config()["nicknameUrl"] + "/" + nickname + "/nodes"
@@ -7539,69 +8401,114 @@ class OTCS:
                 Subnode information as a dictionary, or None if no nodes with
                 the given parent ID are found.
                 Example response:
-                {
-                    "results": [
-                        {
-                            "data": [
-                                {
-                                    "columns": [
-                                        {
-                                            "data_type": 0,
-                                            "key": "string",
-                                            "name": "string",
-                                            "sort_key": "string"
-                                        }
-                                    ],
-                                    "properties": [
-                                        {
-                                            "advanced_versioning": true,
-                                            "container": true,
-                                            "container_size": 0,
-                                            "create_date": "string",
-                                            "create_user_id": 0,
-                                            "description": "string",
-                                            "description_multilingual": {
-                                                "en": "string",
-                                                "de": "string"
-                                            },
-                                            "external_create_date": "2019-08-24",
-                                            "external_identity": "string",
-                                            "external_identity_type": "string",
-                                            "external_modify_date": "2019-08-24",
-                                            "external_source": "string",
-                                            "favorite": true,
-                                            "guid": "string",
-                                            "hidden": true,
-                                            "icon": "string",
-                                            "icon_large": "string",
-                                            "id": 0,
-                                            "modify_date": "2019-08-24",
-                                            "modify_user_id": 0,
-                                            "name": "string",
-                                            "name_multilingual": {
-                                                "en": "string",
-                                                "de": "string"
-                                            },
-                                            "owner": "string",
-                                            "owner_group_id": 0,
-                                            "owner_user_id": 0,
-                                            "parent_id": 0,
-                                            "reserved": true,
-                                            "reserved_date": "string",
-                                            "reserved_user_id": 0,
-                                            "status": 0,
-                                            "type": 0,
-                                            "type_name": "string",
-                                            "versionable": true,
-                                            "versions_control_advanced": true,
-                                            "volume_id": 0
-                                        }
-                                    ]
+            ```json
+            {
+                'collection': {
+                    'filtering': {
+                        'filter': [
+                            {
+                                'key': 'where_type',
+                                'value': -2
+                            }
+                        ]
+                    },
+                    'paging': {
+                        'limit': 2,
+                        'links': {
+                            'data': {
+                                'next': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'href': '/api/v2/nodes/61129/nodes?fields=properties&limit=2&page=2&sort=asc_name',
+                                    'method': 'GET',
+                                    'name': 'Next'
                                 }
-                            ]
+                            }
+                        },
+                        'page': 1,
+                        'page_total': 7,
+                        'range_max': 2,
+                        'range_min': 1,
+                        'total_count': 14
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_name'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nodes/61129/nodes?fields=properties&limit=2&page=1&sort=asc_name',
+                            'method': 'GET',
+                            'name': ''
                         }
-                    ]
-                }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 0,
+                                'create_date': '2016-02-16T16:35:20Z',
+                                'create_user_id': 24275,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'id': 61147,
+                                'mime_type': None,
+                                'modify_date': '2026-10-18T15:46:53Z',
+                                'name': '01 - Account Management',
+                                'parent_id': 61129,
+                                'size': 0,
+                                'type': 0,
+                                'type_name': 'Folder',
+                                'volume_id': 61129,
+                                ...
+                            }
+                        }
+                    },
+                    {
+                        'data': {
+                            'properties': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 0,
+                                'create_date': '2016-02-16T16:35:47Z',
+                                'create_user_id': 24275,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'external_create_date': None,
+                                'external_identity': '',
+                                'external_identity_type': '',
+                                'external_modify_date': None,
+                                'id': 61152,
+                                'mime_type': None,
+                                'modify_date': '2026-10-18T15:46:53Z',
+                                'name': '02 - Meetings',
+                                'parent_id': 61129,
+                                'size': 0,
+                                'type': 0,
+                                'type_name': 'Folder',
+                                'volume_id': 61129,
+                                ...
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -7825,7 +8732,17 @@ class OTCS:
             parent_id (int):
                 The ID of the parent node.
             name (str | None, optional):
-                The name of the node to retrieve. Can also be a substring.
+                Name filter (REST parameter `where_name`). How the name matches (verified with OTCS 26.4):
+                * The node name contains the value as one contiguous substring ('ooling Wat' finds
+                  'CW - Cooling Water System', 'Cooling System' does not). There is no exact match - the
+                  complete name also finds all names containing it.
+                * Case-insensitive also for non-ASCII letters ('MÉNAGERIE' finds 'Ménagerie SARL') and
+                  accent-insensitive ('menagerie' finds 'Ménagerie SARL', 'societe' finds 'Société').
+                * Surrounding whitespace is trimmed (' CW - Cooling Water System ' finds it).
+                * '%' is a wildcard for any characters ('C%System' finds 'CW - Cooling Water System'),
+                  '_' and '*' are literal characters.
+                * The prefixes 'contains_' and 'startswith_' of get_workspace_by_type_and_name() are not
+                  supported - they are taken literally and match nothing.
             facet_values (dict[int, int | str | list[int | str]] | None, optional):
                 Each dictionary item has:
                 * Key: facet ID (int)
@@ -7844,6 +8761,128 @@ class OTCS:
             dict | None:
                 Subnode information as a dictionary, or None if no nodes with
                 the given parent ID and facet filters are found.
+
+        Example:
+            ```json
+            {
+                'results': {
+                    'addable_node_types': [
+                        {
+                            'name': 'Business Workspace',
+                            'type': 848,
+                            'url': 'api/v1/forms/nodes/create?type=848&parent_id=61129'
+                        },
+                        ...
+                    ],
+                    'ancestors': [
+                        {
+                            'id': 2111,
+                            'name': 'Enterprise',
+                            'parent_id': -1,
+                            'type': 141,
+                            'type_name': 'Enterprise Workspace'
+                        },
+                        ...
+                    ],
+                    'columns': [
+                        {
+                            'data_type': 2,
+                            'hasMajorMinor': False,
+                            'include_time': False,
+                            'key': 'type',
+                            'name': 'Type',
+                            'persona': '',
+                            'sort_key': 'type'
+                        },
+                        ...
+                    ],
+                    'container': {
+                        'create_date': '2026-10-18T15:46:49Z',
+                        'drag_and_drop': False,
+                        'favorite': 0,
+                        'id': 61129,
+                        'modify_date': '2026-10-18T15:48:26Z',
+                        'name': '(株) 菱井インダストリー (710004)',
+                        'type': 848,
+                        'type_name': 'Business Workspace',
+                        ...
+                    },
+                    'contents': [
+                        {
+                            'create_date': '2017-10-04T18:24:43Z',
+                            'data': {
+                                'actions': {
+                                    'data': {},
+                                    'map': {},
+                                    'order': []
+                                },
+                                'annotations': {
+                                    'show_annotation': False
+                                },
+                                'boattachinfo': {
+                                    'show': False
+                                },
+                                'cadxref_doc_info': {
+                                    'has_relation': False
+                                },
+                                'claimed_doc_info': {
+                                    'is_claimed': False
+                                },
+                                'dccontrolled_doc_info': {
+                                    'show_control_doc_icon': False
+                                },
+                                'rmiconsdata': {
+                                    'show_classify': False,
+                                    'show_confidential': False,
+                                    'show_hold': False,
+                                    'show_hold_tab': False,
+                                    'show_label_tab': True,
+                                    'show_official': False,
+                                    'show_xref': False,
+                                    'show_xref_tab': False
+                                },
+                                'sestatus_doc_info': {
+                                    'is_se_document': False,
+                                    'sync_tooltip': ''
+                                },
+                                ...
+                            },
+                            'id': 63211,
+                            'mime_type': None,
+                            'modify_date': '2026-10-18T15:46:56Z',
+                            'name': '06 - Sales Quotations',
+                            'parent_id': 61129,
+                            'size': 0,
+                            'type': 854,
+                            'type_name': 'Related Business Workspaces',
+                            ...
+                        },
+                        ...
+                    ],
+                    'executionTime': '181ms',
+                    'paging': {
+                        'page': 1,
+                        'page_total': 2,
+                        'total_count': 3,
+                        'types': [
+                            {
+                                'type': 854,
+                                'type_name': 'Related Business Workspaces'
+                            }
+                        ]
+                    },
+                    'references': {
+                        'members': {
+                            '24275': {
+                                'name': 'Adam Minton'
+                            }
+                        },
+                        'nodes': None
+                    },
+                    ...
+                }
+            }
+            ```
 
         """
 
@@ -7918,7 +8957,9 @@ class OTCS:
             parent_id (int):
                 The ID of the parent node.
             name (str | None, optional):
-                The name of the node to retrieve. Can also be a substring.
+                Name filter (REST parameter `where_name`): the node name contains the value - case- and
+                accent-insensitive, no exact match (verified with OTCS 26.4, see
+                get_nodes_by_parent_and_filters() for the details).
             facet_values (dict[int, str] | None, optional):
                 Each dictionary item has:
                 * Key: facet ID (int)
@@ -8706,12 +9747,7 @@ class OTCS:
                     '173301412': {
                         'data': {
                             'AddRMClassifications': {
-                                'body': '{
-                                    "displayPrompt":false,
-                                    "enabled":false,
-                                    "inheritfrom":false,
-                                    "managed":true
-                                }',
+                                'body': '{"displayPrompt":false,"enabled":false,"inheritfrom":false,"managed":true}',
                                 'content_type': 'application/x-www-form-urlencoded',
                                 'form_href': '',
                                 'href': '/api/v2/nodes/164878074/rmclassifications',
@@ -8791,10 +9827,12 @@ class OTCS:
                                 'name': 'Permissions'
                             },
                             ...
+                        },
                         'map': {...},
                         'order': [...]
                     }
                 }
+            }
             ```
 
         """
@@ -9412,6 +10450,155 @@ class OTCS:
 
         Example:
             `["results"]["data"]["properties"]["id"]` is the node ID of the volume.
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/volumes/141',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': {
+                        'boattachinfo': {
+                            'show': False
+                        },
+                        'bwsinfo': {
+                            'id': None
+                        },
+                        'cadxref_doc_info': {
+                            'has_relation': False
+                        },
+                        'categories': [
+                            {
+                                '35377_2_10_3': 'Any',
+                                '35377_2_10_3_multilingual': {'en': 'Any', ...},
+                                '35377_2_10_4': 'Ontology',
+                                '35377_2_10_5': 'Get the ontology.',
+                                '35377_2_10_6': 'Knowledge Graph',
+                                '35377_2_10_7': 'No',
+                                '35377_2_10_8': None,
+                                '35377_2_10_9': None,
+                                '35377_2_11_3': 'Any',
+                                '35377_2_11_3_multilingual': {'en': 'Any', ...},
+                                '35377_2_11_4': 'Entity Types',
+                                '35377_2_11_5': 'Which {{Process:select[Procurement|Sales|Production & Logistics|En...',
+                                '35377_2_11_6': 'Knowledge Graph',
+                                '35377_2_11_7': 'No',
+                                '35377_2_11_8': None,
+                                '35377_2_11_9': None,
+                                '35377_2_12_3': 'Any',
+                                '35377_2_12_3_multilingual': {'en': 'Any', ...},
+                                '35377_2_12_4': 'Entity Type Information',
+                                '35377_2_12_5': 'Give me everything you know about the {{Workspace Type:select|requ...',
+                                ...
+                            }
+                        ],
+                        'categories_inheritance': [
+                            {
+                                '35377_inheritance': False
+                            }
+                        ],
+                        'claimed_doc_info': {
+                            'is_claimed': False
+                        },
+                        'columns': [
+                            {
+                                'data_type': 2,
+                                'key': 'type',
+                                'name': 'Type',
+                                'sort_key': 'type'
+                            },
+                            {
+                                'data_type': -1,
+                                'key': 'name',
+                                'name': 'Name',
+                                'sort_key': 'name'
+                            },
+                            ...
+                        ],
+                        'dccontrolled_doc_info': {
+                            'show_control_doc_icon': False
+                        },
+                        'doctemplates_info': {
+                            'isInDocTemplateVolTree': False
+                        },
+                        'followups': [],
+                        'nicknames': {
+                            'nickname': '2111'
+                        },
+                        'node_status': {
+                            'watched': False
+                        },
+                        'permissions': [
+                            {
+                                'permissions': ['add_items', 'delete', ...],
+                                'right_id': 1000,
+                                'type': 'owner'
+                            },
+                            {
+                                'permissions': ['see', 'see_contents'],
+                                'right_id': 999,
+                                'type': 'group'
+                            },
+                            ...
+                        ],
+                        'properties': {
+                            'advanced_versioning': None,
+                            'container': True,
+                            'container_size': 24,
+                            'create_date': '2026-10-18T13:45:01Z',
+                            'create_user_id': 1000,
+                            'description': '',
+                            'description_multilingual': {'en': '', ...},
+                            'external_create_date': None,
+                            'external_identity': '',
+                            'external_identity_type': '',
+                            'external_modify_date': None,
+                            'id': 2111,
+                            'mime_type': None,
+                            'modify_date': '2026-11-04T06:13:06Z',
+                            'name': 'Enterprise',
+                            'parent_id': -1,
+                            'size': 24,
+                            'type': 141,
+                            'type_name': 'Enterprise Workspace',
+                            'volume_id': -2111,
+                            ...
+                        },
+                        'rmiconsdata': {
+                            'show_classify': False,
+                            'show_confidential': False,
+                            'show_hold': False,
+                            'show_hold_tab': False,
+                            'show_label_tab': True,
+                            'show_official': False,
+                            'show_xref': False,
+                            'show_xref_tab': False
+                        },
+                        'sestatus_doc_info': {
+                            'is_se_document': False,
+                            'sync_tooltip': ''
+                        },
+                        'sharing_info': {
+                            'is_shared': False,
+                            'sync_state': -1
+                        },
+                        'showmainruleicon': False,
+                        'showworkflowicon': False,
+                        'signedout_doc_info': {
+                            'is_signed_out': False
+                        },
+                        ...
+                    }
+                }
+            }
+            ```
 
         """
 
@@ -10552,6 +11739,54 @@ class OTCS:
             dict | None:
                 The Node information or None if no node with this ID is found.
 
+        Example:
+            ```json
+            {
+                'data': {
+                    'create_date': '2026-10-18T15:47:34Z',
+                    'description': None,
+                    'external_create_date': None,
+                    'external_identity': '',
+                    'external_identity_type': '',
+                    'external_modify_date': None,
+                    'external_source': '',
+                    'file_create_date': '2026-10-18T15:47:33Z',
+                    'file_modify_date': '2026-10-18T15:47:33Z',
+                    'file_name': 'Lounge Invitation_20261018-154731551.pdf',
+                    'file_size': 48262,
+                    'file_type': 'pdf',
+                    'has_generation': False,
+                    'id': 65970,
+                    'locked': False,
+                    'locked_date': None,
+                    'locked_user_id': None,
+                    'mime_type': 'application/pdf',
+                    'modify_date': '2026-10-18T15:47:35Z',
+                    'name': 'Lounge Invitation_20261018-154731551.pdf',
+                    'owner_id': 1000,
+                    'provider_id': 65970,
+                    'version_guid': 'DF427A8C-8D3C-4060-86EB-7F9532597C21',
+                    'version_number': 1,
+                    ...
+                },
+                'definitions': {
+                    'create_date': {
+                        'key': 'create_date',
+                        'name': 'Created',
+                        'persona': '',
+                        'type': -7
+                    },
+                    'description': {
+                        'key': 'description',
+                        'name': 'Description',
+                        'persona': '',
+                        'type': -1
+                    },
+                    ...
+                }
+            }
+            ```
+
         """
 
         # This Method requires V1of the REST API!
@@ -10662,6 +11897,11 @@ class OTCS:
                 The content of the document as bytes if no error occurs,
                 or a dictionary if `parse_request_response` is True and the content is parsed as JSON.
                 Returns None if an error occurs.
+
+        Example:
+            ```json
+            b'%PDF-1.7'...  # 48262 bytes
+            ```
 
         """
 
@@ -12611,55 +13851,192 @@ class OTCS:
         Example:
             ```json
             {
-                'businessProperties': [
-                    {
-                        'attributeID': '14012_29',
-                        'categoryID': '14012',
-                        'name': 'Name',
-                        'type': 'String'
-                    },
-                    {
-                        'attributeID': '14012_28',
-                        'categoryID': '14012',
-                        'name': 'Customer Number',
-                        'type': 'String'
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/externalsystems/TE1/botypes/KNA1?expand_ext_system=true&expand_wksp_ty...',
+                            'method': 'GET',
+                            'name': ''
+                        }
                     }
-                ]
-                'bwsinfo': {'id': None},
-                'cadxref_doc_info': {'has_relation': False},
-                'categories': [],
-                'claimed_doc_info': {'is_claimed': False},
-                'columns': [{...}, {...}, {...}, {...}],
-                'doctemplates_info': {'isInDocTemplateVolTree': False},
-                'followups': [],
-                'nicknames': {'nickname': '16568'},
-                'properties': {
-                    'advanced_versioning': None,
-                    'container': False,
-                    'container_size': 0,
-                    'create_date': '2017-11-23T16:43:34Z',
-                    'create_user_id': 1000,
-                    'description': '',
-                    'description_multilingual': {...},
-                    'external_create_date': None,
-                    'external_identity': '',
-                    ...
                 },
-                'rmiconsdata': {
-                    'class_id': 0,
-                    'official': 0,
-                    'show_classify': False,
-                    'show_hold': False,
-                    'show_hold_tab': False,
-                    'show_label_tab': True,
-                    'show_official': False,
-                    'show_xref': False,
-                    'show_xref_tab': False
-                },
-                'sestatus_doc_info': {'is_se_document': False, 'sync_tooltip': ''},
-                'sharing_info': {'is_shared': False, 'sync_state': -1},
-                'showmainruleicon': False,
-                ...
+                'results': {
+                    'data': {
+                        'business_object_type': {
+                            'data': {
+                                'boattachinfo': {
+                                    'show': False
+                                },
+                                'businessProperties': [
+                                    {
+                                        'attributeID': None,
+                                        'categoryID': '25486',
+                                        'name': None,
+                                        'type': None
+                                    },
+                                    {
+                                        'attributeID': None,
+                                        'categoryID': '25486',
+                                        'name': None,
+                                        'type': None
+                                    },
+                                    ...
+                                ],
+                                'bwsinfo': {
+                                    'id': None
+                                },
+                                'cadxref_doc_info': {
+                                    'has_relation': False
+                                },
+                                'categories': [],
+                                'claimed_doc_info': {
+                                    'is_claimed': False
+                                },
+                                'columns': [
+                                    {
+                                        'data_type': 2,
+                                        'key': 'type',
+                                        'name': 'Type',
+                                        'sort_key': 'type'
+                                    },
+                                    {
+                                        'data_type': -1,
+                                        'key': 'name',
+                                        'name': 'Name',
+                                        'sort_key': 'name'
+                                    },
+                                    ...
+                                ],
+                                'properties': {
+                                    'create_date': '2017-11-23T16:43:32Z',
+                                    'id': 45949,
+                                    'mime_type': None,
+                                    'modify_date': '2026-10-18T15:23:53Z',
+                                    'name': 'SAP Customer',
+                                    'parent_id': 3402,
+                                    'size': 0,
+                                    'type': 889,
+                                    'type_name': 'Business Object Type',
+                                    'volume_id': -3397,
+                                    ...
+                                },
+                                ...
+                            }
+                        },
+                        'external_system': {
+                            'data': {
+                                'boattachinfo': {
+                                    'show': False
+                                },
+                                'bwsinfo': {
+                                    'id': None
+                                },
+                                'cadxref_doc_info': {
+                                    'has_relation': False
+                                },
+                                'categories': [],
+                                'claimed_doc_info': {
+                                    'is_claimed': False
+                                },
+                                'columns': [
+                                    {
+                                        'data_type': 2,
+                                        'key': 'type',
+                                        'name': 'Type',
+                                        'sort_key': 'type'
+                                    },
+                                    {
+                                        'data_type': -1,
+                                        'key': 'name',
+                                        'name': 'Name',
+                                        'sort_key': 'name'
+                                    },
+                                    ...
+                                ],
+                                'dccontrolled_doc_info': {
+                                    'show_control_doc_icon': False
+                                },
+                                'properties': {
+                                    'create_date': '2026-10-18T14:09:32Z',
+                                    'id': 24365,
+                                    'mime_type': None,
+                                    'modify_date': '2026-10-18T14:09:32Z',
+                                    'name': 'TE1',
+                                    'parent_id': 3398,
+                                    'size': 0,
+                                    'type': 885,
+                                    'type_name': 'Business Application',
+                                    'volume_id': -3397,
+                                    ...
+                                },
+                                ...
+                            }
+                        },
+                        'workspace_type': {
+                            'data': {
+                                'boattachinfo': {
+                                    'show': False
+                                },
+                                'bwsinfo': {
+                                    'id': None
+                                },
+                                'cadxref_doc_info': {
+                                    'has_relation': False
+                                },
+                                'claimed_doc_info': {
+                                    'is_claimed': False
+                                },
+                                'columns': [
+                                    {
+                                        'data_type': 2,
+                                        'key': 'type',
+                                        'name': 'Type',
+                                        'sort_key': 'type'
+                                    },
+                                    {
+                                        'data_type': -1,
+                                        'key': 'name',
+                                        'name': 'Name',
+                                        'sort_key': 'name'
+                                    },
+                                    ...
+                                ],
+                                'dccontrolled_doc_info': {
+                                    'show_control_doc_icon': False
+                                },
+                                'permissions': [
+                                    {
+                                        'permissions': [...],
+                                        'right_id': 1000,
+                                        'type': 'owner'
+                                    },
+                                    {
+                                        'permissions': [...],
+                                        'right_id': 2001,
+                                        'type': 'group'
+                                    },
+                                    ...
+                                ],
+                                'properties': {
+                                    'create_date': '2017-03-27T09:02:02Z',
+                                    'id': 36419,
+                                    'mime_type': None,
+                                    'modify_date': '2026-10-18T15:41:07Z',
+                                    'name': 'Customer',
+                                    'parent_id': 4958,
+                                    'size': 0,
+                                    'type': 864,
+                                    'type_name': 'Workspace Type',
+                                    'volume_id': -3542,
+                                    ...
+                                },
+                                ...
+                            }
+                        }
+                    }
+                }
             }
             ```
 
@@ -12887,7 +14264,7 @@ class OTCS:
                             'position': 3
                         },
                         ...
-                    ]
+                    ],
                     'max_rows_exceeded': False,
                     'result_rows': [
                         {
@@ -14251,6 +15628,117 @@ class OTCS:
             dict | None:
                 REST response or None in case of an error.
 
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/smartdocumenttypes/rules/415/bots?bot_key=context',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'forms': [
+                        {
+                            'allow_delete': False,
+                            'bot_key': 'context',
+                            'data': {
+                                'additional_categories': [''],
+                                'based_on_category': 3540,
+                                'location': '43755',
+                                'mimetype': [''],
+                                'rule_expression': '',
+                                'unsupportedMimeTypes': []
+                            },
+                            'options': {
+                                'fields': {
+                                    'additional_categories': {
+                                        'fields': {...},
+                                        'label': 'Additional categories',
+                                        'order': 3,
+                                        'required': False,
+                                        'type': 'array'
+                                    },
+                                    'based_on_category': {
+                                        'helper': 'If you wanted to calculate the document expiration date, this ca...',
+                                        'hidden': False,
+                                        'label': 'Default category',
+                                        'optionLabels': [...],
+                                        'order': 2,
+                                        'readonly': False,
+                                        'removeDefaultNone': True,
+                                        'required': True,
+                                        'type': 'select'
+                                    },
+                                    'location': {
+                                        'helper': 'If no folder is selected, the default location is used.',
+                                        'hidden': False,
+                                        'label': 'Location',
+                                        'order': 1,
+                                        'placeholder': 'Select folder',
+                                        'readonly': False,
+                                        'required': False,
+                                        'type': 'otcs_node_picker',
+                                        'type_control': {...}
+                                    },
+                                    'mimetype': {
+                                        'fields': {...},
+                                        'helper': 'If no file format is selected, all file formats that are specifi...',
+                                        'order': 4,
+                                        'placeholder': 'Select file format',
+                                        'required': False,
+                                        'type': 'array'
+                                    },
+                                    'rule_expression': {
+                                        'hidden': False,
+                                        'label': 'Conditions',
+                                        'order': 5,
+                                        'readonly': False,
+                                        'required': False,
+                                        'type': 'otcs_expression_builder',
+                                        'type_control': {...}
+                                    }
+                                },
+                                'label': 'Set context',
+                                'type': 'object'
+                            },
+                            'required': True,
+                            'role_name': 'SmartDocumentTypeContext',
+                            'schema': {
+                                'properties': {
+                                    'additional_categories': {
+                                        'items': {...},
+                                        'readonly': False,
+                                        'required': False,
+                                        'title': 'Additional categories',
+                                        'type': 'array'
+                                    },
+                                    'based_on_category': {
+                                        'enum': [...],
+                                        'readonly': False,
+                                        'required': True,
+                                        'title': 'Default category',
+                                        'type': 'string',
+                                        'versions': [...]
+                                    },
+                                    ...
+                                },
+                                'type': 'object'
+                            },
+                            'title': 'Set context'
+                        }
+                    ],
+                    'ok': True,
+                    'statusCode': 200
+                }
+            }
+            ```
+
         """
 
         request_url = self.config()["smartDocumentTypesUrl"] + "/rules/{}/bots".format(rule_id)
@@ -14786,11 +16274,13 @@ class OTCS:
         self,
         type_id: int,
     ) -> dict | None:
-        """Get workspace type configured in OTCS.
+        """Get workspace type configured in OTCS (V1 REST API).
 
-        This REST API is very basic. It mainly delivers the type name for the type ID.
-        It is a V1 API. Thus the response cannot be processed by the get_result_value()
-        method. There's also a get_workspace_type_by_name() below.
+        This REST API is very basic. It only delivers the type name, the icon and
+        the policies flag for the type ID - also in OTCS 26.4. It is a V1 API. Thus the
+        response cannot be processed by the get_result_value() method. Use
+        get_workspace_type_details() for the complete configuration (about twice as
+        slow). There's also a get_workspace_type_by_name() below.
 
         The result is deliberately not cached - each call asks OTCS. A cache would return
         outdated names (e.g. of renamed types, also for get_workspace_type_name(renew=True)),
@@ -14830,6 +16320,75 @@ class OTCS:
             timeout=None,
             failure_message="Failed to get workspace type with ID -> {}".format(type_id),
         )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_workspace_type_details")
+    def get_workspace_type_details(
+        self,
+        type_id: int,
+    ) -> dict | None:
+        """Get the complete configuration of a workspace type (V2 REST API).
+
+        Delivers the complete configuration of the workspace type (live-verified
+        with OTCM 26.4; the structure is the same as the items of get_workspace_types()).
+        Like get_workspace_type() the result is not cached.
+
+        Args:
+            type_id (int):
+                The workspace type ID.
+
+        Returns:
+            dict | None:
+                The "results" part of the response or None if the request fails.
+
+        Example (OTCM 26.4, shortened):
+            ```json
+            {
+                'data': {
+                    'properties': {
+                        'aviator_enabled': True,
+                        'config_node_id': 36659,
+                        'relations': [],
+                        'wksp_creation': {'location': 'StaticNodeId', 'location_value': '32692', ...},
+                        'wksp_icon': 'otsapxecm/wksp_customer.png',
+                        'wksp_name_generation': {'wksp_names': {'en': '[25064:Account No] ...', ...}, ...},
+                        'wksp_type_alias_names': {'en': [], ...},
+                        'wksp_type_id': 33,
+                        'wksp_type_key_aspects': {'en': [], ...},
+                        'wksp_type_name': 'Account',
+                        ...
+                    },
+                    'wksp_info': {
+                        'in_use': True,
+                        'indexing_status': 'UpToDate',
+                        'modified': '2026-10-18T15:00:21',
+                        'perspective_folder_id': 36662,
+                        'wksp_type_icon': '/appimg/ot_bws/icons/36659.svg?v=162171_68273'
+                    }
+                }
+            }
+            ```
+
+        """
+
+        request_url = self.config()["businessWorkspaceTypesUrlv2"] + "/" + str(type_id)
+
+        request_header = self.request_form_header()
+
+        self.logger.debug("Get workspace type details with ID -> %d; calling -> %s", type_id, request_url)
+
+        response = self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=None,
+            failure_message="Failed to get workspace type details with ID -> {}".format(type_id),
+        )
+        if not response:
+            return None
+
+        return response.get("results")
 
     # end method definition
 
@@ -15233,6 +16792,159 @@ class OTCS:
             dict | None:
                 Workspace Create Form data or None if the request fails.
 
+        Example:
+            ```json
+            {
+                'forms': [
+                    {
+                        'data': {
+                            'bo_type': 'KNA1',
+                            'bo_type_id': 37,
+                            'name': None,
+                            'parent_id': 33797,
+                            'type': 848,
+                            'wksp_type_name': 'Customer',
+                            ...
+                        },
+                        'options': {
+                            'fields': {
+                                'bo_type': {
+                                    'hidden': True,
+                                    'hideInitValidationError': True,
+                                    'label': 'Business Object Type',
+                                    'readonly': True,
+                                    'type': 'text'
+                                },
+                                'bo_type_id': {
+                                    'hidden': True,
+                                    'hideInitValidationError': True,
+                                    'label': 'Business Object Type Id',
+                                    'readonly': True,
+                                    'type': 'number'
+                                },
+                                ...
+                            },
+                            'form': {
+                                'attributes': {
+                                    'action': 'api/v1/nodes',
+                                    'method': 'POST'
+                                },
+                                'renderForm': True
+                            }
+                        },
+                        'schema': {
+                            'properties': {
+                                'bo_type': {
+                                    'readonly': True,
+                                    'required': False,
+                                    'title': 'Business Object Type',
+                                    'type': 'string'
+                                },
+                                'bo_type_id': {
+                                    'readonly': True,
+                                    'required': True,
+                                    'title': 'Business Object Type Id',
+                                    'type': 'integer'
+                                },
+                                ...
+                            },
+                            'type': 'object'
+                        }
+                    },
+                    {
+                        'data': {
+                            '25220': {
+                                '25220_1': {
+                                    'upgradeable': None,
+                                    'version_number': 1
+                                },
+                                '25220_2': {
+                                    '25220_2_1_36': None,
+                                    '25220_2_1_7': None,
+                                    '25220_2_1_18': None,
+                                    '25220_2_1_19': None,
+                                    '25220_2_1_20': None,
+                                    '25220_2_1_21': None,
+                                    ...
+                                },
+                                '25220_3': {
+                                    '25220_3_1_8': None,
+                                    '25220_3_1_9': None,
+                                    '25220_3_1_10': None,
+                                    '25220_3_1_11': None,
+                                    '25220_3_1_12': None
+                                },
+                                '25220_34': [
+                                    {...}
+                                ],
+                                '25220_34_1': None,
+                                '25220_4': {
+                                    '25220_4_1_13': None,
+                                    '25220_4_1_14': None,
+                                    '25220_4_1_15': None,
+                                    '25220_4_1_16': None,
+                                    '25220_4_1_17': None
+                                },
+                                ...
+                            },
+                            '25486': {
+                                '25486_1': {
+                                    'upgradeable': None,
+                                    'version_number': 1
+                                },
+                                '25486_25': 'Customer',
+                                '25486_28': None,
+                                '25486_29': None,
+                                '25486_30': None,
+                                '25486_31': None,
+                                ...
+                            }
+                        },
+                        'options': {
+                            'fields': {
+                                '25220': {
+                                    'fields': {...},
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'label': 'CRM Account',
+                                    'removeable': False,
+                                    'type': 'object'
+                                },
+                                '25486': {
+                                    'fields': {...},
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'label': 'Customer',
+                                    'removeable': False,
+                                    'type': 'object'
+                                }
+                            }
+                        },
+                        'role_name': 'categories',
+                        'schema': {
+                            'properties': {
+                                '25220': {
+                                    'description': 'Salesforce Account Metadata',
+                                    'properties': {...},
+                                    'title': 'CRM Account',
+                                    'type': 'object'
+                                },
+                                '25486': {
+                                    'description': 'KNA1',
+                                    'properties': {...},
+                                    'title': 'Customer',
+                                    'type': 'object'
+                                }
+                            },
+                            'title': 'Categories',
+                            'type': 'object'
+                        }
+                    },
+                    ...
+                ]
+            }
+            ```
+
         """
 
         request_url = self.config()["businessworkspacecreateform"] + "?template_id={}".format(template_id)
@@ -15338,125 +17050,96 @@ class OTCS:
             ```json
             {
                 'links': {
-                    'data': {...}
-                },
-                'meta_data': {
-                    'properties': {...}
-                },
-                'paging': {
-                    'limit': 500,
-                    'page': 1,
-                    'page_total': 1,
-                    'range_max': 1,
-                    'range_min': 1,
-                    'total_count': 1
-                },
-                'results': [
-                    {
-                        'actions': {...},
-                        'data': {
-                            'business_properties': {
-                                'business_object_id': '0000010020',
-                                'business_object_type': 'LFA1',
-                                'business_object_type_id': 30,
-                                'business_object_type_name': 'Vendor',
-                                'business_object_type_name_multilingual': {'ar': '', 'de': 'Lieferant', 'en': 'Vendor', 'es': '', 'fr': 'Fournisseur', 'it': 'Fornitore', 'iw': '', 'ja': 'ベンダー', 'nl': ''},
-                                'display_url': 'https://fiori.example.com:8443/sap/bc/ui5_ui5/ui2/ushell/shells/abap/FioriLaunchpad.html?sap-client=600&sap-language=EN#Supplier-displayFactSheet?Supplier=0000010020',
-                                'external_system_id': 'TE1',
-                                'external_system_name': 'TE1',
-                                'has_default_display': True,
-                                'has_default_search': True,
-                                'isEarly': False,
-                                'workspace_type_id': 37,
-                                'workspace_type_name': 'Vendor',
-                                'workspace_type_name_multilingual': {'ar': '', 'de': 'Lieferant', 'en': 'Vendor', 'es': '', 'fr': 'Fournisseur', 'it': 'Fornitore', 'iw': '', 'ja': 'ベンダー', 'nl': ''},
-                                'workspace_type_widget_icon_content': '/appimg/ot_bws/icons/24643%2Esvg?v=161696_1252'
-                            }
-                            'properties': {
-                                'advanced_versioning': None,
-                                'classification_id': 0,
-                                'classification_ids': [18003],
-                                'container': True,
-                                'container_size': 9,
-                                'create_date': '2025-06-30T01:14:59',
-                                'create_user_id': 18095,
-                                'description': '',
-                                'description_multilingual': {'ar': '', 'de': '', 'en': '', 'es': '', 'fr': '', 'it': '', 'iw': '', 'ja': '', 'nl': ''},
-                                'external_create_date': None,
-                                'external_identity': '',
-                                'external_identity_type': '',
-                                'external_modify_date': None,
-                                'external_source': '',
-                                'favorite': False,
-                                'guid': None,
-                                'hidden': False,
-                                'icon': '/cssupport/otsapxecm/wksp_vendor.png',
-                                'icon_large': '/cssupport/otsapxecm/wksp_vendor_large.png',
-                                'id': 28866,
-                                'image_url': '/appimg/ot_bws/icons/24643%2Esvg?v=161696_1252',
-                                'modify_date': '2025-06-30T01:47:35',
-                                'modify_user_id': 18095,
-                                'name': 'C.E.B. Berlin SE (10020)',
-                                'name_multilingual': {'ar': '', 'de': '', 'en': 'C.E.B. Berlin SE (10020)', 'es': '', 'fr': '', 'it': '', 'iw': '', 'ja': '', 'nl': ''},
-                                'owner_group_id': 17978,
-                                'owner_user_id': 18095,
-                                'parent_id': 23676,
-                                'reserved': False,
-                                'reserved_date': None,
-                                'reserved_user_id': 0,
-                                'rm_enabled': True,
-                                'status': None,
-                                'type': 848,
-                                'type_name': 'Business Workspace',
-                                'versionable': False,
-                                'versions_control_advanced': False,
-                                'volume_id': -2000,
-                                'wksp_type_name': 'Vendor',
-                                'xgov_workspace_type': ''
-                            }
-                            'display_urls': [
-                                {
-                                    'business_object_type': 'LFA1',
-                                    'business_object_type_id': 30,
-                                    'business_object_type_name': 'Customer',
-                                    'displayUrl': '/sap/bc/gui/sap/its/webgui?~logingroup=SPACE&~transaction=%2fOTX%2fRM_WSC_START_BO+KEY%3dpc%3AS3XljqcFfD0pakDIjUKul%3bOBJTYPE%3daccount&~OkCode=ONLI',
-                                    'external_system_id': 'TE1',
-                                    'external_system_name': 'SAP S/4HANA'
-                                }
-                            ]
-                            'workspace_references': [
-                                {
-                                    'business_object_id': '0000050031',
-                                    'business_object_type': 'KNA1',
-                                    'business_object_type_id': 37,
-                                    'external_system_id': 'TE1',
-                                    'has_default_display': True,
-                                    'has_default_search': True,
-                                    'workspace_type_id': 16
-                                }
-                            ]
-                            'wksp_info':
-                            {
-                                'wksp_type_icon': '/appimg/ot_bws/icons/16634%2Esvg?v=161194_13949'
-                            }
-                            'workspace_references': [
-                                {
-                                    'business_object_id': '0000010020',
-                                    'business_object_type': 'LFA1',
-                                    'business_object_type_id': 30,
-                                    'external_system_id': 'TE1',
-                                    'has_default_display': True,
-                                    'has_default_search': True,
-                                    'workspace_type_id': 37
-                                }
-                            ]
-                        },
-                        'metadata': {...},
-                        'metadata_order': {
-                            'categories': ['16878']
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspaces/61129?fields=properties&metadata',
+                            'method': 'GET',
+                            'name': ''
                         }
                     }
-                ],
+                },
+                'results': {
+                    'actions': {
+                        'data': {
+                            'add-relitem': {
+                                'body': '',
+                                'content_type': '',
+                                'form_href': '',
+                                'href': '/api/v2/businessworkspaces/61129/relateditems',
+                                'method': 'POST',
+                                'name': 'Link'
+                            },
+                            'add-role': {
+                                'body': '',
+                                'content_type': '',
+                                'form_href': '',
+                                'href': '/api/v2/businessworkspaces/61129/roles',
+                                'method': 'POST',
+                                'name': 'Create Role'
+                            },
+                            ...
+                        },
+                        'map': {},
+                        'order': []
+                    },
+                    'data': {
+                        'properties': {
+                            'advanced_versioning': None,
+                            'container': True,
+                            'container_size': 14,
+                            'create_date': '2026-10-18T15:46:49',
+                            'id': 61129,
+                            'modify_date': '2026-10-18T15:48:26',
+                            'name': '(株) 菱井インダストリー (710004)',
+                            'parent_id': 33797,
+                            'type': 848,
+                            'type_name': 'Business Workspace',
+                            'volume_id': -2111,
+                            'wksp_type_name': 'Customer',
+                            ...
+                        }
+                    },
+                    'metadata': {
+                        'properties': {
+                            'advanced_versioning': {
+                                'allow_undefined': True,
+                                'bulk_shared': False,
+                                'default_value': None,
+                                'description': None,
+                                'hidden': False,
+                                'key': 'advanced_versioning',
+                                'key_value_pairs': False,
+                                'multi_value': False,
+                                'multi_value_max_length': None,
+                                'name': 'Advanced Versioning',
+                                'type': 5,
+                                'type_name': 'Boolean',
+                                ...
+                            },
+                            'container': {
+                                'allow_undefined': False,
+                                'bulk_shared': False,
+                                'default_value': None,
+                                'description': None,
+                                'hidden': False,
+                                'key': 'container',
+                                'key_value_pairs': False,
+                                'multi_value': False,
+                                'multi_value_max_length': None,
+                                'name': 'Container',
+                                'type': 5,
+                                'type_name': 'Boolean',
+                                ...
+                            },
+                            ...
+                        }
+                    },
+                    'metadata_order': {
+                        'properties': None
+                    }
+                }
             }
             ```
 
@@ -15530,16 +17213,16 @@ class OTCS:
                 The ID of the workspace_type.
             name (str, optional):
                 Name of the workspace, if None then deliver all instances
-                of the given workspace type. If the name is provided
-                the prefixes 'contains_' and 'startswith_' are supported
-                like 'contains_Test' to find workspace that have 'Test'
-                in their name.
+                of the given workspace type. 'Test' finds the workspaces named exactly 'Test'
+                (case-sensitive), 'contains_Test' the ones containing 'Test' (case-insensitive for
+                ASCII letters only, accent-sensitive), 'startswith_Test' delivers nothing (verified
+                with OTCS 26.4, see get_workspace_by_type_and_name() for the details).
             column_query (str | None, optional):
                 Specific query for custom columns (if columns are configured
                 for the folder the workspaces are in).
             expanded_view (bool, optional):
                 If False, then just search in recently accessed business workspace
-                for this name and type.
+                for this name and type (verified with OTCS 26.4, see get_workspace_by_type_and_name()).
                 If True, (this is the default) then search in all
                 workspaces for this name and type.
             sort (str | None, optional):
@@ -15645,16 +17328,16 @@ class OTCS:
                 The ID of the workspace_type.
             name (str, optional):
                 Name of the workspace, if None then deliver all instances
-                of the given workspace type. If the name is provided
-                the prefixes 'contains_' and 'startswith_' are supported
-                like 'contains_Test' to find workspace that have 'Test'
-                in their name.
+                of the given workspace type. 'Test' finds the workspaces named exactly 'Test'
+                (case-sensitive), 'contains_Test' the ones containing 'Test' (case-insensitive for
+                ASCII letters only, accent-sensitive), 'startswith_Test' delivers nothing (verified
+                with OTCS 26.4, see get_workspace_by_type_and_name() for the details).
             column_query (str | None, optional):
                 Specific query for custom columns (if columns are configured
                 for the folder the workspaces are in).
             expanded_view (bool, optional):
                 If False, then just search in recently accessed business workspace
-                for this name and type.
+                for this name and type (verified with OTCS 26.4, see get_workspace_by_type_and_name()).
                 If True, (this is the default) then search in all workspaces for this name and type.
             sort (str | None, optional):
                 Order by named column (Using prefixes such as sort=asc_name or sort=desc_name).
@@ -15840,17 +17523,27 @@ class OTCS:
             type_id (int, optional):
                 The ID of the workspace_type.
             name (str | None, optional):
-                Name of the workspace, if None then deliver all instances
-                of the given workspace type. If the name is provided
-                the prefixes 'contains_' and 'startswith_' are supported
-                like 'contains_Test' to find workspace that have 'Test'
-                in their name.
+                Name of the workspace (REST parameter `where_name`), if None then deliver all instances
+                of the given workspace type. How the name matches (verified with OTCS 26.4):
+                * 'Test' (no prefix): the workspace name is equal to 'Test' - case-sensitive ('test' does
+                  not find 'Test'), surrounding whitespace is not trimmed (' Test ' does not find 'Test').
+                * 'contains_Test': the workspace name contains 'Test' as one contiguous substring
+                  ('contains_ooling Wat' finds 'CW - Cooling Water System', 'contains_Cooling System' does
+                  not). Case-insensitive for ASCII letters only ('contains_ménagerie' finds
+                  'Ménagerie SARL', 'contains_MÉNAGERIE' does not), accent-sensitive ('contains_menagerie'
+                  does not find 'Ménagerie SARL'), surrounding whitespace is part of the substring.
+                * 'startswith_Test': delivers no workspaces at all - not even 'startswith_C' for
+                  'CW - Cooling Water System' (in any case).
+                * There are no wildcards: '%', '_' and '*' are literal characters.
+                Unlike the facet name filter of get_nodes_by_parent_and_filters(), which always matches
+                substrings and ignores case and accents.
             column_query (str | None, optional):
                 Specific query for custom columns (if columns are configured
                 for the folder the workspaces are in).
             expanded_view (bool, optional):
                 If False, then just search in recently
-                accessed business workspace for this name and type.
+                accessed business workspace for this name and type (verified with OTCS 26.4: only 7 of the 51
+                workspaces of a type were delivered - the recently accessed ones).
                 If True (this is the default), then search in all
                 workspaces for this name and type.
             sort (str | None, optional):
@@ -15912,7 +17605,7 @@ class OTCS:
                             'name': ''
                         }
                     },
-                    limit': 10,
+                    'limit': 10,
                     'page': 1,
                     'page_total': 81,
                     'range_max': 10,
@@ -15953,7 +17646,7 @@ class OTCS:
                                 'original_id': 0,
                                 ...
                                 'wnf_wksp_type_id': 16,
-                                'wnf_wksp_template_id': 28168
+                                'wnf_wksp_template_id': 28168,
                                 'size_formatted': '15 Items',
                                 'type_name': 'Business Workspace',
                                 'container': True,
@@ -17550,6 +19243,94 @@ class OTCS:
             dict | None:
                 Workspace Roles data or None if the request fails.
 
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspaces/61129/roles',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'actions': {
+                            'data': {
+                                'delete-role': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'form_href': '',
+                                    'href': '/api/v2/businessworkspaces/61129/roles/61137',
+                                    'method': 'DELETE',
+                                    'name': 'Delete Role'
+                                },
+                                'edit-role': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'form_href': '',
+                                    'href': '/api/v2/businessworkspaces/61129/roles/61137',
+                                    'method': 'PUT',
+                                    'name': 'Edit Role'
+                                }
+                            },
+                            'map': {},
+                            'order': []
+                        },
+                        'data': {
+                            'properties': {
+                                'description': 'Maintains reviews master data changes',
+                                'id': 61137,
+                                'inherited_from_id': None,
+                                'leader': False,
+                                'name': 'Master Data Management',
+                                'perms': 258183
+                            }
+                        }
+                    },
+                    {
+                        'actions': {
+                            'data': {
+                                'delete-role': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'form_href': '',
+                                    'href': '/api/v2/businessworkspaces/61129/roles/61139',
+                                    'method': 'DELETE',
+                                    'name': 'Delete Role'
+                                },
+                                'edit-role': {
+                                    'body': '',
+                                    'content_type': '',
+                                    'form_href': '',
+                                    'href': '/api/v2/businessworkspaces/61129/roles/61139',
+                                    'method': 'PUT',
+                                    'name': 'Edit Role'
+                                }
+                            },
+                            'map': {},
+                            'order': []
+                        },
+                        'data': {
+                            'properties': {
+                                'description': '',
+                                'id': 61139,
+                                'inherited_from_id': None,
+                                'leader': False,
+                                'name': 'Sales Director',
+                                'perms': 258183
+                            }
+                        }
+                    },
+                    ...
+                ]
+            }
+            ```
+
         """
 
         request_url = self.config()["businessWorkspacesUrl"] + "/" + str(workspace_id) + "/roles"
@@ -17588,6 +19369,79 @@ class OTCS:
         Returns:
             dict | None:
                 Workspace member data or None if the request fails.
+
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspaces/61129/roles/61137/members',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'properties': {
+                                'birth_date': None,
+                                'business_email': 'bfuller@example.com',
+                                'business_fax': None,
+                                'business_phone': None,
+                                'cell_phone': None,
+                                'deleted': False,
+                                'display_language': None,
+                                'display_name': 'Bettina Fuller',
+                                'first_name': 'Bettina',
+                                'gender': None,
+                                'group_id': 24249,
+                                'group_name': 'Master Data Management',
+                                'home_address_1': None,
+                                'home_address_2': None,
+                                'home_fax': None,
+                                'home_phone': None,
+                                'id': 24315,
+                                'name': 'bfuller',
+                                'type': 0,
+                                'type_name': 'User',
+                                ...
+                            }
+                        }
+                    },
+                    {
+                        'data': {
+                            'properties': {
+                                'birth_date': None,
+                                'business_email': 'kmurray@example.com',
+                                'business_fax': None,
+                                'business_phone': None,
+                                'cell_phone': None,
+                                'deleted': False,
+                                'display_language': None,
+                                'display_name': 'Kenzie Murray',
+                                'first_name': 'Kenzie',
+                                'gender': None,
+                                'group_id': 24249,
+                                'group_name': 'Master Data Management',
+                                'home_address_1': None,
+                                'home_address_2': None,
+                                'home_fax': None,
+                                'home_phone': None,
+                                'id': 24316,
+                                'name': 'kmurray',
+                                'type': 0,
+                                'type_name': 'User',
+                                ...
+                            }
+                        }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -18140,7 +19994,7 @@ class OTCS:
                                 'type_name': 'Smart Document Type',
                                 'volume_id': -5486,
                                 'workspace_template_names': 'Sales Contract',
-                                'workspace_template_count': 1,
+                                'workspace_templates_count': 1,
                             },
                             'smart_document_type_id': 40472,
                             'template_expand': {
@@ -18664,6 +20518,129 @@ class OTCS:
             dict | None:
                 Node create form data or None if the request fails.
 
+        Example:
+            ```json
+            {
+                'forms': [
+                    {
+                        'data': {
+                            'file': None,
+                            'name': None,
+                            'description': '',
+                            'parent_id': 61147,
+                            'external_create_date': None,
+                            'external_modify_date': None,
+                            'external_source': '',
+                            'type': 144,
+                            ...
+                        },
+                        'options': {
+                            'fields': {
+                                'file': {
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'label': 'File',
+                                    'readonly': False,
+                                    'type': 'file'
+                                },
+                                'name': {
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'label': 'Name',
+                                    'readonly': False,
+                                    'type': 'text'
+                                },
+                                ...
+                            },
+                            'form': {
+                                'attributes': {
+                                    'action': 'api/v1/nodes',
+                                    'method': 'POST'
+                                },
+                                'renderForm': True
+                            }
+                        },
+                        'schema': {
+                            'properties': {
+                                'file': {
+                                    'readonly': False,
+                                    'required': True,
+                                    'title': 'File',
+                                    'type': 'string'
+                                },
+                                'name': {
+                                    'maxLength': 248,
+                                    'minLength': 1,
+                                    'readonly': False,
+                                    'required': True,
+                                    'title': 'Name',
+                                    'type': 'string'
+                                },
+                                ...
+                            },
+                            'type': 'object'
+                        }
+                    },
+                    {
+                        'data': {
+                            'id': None,
+                            'name': None,
+                            'type': None,
+                            'selectable': None,
+                            'management_type': None,
+                            'score': None,
+                            'inherit_flag': None,
+                            'classvolumeid': 2179,
+                            ...
+                        },
+                        'options': {
+                            'fields': {
+                                'id': {
+                                    'fields': {...},
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'items': {...},
+                                    'label': 'Classification',
+                                    'readonly': False,
+                                    'toolbarSticky': True
+                                },
+                                'name': {
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'label': 'Classification Name',
+                                    'readonly': False,
+                                    'type': 'text'
+                                },
+                                ...
+                            }
+                        },
+                        'role_name': 'classifications',
+                        'schema': {
+                            'properties': {
+                                'id': {
+                                    'items': {...},
+                                    'readonly': False,
+                                    'required': False,
+                                    'title': 'Classification',
+                                    'type': 'array'
+                                },
+                                'name': {
+                                    'readonly': False,
+                                    'required': False,
+                                    'title': 'Classification Name',
+                                    'type': 'string'
+                                },
+                                ...
+                            },
+                            'title': 'Classifications',
+                            'type': 'object'
+                        }
+                    },
+                    ...
+                ]
+            }
+            ```
+
         """
 
         request_header = self.request_form_header()
@@ -18796,7 +20773,7 @@ class OTCS:
                                 'title': 'Order Type',
                                 'type': 'string'
                             },
-                            ... (more fields) ...
+                            ...
                         },
                         'type': 'object'
                     }
@@ -19187,6 +21164,34 @@ class OTCS:
                         "mandatory": bool
                     }
                 Returns None if the REST call fails.
+
+        Example:
+            ```json
+            [
+                {
+                    'type': 'String',
+                    'parm_name': 'privilege',
+                    'display_text': 'Privilege',
+                    'prompt': True,
+                    'prompt_order': None,
+                    'default_value': '',
+                    'description': 'Privilege to be set. Each privilege corresponds witch a technical CS group (typ...',
+                    'mandatory': True,
+                    'type_specific': {}
+                },
+                {
+                    'type': 'String',
+                    'parm_name': 'user_name',
+                    'display_text': 'User Name',
+                    'prompt': True,
+                    'prompt_order': None,
+                    'default_value': '',
+                    'description': 'Login name of the user that should be granted the privilege. Technically we fir...',
+                    'mandatory': True,
+                    'type_specific': {}
+                }
+            ]
+            ```
 
         """
 
@@ -19587,6 +21592,32 @@ class OTCS:
         Notes:
             - This method retrieves the permissions for the specified assignee for the specified ECM item.
 
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nodes/61129/permissions/effective/1000',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': {
+                        'permissions': {
+                            'permissions': ['add_items', 'delete', ...],
+                            'right_id': 1000,
+                            'type': None
+                        }
+                    }
+                }
+            }
+            ```
+
         """
 
         request_url = self.config()["nodesUrlv2"] + "/" + str(node_id) + "/permissions/effective/" + str(assignee)
@@ -19726,7 +21757,7 @@ class OTCS:
         {
             'links': {
                 'data': {
-                    self': {
+                    'self': {
                         'body': '',
                         'content_type': '',
                         'href': '/api/v2/ai/nodes/permissions/check',
@@ -19796,14 +21827,60 @@ class OTCS:
                 REST API response or None in case of an error.
 
         Example:
-        {
-        "links": {},
-        "results": {
-                "node information": {},
-                "user information": {},
-                "environment information": "string"
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/ai/nodecontext',
+                            'method': 'POST',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'environment information': 'You are Aviator, a component of a document management system develo...',
+                    'node Information': {
+                        '65970': {
+                            'additional file properties': {
+                                'mimetype': 'application/pdf',
+                                'size in bytes': 48262
+                            },
+                            'Controlled Revision Properties': {
+                                'Is Controlled': False
+                            },
+                            'custom metadata': {
+                                'Document Type Details (Category ID 3540)': {
+                                    'Date of Origin': '2026-10-18T00:00:00',
+                                    'Document expiration date': None
+                                }
+                            },
+                            'file path information': {
+                                'folder ID': 63187,
+                                'full path': '/Sales/Customers/(株) 菱井インダストリー (710004)/04 - Direct Marketing/',
+                                'number of files in folder': 1
+                            },
+                            'file properties': {
+                                'created by': 'Admin',
+                                'created by userID': 1000,
+                                'creation date': '2026-10-18T15:47:34',
+                                'file name': 'Lounge Invitation_20261018-154731551.pdf',
+                                'last modified date': '2026-10-18T15:47:35',
+                                'object type': 'Document',
+                                'versions': 1
+                            }
+                        }
+                    },
+                    'user information': {
+                        'ID': 1000,
+                        'preferred language': 'en',
+                        'username': 'Admin'
+                    }
+                }
             }
-        }
+            ```
 
         """
 
@@ -19853,109 +21930,137 @@ class OTCS:
                 Category response or None if the call to the REST API fails.
 
         Example:
-            [
-                {
+            ```json
+            {
+                'links': {
                     'data': {
-                        'categories': {
-                            '16878_25': 'Customer',
-                            '16878_28': '50031',
-                            '16878_29': 'Global Trade AG',
-                            '16878_30': 'Gutleutstraße 53',
-                            '16878_31': 'Germany',
-                            '16878_32': '60329',
-                            '16878_33': ['1000'],
-                            '16878_34': 'Frankfurt',
-                            '16878_37': ['Retail'],
-                            '16878_38': '0000050031',
-                            '16878_39_1_40': '0000001096',
-                            '16878_39_1_41': 'Heinz Hart',
-                            '16878_39_1_42': 'Purchasing',
-                            '16878_39_1_43': 'Purchasing Manager',
-                            '16878_39_1_44': '+49695325410',
-                            '16878_39_1_45': '+49695325499',
-                            '16878_39_1_46': 'Heinz.Hart@GlobalTrade.com',
-                            '16878_39_1_47': 'B',
-                            '16878_39_1_48': '4',
-                            ...
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nodes/61129/categories?metadata',
+                            'method': 'GET',
+                            'name': ''
                         }
+                    }
+                },
+                'results': [
+                    {
+                        'data': {
+                            'categories': {
+                                '25220_2_1_18': None,
+                                '25220_2_1_19': None,
+                                '25220_2_1_20': None,
+                                '25220_2_1_21': None,
+                                '25220_2_1_22': None,
+                                '25220_2_1_23': None,
+                                '25220_2_1_24': None,
+                                '25220_2_1_25': None,
+                                '25220_2_1_26': None,
+                                '25220_2_1_27': None,
+                                '25220_2_1_28': None,
+                                '25220_2_1_29': None,
+                                ...
+                            }
+                        },
+                        'metadata': {
+                            'categories': {
+                                '25220': {
+                                    'allow_undefined': False,
+                                    'bulk_shared': False,
+                                    'default_value': None,
+                                    'description': 'Salesforce Account Metadata',
+                                    'description_multilingual': {
+                                        'en': 'Salesforce Account Metadata'
+                                    },
+                                    'hidden': False,
+                                    'key': '25220',
+                                    'key_value_pairs': False,
+                                    'name': 'CRM Account',
+                                    'type': -18,
+                                    'type_name': 'Assoc',
+                                    'version_number': 1,
+                                    ...
+                                },
+                                '25220_2': {
+                                    'allow_undefined': False,
+                                    'bulk_shared': False,
+                                    'default_value': None,
+                                    'description': None,
+                                    'description_multilingual': None,
+                                    'hidden': False,
+                                    'key': '25220_2',
+                                    'key_value_pairs': False,
+                                    'name': 'Account Detail',
+                                    'type': -18,
+                                    'type_name': 'Assoc',
+                                    'version_number': 0,
+                                    ...
+                                },
+                                ...
+                            }
+                        },
+                        ...
                     },
-                    'metadata': {
-                        '16878': {
-                            'allow_undefined': False,
-                            'bulk_shared': False,
-                            'default_value': None,
-                            'description': None,
-                            'hidden': False,
-                            'key': '16878',
-                            'key_value_pairs': False,
-                            'multi_value': False,
-                            'multi_value_length_default': 1,
-                            'multi_value_length_fixed': True,
-                            'multi_value_length_max': 1,
-                            'multi_value_max_length': None,
-                            'multi_value_min_length': None,
-                            'multi_value_unique': False,
-                            'name': 'Customer',
-                            'next_id': 83,
-                            'persona': 'category',
-                            'read_only': True,
-                            'required': False,
-                            ...
+                    {
+                        'data': {
+                            'categories': {
+                                '25486_25': 'Customer',
+                                '25486_28': '710004',
+                                '25486_29': '(株) 菱井インダストリー',
+                                '25486_30': '高島 ２丁目１６番地１号',
+                                '25486_31': 'Japan',
+                                '25486_32': '220-0011',
+                                '25486_33': ['4000'],
+                                '25486_34': '横浜市 西区',
+                                '25486_37': [None],
+                                '25486_38': '0000710004',
+                                '25486_39_1_40': None,
+                                '25486_39_1_41': None,
+                                ...
+                            }
                         },
-                        '16878_25': {
-                            'allow_undefined': False,
-                            'bulk_shared': False,
-                            'default_value': None,
-                            'description': None,
-                            'hidden': False,
-                            'key': '16878_25',
-                            'key_value_pairs': False,
-                            'max_length': None,
-                            'min_length': None,
-                            'multi_select': False,
-                            'multi_value': False,
-                            'multi_value_length_default': 1,
-                            'multi_value_length_fixed': True,
-                            'multi_value_length_max': 1,
-                            'multi_value_max_length': None,
-                            'multi_value_min_length': None,
-                            'multi_value_unique': False,
-                            'multiline': False,
-                            'multilingual': False,
-                            ...
-                        },
-                        '16878_28': {
-                            'allow_undefined': False,
-                            'bulk_shared': False,
-                            'default_value': None,
-                            'description': None,
-                            'hidden': False,
-                            'key': '16878_28',
-                            'key_value_pairs': False,
-                            'max_length': 10,
-                            'min_length': None,
-                            'multi_select': False,
-                            'multi_value': False,
-                            'multi_value_length_default': 1,
-                            'multi_value_length_fixed': True,
-                            'multi_value_length_max': 1,
-                            'multi_value_max_length': None,
-                            'multi_value_min_length': None,
-                            'multi_value_unique': False,
-                            'multiline': False,
-                            'multilingual': False,
-                            ...
+                        'metadata': {
+                            'categories': {
+                                '25486': {
+                                    'allow_undefined': False,
+                                    'bulk_shared': False,
+                                    'default_value': None,
+                                    'description': 'KNA1',
+                                    'description_multilingual': {
+                                        'en': 'KNA1'
+                                    },
+                                    'hidden': False,
+                                    'key': '25486',
+                                    'key_value_pairs': False,
+                                    'name': 'Customer',
+                                    'type': -18,
+                                    'type_name': 'Assoc',
+                                    'version_number': 1,
+                                    ...
+                                },
+                                '25486_25': {
+                                    'allow_undefined': False,
+                                    'bulk_shared': False,
+                                    'default_value': None,
+                                    'description': None,
+                                    'description_multilingual': None,
+                                    'hidden': False,
+                                    'key': '25486_25',
+                                    'key_value_pairs': False,
+                                    'max_length': None,
+                                    'name': 'Status',
+                                    'type': -1,
+                                    'type_name': 'String',
+                                    ...
+                                },
+                                ...
+                            }
                         },
                         ...
                     }
-                    'metadata_map': {
-                        'categories': {'16878': ['16878_2', '16878_3', '16878_4', '16878_5', '16878_6', '16878_7', '16878_8']}
-                    }
-                    'metadata_order': {
-                        'categories': ['16878']
-                    }
-                }
-            ]
+                ]
+            }
+            ```
 
         """
 
@@ -20002,6 +22107,80 @@ class OTCS:
         Returns:
             dict | None:
                 REST response with category data or None if the call to the REST API fails.
+
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/nodes/61129/categories/25486?metadata',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': {
+                        'categories': {
+                            '25486_25': 'Customer',
+                            '25486_28': '710004',
+                            '25486_29': '(株) 菱井インダストリー',
+                            '25486_30': '高島 ２丁目１６番地１号',
+                            '25486_31': 'Japan',
+                            '25486_32': '220-0011',
+                            '25486_33': ['4000'],
+                            '25486_34': '横浜市 西区',
+                            '25486_37': [None],
+                            '25486_38': '0000710004',
+                            '25486_39_1_40': None,
+                            '25486_39_1_41': None,
+                            ...
+                        }
+                    },
+                    'metadata': {
+                        'categories': {
+                            '25486': {
+                                'allow_undefined': False,
+                                'bulk_shared': False,
+                                'default_value': None,
+                                'description': 'KNA1',
+                                'description_multilingual': {
+                                    'en': 'KNA1'
+                                },
+                                'hidden': False,
+                                'key': '25486',
+                                'key_value_pairs': False,
+                                'name': 'Customer',
+                                'type': -18,
+                                'type_name': 'Assoc',
+                                'version_number': 1,
+                                ...
+                            },
+                            '25486_25': {
+                                'allow_undefined': False,
+                                'bulk_shared': False,
+                                'default_value': None,
+                                'description': None,
+                                'description_multilingual': None,
+                                'hidden': False,
+                                'key': '25486_25',
+                                'key_value_pairs': False,
+                                'max_length': None,
+                                'name': 'Status',
+                                'type': -1,
+                                'type_name': 'String',
+                                ...
+                            },
+                            ...
+                        }
+                    },
+                    ...
+                }
+            }
+            ```
 
         """
 
@@ -21867,28 +24046,42 @@ class OTCS:
 
         Example:
             ```json
-                    "results": {
-                        "data": {
-                            "hold": {
-                                "HoldID": 13,
-                                "HoldName": "HOLD_10",
-                                "ActiveHold": 1,
-                                "OBJECT": null,
-                                "ApplyPatron": "Records Management System User",
-                                "DateApplied": null,
-                                "HoldComment": "The comment",
-                                "HoldType": "FOIA",
-                                "DateToRemove": null,
-                                "DateRemoved": null,
-                                "RemovalPatron": null,
-                                "RemovalComment": null,
-                                "EditDate": null,
-                                "EditPatron": null,
-                                "AlternateHoldID": "HOLD_10",
-                                "ParentID": null
-                            }
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/hold',
+                            'method': 'GET',
+                            'name': ''
                         }
                     }
+                },
+                'results': {
+                    'data': {
+                        'hold': {
+                            'HoldID': 2,
+                            'HoldName': 'GENERAL AUDIT HOLD',
+                            'ActiveHold': 1,
+                            'OBJECT': None,
+                            'ApplyPatron': 'Admin',
+                            'DateApplied': '2026-10-18T00:00:00',
+                            'HoldComment': 'General Hold for use until official audit case is created',
+                            'HoldType': 'AUDIT',
+                            'DateToRemove': None,
+                            'DateRemoved': None,
+                            'RemovalPatron': None,
+                            'RemovalComment': None,
+                            'EditDate': None,
+                            'EditPatron': None,
+                            'AlternateHoldID': '',
+                            'ParentID': 54852
+                        }
+                    }
+                }
+            }
+            ```
 
         """
 
@@ -22048,6 +24241,11 @@ class OTCS:
             list | None:
                 The list of Records Management RSIs matching the query string or None if the request fails.
 
+        Example:
+            ```json
+            ['EU-HR-3YEARS', 'US-HR-7YEAR']
+            ```
+
         """
 
         request_url = self.config()["searchRsisUrl"]
@@ -22085,6 +24283,40 @@ class OTCS:
         Returns:
             dict | None:
                 The RM codes or None if the request fails.
+
+        Example:
+            ```json
+            {
+                'accession': {
+                    'default_value': None,
+                    'values': [
+                        {
+                            'code': 'ACC123',
+                            'description': 'ACCESSION 123'
+                        },
+                        {
+                            'code': 'PO_DESTROY_1',
+                            'description': 'PHYSICAL OBJECTS TO BE DESTROYED'
+                        }
+                    ]
+                },
+                'action_code': {
+                    'default_value': 0,
+                    'values': [
+                        {
+                            'code': 0,
+                            'description': 'None'
+                        },
+                        {
+                            'code': 1,
+                            'description': 'Change Status'
+                        },
+                        ...
+                    ]
+                },
+                ...
+            }
+            ```
 
         """
 
@@ -23214,6 +25446,79 @@ class OTCS:
             dict | None:
                 REST response or None if the REST call fails.
 
+        Example:
+            ```json
+            {
+                'data': {
+                    'applyToSetting': {
+                        'bUpdateBoxContents': True,
+                        'secLevelOpts': ['upgrade', 'downgrade'],
+                        'suppMarkOpts': ['merge', 'replace']
+                    },
+                    'can_user_edit_security': True,
+                    'clearance_level': None,
+                    'has_user_security_codes': True,
+                    'inherit_from': False,
+                    'supplemental_markings': [None]
+                },
+                'definitions': {
+                    'clearance_level': {
+                        'allow_undefined': False,
+                        'bulk_shared': False,
+                        'default_value': '',
+                        'description': None,
+                        'hidden': False,
+                        'key': 'clearance_level',
+                        'key_value_pairs': False,
+                        'max_value': None,
+                        'min_value': None,
+                        'multi_value': False,
+                        'multi_value_max_length': None,
+                        'name': 'Security Clearance Level',
+                        'type': 2,
+                        'type_name': 'Integer',
+                        ...
+                    },
+                    'extradata': {
+                        'allow_undefined': False,
+                        'bulk_shared': False,
+                        'default_value': None,
+                        'description': None,
+                        'hidden': True,
+                        'key': 'extradata',
+                        'key_value_pairs': False,
+                        'max_length': None,
+                        'min_length': None,
+                        'multi_select': False,
+                        'multi_value': False,
+                        'name': 'Not important no visible',
+                        'type': -1,
+                        'type_name': 'String',
+                        ...
+                    },
+                    'supplemental_markings': {
+                        'allow_undefined': False,
+                        'bulk_shared': False,
+                        'default_value': None,
+                        'description': None,
+                        'hidden': False,
+                        'key': 'supplemental_markings',
+                        'key_value_pairs': False,
+                        'max_length': None,
+                        'min_length': None,
+                        'multi_select': False,
+                        'multi_value': True,
+                        'name': 'Supplemental Markings',
+                        'type': -1,
+                        'type_name': 'String',
+                        ...
+                    }
+                },
+                'NumSecLevels': 6,
+                'ok': True
+            }
+            ```
+
         """
 
         request_url = self.config()["nodesUrl"] + "/{}/securityclearances".format(node_id)
@@ -23297,6 +25602,108 @@ class OTCS:
         Returns:
             dict | None:
                 REST response or None if the REST call fails.
+
+        Example:
+        {
+            'data': {
+                'clearance_levels':{
+                    'data': [
+                        {
+                            'clearance_level': 5,
+                            'desc': 'Content is Public',
+                            'name': 'Public'
+                        },
+                        ...
+                    ],
+                    'definitions': {
+                        'clearance_level': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'clearance_level',
+                            'key_value_pairs': False,
+                            'max_value': None,
+                            'min_value': None,
+                            'multi_value': False,
+                            'multi_value_max_length': None,
+                            'multi_value_min_length': None,
+                            'multi_value_unique': False,
+                            'name': 'Security Clearance Level',
+                            'persona': None,
+                            'read_only': False,
+                            'required': True,
+                            'type': 2,
+                            'type_name': 'Integer',
+                            'valid_values': [],
+                            'valid_values_name': []
+                        },
+                        'desc': {
+                            'allow_undefined': True,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'desc',
+                            'key_value_pairs': False,
+                            'max_length': None,
+                            'min_length': None,
+                            'multi_select': False,
+                            'multi_value': False,
+                            'multi_value_max_length': None,
+                            'multi_value_min_length': None,
+                            'multi_value_unique': False,
+                            'multiline': False,
+                            'multilingual': False,
+                            'name': 'Description',
+                            'password': False,
+                            'persona': None,
+                            'read_only': False,
+                            'Regex': '',
+                            'required': False,
+                            'type': -1,
+                            'type_name': 'String',
+                            'valid_values': [],
+                            'valid_values_name': []
+                        },
+                        'name': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'name',
+                            'key_value_pairs': False,
+                            'max_length': None,
+                            'min_length': None,
+                            'multi_select': False,
+                            'multi_value': False,
+                            'multi_value_max_length': None,
+                            'multi_value_min_length': None,
+                            'multi_value_unique': False,
+                            'multiline': False,
+                            'multilingual': False,
+                            'name': 'Security Clearance Level Name',
+                            'password': False,
+                            'persona': None,
+                            'read_only': False,
+                            'Regex': '',
+                            'required': True,
+                            'type': -1,
+                            'type_name': 'String',
+                            'valid_values': [],
+                            'valid_values_name': []
+                        }
+                    }
+                },
+                'supplemental_markings': {...}
+            },
+            'definitions': {
+                'clearance_levels': {...},
+                'supplemental_markings': {...}
+            }
+        }
 
         """
 
@@ -23773,78 +26180,56 @@ class OTCS:
             ```json
             {
                 'links': {
-                    'data': {...}
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/workflows/775256/definition',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
                 },
                 'results': {
                     'definition': {
                         'data_packages': [
+                            {
+                                'data': {
+                                    'attachment_folder_id': 775274
+                                },
+                                'description': None,
+                                'sub_type': 1,
+                                'type': 1
+                            },
                             {
                                 'data': {},
                                 'description': None,
                                 'sub_type': 2,
                                 'type': 1
                             },
-                            {
-                                'data': {
-                                    'data': {
-                                        'data': {
-                                            '25397_10': None,
-                                            '25397_11': False,
-                                            '25397_8': None,
-                                            '25397_9': None
-                                        },
-                                        'definitions': {
-                                            '25397': {...},
-                                            '25397_10': {
-                                                'allow_undefined': False,
-                                                'bulk_shared': False,
-                                                'default_value': None,
-                                                'description': None,
-                                                'hidden': False,
-                                                'include_time': False,
-                                                'key': '25397_10',
-                                                'key_value_pairs': False,
-                                                'multi_value': False,
-                                                'multi_value_length_default': 1,
-                                                'multi_value_length_fixed': True,
-                                                'multi_value_length_max': 1,
-                                                'multi_value_max_length': None,
-                                                'multi_value_min_length': None,
-                                                'multi_value_unique': False,
-                                                'name': 'Approval Date',
-                                                'persona': '',
-                                                'read_only': False,
-                                                'required': False,
-                                                'type': -7,
-                                                'type_llattribute': -7,
-                                                'type_name': 'Date',
-                                                'valid_values': [],
-                                                'valid_values_name': []
-                                            },
-                                            '25397_11': {...},
-                                            '25397_8': {...},
-                                            '25397_9': {...}
-                                        },
-                                        'definitions_map': {
-                                            '25397': [...]
-                                        },
-                                        'definitions_order': ['25397']
-                                    },
-                                    'definitions': {...},
-                                    'definitions_map': {...},
-                                    'definitions_order': [...]
-                                },
-                                'description': 'Please fill in all required attributes.',
-                                'sub_type': 3,
-                                'type': 1
-                            },
-                            {...},
-                            {...}
+                            ...
                         ],
                         'tasks': [
-                            {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}
+                            {
+                                'data': {},
+                                'description': None,
+                                'instructions': None,
+                                'sub_type': 100,
+                                'task_id': 1,
+                                'title': 'Start Step',
+                                'type': 1
+                            },
+                            {
+                                'data': {},
+                                'description': '',
+                                'instructions': None,
+                                'sub_type': 1,
+                                'task_id': 2,
+                                'title': 'Run Aviator Studio Agent',
+                                'type': 10
+                            }
                         ],
-                        'workflow_id': 25397,
+                        'workflow_id': 775256,
                         'workflow_roles': []
                     }
                 }
@@ -24007,7 +26392,7 @@ class OTCS:
                     ],
                     'fError': '',
                     'fErrorDetail': '',
-                    'statusMsg': None}
+                    'statusMsg': None
                 }
             }
             ```
@@ -28683,16 +31068,91 @@ class OTCS:
                 Reminder client types information, or None if the request fails.
 
         Example:
-                {
-                    'forms': [
-                        {
-                            'data': {
-                                'client_id': 1,
-                                'name': 'Reminder'
+            ```json
+            {
+                'forms': [
+                    {
+                        'data': {
+                            'followup_type_name': 3,
+                            'followup_client_name': 276634,
+                            'due_on': None,
+                            'description': None,
+                            'assignees': [1000],
+                            'activation_alert': {
+                                'send_in': {
+                                    'activationAlert1': 4,
+                                    'activationAlert2': 2
+                                }
                             }
+                        },
+                        'form': {
+                            'attributes': {
+                                'action': '/api/v1/forms/nodes/followup/getClientTypes',
+                                'method': 'GET'
+                            },
+                            'renderForm': True
+                        },
+                        'options': {
+                            'fields': {
+                                'activation_alert': {
+                                    'escal_to': 1,
+                                    'fields': {
+                                        'send_in': {...}
+                                    },
+                                    'hideInitValidationError': True,
+                                    'label': ' ',
+                                    'readonly': True,
+                                    'type': 'object'
+                                },
+                                'assignees': {
+                                    'fields': {
+                                        'item': {...}
+                                    },
+                                    'hidden': False,
+                                    'hideInitValidationError': True,
+                                    'items': {
+                                        'type': 'object'
+                                    },
+                                    'label': 'Assignee',
+                                    'readonly': False,
+                                    'toolbarSticky': False,
+                                    'type': 'array'
+                                },
+                                ...
+                            }
+                        },
+                        'schema': {
+                            'properties': {
+                                'activation_alert': {
+                                    'properties': {
+                                        'send_in': {...}
+                                    },
+                                    'readonly': True,
+                                    'title': ' ',
+                                    'type': 'object'
+                                },
+                                'assignees': {
+                                    'items': {
+                                        'maxItems': 1,
+                                        'maxLength': 1,
+                                        'minItems': 1,
+                                        'minLength': 1,
+                                        'type': 'otcs_member_picker'
+                                    },
+                                    'readonly': False,
+                                    'required': True,
+                                    'title': 'Assignee',
+                                    'type': 'array'
+                                },
+                                ...
+                            },
+                            'title': None,
+                            'type': 'object'
                         }
-                    ]
-                }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -29371,17 +31831,94 @@ class OTCS:
                 Reminder creation form data, or None if the request fails.
 
         Example:
-                {
-                    'forms': [
-                        {
-                            'data': {
-                                'RSTYPE': 1,
-                                'PRIORITY': 0,
+            ```json
+            {
+                'forms': [
+                    {
+                        'data': {
+                            'activation_alert': {
+                                'send_in': {
+                                    'activation_period': 4,
+                                    'activation_unit': 2
+                                }
+                            },
+                            'assignees': [1000],
+                            'description': None,
+                            'duein': None,
+                            'followup_client_name': 276634,
+                            'followup_type_name': 3,
+                            'priority': 50,
+                            'schedule': {
+                                'due': 0,
+                                'due_in': {
+                                    'due_in_period': 1,
+                                    'due_in_unit': 1
+                                },
+                                'due_on': '',
+                                'end_date': '',
+                                'month_recursive': 1,
+                                'predefined': True,
+                                'reoccuring': False,
+                                'repeat_month': {
+                                    'month_day': 1,
+                                    'month_unit': 'RULE_MONTH_1',
+                                    'month_weekday': 1
+                                },
                                 ...
                             }
+                        },
+                        'form': {
+                            'attributes': {
+                                'action': '/api/v1/forms/nodes/reminder/create',
+                                'method': 'GET'
+                            },
+                            'renderForm': True
+                        },
+                        'options': {
+                            'fields': {
+                                'activation_alert': {
+                                    'escal_to': 1,
+                                    'fields': {...},
+                                    'hideInitValidationError': True,
+                                    'label': 'Activation alert',
+                                    'readonly': False,
+                                    'type': 'object'
+                                },
+                                'assignees': {
+                                    'fields': {...},
+                                    'hideInitValidationError': True,
+                                    'items': {...},
+                                    'label': 'Assignee',
+                                    'readonly': False,
+                                    'toolbarSticky': False,
+                                    'type': 'array'
+                                },
+                                ...
+                            }
+                        },
+                        'schema': {
+                            'properties': {
+                                'activation_alert': {
+                                    'properties': {...},
+                                    'readonly': False,
+                                    'title': 'Activation alert',
+                                    'type': 'object'
+                                },
+                                'assignees': {
+                                    'items': {...},
+                                    'readonly': False,
+                                    'required': True,
+                                    'title': 'Assignee',
+                                    'type': 'array'
+                                },
+                                ...
+                            },
+                            'type': 'object'
                         }
-                    ]
-                }
+                    }
+                ]
+            }
+            ```
 
         """
 
@@ -30448,6 +32985,123 @@ class OTCS:
                 Report detail response containing a ``results.data`` list and
                 ``results.total_count``, or None on error.
 
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspace/61129/reports?type=recentDocuments',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': [
+                        {
+                            'actions': {
+                                'data': {
+                                    'default': {
+                                        'body': '',
+                                        'content_type': '',
+                                        'href': 'api/v1/nodes/65970/content?action=open',
+                                        'href_form': '',
+                                        'method': 'GET',
+                                        'name': 'Open'
+                                    },
+                                    'download': {
+                                        'body': '',
+                                        'content_type': '',
+                                        'href': 'api/v1/nodes/65970/content?action=download',
+                                        'href_form': '',
+                                        'method': 'GET',
+                                        'name': 'Download'
+                                    }
+                                },
+                                'map': {
+                                    'default_action': 'Open'
+                                },
+                                'order': ['default', 'download']
+                            },
+                            'classification_name': 'Lounge Invitation',
+                            'create_date': '2026-10-18T15:47:34',
+                            'date_of_origin': '10/18/2026 12:00 AM',
+                            'id': 65970,
+                            'initiator': 'Admin on behalf of Admin',
+                            'location': '04 - Direct Marketing',
+                            'mime_type': 'application/pdf',
+                            'name': 'Lounge Invitation_20261018-154731551.pdf',
+                            'parent_id': 63187,
+                            'parent_id_expand': {
+                                'advanced_versioning': None,
+                                'container': True,
+                                'container_size': 1,
+                                'create_date': '2016-02-16T16:36:49',
+                                'create_user_id': 24275,
+                                'description': '',
+                                'description_multilingual': {'en': '', ...},
+                                'id': 63187,
+                                'modify_date': '2026-10-18T15:47:35',
+                                'name': '04 - Direct Marketing',
+                                'parent_id': -61129,
+                                'type': 0,
+                                'type_name': 'Folder',
+                                'volume_id': 61129,
+                                ...
+                            },
+                            'reportType': 'recentDocuments',
+                            'type': 144,
+                            'type_name': 'Document'
+                        }
+                    ],
+                    'definitions': {
+                        'classification_name': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'classification_name',
+                            'max_length': None,
+                            'min_length': None,
+                            'multi_value': False,
+                            'multiline': False,
+                            'multilingual': False,
+                            'name': 'Document type',
+                            'type': -1,
+                            'type_name': 'String',
+                            ...
+                        },
+                        'create_date': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'include_time': True,
+                            'key': 'create_date',
+                            'multi_value': False,
+                            'name': 'Created at',
+                            'persona': '',
+                            'read_only': True,
+                            'required': False,
+                            'type': -7,
+                            'type_name': 'Date',
+                            ...
+                        },
+                        ...
+                    },
+                    'definitions_map': {},
+                    'definitions_order': ['date_of_origin', 'create_date', ...],
+                    'total_count': 1,
+                    'type': 'recentDocuments'
+                }
+            }
+            ```
+
         """
 
         request_url = "{}/{}/reports?type={}".format(
@@ -30506,6 +33160,93 @@ class OTCS:
             dict | None:
                 Response containing a ``results.data`` list and ``results.total_count``,
                 or None on error.
+
+        Example:
+            ```json
+            {
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/businessworkspaces/61129/missingdocuments',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': {
+                    'data': [],
+                    'definitions': {
+                        'id': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'id',
+                            'max_length': None,
+                            'min_length': None,
+                            'multi_value': False,
+                            'name': None,
+                            'persona': '',
+                            'read_only': True,
+                            'required': False,
+                            'type': -1,
+                            'type_name': 'Integer',
+                            'valid_values': [],
+                            'valid_values_name': []
+                        },
+                        'name': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'name',
+                            'max_length': None,
+                            'min_length': None,
+                            'multi_value': False,
+                            'multiline': False,
+                            'multilingual': False,
+                            'name': 'Document type',
+                            'password': False,
+                            'persona': '',
+                            'read_only': True,
+                            'regex': '',
+                            'required': False,
+                            'type': -1,
+                            'type_name': 'String',
+                            'valid_values': [],
+                            'valid_values_name': []
+                        },
+                        'parent_id': {
+                            'allow_undefined': False,
+                            'bulk_shared': False,
+                            'default_value': None,
+                            'description': None,
+                            'hidden': False,
+                            'key': 'parent_id',
+                            'max_length': None,
+                            'min_length': None,
+                            'multi_value': False,
+                            'name': 'Location',
+                            'persona': '',
+                            'read_only': True,
+                            'required': False,
+                            'type': -1,
+                            'type_name': 'Integer',
+                            'valid_values': [],
+                            'valid_values_name': []
+                        }
+                    },
+                    'definitions_map': {},
+                    'definitions_order': ['id', 'name', 'parent_id'],
+                    'total_count': 0,
+                    'type': 'missingDocuments'
+                }
+            }
+            ```
 
         """
 

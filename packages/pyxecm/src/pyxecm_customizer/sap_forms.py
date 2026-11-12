@@ -29,11 +29,15 @@ from pyxecm_customizer.sap_models import (
     SAPGoodsMovementResponseModel,
     SAPMaintenanceOrderResponseModel,
     SAPOutboundDeliveryResponseModel,
+    SAPPlantResponseModel,
     SAPProductionOrderResponseModel,
     SAPPurchaseContractResponseModel,
     SAPPurchaseOrderResponseModel,
     SAPSalesContractResponseModel,
     SAPSalesOrderResponseModel,
+    SAPStorageLocationResponseModel,
+    SAPWarrantyClaimResponseModel,
+    SAPWarrantyClaimVersionResponseModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,7 +73,16 @@ FONT_BOLD = "Helvetica-Bold"
 
 # Columns of the item table after the description that are texts (left-aligned) - the others are
 # quantities, dates and amounts (right-aligned):
-TEXT_COLUMNS = {"Unit", "Batch", "Plant", "Storage location", "Work center", "Control key", "Movement type"}
+TEXT_COLUMNS = {
+    "Unit",
+    "Batch",
+    "Plant",
+    "Storage location",
+    "Work center",
+    "Control key",
+    "Movement type",
+    "Purchase order",
+}
 
 # Thousands and decimal separators per country of the sender (like the dates, see format_date()) - all
 # other countries use "1,234.56":
@@ -136,13 +149,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "NL": "Inkoopcontract",
         "PT": "Contrato de compra",
     },
-    "Work Order": {
-        "DE": "Arbeitsauftrag",
-        "FR": "Ordre de travail",
-        "IT": "Ordine di lavoro",
-        "ES": "Orden de trabajo",
-        "NL": "Werkorder",
-        "PT": "Ordem de serviço",
+    "Maintenance Order": {
+        "DE": "Instandhaltungsauftrag",
+        "FR": "Ordre de maintenance",
+        "IT": "Ordine di manutenzione",
+        "ES": "Orden de mantenimiento",
+        "NL": "Onderhoudsorder",
+        "PT": "Ordem de manutenção",
     },
     "Production Order": {
         "DE": "Fertigungsauftrag",
@@ -684,6 +697,46 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "NL": "Gepland werk",
         "PT": "Trabalho planejado",
     },
+    "Delivered by": {
+        "DE": "Geliefert von",
+        "FR": "Livré par",
+        "IT": "Consegnato da",
+        "ES": "Entregado por",
+        "NL": "Geleverd door",
+        "PT": "Entregue por",
+    },
+    "Received by": {
+        "DE": "Wareneingang bestätigt von",
+        "FR": "Réceptionné par",
+        "IT": "Ricevuto da",
+        "ES": "Recibido por",
+        "NL": "Ontvangen door",
+        "PT": "Recebido por",
+    },
+    "Receiving plant": {
+        "DE": "Empfangendes Werk",
+        "FR": "Division réceptrice",
+        "IT": "Divisione ricevente",
+        "ES": "Centro receptor",
+        "NL": "Ontvangende vestiging",
+        "PT": "Centro recetor",
+    },
+    "Header text": {
+        "DE": "Kopftext",
+        "FR": "Texte d'en-tête",
+        "IT": "Testo di testata",
+        "ES": "Texto de cabecera",
+        "NL": "Koptekst",
+        "PT": "Texto de cabeçalho",
+    },
+    "Reversal of material document": {
+        "DE": "Storno von Materialbeleg",
+        "FR": "Annulation du document matière",
+        "IT": "Storno del documento materiale",
+        "ES": "Anulación del documento de material",
+        "NL": "Annulering van materiaaldocument",
+        "PT": "Estorno do documento de material",
+    },
     "Movement type": {
         "DE": "Bewegungsart",
         "FR": "Type de mouvement",
@@ -971,14 +1024,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "NL": "MRP-planner {}",
         "PT": "Planejador MRP {}",
     },
-    "Storage location {}": {
-        "DE": "Lagerort {}",
-        "FR": "Magasin {}",
-        "IT": "Ubicazione {}",
-        "ES": "Almacén {}",
-        "NL": "Opslaglocatie {}",
-        "PT": "Depósito {}",
-    },
     "Equipment {}": {
         "DE": "Equipment {}",
         "FR": "Équipement {}",
@@ -994,6 +1039,143 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ES": "Ubicación técnica {}",
         "NL": "Technische plaats {}",
         "PT": "Local de instalação {}",
+    },
+    # Warranty claims (see render_warranty_claim_pdf()):
+    "Supplier Warranty Claim": {
+        "DE": "Garantieantrag an Lieferanten",
+        "FR": "Réclamation de garantie fournisseur",
+        "IT": "Richiesta di garanzia al fornitore",
+        "ES": "Reclamación de garantía al proveedor",
+        "NL": "Garantieclaim leverancier",
+        "PT": "Reclamação de garantia ao fornecedor",
+    },
+    "Customer Warranty Claim": {
+        "DE": "Garantieantrag des Kunden",
+        "FR": "Réclamation de garantie client",
+        "IT": "Richiesta di garanzia del cliente",
+        "ES": "Reclamación de garantía del cliente",
+        "NL": "Garantieclaim klant",
+        "PT": "Reclamação de garantia do cliente",
+    },
+    "Claim number": {
+        "DE": "Antragsnummer",
+        "FR": "Numéro de réclamation",
+        "IT": "Numero richiesta",
+        "ES": "Número de reclamación",
+        "NL": "Claimnummer",
+        "PT": "Número da reclamação",
+    },
+    "Claim type": {
+        "DE": "Antragsart",
+        "FR": "Type de réclamation",
+        "IT": "Tipo richiesta",
+        "ES": "Tipo de reclamación",
+        "NL": "Claimsoort",
+        "PT": "Tipo de reclamação",
+    },
+    "Plant": {
+        "DE": "Werk",
+        "FR": "Division",
+        "IT": "Divisione",
+        "ES": "Centro",
+        "NL": "Vestiging",
+        "PT": "Centro",
+    },
+    "Reference": {
+        "DE": "Referenz",
+        "FR": "Référence",
+        "IT": "Riferimento",
+        "ES": "Referencia",
+        "NL": "Referentie",
+        "PT": "Referência",
+    },
+    "Warranty object": {
+        "DE": "Garantieobjekt",
+        "FR": "Objet de garantie",
+        "IT": "Oggetto in garanzia",
+        "ES": "Objeto de garantía",
+        "NL": "Garantieobject",
+        "PT": "Objeto da garantia",
+    },
+    "Damage date": {
+        "DE": "Schadensdatum",
+        "FR": "Date du dommage",
+        "IT": "Data del danno",
+        "ES": "Fecha del daño",
+        "NL": "Schadedatum",
+        "PT": "Data do dano",
+    },
+    "Repair date": {
+        "DE": "Reparaturdatum",
+        "FR": "Date de réparation",
+        "IT": "Data di riparazione",
+        "ES": "Fecha de reparación",
+        "NL": "Reparatiedatum",
+        "PT": "Data do reparo",
+    },
+    "Defect code": {
+        "DE": "Schadenscode",
+        "FR": "Code de défaut",
+        "IT": "Codice difetto",
+        "ES": "Código de defecto",
+        "NL": "Defectcode",
+        "PT": "Código do defeito",
+    },
+    "Claimed amount": {
+        "DE": "Beantragter Betrag",
+        "FR": "Montant réclamé",
+        "IT": "Importo richiesto",
+        "ES": "Importe reclamado",
+        "NL": "Geclaimd bedrag",
+        "PT": "Valor reclamado",
+    },
+    "Total claimed amount": {
+        "DE": "Beantragter Gesamtbetrag",
+        "FR": "Montant total réclamé",
+        "IT": "Importo totale richiesto",
+        "ES": "Importe total reclamado",
+        "NL": "Totaal geclaimd bedrag",
+        "PT": "Valor total reclamado",
+    },
+    "Please quote the warranty claim number on all correspondence and credit memos.": {
+        "DE": "Bitte geben Sie die Antragsnummer bei jeder Korrespondenz und auf allen Gutschriften an.",
+        "FR": "Veuillez indiquer le numéro de réclamation dans toute correspondance et sur tous les avoirs.",
+        "IT": "Si prega di indicare il numero della richiesta in tutta la corrispondenza e su tutte le note di credito.",
+        "ES": "Indique el número de reclamación en toda la correspondencia y en todas las notas de crédito.",
+        "NL": "Vermeld het claimnummer bij alle correspondentie en op alle creditnota's.",
+        "PT": "Indique o número da reclamação em toda a correspondência e em todas as notas de crédito.",
+    },
+    "We have registered your warranty claim with the items above and will inform you about our decision.": {
+        "DE": "Wir haben Ihren Garantieantrag mit den obigen Positionen erfasst und informieren Sie über unsere Entscheidung.",
+        "FR": "Nous avons enregistré votre réclamation de garantie avec les postes ci-dessus et vous informerons de notre décision.",
+        "IT": "Abbiamo registrato la sua richiesta di garanzia con le posizioni sopra indicate e la informeremo della nostra decisione.",
+        "ES": "Hemos registrado su reclamación de garantía con las posiciones anteriores y le informaremos de nuestra decisión.",
+        "NL": "Wij hebben uw garantieclaim met de bovenstaande posities geregistreerd en informeren u over onze beslissing.",
+        "PT": "Registamos a sua reclamação de garantia com os itens acima e informaremos sobre a nossa decisão.",
+    },
+    "Serial number {}": {
+        "DE": "Serialnummer {}",
+        "FR": "Numéro de série {}",
+        "IT": "Numero di serie {}",
+        "ES": "Número de serie {}",
+        "NL": "Serienummer {}",
+        "PT": "Número de série {}",
+    },
+    "Installed base {}": {
+        "DE": "Installierte Basis {}",
+        "FR": "Base installée {}",
+        "IT": "Base installata {}",
+        "ES": "Base instalada {}",
+        "NL": "Geïnstalleerde basis {}",
+        "PT": "Base instalada {}",
+    },
+    "Vehicle {}": {
+        "DE": "Fahrzeug {}",
+        "FR": "Véhicule {}",
+        "IT": "Veicolo {}",
+        "ES": "Vehículo {}",
+        "NL": "Voertuig {}",
+        "PT": "Veículo {}",
     },
 }
 
@@ -1443,6 +1625,7 @@ def render_form(data: SAPFormData, logo: str | bytes | None = None) -> bytes:
             "Batch": 1.0 * inch,
             "Operation": 0.7 * inch,
             "Movement type": 1.0 * inch,
+            "Purchase order": 1.2 * inch,
             "Storage location": 1.1 * inch,
             "Target quantity": 1.0 * inch,
         }
@@ -1979,6 +2162,7 @@ def render_purchase_order_pdf(
     company_code: SAPCompanyCodeResponseModel | None = None,
     language: str | None = None,
     logo: str | bytes | None = None,
+    plants: dict[str, SAPPlantResponseModel] | None = None,
 ) -> bytes:
     """Render an SAP purchase order as sent to the supplier (like the SAP standard form).
 
@@ -1994,6 +2178,9 @@ def render_purchase_order_pdf(
             supplier's address in SAP, else of the company code, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
+        plants (dict[str, SAPPlantResponseModel] | None, optional):
+            The receiving plants of the items by plant number (their names are printed with the number).
+            Defaults to None (plant numbers only).
 
     Returns:
         bytes:
@@ -2012,7 +2199,8 @@ def render_purchase_order_pdf(
     # Deleted items are not ordered:
     items = sort_items([item for item in purchase_order.items or [] if not item.deletion_code])
     total = sum((Decimal(str(item.net_amount)) for item in items if item.net_amount not in (None, "")), Decimal(0))
-    plants = list(dict.fromkeys(item.plant for item in items if item.plant))
+    plants = plants or {}
+    plant_ids = list(dict.fromkeys(item.plant for item in items if item.plant))
 
     def delivery_date(item: object) -> str:
         dates = [line.delivery_date for line in getattr(item, "schedule_lines", None) or [] if line.delivery_date]
@@ -2050,7 +2238,15 @@ def render_purchase_order_pdf(
         totals=[("Total net value", "{} {}".format(format_amount(total, country), currency))],
         notes=[
             ("Terms of payment", purchase_order.payment_terms or ""),
-            ("Delivery to", ", ".join(translate("plant {}", language).format(plant) for plant in plants)),
+            (
+                "Delivery to",
+                ", ".join(
+                    "{} ({})".format(plants[plant].name, plant)
+                    if plant in plants and plants[plant].name
+                    else translate("plant {}", language).format(plant)
+                    for plant in plant_ids
+                ),
+            ),
             ("", "Please quote the purchase order number on all delivery notes and invoices."),
         ],
         footer=get_footer(sender, purchase_order.company_code, language),
@@ -2303,7 +2499,7 @@ def render_maintenance_order_pdf(
     )
 
     data = SAPFormData(
-        title="Work Order",
+        title="Maintenance Order",
         number=order.order_id,
         document_date=order.creation_datetime,
         sender=sender,
@@ -2494,6 +2690,10 @@ def render_goods_movement_pdf(
     company_code: SAPCompanyCodeResponseModel | None = None,
     language: str | None = None,
     logo: str | bytes | None = None,
+    plant: SAPPlantResponseModel | None = None,
+    storage_locations: dict[str, SAPStorageLocationResponseModel] | None = None,
+    material_texts: dict[str, str] | None = None,
+    supplier: SAPBusinessPartnerResponseModel | None = None,
 ) -> bytes:
     """Render an SAP goods movement (material document) as goods receipt / issue slip.
 
@@ -2507,6 +2707,16 @@ def render_goods_movement_pdf(
             company code in SAP, else English.
         logo (str | bytes | None, optional):
             The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
+        plant (SAPPlantResponseModel | None, optional):
+            The plant of the first item (name of the receiving plant). Defaults to None (plant number only).
+        storage_locations (dict[str, SAPStorageLocationResponseModel] | None, optional):
+            The storage locations of the items by storage location number (their names).
+            Defaults to None (numbers only).
+        material_texts (dict[str, str] | None, optional):
+            The descriptions of the materials by material number - the material document items have
+            no description of their own. Defaults to None.
+        supplier (SAPBusinessPartnerResponseModel | None, optional):
+            The supplier of the goods (name and address). Defaults to None (supplier number only).
 
     Returns:
         bytes:
@@ -2519,49 +2729,107 @@ def render_goods_movement_pdf(
     """
 
     movement = goods_movement
+    storage_locations = storage_locations or {}
+    material_texts = material_texts or {}
     country = (company_code.country if company_code else "") or ""
     language = get_language(language, company_code.language if company_code else None)
     company_code_id = company_code.company_code if company_code else None
     items = sort_items(movement.items or [])
     first_item = items[0] if items else None
+    plant_id = (first_item.plant if first_item else None) or ""
     sender = get_sender_lines(company_code, company_code_id, language) or [
-        translate("Plant {}", language).format(first_item.plant if first_item else "")
+        translate("Plant {}", language).format(plant_id)
     ]
     has_batches = any(item.batch for item in items)
     purchase_orders = list(dict.fromkeys(item.purchase_order for item in items if item.purchase_order))
     orders = list(dict.fromkeys(item.manufacturing_order for item in items if item.manufacturing_order))
     suppliers = list(dict.fromkeys(item.supplier for item in items if item.supplier))
+    if not suppliers and supplier and supplier.supplier:
+        # Receipts for a purchase order have no supplier in the items - the one of the order is given:
+        suppliers = [supplier.supplier]
+
+    # The receiving plant (address window): its name, number and the storage location(s) of the items:
+    plant_name = (plant.name or "") if plant else ""
+    locations = list(dict.fromkeys(item.storage_location for item in items if item.storage_location))
+    recipient = [
+        plant_name,
+        translate("Plant {}", language).format(plant_id) if plant_id else "",
+        *[
+            "{} {} - {}".format(translate("Storage location", language), location, storage_locations[location].name)
+            if location in storage_locations and storage_locations[location].name
+            else "{} {}".format(translate("Storage location", language), location)
+            for location in locations
+        ],
+    ]
+
+    # The delivering supplier - name and address, else only the number:
+    supplier_text = ", ".join(
+        line
+        for line in (
+            get_address_lines(supplier, translate("Supplier", language), suppliers[0] if suppliers else None)
+            if supplier
+            else suppliers
+        )
+        if line
+    )
+
+    # A reversal (cancellation) refers to the document it reverses:
+    reversed_documents = list(
+        dict.fromkeys(
+            "{}/{}".format(item.reversed_document, item.reversed_document_year)
+            for item in items
+            if item.reversed_document
+        )
+    )
 
     data = SAPFormData(
         title=get_goods_movement_title(movement),
         number="{}/{}".format(movement.document, movement.document_year),
         document_date=movement.posting_date,
         sender=sender,
-        recipient=[
-            translate("Plant {}", language).format(first_item.plant or "") if first_item else "",
-            translate("Storage location {}", language).format(first_item.storage_location)
-            if first_item and first_item.storage_location
-            else "",
-        ],
+        recipient=recipient,
         info=[
             ("Material document", movement.document),
-            ("Year", movement.document_year),
             ("Posting date", format_date(movement.posting_date, country)),
             ("Document date", format_date(movement.document_date, country)),
             ("Delivery note", movement.reference_document or ""),
             ("Purchase order", ", ".join(purchase_orders)),
             ("Order", ", ".join(orders)),
+            ("Supplier number", ", ".join(suppliers)),
         ],
-        body=[movement.header_text or ""],
-        columns=["Item", "Material", "Description", "Quantity", "Unit", "Movement type", "Storage location"]
+        body=[
+            paragraph
+            for paragraph in (
+                "{}: {}".format(translate("Header text", language), movement.header_text)
+                if movement.header_text
+                else "",
+                "{}: {}".format(translate("Reversal of material document", language), ", ".join(reversed_documents))
+                if reversed_documents
+                else "",
+            )
+            if paragraph
+        ],
+        columns=[
+            "Item",
+            "Material",
+            "Description",
+            "Quantity",
+            "Unit",
+            "Purchase order",
+            "Movement type",
+            "Storage location",
+        ]
         + (["Batch"] if has_batches else []),
         rows=[
             [
                 get_item_number(item.item),
                 item.material or "",
-                item.text or "",
+                material_texts.get(item.material or "") or item.text or "",
                 format_quantity(item.quantity, country),
                 item.unit or "",
+                "{} / {}".format(item.purchase_order, get_item_number(item.purchase_order_item))
+                if item.purchase_order and item.purchase_order_item
+                else (item.purchase_order or ""),
                 item.movement_type or "",
                 item.storage_location or "",
             ]
@@ -2569,8 +2837,9 @@ def render_goods_movement_pdf(
             for item in items
         ],
         notes=[
-            ("Supplier", ", ".join(suppliers)),
+            ("Delivered by", supplier_text),
             ("Created by", movement.created_by_user or ""),
+            ("Received by", "______________________________    ______________"),
         ],
         footer=get_footer(sender, company_code_id, language),
         country=country,
@@ -2581,3 +2850,186 @@ def render_goods_movement_pdf(
 
 
 # end function render_goods_movement_pdf
+
+
+# The warranty objects of a claim (WarrantyObjectType) with the label of their number:
+WARRANTY_OBJECT_LABELS = {
+    "EQUI": "Equipment {}",
+    "FUNC": "Functional location {}",
+    "SERN": "Serial number {}",
+    "IBAS": "Installed base {}",
+    "VELO": "Vehicle {}",
+}
+
+
+def get_warranty_claim_version(
+    warranty_claim: SAPWarrantyClaimResponseModel,
+) -> SAPWarrantyClaimVersionResponseModel | None:
+    """Get the version of a warranty claim to print - the active one, else the latest.
+
+    Args:
+        warranty_claim (SAPWarrantyClaimResponseModel):
+            The warranty claim with its versions.
+
+    Returns:
+        SAPWarrantyClaimVersionResponseModel | None:
+            The version - None if the claim has no versions (not expanded).
+
+    """
+
+    versions = warranty_claim.versions or []
+    active = [version for version in versions if version.is_active]
+    candidates = active or versions
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda version: int(version.number) if (version.number or "").isdigit() else 0)
+
+
+# end function get_warranty_claim_version
+
+
+def render_warranty_claim_pdf(
+    warranty_claim: SAPWarrantyClaimResponseModel,
+    partner: SAPBusinessPartnerResponseModel | None = None,
+    company_code: SAPCompanyCodeResponseModel | None = None,
+    material_texts: dict[str, str] | None = None,
+    language: str | None = None,
+    logo: str | bytes | None = None,
+) -> bytes:
+    """Render an SAP warranty claim - a supplier claim as sent to the supplier, a customer claim as confirmation to the customer.
+
+    The items are the ones of the active version of the claim. The claimed amount of an item is the
+    amount claimed from the supplier (reimburser) for a supplier claim and the amount the customer
+    (claimant) claims for a customer claim - else the price of the item.
+
+    Args:
+        warranty_claim (SAPWarrantyClaimResponseModel):
+            The warranty claim with its versions and their items.
+        partner (SAPBusinessPartnerResponseModel | None, optional):
+            The business partner of the supplier (supplier claim) or the customer (customer claim) with
+            its addresses (recipient). Defaults to None.
+        company_code (SAPCompanyCodeResponseModel | None, optional):
+            The company code of the plant of the claim (sender). Defaults to None.
+        material_texts (dict[str, str] | None, optional):
+            The descriptions of the materials of the items (the claim items have none). Defaults to None.
+        language (str | None, optional):
+            The ISO language code of the document, e.g. "DE". Defaults to None: the language of the
+            partner's address in SAP, else of the company code, else English.
+        logo (str | bytes | None, optional):
+            The path or the content of a PNG / JPEG logo for the letterhead. Defaults to None.
+
+    Returns:
+        bytes:
+            The PDF.
+
+    Raises:
+        RuntimeError:
+            If ReportLab is not installed.
+
+    """
+
+    claim = warranty_claim
+    is_supplier_claim = bool(claim.supplier) and not claim.customer
+    country = (company_code.country if company_code else "") or ""
+    language = get_language(language, get_partner_language(partner), company_code.language if company_code else None)
+    company_code_id = company_code.company_code if company_code else None
+    sender = get_sender_lines(company_code, company_code_id, language) or [
+        translate("Plant {}", language).format(claim.plant or "")
+    ]
+    version = get_warranty_claim_version(claim)
+    items = sort_items(list(version.items or [])) if version else []
+    currency = (version.currency if version else None) or next(
+        (item.currency or item.price_currency for item in items if item.currency or item.price_currency), ""
+    )
+    material_texts = material_texts or {}
+
+    def claimed_amount(item: object) -> Decimal | None:
+        amounts = (
+            (item.reimburser_claim_amount, item.claimant_amount, item.price_amount)
+            if is_supplier_claim
+            else (item.claimant_amount, item.reimburser_claim_amount, item.price_amount)
+        )
+        return next(
+            (Decimal(str(amount)) for amount in amounts if amount not in (None, "") and Decimal(str(amount))), None
+        )
+
+    amounts = [claimed_amount(item) for item in items]
+    total = sum((amount for amount in amounts if amount is not None), Decimal(0))
+    object_label = WARRANTY_OBJECT_LABELS.get(claim.object_type or "")
+    warranty_object = (
+        translate(object_label, language).format(claim.external_object_number)
+        if object_label and claim.external_object_number
+        else claim.external_object_number or ""
+    )
+
+    data = SAPFormData(
+        title="Supplier Warranty Claim" if is_supplier_claim else "Customer Warranty Claim",
+        number=claim.claim_id,
+        document_date=claim.creation_date,
+        sender=sender,
+        recipient=get_address_lines(
+            partner,
+            translate("Supplier" if is_supplier_claim else "Customer", language),
+            claim.supplier if is_supplier_claim else claim.customer,
+        ),
+        info=[
+            ("Claim number", claim.claim_id),
+            ("Date", format_date(claim.creation_date, country)),
+            ("Claim type", claim.claim_type or ""),
+            (
+                "Supplier number" if is_supplier_claim else "Customer number",
+                (claim.supplier if is_supplier_claim else claim.customer) or "",
+            ),
+            (
+                "Purchasing organization",
+                (version.purchasing_organization if version and is_supplier_claim else None) or "",
+            ),
+            ("Plant", claim.plant or ""),
+            ("Reference", claim.source_object_number or ""),
+            ("Currency", currency or ""),
+        ],
+        body=[
+            "<b>{}:</b> {}".format(translate("Warranty object", language), warranty_object) if warranty_object else "",
+            "<b>{}:</b> {}".format(translate("Damage date", language), format_date(claim.damage_date, country))
+            if claim.damage_date
+            else "",
+            "<b>{}:</b> {}".format(translate("Repair date", language), format_date(claim.repair_date, country))
+            if claim.repair_date
+            else "",
+        ],
+        columns=["Item", "Material", "Description", "Quantity", "Unit", "Defect code", "Claimed amount"],
+        rows=[
+            [
+                get_item_number(item.item),
+                item.material or item.item_key or "",
+                material_texts.get(item.material or "", ""),
+                format_quantity(item.quantity, country),
+                item.unit or "",
+                item.defect_code or "",
+                format_amount(amount, country),
+            ]
+            for item, amount in zip(items, amounts, strict=True)
+        ],
+        totals=[("Total claimed amount", "{} {}".format(format_amount(total, country), currency).strip())]
+        if items
+        else [],
+        notes=[
+            (
+                "",
+                "Please quote the warranty claim number on all correspondence and credit memos."
+                if is_supplier_claim
+                else "We have registered your warranty claim with the items above and will inform you about our "
+                "decision.",
+            ),
+        ],
+        footer=get_footer(sender, company_code_id, language),
+        country=country,
+        language=language,
+        recipient_country=get_partner_country(partner),
+    )
+
+    return render_form(data, logo=logo)
+
+
+# end function render_warranty_claim_pdf

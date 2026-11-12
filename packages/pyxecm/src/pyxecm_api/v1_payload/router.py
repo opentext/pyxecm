@@ -592,7 +592,7 @@ async def get_payload_logfile_lines(
             The payload item ID.
         lines_request (LogLinesRequest):
             What to read: the query parameters offset, line, direction, limit, max_bytes,
-            levels, q, regex, case, word and count_only (see `lines_request_from_query`).
+            levels, q, regex, case, word, count_only and partial (see `lines_request_from_query`).
 
     Raises:
         HTTPException:

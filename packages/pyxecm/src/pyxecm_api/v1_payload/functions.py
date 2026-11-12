@@ -359,6 +359,14 @@ def lines_request_from_query(
         bool,
         Query(description="Return no lines but count them. The limit and max_bytes are ignored."),
     ] = False,
+    partial: Annotated[
+        bool,
+        Query(
+            description="While the log is still being written, return its unterminated end as a "
+            "provisional last line flagged 'partial'. The end cursor then stays at the start of that "
+            "line, so following the log from it returns the line again, longer or completed.",
+        ),
+    ] = False,
 ) -> LogLinesRequest:
     """Read the query parameters of a request for log lines (a dependency of the `/lines` endpoints).
 
@@ -387,6 +395,7 @@ def lines_request_from_query(
             case=case,
             word=word,
             count_only=count_only,
+            partial=partial,
         )
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc

@@ -58,7 +58,7 @@ class OTAC:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger = ReportingLoggerAttribute(default_logger, error_class=OTACError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=OTACError)
 
     def __init__(
         self,

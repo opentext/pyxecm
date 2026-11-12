@@ -60,7 +60,7 @@ class OTCA:
     AGENT = "ai"  # name of the agent role (used in messages)
     USER = "user"  # name of the user role (used in messages)
 
-    logger = ReportingLoggerAttribute(default_logger, error_class=OTCAError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=OTCAError)
 
     def __init__(
         self,

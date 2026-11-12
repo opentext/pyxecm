@@ -53,7 +53,7 @@ class AVTS:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger = ReportingLoggerAttribute(default_logger, error_class=AVTSError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=AVTSError)
 
     def __init__(
         self,

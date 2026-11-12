@@ -44,7 +44,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 DEFAULT_MAX_ERRORS = 1000
 
@@ -843,7 +843,13 @@ def record_request_error(
 # end function definition
 
 
-class ReportingLogger:
+# Type checkers see ReportingLogger as a logging.Logger, so that the passed-through
+# methods (debug(), info(), getChild(), ...) are typed. At runtime it is a plain proxy
+# that hands these calls to the wrapped logger via __getattr__():
+_ReportingLoggerBase = logging.Logger if TYPE_CHECKING else object
+
+
+class ReportingLogger(_ReportingLoggerBase):
     """Logger proxy whose error() and warning() can also record the message.
 
     Behaves like the wrapped logging.Logger - all other attributes and methods
@@ -891,7 +897,7 @@ class ReportingLogger:
         *args: object,
         report: bool = False,
         category: ErrorCategory | None = None,
-        **kwargs: object,
+        **kwargs: Any,  # noqa: ANN401
     ) -> None:
         """Log an error - and record it if report is True.
 
@@ -904,7 +910,7 @@ class ReportingLogger:
                 If True, record the error for an active capture_errors() block.
             category (ErrorCategory | None, optional):
                 The error category. If None, it is determined from the message.
-            **kwargs (object):
+            **kwargs (Any):
                 Additional keyword arguments for the logger (like exc_info).
 
         """
@@ -923,7 +929,7 @@ class ReportingLogger:
         *args: object,
         report: bool = False,
         category: ErrorCategory | None = None,
-        **kwargs: object,
+        **kwargs: Any,  # noqa: ANN401
     ) -> None:
         """Log a warning - and record it if report is True.
 
@@ -936,7 +942,7 @@ class ReportingLogger:
                 If True, record the warning for an active capture_errors() block.
             category (ErrorCategory | None, optional):
                 The error category. If None, it is determined from the message.
-            **kwargs (object):
+            **kwargs (Any):
                 Additional keyword arguments for the logger (like exc_info).
 
         """
@@ -948,7 +954,7 @@ class ReportingLogger:
 
     # end method definition
 
-    def __getattr__(self, name: str) -> object:
+    def __getattr__(self, name: str) -> Any:  # noqa: ANN401
         """Pass all other attributes and methods to the wrapped logger."""
 
         # Avoid endless recursion if the proxy is not initialized yet (e.g. during copy / unpickling):
@@ -976,7 +982,7 @@ class ReportingLoggerAttribute:
 
     ```python
     class OTDS:
-        logger = ReportingLoggerAttribute(default_logger, error_class=OTDSError)
+        logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=OTDSError)
     ```
     """
 

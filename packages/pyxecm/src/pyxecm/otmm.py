@@ -69,7 +69,7 @@ class OTMM:
     PRODUCT_NEW_METADATA_TABLE = "OTMM.FIELD.PRODUCT_NEW.TAB"
     PRODUCT_NEW_METADATA_FIELD = "OTMM.COLUMN.PRODUCT_NEW.TAB"
 
-    logger = ReportingLoggerAttribute(default_logger, error_class=OTMMError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=OTMMError)
 
     def __init__(
         self,

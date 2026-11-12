@@ -71,7 +71,7 @@ class OTPD:
 
     # Only class variables or class-wide constants should be defined here:
 
-    logger = ReportingLoggerAttribute(default_logger, error_class=OTPDError)
+    logger: ReportingLoggerAttribute = ReportingLoggerAttribute(default_logger, error_class=OTPDError)
 
     def __init__(
         self,

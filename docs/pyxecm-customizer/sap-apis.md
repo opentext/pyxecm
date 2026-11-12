@@ -97,10 +97,32 @@ APIs expect (e.g. `("4900000123", "2026")`).
 | Service                            | BO Type                     | Version        | Entity Sets                                                                                         | Purpose                                                                    |
 | ---------------------------------- | --------------------------- | -------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `API_PURCHASECONTRACT_PROCESS_SRV` | `BUS2014`                   | V2             | `A_PurchaseContract`, `A_PurchaseContractItem`                                                      | Create / Read / Update purchase contracts                                  |
+| `API_RFQ_PROCESS_SRV`              | `BUS2010`                   | V2             | `A_RequestForQuotation`, `A_RequestForQuotationItem`, `A_RequestForQuotationBidder`                 | Create / Read / Update / Delete requests for quotation, complete / cancel  |
+| `API_QTN_PROCESS_SRV`              | `BUS2011`                   | V2             | `A_SupplierQuotation`, `A_SupplierQuotationItem`                                                    | Create from RFQ / Read / Update / Delete supplier quotations, submit       |
+| `API_INFORECORD_PROCESS_SRV`       | -                           | V2             | `A_PurchasingInfoRecord`, `A_PurgInfoRecdOrgPlantData`                                              | Create / Read / Update / Delete (indicator) purchasing info records        |
+| `API_PURCHASING_SOURCE_SRV`        | -                           | V2             | `A_PurchasingSource`                                                                                | Create / Read / Update / Delete source list records                        |
 | `API_PURCHASEREQUISITION_2`        | `BUS2105` (item: `BUS2009`) | V4             | `PurchaseReqn`, `PurchaseReqnItem`, `PurchaseReqnAcctAssgmt`                                        | Create / Read / Update purchase requisitions                               |
 | `API_PURCHASEORDER_2`              | `BUS2012`                   | V4             | `PurchaseOrder`, `PurchaseOrderItem`, `PurchaseOrderScheduleLine`, `PurchaseOrderAccountAssignment` | Create / Read / Update / Delete purchase orders                            |
 | `API_SUPPLIERINVOICE_PROCESS_SRV`  | `BUS2081`                   | V2             | `A_SupplierInvoice`, `A_SuplrInvcItemPurOrdRef`, `A_SupplierInvoiceItemGLAcct`                      | Create / Read / Delete / Cancel / Release supplier invoices                |
 | `API_INBOUND_DELIVERY_SRV`         | `BUS2015`                   | V2 (`;v=0002`) | `A_InbDeliveryHeader`, `A_InbDeliveryItem`                                                          | Create / Read / Update / Delete inbound deliveries, putaway, goods receipt |
+
+Activating the sourcing services is enough for reading and for source list records. Creating
+documents also needs this customizing:
+
+- **Requests for quotation** use the new output management without a NAST fallback. Without
+  the BRF+ content of application object type `REQUEST_FOR_QUOTATION` (SAP Note 2248229, import
+  in transaction `BRFPLUS`), every create fails with `APOC_OR_MESSAGES/051` "ID ... is initial,
+  unknown, or it does not have the correct object type". An empty output determination (`OPD`)
+  is enough - SAP then only warns "No output parameters could be determined".
+- **Supplier quotations** (`CreateFromRFQ`) get the document type of the RFQ with category `Q`:
+  that type must exist for category `Q` (`T161`) and have follow-on document types
+  (`V_MMPUR_FOLL_DTY`, e.g. `F` / `NB` and `K` / `MK`), otherwise `MM_PUR_QTN/002`
+  "Follow-on doc. is inconsistent".
+- **Purchasing info records** with a price need a price condition type whose access sequence
+  contains the info record tables `017` and `018` (as the standard `0002`), otherwise
+  `CND_MAINT_LTD_API/009`. SAP takes the planned delivery time from the supplier's purchasing
+  organization data and ignores the API value (KBA 3696517) - the supplier needs one, otherwise
+  `APPL_MM_PUR_INFOREC/010`.
 
 ### Warranty
 

@@ -2694,6 +2694,7 @@ def render_goods_movement_pdf(
     storage_locations: dict[str, SAPStorageLocationResponseModel] | None = None,
     material_texts: dict[str, str] | None = None,
     supplier: SAPBusinessPartnerResponseModel | None = None,
+    received_by: str | None = None,
 ) -> bytes:
     """Render an SAP goods movement (material document) as goods receipt / issue slip.
 
@@ -2717,6 +2718,8 @@ def render_goods_movement_pdf(
             no description of their own. Defaults to None.
         supplier (SAPBusinessPartnerResponseModel | None, optional):
             The supplier of the goods (name and address). Defaults to None (supplier number only).
+        received_by (str | None, optional):
+            Who received the goods, e.g. "charris (Connie Harris)". Defaults to None: an empty signature line.
 
     Returns:
         bytes:
@@ -2839,7 +2842,7 @@ def render_goods_movement_pdf(
         notes=[
             ("Delivered by", supplier_text),
             ("Created by", movement.created_by_user or ""),
-            ("Received by", "______________________________    ______________"),
+            ("Received by", received_by or "______________________________    ______________"),
         ],
         footer=get_footer(sender, company_code_id, language),
         country=country,

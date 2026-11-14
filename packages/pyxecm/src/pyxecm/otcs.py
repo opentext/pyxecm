@@ -56,6 +56,7 @@ from pyxecm.errors import (
     ErrorSeverity,
     OTCSError,
     ReportingLoggerAttribute,
+    capture_errors,
     record_request_error,
     request_error_severity,
     warn_parse_error_response_deprecated,
@@ -17371,7 +17372,8 @@ class OTCS:
         Returns:
             iter:
                 A generator yielding one workspace instance per iteration.
-                If the REST API fails, returns no value.
+                If a request fails or results are incomplete, reports the error and terminates.
+                Use capture_errors() to distinguish failure from normal end-of-data.
 
         """
 
@@ -17395,24 +17397,41 @@ class OTCS:
                 metadata=metadata,
             )
 
-            # A None response means the underlying request failed (do_request
-            # returned None); the enumeration is truncated and the caller would
-            # otherwise silently receive only a partial result set. Make that loud.
-            # An empty results list on a present response is a genuine end-of-data
-            # and stays quiet (normal iterator termination).
             if response is None:
-                self.logger.warning(
+                self.logger.error(
                     "Workspace instance enumeration truncated for type name -> '%s' / type ID -> %s "
                     "on page -> %d (request failed); returning partial results only.",
                     type_name,
                     type_id,
                     page,
+                    report=True,
                 )
+                return
 
             total_pages = response.get("paging", {}).get("page_total") if response else None
 
             results = response.get("results") if response else None
             if not results:
+                paging = response.get("paging", {}) if response else {}
+                total_count = paging.get("total_count")
+                actions = paging.get("actions")
+                next_action = actions.get("next") if isinstance(actions, dict) else None
+                next_href = next_action.get("href") if isinstance(next_action, dict) else None
+                if (
+                    (isinstance(total_count, int) and retrieved < total_count)
+                    or (isinstance(total_pages, int) and page < total_pages)
+                    or next_href
+                ):
+                    self.logger.error(
+                        "Workspace instance enumeration for type name -> '%s' / type ID -> %s returned "
+                        "%s of %s instances on page -> %s.",
+                        type_name,
+                        type_id,
+                        retrieved,
+                        total_count,
+                        page,
+                        report=True,
+                    )
                 return  # natural iterator termination
 
             yield from results
@@ -17451,15 +17470,16 @@ class OTCS:
                     # complete one.
                     total_count = paging.get("total_count")
                     if isinstance(total_count, int) and retrieved < total_count:
-                        self.logger.warning(
-                            "Workspace instance enumeration for type name -> '%s' / type ID -> %s "
-                            "stopped after page -> %d with %d of %d instances; the server offered "
-                            "no further page (deep-offset result-window cap) - results are incomplete.",
+                        self.logger.error(
+                            "Workspace instance enumeration for type name -> '%s' / type ID -> %s stopped "
+                            "after page -> %s with %s of %s instances; the server offered no further page "
+                            "(deep-offset result-window cap) - results are incomplete.",
                             type_name,
                             type_id,
                             page,
                             retrieved,
                             total_count,
+                            report=True,
                         )
                     return
             # When the server provides no `next` action, its page total is the authority.
@@ -17469,9 +17489,33 @@ class OTCS:
             # enumeration prematurely.
             elif total_pages:
                 if page >= total_pages:
+                    total_count = paging.get("total_count")
+                    if isinstance(total_count, int) and retrieved < total_count:
+                        self.logger.error(
+                            "Workspace instance enumeration for type name -> '%s' / type ID -> %s stopped "
+                            "after page -> %s with %s of %s instances (page_total reached); results are incomplete.",
+                            type_name,
+                            type_id,
+                            page,
+                            retrieved,
+                            total_count,
+                            report=True,
+                        )
                     return
             elif len(results) < effective_limit:
                 # Fewer results than the (server-adjusted) page limit means the last page.
+                total_count = paging.get("total_count")
+                if isinstance(total_count, int) and retrieved < total_count:
+                    self.logger.error(
+                        "Workspace instance enumeration for type name -> '%s' / type ID -> %s stopped "
+                        "after page -> %s with %s of %s instances (short page); results are incomplete.",
+                        type_name,
+                        type_id,
+                        page,
+                        retrieved,
+                        total_count,
+                        report=True,
+                    )
                 return
 
             page += 1
@@ -19003,7 +19047,8 @@ class OTCS:
         Returns:
             iter:
                 A generator yielding one related workspace per iteration.
-                If the REST API fails, returns no value.
+                If a request fails or results are incomplete, reports the error and terminates.
+                Use capture_errors() to distinguish failure from normal end-of-data.
 
         """
 
@@ -19026,23 +19071,39 @@ class OTCS:
                 timeout=timeout,
             )
 
-            # A None response means the underlying request failed (do_request
-            # returned None); the relationship enumeration is truncated and the
-            # caller would otherwise silently receive only a partial result set.
-            # An empty results list on a present response is a genuine end-of-data
-            # and stays quiet (normal iterator termination).
             if response is None:
-                self.logger.warning(
+                self.logger.error(
                     "Workspace relationship enumeration truncated for workspace ID -> %s "
                     "on page -> %d (request failed); returning partial results only.",
                     workspace_id,
                     page,
+                    report=True,
                 )
+                return
 
             total_pages = response.get("paging", {}).get("page_total") if response else None
 
             results = response.get("results") if response else None
             if not results:
+                paging = response.get("paging", {}) if response else {}
+                total_count = paging.get("total_count")
+                actions = paging.get("actions")
+                next_action = actions.get("next") if isinstance(actions, dict) else None
+                next_href = next_action.get("href") if isinstance(next_action, dict) else None
+                if (
+                    (isinstance(total_count, int) and retrieved < total_count)
+                    or (isinstance(total_pages, int) and page < total_pages)
+                    or next_href
+                ):
+                    self.logger.error(
+                        "Workspace relationship enumeration for workspace ID -> %s returned %s of %s "
+                        "related items on page -> %s.",
+                        workspace_id,
+                        retrieved,
+                        total_count,
+                        page,
+                        report=True,
+                    )
                 return  # natural iterator termination
 
             yield from results
@@ -19081,14 +19142,15 @@ class OTCS:
                     # complete one.
                     total_count = paging.get("total_count")
                     if isinstance(total_count, int) and retrieved < total_count:
-                        self.logger.warning(
-                            "Workspace relationship enumeration for workspace ID -> %s stopped "
-                            "after page -> %d with %d of %d related items; the server offered no "
-                            "further page (deep-offset result-window cap) - results are incomplete.",
+                        self.logger.error(
+                            "Workspace relationship enumeration for workspace ID -> %s stopped after "
+                            "page -> %s with %s of %s related items; the server offered no further page "
+                            "(deep-offset result-window cap) - results are incomplete.",
                             workspace_id,
                             page,
                             retrieved,
                             total_count,
+                            report=True,
                         )
                     return
             # When the server provides no `next` action, its page total is the authority.
@@ -19098,9 +19160,31 @@ class OTCS:
             # enumeration prematurely.
             elif total_pages:
                 if page >= total_pages:
+                    total_count = paging.get("total_count")
+                    if isinstance(total_count, int) and retrieved < total_count:
+                        self.logger.error(
+                            "Workspace relationship enumeration for workspace ID -> %s stopped after "
+                            "page -> %s with %s of %s related items (page_total reached); results are incomplete.",
+                            workspace_id,
+                            page,
+                            retrieved,
+                            total_count,
+                            report=True,
+                        )
                     return
             elif len(results) < effective_limit:
                 # Fewer results than the (server-adjusted) page limit means the last page.
+                total_count = paging.get("total_count")
+                if isinstance(total_count, int) and retrieved < total_count:
+                    self.logger.error(
+                        "Workspace relationship enumeration for workspace ID -> %s stopped after "
+                        "page -> %s with %s of %s related items (short page); results are incomplete.",
+                        workspace_id,
+                        page,
+                        retrieved,
+                        total_count,
+                        report=True,
+                    )
                 return
 
             page += 1
@@ -28515,7 +28599,7 @@ class OTCS:
         business_objects: bool = False,
         page_size: int = 500,
         **kwargs: dict,
-    ) -> dict:
+    ) -> dict | None:
         """Traverse nodes using a queue and thread pool (BFS-style).
 
         This method is preferred for I/O or API intensive traversals.
@@ -28619,12 +28703,16 @@ class OTCS:
                 Additional arguments for executables.
 
         Returns:
-            dict:
+            dict | None:
                 Stats with processed and traversed counters. "processed" counts the
                 workspaces for which all node executables ran successfully. "traversed"
                 counts the relationship links that were followed - note that with the
                 default relationship_types of ["child", "parent"] a relationship is seen
                 from both of its endpoints and therefore counted twice.
+                Includes "complete": True on success. Returns None if initialization,
+                enumeration, or an executable raises; use capture_errors() for details.
+                An executable returning success=False stops its chain for that item only,
+                as before; it does not fail the traversal.
 
         """
 
@@ -28688,7 +28776,12 @@ class OTCS:
         #   2. Have get_workspace_type_name() calls during traversal hit the cache.
         #   3. Iterate the workspace types for queue initialization without an
         #      extra REST round-trip.
-        self.get_workspace_type_lookup(renew=True)
+        with capture_errors() as errors:
+            self.get_workspace_type_lookup(renew=True)
+        lookup_errors = [error for error in errors if error.severity == ErrorSeverity.ERROR]
+        if lookup_errors:
+            self.logger.error("Workspace traversal failed: %s", lookup_errors[-1].to_agent_message(), report=True)
+            return None
 
         # Resolve the server-side related workspace type filter once, now that the
         # full workspace type lookup is available. When filter_at_traversal is False
@@ -28707,6 +28800,37 @@ class OTCS:
             )
 
         lock = threading.Lock()
+        traversal_failed = threading.Event()
+        failure_message: str | None = None
+
+        def fail_traversal(message: str, *args: object) -> None:
+            """Report a traversal failure and stop accepting new work."""
+            nonlocal failure_message
+            self.logger.error(message, *args, report=True)
+            with lock:
+                if failure_message is None:
+                    failure_message = message % args if args else message
+                traversal_failed.set()
+
+        def checked_workspaces(workspaces: iter) -> iter:
+            """Capture enumeration failures without capturing callback enrichment errors."""
+            while not traversal_failed.is_set():
+                with capture_errors() as errors:
+                    try:
+                        workspace = next(workspaces)
+                    except StopIteration:
+                        enumeration_errors = [error for error in errors if error.severity == ErrorSeverity.ERROR]
+                        if enumeration_errors:
+                            fail_traversal(
+                                "Workspace enumeration failed: %s", enumeration_errors[-1].to_agent_message()
+                            )
+                        return
+                enumeration_errors = [error for error in errors if error.severity == ErrorSeverity.ERROR]
+                if enumeration_errors:
+                    fail_traversal("Workspace enumeration failed: %s", enumeration_errors[-1].to_agent_message())
+                    return
+                yield workspace
+
         # The strategy is not just a traversal-order preference, it is the main lever on
         # peak memory (see queue_high_water below), so an unrecognized value must not pass
         # silently - without this guard task_queue would stay unbound and surface as a
@@ -28768,6 +28892,8 @@ class OTCS:
             # workers started, so we neither re-query the REST API nor need to
             # repopulate the lookup here:
             for wksp_type_id, wksp_type_name in self._workspace_type_lookup.items():
+                if traversal_failed.is_set():
+                    return
                 if not self._check_filter(
                     workspace_type_name=wksp_type_name,
                     workspace_type_id=wksp_type_id,
@@ -28791,7 +28917,9 @@ class OTCS:
                     page_size=page_size,
                     metadata=False,  # this is NOT categories but field schema information
                 )
-                for workspace_instance in workspace_instances:
+                for workspace_instance in checked_workspaces(workspace_instances):
+                    if traversal_failed.is_set():
+                        return
                     # Add the workspace at depth 0 (roots are always depth 0):
                     workspace_id = self.get_result_value(response=workspace_instance, key="id")
 
@@ -28799,13 +28927,16 @@ class OTCS:
                     # high-water mark before adding more roots. Only the initializer
                     # blocks here; workers use the full timeout while init is running, so
                     # they stay alive draining and this cannot deadlock:
-                    while task_queue.qsize() > queue_high_water:
+                    while task_queue.qsize() > queue_high_water and not traversal_failed.is_set():
                         self.logger.debug(
                             "Queue size %d exceeds high-water mark %d, waiting for workers to drain...",
                             task_queue.qsize(),
                             queue_high_water,
                         )
                         time.sleep(0.1)
+
+                    if traversal_failed.is_set():
+                        return
 
                     with lock:
                         if workspace_id in enqueued_workspace_ids:
@@ -28842,8 +28973,8 @@ class OTCS:
             or an exception raised by the tracing decorator - every worker would
             loop on the empty queue forever and the pool would never shut down, so
             the caller would hang with no error reported. Setting the flag in a
-            "finally" turns that silent deadlock into a completed (if incomplete)
-            traversal plus a logged error.
+            "finally" ensures the pool shuts down, while the failure signal prevents
+            returning a partial traversal as successful.
             """
 
             nonlocal initialization_done
@@ -28851,10 +28982,7 @@ class OTCS:
             try:
                 init_traversal_queue()
             except Exception as init_error:
-                self.logger.error(
-                    "Initialization of traversal queue failed; traversal continues with the workspaces enqueued so far; error -> %s",
-                    str(init_error),
-                )
+                fail_traversal("Initialization of traversal queue failed; error -> %s", init_error)
             finally:
                 initialization_done = True
 
@@ -28906,6 +29034,9 @@ class OTCS:
                     with lock:
                         active_workers += 1
 
+                    if traversal_failed.is_set():
+                        continue
+
                     if max_depth is not None and current_depth > max_depth:
                         self.logger.debug("Reached maximum traversal depth of %d. Don't go deeper here...", max_depth)
                         continue  # will jump to finally, declare task done and only then continue while loop
@@ -28947,11 +29078,11 @@ class OTCS:
                             if not result_success:
                                 break
                         except Exception as e:
-                            self.logger.error(
+                            fail_traversal(
                                 "Failed to run workspace node executable on workspace -> '%s' (%s), error -> %s",
                                 workspace_name,
                                 workspace_id,
-                                str(e),
+                                e,
                             )
                             # Treat a raised exception exactly like an executable that
                             # returned success = False: stop the executable chain and
@@ -28965,6 +29096,9 @@ class OTCS:
                     else:
                         with lock:
                             results["processed"] += 1
+
+                    if traversal_failed.is_set():
+                        continue
 
                     # We only traverse the related workspaces if at least one executable
                     # indicated that further traversal is required. All configured
@@ -28986,7 +29120,9 @@ class OTCS:
                         )
 
                         # Traverse all related workspaces:
-                        for related_workspace in workspace_relationships:
+                        for related_workspace in checked_workspaces(workspace_relationships):
+                            if traversal_failed.is_set():
+                                break
                             # The relationship type is the only configured one, or (with several configured
                             # types) the direction of this related workspace as delivered by the REST API.
                             # Relationships created by a leading application have a 'BO_' prefix (e.g. 'BO_Child'):
@@ -29062,15 +29198,22 @@ class OTCS:
                                     if not result_success:
                                         break
                                 except Exception as e:
-                                    self.logger.error(
-                                        "Failed to run workspace relationship executable on workspace -> '%s' (%d) and related workspace -> '%s' (%d), error -> %s",
+                                    fail_traversal(
+                                        (
+                                            "Failed to run workspace relationship executable on workspace -> '%s' (%s) "
+                                            "and related workspace -> '%s' (%s), error -> %s"
+                                        ),
                                         workspace_name,
                                         workspace_id,
                                         related_workspace_name,
                                         related_workspace_id,
-                                        str(e),
+                                        e,
                                     )
+                                    break
                             # end executable in relationship_executables or []
+
+                            if traversal_failed.is_set():
+                                break
 
                             # Count the edge as traversed regardless of whether we
                             # (re-)queue its target below:
@@ -29105,7 +29248,7 @@ class OTCS:
                     # end if traverse:
 
                 except Exception as worker_error:
-                    self.logger.error("Worker thread crashed unexpectedly; error -> %s", str(worker_error))
+                    fail_traversal("Worker thread crashed unexpectedly; error -> %s", worker_error)
 
                 finally:
                     # This worker is going back to waiting on the queue:
@@ -29201,6 +29344,11 @@ class OTCS:
         # Stop the progress monitor now that the workers are done:
         monitor_stop.set()
         monitor_thread.join()
+
+        if traversal_failed.is_set():
+            self.logger.error("Workspace traversal failed: %s", failure_message, report=True)
+            return None
+        results["complete"] = True
 
         return results
 

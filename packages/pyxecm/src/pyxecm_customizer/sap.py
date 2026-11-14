@@ -415,6 +415,8 @@ REQUEST_TIMEOUT = 60.0
 # timeout), as do $metadata downloads and PDFs that SAP renders on a GET:
 REQUEST_READ_TIMEOUT = 20.0
 REQUEST_MAX_RETRIES = 3
+# Maximum number of objects read when searching an SAP business object by text (see find_business_object_ids()):
+SAP_BUSINESS_OBJECT_SEARCH_LIMIT = 50
 # Hint of the connection checks for TLS errors - an internal CA belongs into the CA bundle, switching off
 # the verification is only an option for test systems:
 TLS_ERROR_HINT = (
@@ -4568,6 +4570,137 @@ class SAP:
             case _:
                 self.log_error("Unsupported SAP business object type -> '%s' with ID -> '%s'.", bo_type, bo_id)
                 return None
+
+    # end method definition
+
+    def find_business_object_ids(
+        self,
+        bo_type: str,
+        search_field: str,
+        search_value: str,
+        bo_id: str = "",
+    ) -> list[str] | None:
+        """Find SAP objects by a text and return their business object IDs (as used by Extended ECM workspaces).
+
+        This allows to connect a workspace to the SAP object with the expected name even if the
+        object has a different ID in another SAP system / client (or the ID is used for another
+        object). Supported types: BUS2038 (maintenance notification), EQUI (equipment), BUS2007
+        (maintenance order), BUS1020 (maintenance plan), BUS2105 (purchase requisition), BUS0010
+        (functional location), BUS1006 (business partner), BUS0008 (plant), BUS0002 (company
+        code) and BUS2014 (purchase contract, see search_field). The search is done with the query
+        model of the type.
+
+        Args:
+            bo_type (str):
+                The SAP BOR object type, e.g. "BUS2038".
+            search_field (str):
+                The field of the query model of the type with the text, e.g. "text_contains"
+                (notification), "name_contains" (equipment, functional location, business partner,
+                plant, company code) or "description_contains" (order, maintenance plan, purchase
+                requisition). Purchase contracts have no name: use "supplier_name" with (a part of)
+                the name of the supplier of the contract.
+            search_value (str):
+                The text to search for (contained in the notification text, name or description).
+            bo_id (str, optional):
+                If given, only the object with this ID is searched. This verifies that the object with
+                that ID has the expected text. Defaults to "" (search all objects).
+
+        Returns:
+            list[str] | None:
+                The business object IDs in SAP's internal format (an empty list if no object matches).
+                None if the type or the search field is unsupported, the ID is invalid or the request
+                failed - in this case it is unknown whether the object exists (see last_error).
+
+        """
+
+        if not search_field or not search_value:
+            self.log_error(
+                "Cannot search SAP business object of type -> '%s': search field or value is empty.", bo_type
+            )
+            return None
+
+        bo_type_info = SAPBusinessObjectType.get(bo_type)
+        match bo_type:
+            case "BUS2038":
+                query_class, id_field = SAPMaintenanceNotificationQueryModel, "notification_ids"
+                getter, id_attribute = self.get_maintenance_notifications, "notification_id"
+            case "EQUI":
+                query_class, id_field = SAPEquipmentQueryModel, "equipment_ids"
+                getter, id_attribute = self.get_equipments, "equipment_id"
+            case "BUS2007":
+                query_class, id_field = SAPMaintenanceOrderQueryModel, "order_ids"
+                getter, id_attribute = self.get_maintenance_orders, "order_id"
+            case "BUS1020":
+                query_class, id_field = SAPMaintenancePlanQueryModel, "plan_ids"
+                getter, id_attribute = self.get_maintenance_plans, "plan_id"
+            case "BUS2105":
+                query_class, id_field = SAPPurchaseRequisitionQueryModel, "requisition_ids"
+                getter, id_attribute = self.get_purchase_requisitions, "requisition_id"
+            case "BUS0010":
+                query_class, id_field = SAPFunctionalLocationQueryModel, "functional_location_ids"
+                getter, id_attribute = self.get_functional_locations, "functional_location_id"
+            case "BUS1006":
+                query_class, id_field = SAPBusinessPartnerQueryModel, "business_partner_ids"
+                getter, id_attribute = self.get_business_partners, "business_partner_id"
+            case "BUS0008":
+                query_class, id_field = SAPPlantQueryModel, "plant_ids"
+                getter, id_attribute = self.get_plants, "plant_id"
+            case "BUS0002":
+                query_class, id_field = SAPCompanyCodeQueryModel, "company_codes"
+                getter, id_attribute = self.get_company_codes, "company_code"
+            case "BUS2014":
+                query_class, id_field = SAPPurchaseContractQueryModel, "contract_ids"
+                getter, id_attribute = self.get_purchase_contracts, "contract_id"
+            case _:
+                self.log_error("Search is not supported for SAP business object type -> '%s'.", bo_type)
+                return None
+
+        # The search criteria of the queries. Usually one query is enough:
+        criteria_list = [{search_field: search_value}]
+        if bo_type == "BUS2014" and search_field == "supplier_name":
+            # Purchase contracts have no name - they are identified by the name of their supplier,
+            # which we resolve into the supplier numbers (the suppliers whose name contains the text):
+            suppliers = self.get_suppliers(
+                SAPSupplierQueryModel(name_contains=search_value, limit=SAP_BUSINESS_OBJECT_SEARCH_LIMIT)
+            )
+            if suppliers is None:
+                return None
+            criteria_list = [{"supplier": supplier.supplier} for supplier in suppliers if supplier.supplier]
+
+        results = []
+        for criteria in criteria_list:
+            try:
+                if bo_id:
+                    # Validate the ID, but filter by the internal format (codes like plants have no ALPHA conversion):
+                    bo_type_info.get_key_fields(bo_id)
+                    criteria = {**criteria, id_field: [bo_id.strip()]}
+                query = query_class(limit=SAP_BUSINESS_OBJECT_SEARCH_LIMIT, **criteria)
+            except (ValueError, ValidationError) as error:
+                self.log_error(
+                    "Cannot search SAP business object of type -> '%s' with '%s' = '%s'; error -> %s",
+                    bo_type,
+                    search_field,
+                    search_value,
+                    str(error),
+                )
+                return None
+
+            query_results = getter(query=query)
+            if query_results is None:
+                return None
+            results.extend(query_results)
+
+        # Equipment is time dependent - the same ID can be returned more than once:
+        bo_ids = []
+        for result in results:
+            try:
+                result_id = bo_type_info.get_business_object_id((getattr(result, id_attribute),))
+            except ValueError:
+                continue
+            if result_id not in bo_ids:
+                bo_ids.append(result_id)
+
+        return bo_ids
 
     # end method definition
 
@@ -9752,7 +9885,8 @@ class SAP:
         """Change the status of an SAP inbound delivery (e.g. put away all items or post the goods receipt).
 
         The delivery functions require the current ETag of the delivery (If-Match header),
-        so the delivery is read first.
+        so the delivery is read first. Only ReverseGoodsReceipt is called without it - SAP
+        answers HTTP 501 if it gets one.
 
         Args:
             delivery_id (str):
@@ -9781,7 +9915,10 @@ class SAP:
         )
         if not exists:
             return False
-        headers["If-Match"] = etag or "*"
+        # ReverseGoodsReceipt rejects any ETag (HTTP 501 /IWBEP/CM_MGW_RT/018 "eTag handling for function
+        # import not implemented") - the other delivery functions require it:
+        if str(action) != SAPInboundDeliveryAction.REVERSE_GOODS_RECEIPT:
+            headers["If-Match"] = etag or "*"
         params = {
             name: odata_literal(value)
             for name, value in {"DeliveryDocument": delivery_id, **(parameters or {})}.items()

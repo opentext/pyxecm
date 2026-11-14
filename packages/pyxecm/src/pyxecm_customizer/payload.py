@@ -12709,6 +12709,139 @@ class Payload:
 
     # end method definition
 
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="verify_sap_business_object")
+    def verify_sap_business_object(
+        self,
+        workspace_name: str,
+        bo_type: str,
+        bo_id: str | None,
+        search_field: str,
+        search_value: str,
+    ) -> str | None:
+        """Determine the SAP business object ID that matches the expected name of the object.
+
+        IDs of SAP objects in a payload may not be valid in the SAP system the payload is deployed to:
+        the object may not exist or the ID may be used for another object. So we check that the object
+        with the ID has the search value and otherwise search for the object by the search value.
+
+        Args:
+            workspace_name (str):
+                The name of the workspace (for logging only).
+            bo_type (str):
+                The SAP business object type, e.g. "BUS2038".
+            bo_id (str | None):
+                The business object ID from the payload (SAP internal format). Can be empty.
+            search_field (str):
+                The field of the SAP query model of the type, e.g. "text_contains".
+            search_value (str):
+                The expected name of the object (text contained in the name / text / description).
+
+        Returns:
+            str | None:
+                The business object ID to connect the workspace to. This is the given ID if the object has
+                the expected name or if the check itself failed (SAP not reachable, unsupported type, ...).
+                None if there is no matching object (do not connect).
+
+        """
+
+        # 1. Check if the object with the ID has the expected name:
+        if bo_id:
+            bo_ids = self._sap.find_business_object_ids(
+                bo_type=bo_type,
+                search_field=search_field,
+                search_value=search_value,
+                bo_id=bo_id,
+            )
+            if bo_ids is None:
+                self.logger.warning(
+                    "Cannot check SAP business object (type -> '%s', ID -> '%s') for workspace -> '%s' (%s). Using the ID from the payload.",
+                    bo_type,
+                    bo_id,
+                    workspace_name,
+                    self._sap.last_error,
+                )
+                return bo_id
+            if bo_ids:
+                self.logger.debug(
+                    "SAP business object (type -> '%s', ID -> '%s') has the expected name ('%s' = '%s').",
+                    bo_type,
+                    bo_id,
+                    search_field,
+                    search_value,
+                )
+                return bo_id
+
+            # The ID does not match the name - either the object does not exist or it is another object:
+            sap_object = self._sap.get_business_object(bo_type=bo_type, bo_id=bo_id)
+            if sap_object:
+                # The name is in "text" (notification), "name" (equipment) or "description" (order):
+                sap_name = next(
+                    (
+                        getattr(sap_object, attr)
+                        for attr in ("text", "name", "description")
+                        if getattr(sap_object, attr, None)
+                    ),
+                    "",
+                )
+                self.logger.warning(
+                    "SAP business object with type -> '%s' and ID -> '%s' already exists but has a different name -> '%s' (expected '%s' = '%s') - so it is not connected to workspace -> '%s'. Searching for the object by name...",
+                    bo_type,
+                    bo_id,
+                    sap_name,
+                    search_field,
+                    search_value,
+                    workspace_name,
+                )
+            else:
+                self.logger.warning(
+                    "SAP business object with type -> '%s' and ID -> '%s' does not exist. Searching for the object by name ('%s' = '%s')...",
+                    bo_type,
+                    bo_id,
+                    search_field,
+                    search_value,
+                )
+
+        # 2. Search the object by name (it may have another ID in this SAP system):
+        bo_ids = self._sap.find_business_object_ids(
+            bo_type=bo_type,
+            search_field=search_field,
+            search_value=search_value,
+        )
+        if bo_ids is None:
+            self.logger.warning(
+                "Cannot search SAP business object (type -> '%s', '%s' = '%s') for workspace -> '%s' (%s).",
+                bo_type,
+                search_field,
+                search_value,
+                workspace_name,
+                self._sap.last_error,
+            )
+            # The search failed - we do not know if the object exists, so we keep the payload ID (if any):
+            return bo_id
+        if not bo_ids:
+            return None
+        if len(bo_ids) > 1:
+            self.logger.warning(
+                "SAP search delivered %d business objects of type -> '%s' with '%s' = '%s'! Picking the first one with ID -> %s...",
+                len(bo_ids),
+                bo_type,
+                search_field,
+                search_value,
+                bo_ids[0],
+            )
+        self.logger.info(
+            "Found SAP business object of type -> '%s' with '%s' = '%s' under ID -> %s%s.",
+            bo_type,
+            search_field,
+            search_value,
+            bo_ids[0],
+            " (payload ID -> {})".format(bo_id) if bo_id else "",
+        )
+
+        return bo_ids[0]
+
+    # end method definition
+
     @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="prepare_workspace_business_objects")
     def prepare_workspace_business_objects(
         self,
@@ -12765,8 +12898,10 @@ class Payload:
 
             if "bo_id" in business_object_data:
                 bo_id = business_object_data["bo_id"]
-                bo_search_field = None
-                bo_search_value = None
+                # For SAP the search fields are optional additions to the ID. They are used to check that the
+                # SAP object with this ID has the expected name (and to find it under another ID if not):
+                bo_search_field = business_object_data.get("bo_search_field")
+                bo_search_value = business_object_data.get("bo_search_value")
                 bo_filter_field = None
                 bo_filter_value = None
             elif "bo_search_field" not in business_object_data or "bo_search_value" not in business_object_data:
@@ -12877,6 +13012,49 @@ class Payload:
                     )
                     continue
             # end if external_system_type == "Guidewire" and not bo_id
+
+            # For SAP the business object ID in the payload may not be valid in the SAP system we deploy to
+            # (the object does not exist or the ID is used for another object). If the payload specifies a
+            # search field and value (name of the object) we check that the object with the ID has that name
+            # and otherwise search for the object by name. Without that information we keep the ID from the payload.
+            if external_system_type == "SAP" and bo_search_field and bo_search_value:
+                # If the SAP external system is used across payloads it may not be initialized here:
+                if not self._sap and external_system.get("external_system_hostname"):
+                    self._sap = self.init_sap(external_system)
+                if not self._sap:
+                    self.logger.warning(
+                        "SAP connection is not initialized. Cannot check business object (type -> '%s', ID -> '%s') for workspace -> '%s'!",
+                        bo_type,
+                        bo_id,
+                        name,
+                    )
+                else:
+                    bo_id = self.verify_sap_business_object(
+                        workspace_name=name,
+                        bo_type=bo_type,
+                        bo_id=bo_id,
+                        search_field=bo_search_field,
+                        search_value=bo_search_value,
+                    )
+                    if not bo_id:
+                        self.logger.warning(
+                            "Workspace -> '%s' will not be connected to SAP (%s) as no business object of type -> '%s' with '%s' = '%s' was found!",
+                            name,
+                            ext_system_id,
+                            bo_type,
+                            bo_search_field,
+                            bo_search_value,
+                        )
+                        continue
+            # end if external_system_type == "SAP" and bo_search_field and bo_search_value
+
+            if not bo_id:
+                self.logger.error(
+                    "Missing business object ID for workspace -> '%s' (type -> '%s'). Create workspace without connection...",
+                    name,
+                    bo_type,
+                )
+                continue
 
             self.logger.info(
                 "Workspace -> '%s' will be connected with external system -> '%s' (%s) with (type -> '%s', ID -> '%s').",

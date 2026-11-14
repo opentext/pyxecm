@@ -10153,25 +10153,25 @@ class SAPInboundDeliveryItemModel(SAPODataCreateModel):
     unit: SAPCode | None = Field(
         default=None,
         alias="DeliveryQuantityUnit",
-        description="Unit (English unit code), e.g. 'PC' (piece) - internal codes like 'ST' are rejected. Defaults to the order unit of the purchase order item.",
+        description="Unit (English unit code, e.g. piece = 'PC'; internal codes like 'ST' are rejected). Leave it empty - SAP takes the order unit of the purchase order item. Set it only if the user names a different unit.",
         max_length=3,
     )
     material: SAPCode | None = Field(
         default=None,
         alias="Material",
-        description="Material (product) number. Defaults to the material of the purchase order item.",
+        description="Material (product) number. Leave it empty - SAP takes the material of the purchase order item.",
         max_length=40,
     )
     plant: SAPCode | None = Field(
         default=None,
         alias="Plant",
-        description="Receiving plant, e.g. '1010'. Defaults to the plant of the purchase order item.",
+        description="Receiving plant. Leave it empty - SAP takes the plant of the purchase order item.",
         max_length=4,
     )
     storage_location: SAPCode | None = Field(
         default=None,
         alias="StorageLocation",
-        description="Storage location to receive the goods in, e.g. '101A'.",
+        description="Storage location to receive the goods in. Leave it empty unless the user names one - never guess a value; the storage locations of a plant are in sap_storage_location_query.",
         max_length=4,
     )
     batch: SAPCode | None = Field(

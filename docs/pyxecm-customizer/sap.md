@@ -301,8 +301,15 @@ concatenated composite keys); single-field IDs also accept the external format. 
 
 `None` means the lookup did not succeed, **not necessarily that the object is absent**:
 unsupported types, malformed IDs, authorization errors, and connectivity failures also return
-`None`. Inspect `sap.last_error` or use `pyxecm.capture_errors()` to distinguish failures. This
-method does not change workspace payload processing automatically.
+`None`. Inspect `sap.last_error` or use `pyxecm.capture_errors()` to distinguish failures.
+
+[`find_business_object_ids`](#pyxecm_customizer.sap.SAP.find_business_object_ids) searches the objects of a
+type by text (maintenance notifications, equipment, maintenance orders, maintenance plans, purchase requisitions,
+functional locations, business partners, plants, company codes and - by supplier name - purchase contracts; see the method for the search fields) and
+returns their business object IDs. With `bo_id` it only checks that the object with this ID has the text. The payload processing uses it
+to connect workspaces to the SAP object with the expected name (see
+[Business objects](payload-syntax.md#workspaces)). An empty list means that no object matches, `None` that the
+search was not possible (unsupported type or field, request failed).
 
 ## PDF documents
 

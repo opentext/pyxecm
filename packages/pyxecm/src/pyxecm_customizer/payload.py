@@ -12722,7 +12722,8 @@ class Payload:
 
         IDs of SAP objects in a payload may not be valid in the SAP system the payload is deployed to:
         the object may not exist or the ID may be used for another object. So we check that the object
-        with the ID has the search value and otherwise search for the object by the search value.
+        with the ID has the search value and omit the connection if it does not match.
+        Only when no ID is supplied do we search for the object by the search value.
 
         Args:
             workspace_name (str):
@@ -12740,7 +12741,8 @@ class Payload:
             str | None:
                 The business object ID to connect the workspace to. This is the given ID if the object has
                 the expected name or if the check itself failed (SAP not reachable, unsupported type, ...).
-                None if there is no matching object (do not connect).
+                None if the given ID is missing or mismatched, or a search without an ID finds no object
+                (do not connect).
 
         """
 
@@ -12784,7 +12786,7 @@ class Payload:
                     "",
                 )
                 self.logger.warning(
-                    "SAP business object with type -> '%s' and ID -> '%s' already exists but has a different name -> '%s' (expected '%s' = '%s') - so it is not connected to workspace -> '%s'. Searching for the object by name...",
+                    "SAP business object with type -> '%s' and ID -> '%s' already exists but has a different name -> '%s' (expected '%s' = '%s') - so it is not connected to workspace -> '%s'.",
                     bo_type,
                     bo_id,
                     sap_name,
@@ -12794,14 +12796,16 @@ class Payload:
                 )
             else:
                 self.logger.warning(
-                    "SAP business object with type -> '%s' and ID -> '%s' does not exist. Searching for the object by name ('%s' = '%s')...",
+                    "SAP business object with type -> '%s' and ID -> '%s' does not exist or does not match '%s' = '%s' - so it is not connected to workspace -> '%s'.",
                     bo_type,
                     bo_id,
                     search_field,
                     search_value,
+                    workspace_name,
                 )
+            return None
 
-        # 2. Search the object by name (it may have another ID in this SAP system):
+        # 2. Search the object by name only when no ID was supplied:
         bo_ids = self._sap.find_business_object_ids(
             bo_type=bo_type,
             search_field=search_field,
@@ -12899,7 +12903,7 @@ class Payload:
             if "bo_id" in business_object_data:
                 bo_id = business_object_data["bo_id"]
                 # For SAP the search fields are optional additions to the ID. They are used to check that the
-                # SAP object with this ID has the expected name (and to find it under another ID if not):
+                # SAP object with this ID has the expected name (otherwise the connection is omitted):
                 bo_search_field = business_object_data.get("bo_search_field")
                 bo_search_value = business_object_data.get("bo_search_value")
                 bo_filter_field = None
@@ -12920,18 +12924,41 @@ class Payload:
             # Lookup external system in this payload or a former processed payload:
             external_system = self.lookup_external_system(ext_system_id=ext_system_id)
 
-            # If the external system is not in the current payload but in the system
-            # we try to avoid errors in the following code.
-            # TODO: review REST APIs in OTCS 26.1 version to see if we can improve this.
-            response = self._otcs.get_external_system_connection(connection_name=ext_system_id)
-            if not external_system and response and response.get("results"):
-                # As the REST API for reading external system data is pretty much limited
-                # we try to do the bare minimum here:
-                if "Guidewire" in business_object_data["external_system"]:
-                    external_system_type = "Guidewire"
-                elif "Salesforce" in business_object_data["external_system"]:
-                    external_system_type = "Salesforce"
-                external_system = {"enabled": True, "reachable": True, "external_system_type": external_system_type}
+            # If the external system is not in the current payload but in the system we construct the
+            # minimum external system information the following code needs. Since OTCM 26.1 the REST API
+            # returns the connection type; for older versions we derive the type from the name.
+            response = (
+                self._otcs.get_external_system_connection(connection_name=ext_system_id)
+                if not external_system
+                else None
+            )
+            if response and response.get("results"):
+                connection = response["results"][0]
+                conn_type = connection.get("conn_type", "")
+                match conn_type:
+                    case "SF":
+                        external_system_type = "Salesforce"
+                    case "GWInstance":
+                        external_system_type = "Guidewire"
+                    case "SFInstance":
+                        external_system_type = "SuccessFactors"
+                    case "HTTP":
+                        # SAP and AppWorks both use the default web service adapter - SAP has an
+                        # application server URL like https://<host>/sap/bc/srt/...:
+                        external_system_type = "SAP" if "/sap/" in connection.get("asurl", "") else "AppWorks Platform"
+                    case _ if conn_type.startswith("ot.sap."):
+                        external_system_type = "SAP"
+                    case _ if "Guidewire" in ext_system_id:
+                        external_system_type = "Guidewire"
+                    case _ if "Salesforce" in ext_system_id:
+                        external_system_type = "Salesforce"
+                    case _:
+                        external_system_type = conn_type
+                external_system = {
+                    "enabled": bool(connection.get("enabled", True)),
+                    "reachable": True,
+                    "external_system_type": external_system_type,
+                }
                 self.logger.info(
                     "External system -> '%s' is not found in current payload but it exists in the system. Construct minimum external system information -> %s.",
                     ext_system_id,
@@ -13016,7 +13043,8 @@ class Payload:
             # For SAP the business object ID in the payload may not be valid in the SAP system we deploy to
             # (the object does not exist or the ID is used for another object). If the payload specifies a
             # search field and value (name of the object) we check that the object with the ID has that name
-            # and otherwise search for the object by name. Without that information we keep the ID from the payload.
+            # and otherwise omit the connection. Only without an ID do we search for the object by name.
+            # Without search information we keep the ID from the payload.
             if external_system_type == "SAP" and bo_search_field and bo_search_value:
                 # If the SAP external system is used across payloads it may not be initialized here:
                 if not self._sap and external_system.get("external_system_hostname"):

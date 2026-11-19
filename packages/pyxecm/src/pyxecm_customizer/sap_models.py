@@ -6759,6 +6759,23 @@ class SAPSupplierQuotationModel(SAPSourcingDocumentModel):
         alias="QuotationSubmissionDate",
         description="Date the supplier submitted the quotation, e.g. '2026-11-20'.",
     )
+    follow_on_category: Literal["F", "K"] | None = Field(
+        default=None,
+        alias="FollowOnDocumentCategory",
+        description=(
+            "What SAP creates when the quotation is awarded: 'F' purchase order, 'K' purchase contract. Give it only "
+            "if the user does; otherwise leave it empty (SAP applies the default of the quotation type)."
+        ),
+    )
+    follow_on_type: SAPCode | None = Field(
+        default=None,
+        alias="FollowOnDocumentType",
+        description=(
+            "Document type of the follow-on purchase order / contract, e.g. 'NB' - system specific - give it only if "
+            "the user does; otherwise leave it empty (SAP applies its default)."
+        ),
+        max_length=4,
+    )
 
 
 # Inherits from SAPODataModel - nested in SAPSupplierQuotationResponseModel.
@@ -6905,6 +6922,14 @@ class SAPSupplierQuotationResponseModel(SAPODataModel):
     incoterms: str | None = Field(default=None, alias="IncotermsClassification", description="Incoterms, e.g. 'FOB'.")
     incoterms_location: str | None = Field(
         default=None, alias="IncotermsLocation1", description="Location of the Incoterms."
+    )
+    follow_on_category: str | None = Field(
+        default=None,
+        alias="FollowOnDocumentCategory",
+        description="What SAP creates when the quotation is awarded: 'F' purchase order, 'K' purchase contract.",
+    )
+    follow_on_type: str | None = Field(
+        default=None, alias="FollowOnDocumentType", description="Document type of the follow-on document."
     )
     creation_date: ODataDate = Field(
         default=None, alias="CreationDate", description="Date the record was created in SAP."

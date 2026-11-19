@@ -732,6 +732,7 @@ class OTCS:
         otcs_config["facetsUrl"] = otcs_rest_url + "/v2/facets"
         otcs_config["facetBrowseUrl"] = otcs_rest_url + "/v3/app/container"
         otcs_config["transformUrlv1"] = otcs_rest_url + "/v1/viewx/transform"
+        otcs_config["esignWorkflowsUrlv2"] = otcs_rest_url + "/v2/esign/workflows"
 
         self._config = otcs_config
         self._otcs_ticket = None  # will be set by authenticate()
@@ -6297,6 +6298,72 @@ class OTCS:
             ]
 
         return response
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_signing_workflows")
+    def get_signing_workflows(self) -> dict | None:
+        """Get the signing workflows (eSignature) from Content Server.
+
+        Returns:
+            dict | None:
+                Response with the signing workflows or None if the request fails.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 20,
+                        'page': 1,
+                        'page_total': 1,
+                        'range_max': 1,
+                        'range_min': 1,
+                        'total_count': 1
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_name'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/esign/workflows',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'id': 50698,
+                        'name': 'esign_wf'
+                    }
+                ]
+            }
+            ```
+
+        """
+
+        request_url = self.config()["esignWorkflowsUrlv2"]
+        request_header = self.request_form_header()
+
+        self.logger.debug("Get signing workflows; calling -> %s", request_url)
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get signing workflows",
+        )
 
     # end method definition
 
@@ -26508,6 +26575,83 @@ class OTCS:
                 node_ids if node_ids is not None else node_id,
                 parent_id,
             ),
+        )
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="get_document_signing_workflows")
+    def get_document_signing_workflows(self, node_id: int) -> dict | None:
+        """Get a list of available signing workflows (eSignature) for a document.
+
+        Args:
+            node_id (int):
+                The node ID of the document.
+
+        Returns:
+            dict | None:
+                Response with the available signing workflows or None if the request fails.
+
+        Example:
+            ```json
+            {
+                'collection': {
+                    'paging': {
+                        'limit': 20,
+                        'page': 1,
+                        'page_total': 1,
+                        'range_max': 1,
+                        'range_min': 1,
+                        'total_count': 1
+                    },
+                    'sorting': {
+                        'sort': [
+                            {
+                                'key': 'sort',
+                                'value': 'asc_name'
+                            }
+                        ]
+                    }
+                },
+                'links': {
+                    'data': {
+                        'self': {
+                            'body': '',
+                            'content_type': '',
+                            'href': '/api/v2/esign/workflows?nodeId=89802',
+                            'method': 'GET',
+                            'name': ''
+                        }
+                    }
+                },
+                'results': [
+                    {
+                        'id': 50698,
+                        'name': 'esign_wf'
+                    }
+                ]
+            }
+            ```
+
+        """
+
+        query = {"nodeId": node_id}
+        encoded_query = urllib.parse.urlencode(query=query, doseq=True)
+
+        request_url = self.config()["esignWorkflowsUrlv2"] + "?{}".format(encoded_query)
+        request_header = self.request_form_header()
+
+        self.logger.debug(
+            "Get signing workflows for node with ID -> %d; calling -> %s",
+            node_id,
+            request_url,
+        )
+
+        return self.do_request(
+            url=request_url,
+            method="GET",
+            headers=request_header,
+            timeout=REQUEST_TIMEOUT,
+            failure_message="Failed to get signing workflows for node with ID -> {}".format(node_id),
         )
 
     # end method definition

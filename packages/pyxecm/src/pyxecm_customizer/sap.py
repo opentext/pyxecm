@@ -119,6 +119,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from http import HTTPStatus
 from importlib.metadata import version
 from typing import ClassVar
@@ -191,6 +192,7 @@ from .sap_models import (
     SAPInboundDeliveryModel,
     SAPInboundDeliveryQueryModel,
     SAPInboundDeliveryResponseModel,
+    SAPInvoiceReferenceCheckModel,
     SAPMaintenanceNotificationAction,
     SAPMaintenanceNotificationItemModel,
     SAPMaintenanceNotificationModel,
@@ -235,6 +237,9 @@ from .sap_models import (
     SAPOutboundDeliveryModel,
     SAPOutboundDeliveryQueryModel,
     SAPOutboundDeliveryResponseModel,
+    SAPOutboundDeliveryStorageLocationModel,
+    SAPOutboundDeliveryStorageLocationProblemModel,
+    SAPOutboundDeliveryStorageLocationsModel,
     SAPPersonQueryModel,
     SAPPersonResponseModel,
     SAPPlannedOrderComponentModel,
@@ -244,6 +249,7 @@ from .sap_models import (
     SAPPlantQueryModel,
     SAPPlantResponseModel,
     SAPProductDescriptionModel,
+    SAPProductExtensionModel,
     SAPProductionOrderAction,
     SAPProductionOrderModel,
     SAPProductionOrderOperationModel,
@@ -263,6 +269,7 @@ from .sap_models import (
     SAPPurchaseContractModel,
     SAPPurchaseContractQueryModel,
     SAPPurchaseContractResponseModel,
+    SAPPurchaseOrderHistoryModel,
     SAPPurchaseOrderItemModel,
     SAPPurchaseOrderModel,
     SAPPurchaseOrderQueryModel,
@@ -299,6 +306,7 @@ from .sap_models import (
     SAPStorageLocationQueryModel,
     SAPStorageLocationResponseModel,
     SAPSupplierCompanyModel,
+    SAPSupplierInvoiceCompletionModel,
     SAPSupplierInvoiceGLAccountItemQueryModel,
     SAPSupplierInvoiceGLAccountItemResponseModel,
     SAPSupplierInvoiceItemQueryModel,
@@ -317,6 +325,7 @@ from .sap_models import (
     SAPTaskListOperationModel,
     SAPTaskListQueryModel,
     SAPTaskListResponseModel,
+    SAPWarrantyClaimCheckModel,
     SAPWarrantyClaimItemModel,
     SAPWarrantyClaimItemResponseModel,
     SAPWarrantyClaimModel,
@@ -406,6 +415,10 @@ SAML_MAX_VALIDITY_SECONDS = 300
 # Assertions are valid from this many seconds in the past, for SAP clocks that run behind:
 SAML_CLOCK_SKEW_SECONDS = 60
 SAML_MIN_KEY_SIZE = 2048
+
+# The status values of the picking and goods movement of outbound deliveries (and items) that are not done yet -
+# "A" not started, "B" partially done ("C" done, empty: not relevant):
+OUTBOUND_DELIVERY_OPEN_STATUSES = ("A", "B")
 # Warn at startup if the signing certificate expires within this many days:
 SAML_CERTIFICATE_EXPIRY_WARNING_DAYS = 30
 
@@ -8197,6 +8210,139 @@ class SAP:
 
     # end method definition
 
+    def check_warranty_claim(self, claim: SAPWarrantyClaimModel) -> SAPWarrantyClaimCheckModel:
+        """Check a new warranty claim for what SAP rejects - before it is created.
+
+        SAP checks the claim only when it is created. A user who confirmed the claim then confirms it a second
+        time for the corrected claim. SAP requires:
+
+        * The repair date ("Enter the repair date") and the damage date (WTY_RAP/038 "Enter the damage date").
+        * An existing warranty object (WTY_RAP/013 "Equipment ... does not exist", WTY_RAP/100 "Functional
+          location ... do not exist"). SAP silently hides equipment and functional locations the user may not
+          display (access control of API_EQUIPMENT / API_FUNCTIONALLOCATION) - but the warranty claim API
+          checks the object without these restrictions. If the user sees no objects of the kind at all, the
+          object can't be checked and is left to SAP (object_unchecked); only if the user sees others, the
+          object is missing (or hidden by an object specific authorization).
+        * A sales area (sales organization, distribution channel, division) of the claim partner as a customer
+          for every version: of the customer of a customer claim, of the customer number of the supplier of a
+          supplier claim (it may differ from the supplier and business partner number). SAP rejects other
+          sales areas ("Invalid combination of sales org., distribution channel, and division", "partner ...
+          is not setup in sales organization") and a supplier without a customer number (WTY_RAP/015).
+          Missing sales area fields of a version are filled in place if the sales area is unique.
+
+        Reads that fail (e.g. no scope for the equipment API or the customer master) are left to SAP.
+
+        Args:
+            claim (SAPWarrantyClaimModel):
+                The claim to create - missing sales area fields of its versions are filled in place.
+
+        Returns:
+            SAPWarrantyClaimCheckModel:
+                The problems found - see its errors property.
+
+        """
+
+        check = SAPWarrantyClaimCheckModel()
+
+        if not claim.repair_date:
+            check.missing_fields.append("WrntyClaimRepairDate")
+        if not claim.damage_date:
+            check.missing_fields.append("WrntyClaimDamageDate")
+
+        number = claim.external_object_number
+        if claim.object_type and not number:
+            check.missing_fields.append("WrntyExternalObjectNumber")
+        elif claim.object_type == "EQUI":
+            found = self.get_equipment(equipment_id=number)
+            error = self.last_error
+            # A failed read (e.g. no scope for the equipment API) is left to SAP:
+            if found is None and (not error or "not_found" in error or "Cannot find" in error):
+                others = self.get_equipments(query=SAPEquipmentQueryModel(limit=1))
+                if others is None or not others:
+                    check.object_unchecked = True
+                else:
+                    check.object_error = (
+                        "Equipment '{}' was not found in SAP or the user has no authorization to display it.".format(
+                            number
+                        )
+                    )
+        elif claim.object_type == "FUNC":
+            locations = self.get_functional_locations(
+                query=SAPFunctionalLocationQueryModel(label_contains=number, limit=10)
+            )
+            if locations is not None and not any(location.label.upper() == number.upper() for location in locations):
+                others = self.get_functional_locations(query=SAPFunctionalLocationQueryModel(limit=1))
+                if others is None or not others:
+                    check.object_unchecked = True
+                else:
+                    check.object_error = (
+                        "Functional location '{}' was not found in SAP or the user has no authorization to "
+                        "display it. The object of a functional location claim is its label "
+                        "(e.g. 'XX-XXX-XX').".format(number)
+                    )
+
+        if not claim.versions:
+            return check
+
+        customer_id = claim.customer
+        if not customer_id and claim.supplier:
+            supplier = self.get_supplier(supplier_id=claim.supplier, expand_items=False)
+            if supplier is None:
+                return check
+            if not supplier.customer:
+                check.sales_area_error = (
+                    "Supplier '{}' has no customer number in SAP - SAP accepts supplier claims only for suppliers "
+                    "that are also customers (WTY_RAP/015). The supplier must be set up as a customer in SAP "
+                    "first.".format(claim.supplier)
+                )
+                return check
+            customer_id = supplier.customer
+        if not customer_id:
+            return check
+
+        partner = self.get_customer(customer_id=customer_id, expand_items=True)
+        if partner is None or partner.customer_data is None or partner.customer_data.sales_areas is None:
+            return check
+        sales_areas = partner.customer_data.sales_areas
+        names = ", ".join(
+            "{}/{}/{}".format(area.sales_organization, area.distribution_channel, area.division) for area in sales_areas
+        )
+        whose = "customer '{}'".format(customer_id) + (
+            " (the customer number of supplier '{}')".format(claim.supplier) if not claim.customer else ""
+        )
+        if not sales_areas:
+            check.sales_area_error = "{} has no sales area in SAP - SAP needs one for the claim versions.".format(
+                whose.capitalize()
+            )
+            return check
+
+        fields = ("sales_organization", "distribution_channel", "division")
+        for claim_version in claim.versions:
+            given = {field: getattr(claim_version, field) for field in fields if getattr(claim_version, field)}
+            matches = [
+                area for area in sales_areas if all(getattr(area, field) == value for field, value in given.items())
+            ]
+            if len(matches) == 1:
+                for field in fields:
+                    setattr(claim_version, field, getattr(matches[0], field))
+                continue
+            if not matches:
+                check.sales_area_error = (
+                    "The sales area {} of the claim version is no sales area of {} - use one of: {} "
+                    "(sales organization/distribution channel/division; not the division of the product).".format(
+                        "/".join(given.get(field, "*") for field in fields), whose, names
+                    )
+                )
+            else:
+                check.sales_area_error = "{} has several sales areas ({}) - one must be chosen for the claim.".format(
+                    whose.capitalize(), names
+                )
+            break
+
+        return check
+
+    # end method definition
+
     def get_warranty_claim(self, claim_id: str, expand_versions: bool = True) -> SAPWarrantyClaimResponseModel | None:
         """Get a single SAP warranty claim by its number.
 
@@ -9667,6 +9813,186 @@ class SAP:
 
     # end method definition
 
+    def get_missing_outbound_delivery_storage_locations(
+        self, delivery_ids: list[str], storage_locations: dict[str, str] | None = None
+    ) -> SAPOutboundDeliveryStorageLocationsModel:
+        """Determine the storage locations of the items of outbound deliveries that have none.
+
+        Picking and the goods issue fail for items without a storage location ("[M7/018] Enter Location"),
+        and SAP doesn't always determine it when the delivery is created. Determine the locations before
+        the user confirms the action - otherwise it fails after the confirmation and setting the storage
+        location needs another confirmation.
+
+        A storage location given for the material is taken as is. Otherwise it is the only storage location
+        with enough unrestricted-use stock that SAP can issue for the item: own stock and the sales order
+        stock of the delivered sales order item (see the hint of [M7/021]), of the batch of the item if it
+        has one. Items without a goods movement (e.g. text items), deliveries that are already posted and
+        deliveries or stock that can't be read are left to SAP.
+
+        Args:
+            delivery_ids (list[str]):
+                The delivery numbers.
+            storage_locations (dict[str, str] | None, optional):
+                The storage locations given per material, e.g. {"P-100": "0001"}. Defaults to None.
+
+        Returns:
+            SAPOutboundDeliveryStorageLocationsModel:
+                The storage locations to set (update_outbound_delivery()) and the items whose storage
+                location can't be determined - with the stock that is available.
+
+        """
+
+        given = {key.strip().upper(): value.strip().upper() for key, value in (storage_locations or {}).items()}
+        result = SAPOutboundDeliveryStorageLocationsModel()
+
+        for delivery_id in delivery_ids:
+            delivery = self.get_outbound_delivery(delivery_id=delivery_id, expand_items=True)
+            if delivery is None or delivery.goods_movement_status == "C":
+                # Errors and deliveries already posted are reported by the status change itself:
+                continue
+            for item in delivery.items or []:
+                # An empty goods movement status means the item has no goods movement (e.g. a text item):
+                if (
+                    item.storage_location
+                    or item.goods_movement_status not in OUTBOUND_DELIVERY_OPEN_STATUSES
+                    or not item.material
+                ):
+                    continue
+                storage_location = given.get(item.material)
+                if not storage_location:
+                    stock = self.get_material_stock(
+                        query=SAPMaterialStockQueryModel(
+                            materials=[item.material], plants=[item.plant], stock_types=["01"], limit=100
+                        )
+                    )
+                    if stock is None:
+                        continue
+                    available: dict[str, Decimal] = {}
+                    for segment in stock:
+                        order_stock = segment.special_stock_type == "E" and (
+                            (segment.sales_order or "").lstrip("0"),
+                            (segment.sales_order_item or "").lstrip("0"),
+                        ) == (
+                            (item.reference_document or "").lstrip("0"),
+                            (item.reference_document_item or "").lstrip("0"),
+                        )
+                        if (
+                            segment.storage_location
+                            and (not segment.special_stock_type or order_stock)
+                            and (not item.batch or segment.batch == item.batch)
+                        ):
+                            available[segment.storage_location] = available.get(
+                                segment.storage_location, Decimal(0)
+                            ) + (segment.quantity or Decimal(0))
+                    enough = [
+                        location
+                        for location, quantity in available.items()
+                        if quantity >= (item.quantity_in_base_unit or Decimal(0))
+                    ]
+                    if len(enough) != 1:
+                        result.problems.append(
+                            SAPOutboundDeliveryStorageLocationProblemModel(
+                                delivery_id=delivery_id,
+                                item=item.item,
+                                material=item.material,
+                                quantity=item.quantity_in_base_unit,
+                                unit=item.base_unit,
+                                enough_stock_in_several=bool(enough),
+                                stock=available,
+                            )
+                        )
+                        continue
+                    storage_location = enough[0]
+
+                result.assignments.append(
+                    SAPOutboundDeliveryStorageLocationModel(
+                        delivery_id=delivery_id,
+                        item=item.item,
+                        material=item.material,
+                        quantity=item.quantity_in_base_unit,
+                        unit=item.base_unit,
+                        storage_location=storage_location,
+                    )
+                )
+
+        return result
+
+    # end method definition
+
+    def process_outbound_delivery(
+        self,
+        delivery_id: str,
+        action: SAPOutboundDeliveryAction,
+        parameters: dict | None = None,
+        storage_locations: dict[str, str] | None = None,
+        done: list[str] | None = None,
+    ) -> bool:
+        """Change the status of an SAP outbound delivery - with the steps SAP needs before.
+
+        * The storage locations are set first (update_outbound_delivery()).
+        * For the goods issue, the open picking steps are done first: the picking and its confirmation, if
+          SAP requires them for the delivery. The confirmation status is read after the picking, as the
+          picking can make the confirmation due. A goods issue that is already posted is not posted again.
+        * Then the action itself (change_outbound_delivery_status()).
+
+        The method stops at the first error.
+
+        Args:
+            delivery_id (str):
+                The delivery number, e.g. "80000123".
+            action (SAPOutboundDeliveryAction):
+                The status action.
+            parameters (dict | None, optional):
+                Additional parameters of the action, see change_outbound_delivery_status(). Defaults to None.
+            storage_locations (dict[str, str] | None, optional):
+                The storage locations to set first per item number, e.g. {"000010": "0001"} (see
+                get_missing_outbound_delivery_storage_locations()). Defaults to None.
+            done (list[str] | None, optional):
+                A list that receives the names of the steps done - also if a later step fails, e.g.
+                ["set storage location", "pick all items"]. Defaults to None.
+
+        Returns:
+            bool:
+                True if the action (or the goods issue before) has been done, False in case of an error.
+
+        """
+
+        if done is None:
+            done = []
+
+        if storage_locations:
+            if not self.update_outbound_delivery(
+                delivery_id=delivery_id,
+                item_changes={item: {"StorageLocation": location} for item, location in storage_locations.items()},
+            ):
+                return False
+            done.append("set storage location")
+
+        if action == SAPOutboundDeliveryAction.POST_GOODS_ISSUE:
+            for step, status in (
+                (SAPOutboundDeliveryAction.PICK_ALL_ITEMS, "picking_status"),
+                (SAPOutboundDeliveryAction.CONFIRM_PICKING_ALL_ITEMS, "picking_confirmation_status"),
+            ):
+                delivery = self.get_outbound_delivery(delivery_id=delivery_id, expand_items=False)
+                if delivery is None:
+                    return False
+                if delivery.goods_movement_status == "C":
+                    self.logger.info("The goods issue of SAP outbound delivery -> '%s' is already posted.", delivery_id)
+                    done.append("goods issue was already posted - nothing to do")
+                    return True
+                if getattr(delivery, status) in OUTBOUND_DELIVERY_OPEN_STATUSES:
+                    if not self.change_outbound_delivery_status(delivery_id=delivery_id, action=step):
+                        return False
+                    done.append(step.name.lower().replace("_", " "))
+
+        if not self.change_outbound_delivery_status(delivery_id=delivery_id, action=action, parameters=parameters):
+            return False
+        done.append(action.name.lower().replace("_", " "))
+
+        return True
+
+    # end method definition
+
     def iter_inbound_deliveries(
         self, query: SAPInboundDeliveryQueryModel | None = None
     ) -> SAPODataIterator[SAPInboundDeliveryResponseModel]:
@@ -10139,6 +10465,251 @@ class SAP:
             params={"$expand": SAPSupplierInvoiceQueryModel.EXPAND} if expand_items else None,
             label="supplier invoice -> {}/{}".format(invoice_id, fiscal_year),
         )
+
+    # end method definition
+
+    def check_supplier_invoice_reference(
+        self, invoicing_party: str, company_code: str, reference: str
+    ) -> SAPInvoiceReferenceCheckModel | None:
+        """Find the invoices of a supplier with the same supplier invoice number (advisory duplicate check).
+
+        The invoices are sorted by what they mean for a duplicate: active invoices (posted or parked) are
+        possible duplicates, deleted invoices and reversed invoices with their reversal documents are not.
+
+        Args:
+            invoicing_party (str):
+                The supplier (leading zeros are ignored).
+            company_code (str):
+                The company code of the invoice.
+            reference (str):
+                The supplier's invoice number.
+
+        Returns:
+            SAPInvoiceReferenceCheckModel | None:
+                The matching invoices sorted into possible duplicates, deleted and reversed documents
+                or None in case of an error.
+
+        """
+
+        existing = self.get_supplier_invoices(
+            query=SAPSupplierInvoiceQueryModel(
+                invoicing_party=invoicing_party, company_code=company_code, supplier_invoice_reference=reference
+            )
+        )
+        if existing is None:
+            return None
+
+        check = SAPInvoiceReferenceCheckModel()
+        for entry in existing:
+            if (
+                (entry.invoicing_party or "").lstrip("0") != invoicing_party.lstrip("0")
+                or entry.company_code != company_code
+                or entry.supplier_invoice_reference != reference
+            ):
+                continue
+            number = "{}/{}".format(entry.invoice_id, entry.fiscal_year)
+            if entry.is_reversal or entry.is_reversed:
+                # A cancelled invoice comes with its reversal document:
+                check.reversed.append(number)
+            elif entry.status == "2":
+                check.deleted.append("{}: {}".format(number, entry.status_name or "Unknown status"))
+            else:
+                check.possible_duplicates.append("{}: {}".format(number, entry.status_name or "Unknown status"))
+
+        return check
+
+    # end method definition
+
+    def get_purchase_order_history(
+        self, order_id: str, supplier_invoice_reference: str | None = None
+    ) -> SAPPurchaseOrderHistoryModel | None:
+        """Get the goods receipts and supplier invoices of an SAP purchase order.
+
+        Args:
+            order_id (str):
+                The purchase order number, e.g. "4500000123".
+            supplier_invoice_reference (str | None, optional):
+                The supplier's invoice number to check for duplicates across all purchase orders of the
+                supplier and company code of the order (see check_supplier_invoice_reference()). If the
+                check fails, the history is still returned and the check carries the reason in
+                check_failed. Defaults to None (no check).
+
+        Returns:
+            SAPPurchaseOrderHistoryModel | None:
+                The goods receipts (movement type 101), invoice items and invoices of the purchase order
+                or None in case of an error.
+
+        """
+
+        receipts = self.get_goods_movement_items(
+            query=SAPGoodsMovementItemQueryModel(purchase_orders=[order_id], movement_types=["101"])
+        )
+        if receipts is None:
+            return None
+        invoice_items = self.get_supplier_invoice_items(
+            query=SAPSupplierInvoiceItemQueryModel(purchase_orders=[order_id])
+        )
+        if invoice_items is None:
+            return None
+        invoices = []
+        if invoice_items:
+            invoices = self.get_supplier_invoices(
+                query=SAPSupplierInvoiceQueryModel(invoice_ids=sorted({item.invoice_id for item in invoice_items}))
+            )
+            if invoices is None:
+                return None
+
+        invoice_reference_check = None
+        if supplier_invoice_reference:
+            order = self.get_purchase_order(order_id=order_id, expand_items=False)
+            if order is None or not order.supplier or not order.company_code:
+                invoice_reference_check = SAPInvoiceReferenceCheckModel(
+                    CheckFailed=self.last_error
+                    or "Cannot read the supplier of SAP purchase order -> '{}'".format(order_id)
+                )
+            else:
+                invoice_reference_check = self.check_supplier_invoice_reference(
+                    invoicing_party=order.supplier,
+                    company_code=order.company_code,
+                    reference=supplier_invoice_reference,
+                ) or SAPInvoiceReferenceCheckModel(
+                    CheckFailed=self.last_error or "SAP did not return the existing invoices"
+                )
+
+        return SAPPurchaseOrderHistoryModel(
+            PurchaseOrder=order_id,
+            GoodsReceipts=receipts,
+            InvoiceItems=invoice_items,
+            Invoices=invoices,
+            InvoiceReferenceCheck=invoice_reference_check,
+        )
+
+    # end method definition
+
+    def complete_supplier_invoice(self, invoice: SAPSupplierInvoiceModel) -> SAPSupplierInvoiceCompletionModel:
+        """Fill in what SAP needs for a supplier invoice and the caller can't know - before create_supplier_invoice().
+
+        The invoice is changed in place - show it to the user before it is created. Values given by the
+        caller are kept. SAP determines whether a tax code is required (by the configuration of the
+        company), so a missing one is only reported as warning. Verified in S/4HANA:
+
+        * The tax code and tax jurisdiction of the purchase order item: in company codes with tax
+          jurisdictions (US), posting fails without the jurisdiction (M8/757 "Enter a tax jurisdiction code").
+        * The order unit of items with a quantity: without it SAP rejects the item (BM/034 "No measurement
+          unit is assigned to ISO code SPACE").
+        * The supplier of the purchase order if the invoice has none.
+        * The goods receipt of items with goods-receipt-based invoice verification: SAP rejects them
+          without it (M8/375 "Fill in mandatory field 'ReferenceDocument, -FiscalYear, -Item'"). An item gets
+          the goods receipt if its purchase order item has exactly one (not cancelled).
+        * No account assignments for a purchase order item with a single account assignment: SAP takes it
+          from the purchase order item and rejects one in the invoice, also with the same values (M8/892
+          "There is different account assignment information in item ..."). The account assignments of
+          items with multiple account assignment get the order unit (BM/034 without it).
+        * The tax jurisdiction of G/L account items with a cost center: in company codes with tax
+          jurisdictions (US), a parked invoice whose G/L account items have none can't be posted (FF/718 "Tax
+          code I0 does not exist for jurisdiction code"), and parked invoices can't be changed via the API.
+          The jurisdiction belongs to the cost center, but the cost center API doesn't return it - it is
+          taken from the latest invoice G/L account item of the cost center.
+
+        Args:
+            invoice (SAPSupplierInvoiceModel):
+                The invoice - its purchase order items and G/L account items are completed in place.
+
+        Returns:
+            SAPSupplierInvoiceCompletionModel:
+                The goods receipt items of the purchase orders of the invoice (for the hint if SAP rejects
+                the invoice) and the warnings. Lookups that fail are warnings, not errors.
+
+        """
+
+        completion = SAPSupplierInvoiceCompletionModel()
+
+        order_items = {}
+        order_errors = {}
+        for order_id in sorted({item.purchase_order for item in invoice.purchase_order_items}):
+            order = self.get_purchase_order(order_id=order_id, expand_items=True)
+            if order is None:
+                order_errors[order_id] = self.last_error or "SAP did not return the purchase order"
+            if order and not invoice.invoicing_party:
+                # SAP takes the supplier of the purchase order:
+                invoice.invoicing_party = order.supplier or None
+            for order_item in (order.items or []) if order else []:
+                order_items[(order_id, int(order_item.item))] = order_item
+
+        open_items = []
+        for item in invoice.purchase_order_items:
+            order_item = order_items.get((item.purchase_order, int(item.purchase_order_item)))
+            item.tax_code = item.tax_code or (order_item.tax_code if order_item else None) or None
+            if not item.tax_code:
+                if item.purchase_order in order_errors:
+                    reason = "purchase order lookup failed: {}".format(order_errors[item.purchase_order])
+                elif order_item is None:
+                    reason = "purchase order item was not returned"
+                else:
+                    reason = "no tax code was supplied or inherited from the purchase order"
+                completion.warnings.append(
+                    "Tax code unresolved for purchase order item {}/{}: {}. "
+                    "Review before proceeding; SAP will determine whether a tax code is required.".format(
+                        item.purchase_order, int(item.purchase_order_item), reason
+                    )
+                )
+            if order_item is None:
+                continue
+            item.tax_jurisdiction = item.tax_jurisdiction or order_item.tax_jurisdiction or None
+            if item.quantity is not None and not item.unit:
+                item.unit = order_item.unit or None
+            if item.account_assignments and order_item.account_assignments is not None:
+                if len(order_item.account_assignments) <= 1:
+                    self.logger.info(
+                        "Purchase order item -> %s/%s has a single account assignment - SAP takes it, dropping the "
+                        "account assignments of the invoice item.",
+                        item.purchase_order,
+                        item.purchase_order_item,
+                    )
+                    item.account_assignments = []
+                for account_assignment in item.account_assignments:
+                    if account_assignment.quantity is not None and not account_assignment.unit:
+                        account_assignment.unit = item.unit or order_item.unit or None
+            if order_item.invoice_is_goods_receipt_based and not item.reference_document:
+                open_items.append(item)
+
+        if open_items:
+            receipts = self.get_goods_movement_items(
+                query=SAPGoodsMovementItemQueryModel(
+                    purchase_orders=sorted({item.purchase_order for item in open_items}), movement_types=["101"]
+                )
+            )
+            completion.goods_receipts = [receipt for receipt in receipts or [] if not receipt.is_cancelled]
+            for item in open_items:
+                matches = [
+                    receipt
+                    for receipt in completion.goods_receipts
+                    if receipt.purchase_order == item.purchase_order
+                    and receipt.purchase_order_item
+                    and int(receipt.purchase_order_item) == int(item.purchase_order_item)
+                ]
+                if len(matches) == 1:
+                    item.reference_document = matches[0].document
+                    item.reference_document_fiscal_year = matches[0].document_year
+                    item.reference_document_item = matches[0].item.zfill(4)
+
+        jurisdictions: dict[tuple[str, str], str | None] = {}
+        for item in invoice.gl_account_items:
+            if item.tax_jurisdiction or not item.cost_center:
+                continue
+            key = (item.company_code or invoice.company_code, item.cost_center)
+            if key not in jurisdictions:
+                earlier_items = self.get_supplier_invoice_gl_account_items(
+                    query=SAPSupplierInvoiceGLAccountItemQueryModel(
+                        company_code=key[0], cost_centers=[key[1]], limit=20
+                    )
+                )
+                jurisdictions[key] = next(
+                    (earlier.tax_jurisdiction for earlier in earlier_items or [] if earlier.tax_jurisdiction), None
+                )
+            item.tax_jurisdiction = jurisdictions[key]
+
+        return completion
 
     # end method definition
 
@@ -12226,6 +12797,117 @@ class SAP:
             changes=changes,
             label="plant data -> '{}' of product -> '{}'".format(plant, product_id),
         )
+
+    # end method definition
+
+    def get_product_extension(
+        self,
+        product_id: str,
+        plant: SAPProductPlantModel,
+        valuation: SAPProductValuationModel | None = None,
+    ) -> SAPProductExtensionModel | None:
+        """Determine what is missing to extend an SAP product to a plant, storage locations and valuation area.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "KT-4402".
+            plant (SAPProductPlantModel):
+                The plant with the storage locations to extend the product to.
+            valuation (SAPProductValuationModel | None, optional):
+                The valuation data of the product in its valuation area. Defaults to None (not needed).
+
+        Returns:
+            SAPProductExtensionModel | None:
+                The plant, storage locations and valuation data to create - nothing of what exists already.
+                None if the product does not exist or in case of an error.
+
+        """
+
+        product = self.get_product(product_id=product_id, expand_items=True)
+        if product is None:
+            return None
+
+        existing_plant = next((item for item in product.plants or [] if item.plant == plant.plant), None)
+        existing_storage_locations = (
+            {item.storage_location for item in existing_plant.storage_locations or []} if existing_plant else set()
+        )
+
+        return SAPProductExtensionModel(
+            extend_plant=existing_plant is None,
+            new_storage_locations=[
+                item for item in plant.storage_locations if item.storage_location not in existing_storage_locations
+            ],
+            create_valuation=valuation is not None
+            and valuation.valuation_area not in {item.valuation_area for item in product.valuations or []},
+        )
+
+    # end method definition
+
+    def extend_product(
+        self,
+        product_id: str,
+        plant: SAPProductPlantModel,
+        valuation: SAPProductValuationModel | None = None,
+        extension: SAPProductExtensionModel | None = None,
+        done: list[str] | None = None,
+    ) -> bool:
+        """Extend an SAP product to a plant, storage locations and valuation area - creating only what is missing.
+
+        See get_product_extension() for what is missing. The method stops at the first error.
+
+        Args:
+            product_id (str):
+                The product (material) number, e.g. "KT-4402".
+            plant (SAPProductPlantModel):
+                The plant with the storage locations to extend the product to.
+            valuation (SAPProductValuationModel | None, optional):
+                The valuation data of the product in its valuation area. Defaults to None (not needed).
+            extension (SAPProductExtensionModel | None, optional):
+                What to create, as confirmed by the user (get_product_extension()) - done as given, without
+                reading the product again. Defaults to None (determined now).
+            done (list[str] | None, optional):
+                A list that receives the steps done - also if a later step fails, e.g.
+                ["extended to plant 3000", "extended to storage location 0001"]. Defaults to None.
+
+        Returns:
+            bool:
+                True if the product is extended (now or before), False in case of an error.
+
+        """
+
+        if done is None:
+            done = []
+
+        if extension is None:
+            extension = self.get_product_extension(product_id=product_id, plant=plant, valuation=valuation)
+            if extension is None:
+                return False
+
+        if extension.extend_plant:
+            new_plant = plant.model_copy(update={"storage_locations": extension.new_storage_locations})
+            if self.create_product_plant(product_id=product_id, plant=new_plant) is None:
+                return False
+            done.append("extended to plant {}".format(plant.plant))
+            done.extend(
+                "extended to storage location {}".format(item.storage_location)
+                for item in extension.new_storage_locations
+            )
+        else:
+            for storage_location in extension.new_storage_locations:
+                if (
+                    self.create_product_storage_location(
+                        product_id=product_id, plant=plant.plant, storage_location=storage_location
+                    )
+                    is None
+                ):
+                    return False
+                done.append("extended to storage location {}".format(storage_location.storage_location))
+        if extension.create_valuation:
+            if self.create_product_valuation(product_id=product_id, valuation=valuation) is None:
+                return False
+            done.append("created the valuation data in valuation area {}".format(valuation.valuation_area))
+
+        return True
 
     # end method definition
 
@@ -14368,6 +15050,65 @@ class SAP:
             params={"$expand": "to_Text"} if expand_items else None,
             label="sales organization -> '{}'".format(sales_organization),
         )
+
+    # end method definition
+
+    def get_company_code_of_sales_organization(
+        self, sales_organization: str | None
+    ) -> SAPCompanyCodeResponseModel | None:
+        """Get the company code of an SAP sales organization (the sender of sales documents).
+
+        Args:
+            sales_organization (str | None):
+                The sales organization, e.g. "1000".
+
+        Returns:
+            SAPCompanyCodeResponseModel | None:
+                The company code or None if it can't be determined or in case of an error.
+
+        """
+
+        if not sales_organization:
+            return None
+
+        organization = self.get_sales_organization(sales_organization=sales_organization, expand_items=False)
+        if not organization or not organization.company_code:
+            return None
+
+        return self.get_company_code(company_code=organization.company_code)
+
+    # end method definition
+
+    def get_company_code_of_plant(self, plant_id: str | None) -> SAPCompanyCodeResponseModel | None:
+        """Get the company code of an SAP plant (the sender of plant documents like production orders).
+
+        The plant APIs do not return the company code assignment. The company code with the number of the
+        plant's valuation area is used if it exists - in many systems (e.g. the SAP best practice and demo
+        systems) plant, valuation area and company code have the same number. Otherwise the company code of
+        the plant's sales organization is used.
+
+        Args:
+            plant_id (str | None):
+                The plant, e.g. "3000".
+
+        Returns:
+            SAPCompanyCodeResponseModel | None:
+                The company code or None if it can't be determined or in case of an error.
+
+        """
+
+        if not plant_id:
+            return None
+
+        plant = self.get_plant(plant_id=plant_id)
+        if plant is None:
+            return None
+        if plant.valuation_area:
+            company_code = self.get_company_code(company_code=plant.valuation_area)
+            if company_code:
+                return company_code
+
+        return self.get_company_code_of_sales_organization(sales_organization=plant.sales_organization)
 
     # end method definition
 

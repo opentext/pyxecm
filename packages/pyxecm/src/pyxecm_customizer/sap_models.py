@@ -12321,6 +12321,21 @@ class SAPOutboundDeliveryAction(StrEnum):
     REVERSE_GOODS_ISSUE = "ReverseGoodsIssue"
     DELETE_ALL_HANDLING_UNITS = "DeleteAllHandlingUnitsFromDelivery"
 
+    @property
+    def needs_storage_location(self) -> bool:
+        """Whether SAP rejects the action for items without a storage location ("[M7/018] Enter Location").
+
+        SAP doesn't always determine the storage location when the delivery is created, see
+        SAP.get_missing_outbound_delivery_storage_locations().
+
+        """
+
+        return self in (
+            SAPOutboundDeliveryAction.PICK_ALL_ITEMS,
+            SAPOutboundDeliveryAction.CONFIRM_PICKING_ALL_ITEMS,
+            SAPOutboundDeliveryAction.POST_GOODS_ISSUE,
+        )
+
 
 class SAPInboundDeliveryAction(StrEnum):
     """Status actions for inbound deliveries (function imports of API_INBOUND_DELIVERY_SRV).
@@ -13048,6 +13063,178 @@ class SAPGoodsMovementItemQueryModel(SAPODataQueryModel):
     )
     documents: Annotated[list[SAPCode] | None, ODataCondition("MaterialDocument")] = Field(
         default=None, description="Material document numbers, e.g. ['4900000123']."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Purchase order history and supplier invoice completion (combinations of the APIs above)
+# ---------------------------------------------------------------------------
+
+
+# Not shown to LLMs - parts of SAPOutboundDeliveryStorageLocationsModel.
+class SAPOutboundDeliveryStorageLocationModel(SAPODataModel):
+    """The storage location to set for an item of an outbound delivery."""
+
+    delivery_id: str = Field(description="The delivery number.")
+    item: str = Field(description="The delivery item number, e.g. '000010'.")
+    material: str = Field(description="The material of the item.")
+    quantity: SAPDecimal | None = Field(default=None, description="The quantity of the item in its base unit.")
+    unit: str | None = Field(default=None, description="The base unit of the item.")
+    storage_location: str = Field(description="The storage location to set.")
+
+
+# Not shown to LLMs - part of SAPOutboundDeliveryStorageLocationsModel.
+class SAPOutboundDeliveryStorageLocationProblemModel(SAPODataModel):
+    """An item of an outbound delivery whose storage location can't be determined."""
+
+    delivery_id: str = Field(description="The delivery number.")
+    item: str = Field(description="The delivery item number, e.g. '000010'.")
+    material: str = Field(description="The material of the item.")
+    quantity: SAPDecimal | None = Field(default=None, description="The quantity of the item in its base unit.")
+    unit: str | None = Field(default=None, description="The base unit of the item.")
+    enough_stock_in_several: bool = Field(
+        default=False,
+        description="True if several storage locations have enough stock, False if none has (not enough stock).",
+    )
+    stock: dict[str, SAPDecimal] = Field(
+        default_factory=dict, description="The unrestricted-use stock SAP can issue per storage location."
+    )
+
+
+# Not shown to LLMs - the result of SAP.get_missing_outbound_delivery_storage_locations().
+class SAPOutboundDeliveryStorageLocationsModel(SAPODataModel):
+    """The storage locations to set for the delivery items without one - and the items where that is not possible."""
+
+    assignments: list[SAPOutboundDeliveryStorageLocationModel] = Field(default_factory=list)
+    problems: list[SAPOutboundDeliveryStorageLocationProblemModel] = Field(default_factory=list)
+
+
+# Not shown to LLMs - the result of SAP.check_warranty_claim().
+class SAPWarrantyClaimCheckModel(SAPODataModel):
+    """What SAP would reject in a new warranty claim - found before the claim is created."""
+
+    missing_fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "OData names of the fields SAP requires and the claim does not have: WrntyClaimRepairDate, "
+            "WrntyClaimDamageDate (WTY_RAP/038) and WrntyExternalObjectNumber (if the object type is given)."
+        ),
+    )
+    object_error: str | None = Field(
+        default=None,
+        description=(
+            "The reason if the equipment or functional location of the claim does not exist (SAP: WTY_RAP/013, "
+            "WTY_RAP/100) or the user may not display it."
+        ),
+    )
+    object_unchecked: bool = Field(
+        default=False,
+        description=(
+            "True if the object could not be checked - the user may not display any objects of its kind, so "
+            "SAP checks it when the claim is created."
+        ),
+    )
+    sales_area_error: str | None = Field(
+        default=None,
+        description=(
+            "The reason if a sales area of a claim version does not fit the customer master or the supplier has "
+            "no customer number (WTY_RAP/015) - SAP rejects such claims only when they are created."
+        ),
+    )
+
+    @property
+    def errors(self) -> bool:
+        """Whether the claim would be rejected."""
+
+        return bool(self.missing_fields or self.object_error or self.sales_area_error)
+
+
+# Inherits from SAPODataModel: str() is compact JSON with the OData names. Returned by
+# SAP.check_supplier_invoice_reference() and part of SAPPurchaseOrderHistoryModel.
+class SAPInvoiceReferenceCheckModel(SAPODataModel):
+    """The invoices of a supplier with a given supplier invoice number, sorted by what they mean for a duplicate."""
+
+    possible_duplicates: list[str] = Field(
+        default_factory=list,
+        alias="PossibleDuplicates",
+        description="Active invoices (posted or parked) with the number - '<invoice>/<year>: <status>'.",
+    )
+    deleted: list[str] = Field(
+        default_factory=list,
+        alias="Deleted",
+        description="Deleted invoices with the number - no duplicates.",
+    )
+    reversed: list[str] = Field(
+        default_factory=list,
+        alias="ReversedOrReversal",
+        description="Reversed invoices and their reversal documents ('<invoice>/<year>') - no duplicates.",
+    )
+    check_failed: str | None = Field(
+        default=None,
+        alias="CheckFailed",
+        description="The reason if the check could not be completed - the lists are then empty and unreliable.",
+    )
+
+
+# Inherits from SAPODataModel: str() is compact JSON with the OData names (as LLM tools return it).
+# Returned by SAP.get_purchase_order_history().
+class SAPPurchaseOrderHistoryModel(SAPODataModel):
+    """The goods receipts and supplier invoices of a purchase order (purchase order history)."""
+
+    purchase_order: str = Field(..., alias="PurchaseOrder", description="The purchase order number.")
+    goods_receipts: list[SAPGoodsMovementItemResponseModel] = Field(
+        default_factory=list,
+        alias="GoodsReceipts",
+        description="Goods receipt items (movement type 101) - reversed ones have IsCancelled / is_cancelled.",
+    )
+    invoice_items: list[SAPSupplierInvoicePurchaseOrderItemResponseModel] = Field(
+        default_factory=list, alias="InvoiceItems", description="Supplier invoice items for the purchase order items."
+    )
+    invoices: list[SAPSupplierInvoiceResponseModel] = Field(
+        default_factory=list,
+        alias="Invoices",
+        description=(
+            "The supplier invoices of these items - with the supplier's invoice number (SupplierInvoiceIDByInvcgParty), "
+            "status, payment block and reversal."
+        ),
+    )
+    invoice_reference_check: SAPInvoiceReferenceCheckModel | None = Field(
+        default=None,
+        alias="InvoiceReferenceCheck",
+        description=(
+            "Duplicate check of the given supplier invoice number across all purchase orders of the order's supplier "
+            "and company code. None if no number was given. Only PossibleDuplicates are duplicates; if CheckFailed "
+            "is set, the check is open - say so, don't report the number as new."
+        ),
+    )
+
+    @property
+    def open_invoices(self) -> list[SAPSupplierInvoiceResponseModel]:
+        """The invoices that have not been cancelled - in the order to cancel them (before the goods receipts).
+
+        A reversed invoice has IsReversed, its reversal document has the reversed invoice in ReverseDocument.
+
+        """
+
+        return [invoice for invoice in self.invoices if not invoice.is_reversed and not invoice.reverse_document]
+
+    @property
+    def open_goods_receipts(self) -> list[SAPGoodsMovementItemResponseModel]:
+        """The goods receipt items that have not been cancelled."""
+
+        return [receipt for receipt in self.goods_receipts if not receipt.is_cancelled]
+
+
+# Not shown to LLMs - the result of SAP.complete_supplier_invoice().
+class SAPSupplierInvoiceCompletionModel(SAPODataModel):
+    """What SAP.complete_supplier_invoice() found out while filling in an invoice."""
+
+    goods_receipts: list[SAPGoodsMovementItemResponseModel] = Field(
+        default_factory=list,
+        description="The goods receipt items of the purchase orders of the invoice (not cancelled, also several per purchase order item).",
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Values SAP needs that could not be determined (e.g. an unresolved tax code)."
     )
 
 
@@ -15880,6 +16067,25 @@ class SAPProductValuationModel(SAPODataCreateModel):
         return self
 
     # end method definition
+
+
+# Not shown to LLMs - the result of SAP.get_product_extension().
+class SAPProductExtensionModel(SAPODataModel):
+    """What is missing to extend an SAP product to a plant, storage locations and valuation area."""
+
+    extend_plant: bool = Field(default=False, description="True if the product is not extended to the plant yet.")
+    new_storage_locations: list[SAPProductStorageLocationModel] = Field(
+        default_factory=list, description="The storage locations the product has not been extended to yet."
+    )
+    create_valuation: bool = Field(
+        default=False, description="True if the product has no valuation data in the valuation area yet."
+    )
+
+    @property
+    def is_complete(self) -> bool:
+        """Whether the product is already extended as requested - nothing to do."""
+
+        return not (self.extend_plant or self.new_storage_locations or self.create_valuation)
 
 
 # Inherits from SAPODataCreateModel: to_odata() builds the payload of SAP.create_product(), to_odata_update() the

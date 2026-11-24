@@ -6843,19 +6843,32 @@ automated via the web user interface. Each list element is a dict with these key
 </div>
 <h3 id="appworks-platform-customizing-syntax">AppWorks Platform Customizing Syntax<a class="headerlink" href="#appworks-platform-customizing-syntax" title="Permanent link">&para;</a></h3>
 <h4 id="appworks">appworks<a class="headerlink" href="#appworks" title="Permanent link">&para;</a></h4>
-<p><code>appworks</code> configures OpenText AppWorks Platform organizations. For each organization the Customizer first (optionally) sets up the OTDS resource, access role, license and Kubernetes configuration, then creates the AppWorks workspaces, publishes their projects and finally creates entities (categories, priorities, case types, customers, cases). The section requires that OTDS, Content Server, AppWorks Platform and Kubernetes access are configured.</p>
+<p><code>appworks</code> configures OpenText AppWorks Platform organizations. For each organization the Customizer first (optionally) sets up the OTDS resource, access role, license and Kubernetes configuration, then creates the AppWorks workspaces, publishes their projects and finally creates entities (categories, priorities, case types, customers, cases). Resource configuration requires Kubernetes; creating a new workspace also requires Kubernetes to copy its artifacts. Existing workspaces and entities do not require Kubernetes for this section. Organization login URLs use the public OTDS URL configured in the customizer; when no public URL is supplied to the payload processor, the legacy OTDS base URL is used.</p>
 <p>Each list element is a dictionary with these fields:</p>
 <ul>
 <li><code>enabled</code> (bool, optional, default = <code>true</code>) - switch to turn the payload element on or off</li>
 <li><code>organization</code> (str, mandatory) - name of the AppWorks organization</li>
 <li><code>resource_config</code> (bool, optional, default = <code>false</code>) - if <code>true</code>, the OTDS resource <code>&lt;organization&gt;</code> is created (if missing), the Content Server and admin partitions are added to the OTDS access role <code>Access to &lt;organization&gt;</code>, the AppWorks license is assigned (if a license file is available), the organization configuration in the Kubernetes config map is updated and the AppWorks stateful set is restarted. If <code>false</code>, this part is skipped.</li>
-<li><code>workspaces</code> (list, optional) - list of AppWorks workspaces to create and synchronize. If missing, no workspaces or entities are processed for the organization.<ul>
+<li><code>organization_roles_partition</code> (bool, optional, default = <code>false</code>) - create and use <code>awp-&lt;organization&gt;-partition</code> for the organization's roles. When omitted, the existing roles partition is preserved. The derived partition name must be valid in OTDS.</li>
+<li><code>use_shared_appworks_license</code> (bool, optional, default = <code>false</code>) - rely on the shared AppWorks resource license instead of creating an organization-specific license. Before processing, the shared resource configured by <code>otawp.resource_name</code> (normally <code>awp</code>) must have the AppWorks license and <code>USERS</code> assignments for <code>otds.admin</code> and the Content Server user partition. Configure those through the <code>licenses</code> and <code>partitions</code> sections before <code>appworks</code>. Missing shared licensing fails the organization. Existing organization licenses are not removed.</li>
+<li><code>strict_appworks_failures</code> (bool, optional, default = <code>false</code>) - stop work for this organization if its resource configuration or the AppWorks restart fails, and fail the workspace when artifact copying fails. This applies to all enabled entries for the same organization. By default a restart or copy failure is logged and legacy processing continues.</li>
+<li><code>start_if_stopped</code> (bool, optional, default = <code>false</code>) - scale a stopped AppWorks StatefulSet to one replica instead of requesting the legacy restart.</li>
+<li><code>process_entities_without_workspaces</code> (bool, optional, default = <code>false</code>) - process entities when the <code>workspaces</code> key is absent.</li>
+<li><code>workspaces</code> (list, optional) - list of AppWorks workspaces to create and synchronize. If missing, no workspaces or entities are processed unless <code>process_entities_without_workspaces</code> is enabled.<ul>
 <li><code>workspace_id</code> (str, mandatory) - ID of the workspace</li>
 <li><code>name</code> (str, mandatory) - name of the workspace</li>
 <li><code>path</code> (str, mandatory) - directory in the AppWorks pod that contains the project artifacts. For a newly created workspace the content of this directory is copied into the workspace.</li>
 <li><code>projects</code> (list, optional) - list of projects in the workspace that are published<ul>
 <li><code>name</code> (str, mandatory) - name of the project</li>
 <li><code>documentId</code> (str, mandatory) - document ID of the project</li>
+<li><code>mcp_solution_name</code> (str, optional) - add the published solution to the AppWorks MCP configuration. MCP configuration failures are logged and do not fail the organization.</li>
+<li><code>data_import</code> (mapping, optional) - spreadsheet data to import after publication. Add an enabled <code>appworksDataImports</code> entry to <code>payloadSections</code> <strong>after</strong> <code>appworks</code> and any required restart and role assignment sections.<ul>
+<li><code>enabled</code> (bool, optional, default = <code>true</code>)</li>
+<li><code>file_path</code> or <code>file_url</code> - exactly one local workbook path or HTTP(S) URL</li>
+<li><code>request_json_path</code> or <code>request_json_url</code> - exactly one local request JSON path or HTTP(S) URL; its <code>solution</code> field must be a JSON-encoded string</li>
+<li><code>project_meta</code> (mapping, mandatory) - must contain <code>entities</code> and <code>homepageLayoutID</code>; optional fields override generated metadata.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -6880,6 +6893,7 @@ automated via the web user interface. Each list element is a dict with these key
 </ul>
 </li>
 </ul>
+<p>Multiple entries for the same organization are supported and processed in payload order. A disabled entry is ignored; a null <code>appworks</code> value is treated as empty. Data imports are skipped for an organization whose AppWorks processing failed; an unrelated Kubernetes or role-assignment section does not automatically block other imports. If the import depends on such a section, place it after that section and ensure the dependency has succeeded.</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="58:2"><input checked="checked" id="__tabbed_58_1" name="__tabbed_58" type="radio" /><input id="__tabbed_58_2" name="__tabbed_58" type="radio" /><div class="tabbed-labels"><label for="__tabbed_58_1">Terraform / HCL</label><label for="__tabbed_58_2">YAML</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">

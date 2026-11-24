@@ -8,6 +8,7 @@ __email__ = "mdiefenb@opentext.com"
 
 import json
 import logging
+import os
 import platform
 import re
 import sys
@@ -15,8 +16,10 @@ import time
 import uuid
 from http import HTTPStatus
 from importlib.metadata import version
+from xml.sax.saxutils import escape
 
 import requests
+from opentelemetry import trace
 
 from pyxecm.errors import (
     ErrorCategory,
@@ -31,6 +34,8 @@ from pyxecm.otds import OTDS
 APP_NAME = "pyxecm"
 APP_VERSION = version("pyxecm")
 MODULE_NAME = APP_NAME + ".otawp"
+tracer = trace.get_tracer(__name__)
+OTEL_TRACING_ATTRIBUTES = {"class": "otawp"}
 
 PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 OS_INFO = f"{platform.system()} {platform.release()}"
@@ -64,6 +69,7 @@ REQUEST_TIMEOUT = 120.0
 REQUEST_MAX_RETRIES = 10
 REQUEST_RETRY_DELAY = 30.0
 SYNC_PUBLISH_REQUEST_TIMEOUT = 600.0
+XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 default_logger = logging.getLogger(MODULE_NAME)
 
@@ -1823,6 +1829,268 @@ class OTAWP:
         )
 
         return False
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="update_mcp_configuration")
+    def update_mcp_configuration(self, solution_names: list[str]) -> bool:
+        """Update the organization-level MCP configuration in the AppWorks XML store.
+
+        The XML store object /OpenText/MCP/configuration is replaced as a whole,
+        so all solutions of the current organization have to be passed in one call.
+
+        Args:
+            solution_names (list[str]):
+                The names of the AppWorks solutions to expose via MCP (e.g. "MyCompanyhimss").
+
+        Returns:
+            bool:
+                True if the configuration was updated, False otherwise.
+
+        """
+
+        organization = self.config()["organization"]
+        if not solution_names:
+            self.logger.error(
+                "Cannot update MCP configuration for organization -> '%s' without solutions!", organization
+            )
+            return False
+
+        self.logger.info(
+            "Update MCP configuration for organization -> '%s' with solutions -> %s...",
+            organization,
+            ", ".join(solution_names),
+        )
+
+        solutions_xml = "".join(
+            "<solution><name>{}</name><filters><methods><method>GET</method><method>POST</method></methods>"
+            "</filters></solution>".format(escape(solution_name))
+            for solution_name in solution_names
+        )
+
+        mcp_configuration_data = f"""
+        <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP:Header xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+                <header xmlns="http://schemas.cordys.com/General/1.0/">
+                    <Logger xmlns="http://schemas.cordys.com/General/1.0/"/>
+                </header>
+                <i18n:international xmlns:i18n="http://www.w3.org/2005/09/ws-i18n">
+                    <i18n:locale>en-US</i18n:locale>
+                </i18n:international>
+            </SOAP:Header>
+            <SOAP:Body>
+                <UpdateXMLObject xmlns="http://schemas.cordys.com/1.0/xmlstore">
+                    <tuple xmlns="http://schemas.cordys.com/1.0/xmlstore" key="/OpenText/MCP/configuration" level="organization" name="configuration" original="/OpenText/MCP/configuration" version="organization">
+                        <new>
+                            <mcpConfiguration xmlns="">
+                                <statictools>
+                                    <enabled>true</enabled>
+                                </statictools>
+                                <swagger>
+                                    <defaults>
+                                        <filters>
+                                            <paths>
+                                                <exclude>
+                                                    <path>**/childEntities</path>
+                                                    <path>**/childEntities/**</path>
+                                                </exclude>
+                                            </paths>
+                                        </filters>
+                                    </defaults>
+                                    <solutions>{solutions_xml}</solutions>
+                                </swagger>
+                            </mcpConfiguration>
+                        </new>
+                    </tuple>
+                </UpdateXMLObject>
+            </SOAP:Body>
+        </SOAP:Envelope>
+        """
+
+        request_url = self.gateway_url()
+
+        self.logger.debug(
+            "Update MCP configuration for organization -> '%s'; calling -> '%s'",
+            organization,
+            request_url,
+        )
+
+        for attempt in range(2):
+            try:
+                response = requests.post(
+                    url=request_url,
+                    data=mcp_configuration_data,
+                    headers=REQUEST_HEADERS_XML,
+                    cookies=self.cookie(),
+                    timeout=REQUEST_TIMEOUT,
+                )
+            except requests.RequestException as req_exception:
+                self.logger.error(
+                    "Request to update MCP configuration for organization -> '%s' failed with error -> %s",
+                    organization,
+                    str(req_exception),
+                )
+                return False
+
+            if response.status_code == 401 and attempt == 0:
+                self.logger.warning("Session expired. Re-authenticating...")
+                self.authenticate(revalidate=True)
+                continue
+
+            if response.ok and SOAP_FAULT_INDICATOR not in response.text:
+                self.logger.info("Successfully updated MCP configuration for organization -> '%s'.", organization)
+                return True
+
+            if SOAP_FAULT_INDICATOR in response.text:
+                self.logger.error(
+                    "Failed to update MCP configuration for organization -> '%s'; error -> '%s'",
+                    organization,
+                    self.get_soap_element(soap_response=response.text, soap_tag="faultstring"),
+                )
+            else:
+                self.logger.error(
+                    "Failed to update MCP configuration for organization -> '%s'; status code -> %d",
+                    organization,
+                    response.status_code,
+                )
+            self.logger.debug("SOAP message -> %s", response.text)
+            return False
+
+        return False
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="authenticate_with_otds")
+    def authenticate_with_otds(self, otds_object: OTDS, revalidate: bool = False) -> dict | None:
+        """Exchange an OTDS ticket for a SAML artifact without changing the provisioning session.
+
+        Args:
+            otds_object (OTDS):
+                Shared OTDS administrator session with permission to impersonate otadmin.
+            revalidate (bool, optional):
+                Refresh the administrator session before requesting a new user ticket.
+                Defaults to False.
+
+        Returns:
+            dict | None:
+                Organization-scoped SAML cookie, or None on failure.
+
+        """
+
+        if revalidate and not otds_object.authenticate(revalidate=True):
+            self.logger.error("Cannot refresh the OTDS administrator session for AppWorks import authentication.")
+            return None
+        impersonation = otds_object.impersonate_user(user_id="otadmin", partition="otds.admin")
+        ticket = impersonation.get("ticket") if impersonation else None
+        if not isinstance(ticket, str) or not ticket:
+            self.logger.error("OTDS impersonation did not return a ticket for otadmin@otds.admin.")
+            return None
+        ticket = escape(ticket)
+        soap_payload = f"""
+        <SOAP:Envelope xmlns:SOAP="http://schemas.xmlsoap.org/soap/envelope/">
+            <SOAP:Header>
+                <OTAuthentication xmlns="urn:api.bpm.opentext.com">
+                    <AuthenticationToken>{ticket}</AuthenticationToken>
+                </OTAuthentication>
+            </SOAP:Header>
+            <SOAP:Body>
+                <samlp:Request xmlns:samlp="urn:oasis:names:tc:SAML:1.0:protocol" MajorVersion="1" MinorVersion="1">
+                    <samlp:AuthenticationQuery>
+                        <saml:Subject xmlns:saml="urn:oasis:names:tc:SAML:1.0:assertion">
+                            <saml:NameIdentifier Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"/>
+                        </saml:Subject>
+                    </samlp:AuthenticationQuery>
+                </samlp:Request>
+            </SOAP:Body>
+        </SOAP:Envelope>
+        """
+        try:
+            response = requests.post(
+                url=self.credential_url(), data=soap_payload, headers=REQUEST_HEADERS_XML, timeout=REQUEST_TIMEOUT
+            )
+        except requests.RequestException:
+            self.logger.error(
+                "OTDS ticket exchange failed for AppWorks organization -> '%s'.", self.config()["organization"]
+            )
+            return None
+        if not response.ok:
+            self.logger.error("AppWorks OTDS ticket exchange failed; HTTP status -> %s.", response.status_code)
+            return None
+        parsed = self.parse_xml(xml_string=response.text)
+        artifact = self.find_key(data=parsed, target_key="AssertionArtifact") if parsed else None
+        if not isinstance(artifact, str) or not artifact:
+            self.logger.error("AppWorks OTDS ticket exchange returned no SAML artifact.")
+            return None
+        return {"defaultinst_SAMLart": artifact, "defaultinst_ct": "abcd"}
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="import_project_data")
+    def import_project_data(
+        self, file_path: str, request_json: dict, project_meta: dict, *, otds_object: OTDS
+    ) -> dict | None:
+        """Import runtime project data from a local Excel workbook.
+
+        Args:
+            file_path (str):
+                Workbook path on the caller's filesystem.
+            request_json (dict):
+                Spreadsheet request, including workspaceName and the JSON-encoded solution.
+            project_meta (dict):
+                Spreadsheet project metadata, passed without changing workspaceID semantics.
+            otds_object (OTDS):
+                Shared OTDS administrator session used to obtain an impersonated otadmin ticket.
+
+        Returns:
+            dict | None:
+                Import response, or None on authentication, file, HTTP, or parsing failure.
+
+        """
+
+        request_url = self.base_url() + "/app/aviatorservice/spreadsheet/generateSolution"
+        self.logger.info("Import project data from -> '%s'; calling -> %s", file_path, request_url)
+        try:
+            with open(file_path, "rb") as workbook:
+                for attempt in range(2):
+                    cookie = self.authenticate_with_otds(otds_object, revalidate=attempt == 1)
+                    if not cookie or not cookie.get("defaultinst_SAMLart"):
+                        return None
+                    workbook.seek(0)
+                    response = requests.post(
+                        url=request_url,
+                        headers={
+                            "User-Agent": USER_AGENT,
+                            "SAMLart": cookie["defaultinst_SAMLart"],
+                            "clienteventsourceid": "a541977eb534f37cf4511f6ae7da43c",
+                        },
+                        data={
+                            "requestJson": json.dumps(request_json, ensure_ascii=False, separators=(",", ":")),
+                            "operationType": "DATA",
+                            "projectMeta": json.dumps(project_meta),
+                        },
+                        files={"file": (os.path.basename(file_path), workbook, XLSX_CONTENT_TYPE)},
+                        timeout=SYNC_PUBLISH_REQUEST_TIMEOUT,
+                    )
+                    if response.status_code == 401 and attempt == 0:
+                        continue
+                    if not response.ok:
+                        self.logger.error(
+                            "Project data import failed; HTTP status -> %s; response -> %s",
+                            response.status_code,
+                            response.text[:4000],
+                        )
+                        return None
+                    result = self.parse_request_response(response_object=response)
+                    if not isinstance(result, dict) or result.get("success") is False:
+                        self.logger.error(
+                            "Project data import did not return a successful result; response -> %s",
+                            response.text[:4000],
+                        )
+                        return None
+                    return result
+        except (OSError, requests.RequestException) as exception:
+            self.logger.error("Failed to import project workbook -> '%s': %s", file_path, exception)
+        return None
 
     # end method definition
 

@@ -47,6 +47,7 @@ import logging
 import os
 import random
 import re
+import shlex
 import string
 import subprocess
 import tempfile
@@ -56,6 +57,7 @@ import traceback
 from ast import literal_eval
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 from urllib.parse import parse_qs, urlparse
 
 import hcl2.api
@@ -108,6 +110,173 @@ OTEL_TRACING_ATTRIBUTES = {"class": "payload"}
 data_load_lock = threading.Lock()
 
 
+def raise_appworks_payload_error(message: str) -> NoReturn:
+    """Raise a payload import error with a contextual validation message."""
+
+    raise PayloadImportError(message)
+
+
+def validate_appworks_payload(payload: dict) -> None:
+    """Validate explicitly requested AppWorks organization partitions."""
+
+    sections = payload.get("payloadSections")
+    if not sections or not any(
+        section.get("name") == "appworks" and section.get("enabled", False) for section in sections
+    ):
+        return
+
+    appworks_configurations = payload.get("appworks")
+    if appworks_configurations is None:
+        return
+    if not isinstance(appworks_configurations, list):
+        raise_appworks_payload_error("AppWorks payload section 'appworks' must be a list.")
+
+    enabled_partition_names: dict[str, str] = {}
+    for index, configuration in enumerate(appworks_configurations):
+        if not isinstance(configuration, dict):
+            raise_appworks_payload_error(f"AppWorks configuration at index {index} must be a mapping.")
+
+        if not configuration.get("enabled", True) or not configuration.get("organization_roles_partition", False):
+            continue
+
+        if configuration.get("resource_config", False):
+            organization = configuration.get("organization")
+            if not isinstance(organization, str) or not organization:
+                raise_appworks_payload_error(f"AppWorks configuration at index {index} requires an organization.")
+            partition_name = "awp-{}-partition".format(organization)
+            if len(partition_name) > 255 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", partition_name):
+                raise_appworks_payload_error(
+                    f"Invalid OTDS roles partition name derived for organization -> '{organization}': '{partition_name}'.",
+                )
+            partition_key = partition_name.casefold()
+            if partition_key in enabled_partition_names and enabled_partition_names[partition_key] != organization:
+                raise_appworks_payload_error(
+                    "Duplicate derived OTDS roles partition name -> '{}' for organizations '{}' and '{}'.".format(
+                        partition_name,
+                        enabled_partition_names[partition_key],
+                        organization,
+                    ),
+                )
+            enabled_partition_names[partition_key] = organization
+
+
+def update_appworks_yaml_placeholders(
+    config_map_data: dict,
+    *,
+    content_server_url: str,
+    content_server_support_url: str,
+    content_server_resource_id: str,
+    public_otds_url: str | None,
+    internal_otds_url: str,
+    organization: str | None = None,
+    update_shared: bool = False,
+) -> set[str]:
+    """Update recognized AppWorks settings, without rewriting unchanged documents."""
+
+    updated_files: set[str] = set()
+
+    def update_document(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                update_document(item)
+            return
+        if not isinstance(value, dict):
+            return
+
+        content_server = value.get("ContentServer")
+        if isinstance(content_server, dict):
+            content_server["contentServerUrl"] = content_server_url
+            content_server["contentServerSupportDirectoryUrl"] = content_server_support_url
+            content_server["otdsResourceId"] = content_server_resource_id
+
+        connection = value.get("sysConnection")
+        if isinstance(connection, dict):
+            connection["connectionString"] = "jdbc:postgresql://${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
+            connection["database"] = "${DATABASE_NAME}"
+            connection["password"] = "${DATABASE_PASSWORD}"
+
+        authenticators = value.get("authenticators")
+        if isinstance(authenticators, dict):
+            authenticator = authenticators.get(authenticators.get("defaultLogin", "OTDSAuth"))
+            if isinstance(authenticator, dict):
+                authenticator["publicLoginUrl"] = (
+                    public_otds_url.rstrip("/") + "/otdsws/login"
+                    if public_otds_url
+                    else internal_otds_url.rstrip("/") + "/otdsws/login"
+                )
+
+        for item in value.values():
+            update_document(item)
+
+    for filename, content in config_map_data.items():
+        if not isinstance(filename, str) or not filename.casefold().endswith((".yaml", ".yml")):
+            continue
+        if not isinstance(content, str):
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        platform = document.get("platform")
+        if not isinstance(platform, dict):
+            continue
+        original = copy.deepcopy(document)
+        if organization is None:
+            update_document(platform)
+        else:
+            organizations = platform.get("organizations")
+            if isinstance(organizations, dict) and isinstance(organizations.get(organization), dict):
+                update_document(organizations[organization])
+            if update_shared and filename == "solution.yaml" and "authenticators" in platform:
+                update_document({"authenticators": platform["authenticators"]})
+        if document != original:
+            config_map_data[filename] = yaml.safe_dump(document, sort_keys=False)
+            updated_files.add(filename)
+
+    return updated_files
+
+
+def update_appworks_organization_resource_settings(
+    config_map_data: dict,
+    *,
+    organization: str,
+    resource_id: str,
+    roles_partition: str | None,
+) -> set[str]:
+    """Update the requested organization under platform.organizations."""
+
+    updated_files: set[str] = set()
+
+    for filename, content in config_map_data.items():
+        if not isinstance(filename, str) or not filename.casefold().endswith((".yaml", ".yml")):
+            continue
+        if not isinstance(content, str):
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict) or not isinstance(document.get("platform"), dict):
+            continue
+        organizations = document["platform"].get("organizations")
+        if not isinstance(organizations, dict) or not isinstance(organizations.get(organization), dict):
+            continue
+        settings = organizations[organization].get("otds")
+        if not isinstance(settings, dict):
+            continue
+        original = copy.deepcopy(document)
+        settings["resourceId"] = resource_id
+        if roles_partition is not None:
+            settings["rolesPartition"] = roles_partition
+        if document != original:
+            config_map_data[filename] = yaml.safe_dump(document, sort_keys=False)
+        updated_files.add(filename)
+
+    return updated_files
+
+
 def load_payload(
     payload_source: str,
     logger: logging.Logger = default_logger,
@@ -139,7 +308,7 @@ def load_payload(
         try:
             with open(payload_source, encoding="utf-8") as stream:
                 payload_data = stream.read()
-            return yaml.safe_load(payload_data)
+            payload = yaml.safe_load(payload_data)
         except yaml.YAMLError:
             logger.error(
                 "Error while reading YAML payload file -> '%s'!",
@@ -204,6 +373,8 @@ def load_payload(
         )
         return None
 
+    validate_appworks_payload(payload)
+
     return payload
 
 
@@ -249,6 +420,7 @@ class Payload:
         otca_object: OTCA | None = None,
         otkd_object: OTKD | None = None,
         avts_object: AVTS | None = None,
+        otds_public_url: str | None = None,
         settings: Settings | None = None,
         wait_budget: WaitBudget | None = None,
         logger: logging.Logger = default_logger,
@@ -309,6 +481,8 @@ class Payload:
                 An optional Knowledge Discovery object.
             avts_object (AVTS | None, optional):
                 An optional Aviator Search object.
+            otds_public_url (str | None):
+                The public ingress URL of OTDS.
             settings (Settings | None, optional):
                 The customizer settings. They are the fallback for values that are
                 not defined in the payload. Defaults to the settings of the environment.
@@ -351,6 +525,7 @@ class Payload:
         self._otca = otca_object  # Content Aviator
         self._otkd = otkd_object  # Knowledge Discovery
         self._avts = avts_object  # Aviator Search
+        self._otds_public_url = otds_public_url
         self._browser_headless = browser_headless
         self._custom_settings_dir = custom_settings_dir
         self._placeholder_values: dict = placeholder_values
@@ -373,6 +548,8 @@ class Payload:
         self._admin_settings: list = []
         self._admin_settings_post: list = []
         self._appworks_configurations: list = []
+        self._appworks_organization_results: dict[str, dict] = {}
+        self.appworks_startup_failed: bool = False
         self._assignments: list = []
         self._auth_handlers: list = []
         self._avts_repositories: list = []
@@ -613,6 +790,7 @@ class Payload:
         )
         self._test_automations = self.get_payload_section("testAutomations")
         self._appworks_configurations = self.get_payload_section("appworks")
+        self._appworks_organization_results = {}
         self._avts_repositories = self.get_payload_section("avtsRepositories")
         self._avts_questions = self.get_payload_section("avtsQuestions")
         self._embeddings = self.get_payload_section("embeddings")
@@ -621,6 +799,39 @@ class Payload:
         self._aviator_mcp_tools = self.get_payload_section("aviatorMcpTools")
 
         return self._payload
+
+    # end method definition
+
+    def record_appworks_result(
+        self,
+        organization: str,
+        phase: str,
+        *,
+        success: bool,
+        error: str | None = None,
+    ) -> None:
+        """Record the outcome of one AppWorks organization processing phase."""
+
+        if not hasattr(self, "_appworks_organization_results"):
+            self._appworks_organization_results = {}
+        organization_key = organization
+        result = self._appworks_organization_results.setdefault(
+            organization_key,
+            {
+                "organization": organization,
+                "enabled": True,
+                "success": True,
+                "phases": {},
+                "errors": [],
+            },
+        )
+        if success:
+            result["phases"].setdefault(phase, "succeeded")
+        else:
+            result["phases"][phase] = "failed"
+            result["success"] = False
+            if error:
+                result["errors"].append({"phase": phase, "message": error})
 
     # end method definition
 
@@ -715,7 +926,6 @@ class Payload:
         * Resource configuration
             - add the OTCS user partition to the OTDS access role for the AppWorks organization
             - add the OTCS admin partition to the OTDS access role for the AppWorks organization
-            - add an OTAWP license
         * Solution configuration
             - create the AppWorks artifacts
 
@@ -753,11 +963,34 @@ class Payload:
             return True
 
         success: bool = True
+        failed_resource_organizations: set[str] = set()
+        configured_organizations: list[str] = []
+        resource_configurations = [
+            item
+            for item in self._appworks_configurations
+            if item.get("enabled", True) and item.get("resource_config", False) and item.get("organization")
+        ]
+        strict_organizations = {
+            item["organization"]
+            for item in self._appworks_configurations
+            if item.get("enabled", True) and item.get("organization") and item.get("strict_appworks_failures", False)
+        }
+        shared_license_organizations = {
+            item["organization"] for item in resource_configurations if item.get("use_shared_appworks_license", False)
+        }
+        config_map = None
+        if resource_configurations:
+            if self._k8s:
+                config_map = self._k8s.get_config_map(config_map_name=self._otawp.config_map_name())
+            else:
+                self.logger.error("Kubernetes is required for AppWorks resource configuration.")
 
         #
         # 1: Loop to create the required OTDS resources for the AppWorks organization:
         #
         for appworks_configuration in self._appworks_configurations:
+            if not appworks_configuration.get("enabled", True):
+                continue
             organization = appworks_configuration.get("organization", None)
             if not organization:
                 self.logger.error("AppWorks configuration is missing the organization name! Skipping...")
@@ -768,18 +1001,73 @@ class Payload:
                 text="Process AppWorks resource configuration for '{}'".format(organization), char="-"
             )
 
-            # Check if user has been explicitly disabled in payload
-            # (enabled = false). In this case we skip the element:
-            if not appworks_configuration.get("enabled", True):
-                self.logger.info(
-                    "Payload for AppWorks configuration -> '%s' is disabled. Skipping...",
-                    organization,
-                )
-                continue
-
             if not appworks_configuration.get("resource_config", False):
+                self.record_appworks_result(organization, "resource", success=True)
                 self.logger.info("AppWorks resource configuration is disabled for -> '%s'. Skipping...", organization)
                 continue
+
+            if not config_map or not isinstance(config_map.data, dict):
+                self.logger.error(
+                    "Failed to retrieve AppWorks Kubernetes config map -> '%s'!",
+                    self._otawp.config_map_name(),
+                )
+                failed_resource_organizations.add(organization)
+                self.record_appworks_result(
+                    organization,
+                    "resource",
+                    success=False,
+                    error="AppWorks Kubernetes ConfigMap could not be retrieved.",
+                )
+                success = False
+                continue
+
+            if appworks_configuration.get("use_shared_appworks_license", False):
+                shared_name = self._settings.otawp.resource_name
+                shared_resource = self._otds.get_resource(name=shared_name)
+                shared_id = shared_resource.get("resourceID") if isinstance(shared_resource, dict) else None
+                shared_licenses = self._otds.get_license_for_resource(shared_id) if shared_id else None
+                license_name = self._otawp.product_name()
+                if (
+                    not shared_id
+                    or not isinstance(shared_licenses, list)
+                    or not any(
+                        isinstance(license_item, dict) and license_item.get("_oTLicenseProduct") == license_name
+                        for license_item in shared_licenses
+                    )
+                ):
+                    self.logger.error(
+                        "Shared AppWorks license -> '%s' was not found on OTDS resource -> '%s'.",
+                        license_name,
+                        shared_name,
+                    )
+                    failed_resource_organizations.add(organization)
+                    self.record_appworks_result(
+                        organization, "resource", success=False, error="Shared AppWorks resource or license is missing."
+                    )
+                    success = False
+                    continue
+                missing_partitions = [
+                    name
+                    for name in ("otds.admin", self._otcs.partition_name())
+                    if not self._otds.is_partition_licensed(
+                        partition_name=name,
+                        resource_id=shared_id,
+                        license_feature="USERS",
+                        license_name=license_name,
+                    )
+                ]
+                if missing_partitions:
+                    self.logger.error(
+                        "Shared AppWorks license on resource -> '%s' is missing USERS assignments for -> %s.",
+                        shared_name,
+                        ", ".join(missing_partitions),
+                    )
+                    failed_resource_organizations.add(organization)
+                    self.record_appworks_result(
+                        organization, "resource", success=False, error="Shared AppWorks partition licenses are missing."
+                    )
+                    success = False
+                    continue
 
             access_role_name = "Access to " + organization
 
@@ -806,6 +1094,21 @@ class Payload:
                     organization,
                 )
 
+            if not isinstance(awp_resource, dict) or not awp_resource.get("resourceID"):
+                self.logger.error(
+                    "Failed to create or retrieve OTDS resource for AppWorks organization -> '%s'.",
+                    organization,
+                )
+                failed_resource_organizations.add(organization)
+                self.record_appworks_result(
+                    organization,
+                    "resource",
+                    success=False,
+                    error="OTDS resource could not be created or retrieved.",
+                )
+                success = False
+                continue
+
             awp_resource_id = awp_resource["resourceID"]
 
             self.logger.info(
@@ -814,12 +1117,44 @@ class Payload:
                 awp_resource_id,
             )
 
+            organization_partition = None
+            if appworks_configuration.get("organization_roles_partition", False):
+                organization_partition = "awp-{}-partition".format(organization)
+            if organization_partition and not self._otds.get_partition(name=organization_partition, show_error=False):
+                created_partition = self._otds.add_partition(
+                    name=organization_partition,
+                    description="AppWorks roles for organization {}".format(organization),
+                )
+                if not created_partition:
+                    self.logger.error(
+                        "Failed to create OTDS roles partition -> '%s' for AppWorks organization -> '%s'.",
+                        organization_partition,
+                        organization,
+                    )
+                    failed_resource_organizations.add(organization)
+                    self.record_appworks_result(
+                        organization,
+                        "resource",
+                        success=False,
+                        error="The organization OTDS roles partition could not be created.",
+                    )
+                    success = False
+                    continue
+
             # Loop to wait for OTCS to create its OTDS user partition:
-            self.wait_for(
+            otcs_partition = self.wait_for(
                 lambda: self._otds.get_partition(name=self._otcs.partition_name(), show_error=False),
                 f"OTDS user partition -> '{self._otcs.partition_name()}' for Content Server",
                 service="otawp",
             )
+            if not otcs_partition:
+                self.logger.error("Content Server OTDS partition is unavailable for -> '%s'.", organization)
+                failed_resource_organizations.add(organization)
+                self.record_appworks_result(
+                    organization, "resource", success=False, error="Content Server OTDS partition was not found."
+                )
+                success = False
+                continue
 
             # Add the OTDS user partition for OTCS to the AppWorks Platform Access Role in OTDS.
             # This will effectively sync all OTCS users with AppWorks Platform:
@@ -833,6 +1168,13 @@ class Payload:
                 access_role=access_role_name,
                 partition=self._otds.admin_partition_name(),
             )
+
+            # Add the organization roles partition to the AppWorks Platform Access Role.
+            if organization_partition:
+                self._otds.add_partition_to_access_role(
+                    access_role=access_role_name,
+                    partition=organization_partition,
+                )
 
             # Set Group inclusion for Access Role for OTAWP to "True":
             self._otds.update_access_role_attributes(
@@ -849,144 +1191,151 @@ class Payload:
             # Allow impersonation for all users:
             self._otds.impersonate_resource(resource_name=organization)
 
-            # Editing configmap
-            config_map = self._k8s.get_config_map(config_map_name=self._otawp.config_map_name())
-            if not config_map:
-                self.logger.error(
-                    "Failed to retrieve AppWorks Kubernetes config map -> '%s'!",
-                    self._otawp.config_map_name(),
+            self.logger.info(
+                "Update YAML settings for AppWorks organization -> '%s' with OTDS resource IDs...",
+                organization,
+            )
+            updated_files = update_appworks_organization_resource_settings(
+                config_map.data,
+                organization=organization,
+                resource_id=awp_resource_id,
+                roles_partition=organization_partition,
+            )
+            if not updated_files:
+                self.logger.error("No AppWorks YAML organization block found for -> '%s'.", organization)
+                failed_resource_organizations.add(organization)
+                self.record_appworks_result(
+                    organization, "resource", success=False, error="AppWorks organization YAML block was not found."
                 )
                 success = False
-            else:
-                self.logger.info(
-                    "Update Kubernetes config map for AppWorks organization -> '%s' with OTDS resource IDs...",
-                    organization,
-                )
-                solution = yaml.safe_load(
-                    config_map.data[organization + ".yaml"],
-                )
+                continue
+            update_appworks_yaml_placeholders(
+                config_map.data,
+                content_server_url=self._otcs.cs_url(),
+                content_server_support_url=self._otcs.cs_support_url(),
+                content_server_resource_id=self._otcs.resource_id(),
+                public_otds_url=getattr(self, "_otds_public_url", None),
+                internal_otds_url=self._otds.base_url(),
+                organization=organization,
+                update_shared=bool(getattr(self, "_otds_public_url", None)),
+            )
 
-                solution["platform"]["organizations"][organization]["otds"]["resourceId"] = awp_resource_id
-                solution["platform"]["organizations"][organization]["database"]["connections"]["sysConnection"][
-                    "connectionString"
-                ] = "jdbc:postgresql://${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
-
-                solution["platform"]["organizations"][organization]["database"]["connections"]["sysConnection"][
-                    "database"
-                ] = "${DATABASE_NAME}"
-
-                solution["platform"]["organizations"][organization]["database"]["connections"]["sysConnection"][
-                    "password"
-                ] = "${DATABASE_PASSWORD}"
-
-                solution["platform"]["organizations"][organization]["content"]["ContentServer"]["contentServerUrl"] = (
-                    self._otcs.cs_url()
+            license_file = self._otawp.license_file()
+            if not appworks_configuration.get("use_shared_appworks_license", False) and os.path.isfile(license_file):
+                license_name = self._otawp.product_name()
+                license_result = self._otds.add_license_to_resource(
+                    path_to_license_file=license_file,
+                    product_name=license_name + "_" + organization.upper(),
+                    product_description=license_name + organization,
+                    resource_id=awp_resource_id,
                 )
-                solution["platform"]["organizations"][organization]["content"]["ContentServer"][
-                    "contentServerSupportDirectoryUrl"
-                ] = self._otcs.cs_support_url()
-                solution["platform"]["organizations"][organization]["content"]["ContentServer"]["otdsResourceId"] = (
-                    self._otcs.resource_id()
-                )
-                solution["platform"]["organizations"][organization]["authenticators"]["OTDSAuth"]["publicLoginUrl"] = (
-                    self._otds.base_url() + "/otdsws/login"
-                )
-
-                config_map.data[organization + ".yaml"] = yaml.dump(solution)
-                result = self._k8s.replace_config_map(
-                    config_map_name=self._otawp.config_map_name(),
-                    config_map_data=config_map.data,
-                )
-                if result:
-                    self.logger.info(
-                        "Successfully updated AppWorks solution YAML for organization -> '%s'.",
-                        organization,
-                    )
-                else:
-                    self.logger.error(
-                        "Failed to update AppWorks solution YAML for organization -> '%s'!",
-                        organization,
-                    )
-                self.logger.debug(
-                    "Solution YAML for Appworks organization -> '%s': %s",
-                    organization,
-                    solution,
-                )
-            # Add SPS license for OTAWP
-            license_name = self._otawp.product_name()
-            product_name = self._otawp.product_name() + "_" + organization.upper()
-            product_description = self._otawp.product_name() + organization
-            if os.path.isfile(self._otawp.license_file()):
-                self.logger.info(
-                    "Found OTAWP license file -> '%s', assigning it to OTDS resource -> '%s'...",
-                    self._otawp.license_file(),
-                    organization,
-                )
-
-                otawp_license = self._otds.add_license_to_resource(
-                    path_to_license_file=self._otawp.license_file(),
-                    product_name=product_name,
-                    product_description=product_description,
-                    resource_id=awp_resource["resourceID"],
-                )
-                if not otawp_license:
-                    self.logger.error(
-                        "Couldn't apply license -> '%s' for product -> '%s' to OTDS resource -> '%s'!",
-                        self._otawp.license_file(),
-                        product_name,
-                        awp_resource["resourceID"],
-                    )
-                else:
-                    self.logger.info(
-                        "Successfully applied license -> '%s' for product -> '%s' to OTDS resource -> '%s'.",
-                        self._otawp.license_file(),
-                        product_name,
-                        awp_resource["resourceID"],
-                    )
-
-                # Assign AppWorks license to Content Server Members Partition and otds.admin:
+                if not license_result:
+                    self.logger.error("Failed to apply AppWorks license to organization -> '%s'.", organization)
                 for partition_name in ["otds.admin", self._otcs.partition_name()]:
-                    if self._otds.is_partition_licensed(
+                    if not self._otds.is_partition_licensed(
                         partition_name=partition_name,
-                        resource_id=awp_resource["resourceID"],
+                        resource_id=awp_resource_id,
+                        license_feature="USERS",
+                        license_name=license_name,
+                    ) and not self._otds.assign_partition_to_license(
+                        partition_name=partition_name,
+                        resource_id=awp_resource_id,
                         license_feature="USERS",
                         license_name=license_name,
                     ):
-                        self.logger.info(
-                            "Partition -> '%s' is already licensed for -> '%s' (%s).",
+                        self.logger.error(
+                            "Failed to assign AppWorks license to partition -> '%s' for organization -> '%s'.",
                             partition_name,
-                            product_name,
-                            "USERS",
+                            organization,
                         )
-                    else:
-                        assigned_license = self._otds.assign_partition_to_license(
-                            partition_name=partition_name,
-                            resource_id=awp_resource["resourceID"],
-                            license_feature="USERS",
-                            license_name=license_name,
+                        self.record_appworks_result(
+                            organization,
+                            "resource",
+                            success=False,
+                            error="AppWorks partition license assignment failed.",
                         )
-                        if not assigned_license:
-                            self.logger.error(
-                                "Partition -> '%s' could not be assigned to license -> '%s' (%s)!",
-                                partition_name,
-                                product_name,
-                                "USERS",
-                            )
-                            success = False
-                        else:
-                            self.logger.info(
-                                "Partition -> '%s' successfully assigned to license -> '%s' (%s).",
-                                partition_name,
-                                product_name,
-                                "USERS",
-                            )
-                # end for partition_name in ["otds.admin", self._otcs.partition_name()]:
-            # end if os.path.isfile(self._otawp.license_file()):
+                        success = False
+            configured_organizations.append(organization)
+        # end for appworks_configuration in self._appworks_configurations:
 
-            self.logger.info("Restart AppWorks Kubernetes stateful set -> '%s'...", self._otawp.hostname())
+        config_map_saved = False
+        if configured_organizations and config_map and isinstance(config_map.data, dict):
+            config_map_saved = bool(
+                self._k8s.replace_config_map(
+                    config_map_name=self._otawp.config_map_name(),
+                    config_map_data=config_map.data,
+                ),
+            )
+            if config_map_saved:
+                self.logger.info("Saved shared and organization AppWorks YAML settings in one ConfigMap update.")
+            else:
+                self.logger.error("Failed to save shared and organization AppWorks YAML settings. Skipping startup.")
+                success = False
 
-            self._k8s.restart_stateful_set(sts_name=self._otawp.hostname(), wait=True)
+        for organization in configured_organizations:
+            if config_map_saved:
+                self.record_appworks_result(organization, "resource", success=True)
+            else:
+                self.record_appworks_result(
+                    organization,
+                    "resource",
+                    success=False,
+                    error="AppWorks organization YAML ConfigMap update failed.",
+                )
+                failed_resource_organizations.add(organization)
 
+        organizations_to_process = configured_organizations
+        appworks_ready = not organizations_to_process or config_map_saved
+        if organizations_to_process and config_map_saved:
+            appworks_ready = False
+            sts_name = self._otawp.hostname()
+            stateful_set = self._k8s.get_stateful_set(sts_name=sts_name)
+            if not stateful_set:
+                self.logger.error("AppWorks Kubernetes stateful set -> '%s' was not found!", sts_name)
+            elif not (stateful_set.spec.replicas or 0) and any(
+                item.get("start_if_stopped", False) and item["organization"] in organizations_to_process
+                for item in resource_configurations
+            ):
+                self.logger.info(
+                    "Start AppWorks Kubernetes stateful set -> '%s' after organization YAML updates...",
+                    sts_name,
+                )
+                if not self._k8s.scale_stateful_set(sts_name=sts_name, scale=1) or not self._k8s.verify_pod_status(
+                    pod_name=sts_name + "-0",
+                ):
+                    self.logger.error("Failed to start AppWorks Kubernetes stateful set -> '%s'!", sts_name)
+                else:
+                    appworks_ready = True
+            else:
+                self.logger.info(
+                    "Restart AppWorks Kubernetes stateful set -> '%s' after organization YAML updates...",
+                    sts_name,
+                )
+                appworks_ready = self._k8s.restart_stateful_set(sts_name=sts_name, wait=True)
+                if not appworks_ready:
+                    self.logger.error("Failed to restart AppWorks Kubernetes stateful set -> '%s'!", sts_name)
+
+        if not appworks_ready:
+            self.appworks_startup_failed = True
+            for organization in strict_organizations:
+                if organization not in organizations_to_process:
+                    continue
+                self.record_appworks_result(
+                    organization,
+                    "startup",
+                    success=False,
+                    error="AppWorks StatefulSet failed to become ready after organization YAML updates.",
+                )
+            if strict_organizations.intersection(organizations_to_process):
+                success = False
+
+        for organization in configured_organizations:
+            if organization in shared_license_organizations and organization in failed_resource_organizations:
+                continue
+            if organization in strict_organizations and (
+                not appworks_ready or organization in failed_resource_organizations
+            ):
+                continue
             self._otawp.set_organization(organization)
             otawp_cookie = self._otawp.authenticate(revalidate=True)
             if not otawp_cookie:
@@ -994,31 +1343,48 @@ class Payload:
                     "Authentication at AppWorks failed! Cannot proceed with processing of AppWorks configuration -> '%s'!",
                     organization,
                 )
+                self.record_appworks_result(
+                    organization,
+                    "authentication",
+                    success=False,
+                    error="AppWorks authentication failed for the organization.",
+                )
                 success = False
                 continue
+            self.record_appworks_result(organization, "authentication", success=True)
             self._otawp.create_cws_config(
                 partition=self._otcs.partition_name(), resource_name=organization, otcs_url=self._otcs.cs_url()
             )
             self._otawp.assign_role_to_user(
                 organization=organization, user_name=self._otawp.username(), role_name="Developer"
             )
-        # end for appworks_configuration in self._appworks_configurations:
+        # end for organization in configured_organizations:
 
         #
         # 2: Loop to create the AppWorks workspaces, projects, and entities:
         #
         for appworks_configuration in self._appworks_configurations:
+            if not appworks_configuration.get("enabled", True):
+                continue
             organization = appworks_configuration.get("organization", None)
             if not organization:
                 self.logger.error("AppWorks configuration is missing the organization name! Skipping...")
                 success = False
                 continue
 
-            # Check if user has been explicitly disabled in payload
-            # (enabled = false). In this case we skip the element:
-            if not appworks_configuration.get("enabled", True):
-                self.logger.info(
-                    "Payload for AppWorks configuration -> '%s' is disabled. Skipping...",
+            strict_failures = organization in strict_organizations
+            if (
+                strict_failures or organization in shared_license_organizations
+            ) and organization in failed_resource_organizations:
+                self.logger.error(
+                    "Skipping AppWorks configuration for organization -> '%s' because its OTDS resource setup failed.",
+                    organization,
+                )
+                continue
+
+            if strict_failures and organization in organizations_to_process and not appworks_ready:
+                self.logger.error(
+                    "Skipping AppWorks configuration for organization -> '%s' because the AppWorks StatefulSet is not ready.",
                     organization,
                 )
                 continue
@@ -1034,16 +1400,29 @@ class Payload:
                     "Authentication at AppWorks failed. Cannot proceed with processing of AppWorks configuration -> '%s'!",
                     organization,
                 )
+                self.record_appworks_result(
+                    organization,
+                    "authentication",
+                    success=False,
+                    error="AppWorks authentication failed before workspace and entity processing.",
+                )
                 success = False
                 continue
+            self.record_appworks_result(organization, "authentication", success=True)
 
-            if "workspaces" not in appworks_configuration:
+            if "workspaces" not in appworks_configuration and not appworks_configuration.get(
+                "process_entities_without_workspaces", False
+            ):
                 self.logger.warning(
                     "No workspace information in AppWorks configuration -> '%s'. Skipping...", organization
                 )
                 continue
+            workspaces = appworks_configuration.get("workspaces", [])
+            workspace_success = True
+            project_success = True
+            mcp_solution_names: list[str] = []
 
-            for workspace in appworks_configuration["workspaces"]:
+            for workspace in workspaces:
                 workspace_id = workspace.get("workspace_id", None)
                 workspace_name = workspace.get("name", None)
                 workspace_path = workspace.get("path", None)
@@ -1054,6 +1433,7 @@ class Payload:
                         " (workspace name -> {})".format(workspace_name) if workspace_name else "",
                     )
                     success = False
+                    workspace_success = False
                     continue
 
                 response, created = self._otawp.create_workspace(
@@ -1062,6 +1442,7 @@ class Payload:
                 if not response:
                     self.logger.info("Failed to create workspace -> '%s' (%s)!", workspace_name, workspace_id)
                     success = False
+                    workspace_success = False
                     continue
 
                 if created:
@@ -1073,6 +1454,7 @@ class Payload:
                     if not response:
                         self.logger.error("Failed to synchronize workspace -> '%s' (%s)!", workspace_name, workspace_id)
                         success = False
+                        workspace_success = False
                         continue
                     self.logger.info(
                         "Copy projects artifacts to workspace -> '%s' (%s) in AppWorks pod -> '%s'...",
@@ -1080,15 +1462,41 @@ class Payload:
                         workspace_id,
                         "appworks-0",
                     )
-                    self._k8s.exec_pod_command(
+                    sync_path = "/opt/appworks/cluster/shared/cws/sync/{}/{}".format(
+                        organization,
+                        workspace_name,
+                    )
+                    if not self._k8s:
+                        self.logger.error("Kubernetes is required to copy AppWorks workspace artifacts.")
+                        success = False
+                        workspace_success = False
+                        continue
+                    copy_marker = "__APPWORKS_COPY_OK__"
+                    # exec_pod_command() does not report the exit code, so emit a marker on success:
+                    copy_result = self._k8s.exec_pod_command(
                         pod_name="appworks-0",
                         command=[
                             "/bin/sh",
                             "-c",
-                            f'cp -r "{workspace_path}/"* "/opt/appworks/cluster/shared/cws/sync/{organization}/{workspace_name}"',
+                            "cp -r {}/* {} && echo {}".format(
+                                shlex.quote(workspace_path), shlex.quote(sync_path), copy_marker
+                            ),
                         ],
                         timeout=600,
                     )
+                    if not copy_result or copy_marker not in copy_result:
+                        self.logger.error(
+                            "Failed to copy AppWorks artifacts from -> '%s' to -> '%s' for organization -> '%s', workspace -> '%s'! Output -> %s",
+                            workspace_path,
+                            sync_path,
+                            organization,
+                            workspace_name,
+                            copy_result or "<none>",
+                        )
+                        if strict_failures:
+                            success = False
+                            workspace_success = False
+                            continue
                     self.logger.info(
                         "Copying of projects artifacts to workspace -> '%s' (%s) completed.",
                         workspace_name,
@@ -1102,6 +1510,7 @@ class Payload:
                 if not response:
                     self.logger.error("Failed to synchronize workspace -> '%s' (%s)!", workspace_name, workspace_id)
                     success = False
+                    workspace_success = False
                     continue
 
                 if "projects" in workspace:
@@ -1114,17 +1523,52 @@ class Payload:
                                 project_id=project.get("documentId"),
                             ):
                                 success = False
+                                project_success = False
+                                self.record_appworks_result(
+                                    organization,
+                                    "projects",
+                                    success=False,
+                                    error="A configured CWS project could not be published.",
+                                )
                                 continue
+                            mcp_solution_name = project.get("mcp_solution_name")
+                            if mcp_solution_name and mcp_solution_name not in mcp_solution_names:
+                                mcp_solution_names.append(mcp_solution_name)
                         else:
                             self.logger.error(
                                 "Skipping project -> '%s' due to missing required project fields 'name' or 'documentId'!",
                                 project.get("name"),
                             )
                             success = False
+                            project_success = False
+                            self.record_appworks_result(
+                                organization,
+                                "projects",
+                                success=False,
+                                error="A CWS project is missing its name or documentId.",
+                            )
                             continue
                     # end for project in workspace["projects"]:
                 # end if "projects" in workspace
             # end for workspace in value["cws"]["workspaces"]
+
+            # The MCP configuration is optional - failures are logged but don't fail the organization:
+            if mcp_solution_names and not self._otawp.update_mcp_configuration(solution_names=mcp_solution_names):
+                self.logger.warning(
+                    "Failed to update MCP configuration for organization -> '%s'. Continuing...",
+                    organization,
+                )
+
+            self.record_appworks_result(organization, "workspaces", success=workspace_success)
+            if not workspace_success:
+                self.record_appworks_result(
+                    organization,
+                    "workspaces",
+                    success=False,
+                    error="One or more workspace operations failed.",
+                )
+            if project_success:
+                self.record_appworks_result(organization, "projects", success=True)
 
             # Process the entities in the payload:
             entities = appworks_configuration.get("entities", [])
@@ -1135,15 +1579,194 @@ class Payload:
                 for entity in entities:
                     if not self.process_appworks_entity(entity=entity):
                         success = False
+                        self.record_appworks_result(
+                            organization,
+                            "entities",
+                            success=False,
+                            error="A runtime entity could not be created or verified.",
+                        )
                 self.logger.info("Entity processing completed for organization -> '%s'.", organization)
+                if (
+                    self._appworks_organization_results.get(organization, {}).get("phases", {}).get("entities")
+                    != "failed"
+                ):
+                    self.record_appworks_result(organization, "entities", success=True)
+            else:
+                self.record_appworks_result(organization, "entities", success=True)
+
+            result = getattr(self, "_appworks_organization_results", {}).get(organization, {})
+            if result.get("success", True):
+                self.record_appworks_result(organization, "application", success=True)
+            self.logger.info(
+                "AppWorks organization -> '%s' processing result -> %s.",
+                organization,
+                "success" if result.get("success", True) else "failed",
+            )
         # end for appworks_configuration in self._appworks_configurations:
+
+        if any(
+            result.get("enabled", True) and not result.get("success", True)
+            for result in self._appworks_organization_results.values()
+        ):
+            success = False
 
         self.write_status_file(
             success=success,
             payload_section_name=section_name,
             payload_section=self._appworks_configurations,
         )
+        self.write_status_file(
+            success=success,
+            payload_section_name="appworksOrganizationResults",
+            payload_section=list(self._appworks_organization_results.values()),
+        )
 
+        return success
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_appworks_data_imports")
+    def process_appworks_data_imports(self) -> bool:
+        """Import project data after publication, restart, and OTDS assignments.
+
+        Returns:
+            bool:
+                True if all enabled imports succeeded or were already completed.
+
+        """
+
+        section_name = "appworksDataImports"
+        if self.check_status_file(payload_section_name=section_name):
+            return True
+        success = True
+        for configuration in self._appworks_configurations:
+            if not configuration.get("enabled", True):
+                continue
+            organization = configuration.get("organization")
+            if not organization:
+                self.logger.error("Cannot import AppWorks data: organization is missing.")
+                success = False
+                continue
+            result = getattr(self, "_appworks_organization_results", {}).get(organization, {})
+            if not result.get("success", True):
+                self.logger.error("Skipping AppWorks data imports for failed organization -> '%s'.", organization)
+                success = False
+                continue
+            self._otawp.set_organization(organization)
+            for workspace in configuration.get("workspaces", []):
+                for project in workspace.get("projects", []):
+                    data_import = project.get("data_import")
+                    if not data_import or not data_import.get("enabled", True):
+                        continue
+                    imported = self.process_appworks_project_data(
+                        project=project, workspace=workspace, organization=organization
+                    )
+                    self.record_appworks_result(
+                        organization,
+                        "data_import",
+                        success=imported,
+                        error="A project spreadsheet import failed." if not imported else "",
+                    )
+                    success = imported and success
+        self.write_status_file(
+            success=success, payload_section_name=section_name, payload_section=self._appworks_configurations
+        )
+        self.write_status_file(
+            success=success,
+            payload_section_name="appworksOrganizationResults",
+            payload_section=list(self._appworks_organization_results.values()),
+        )
+        return success
+
+    # end method definition
+
+    @tracer.start_as_current_span(attributes=OTEL_TRACING_ATTRIBUTES, name="process_appworks_project_data")
+    def process_appworks_project_data(self, project: dict, workspace: dict, organization: str) -> bool:
+        """Import one published project's spreadsheet data from local files or artifact URLs.
+
+        Args:
+            project (dict):
+                Project with a data_import block containing file_path or file_url,
+                request_json_path or request_json_url, and project_meta
+                (entities and homepageLayoutID plus optional overrides).
+            workspace (dict):
+                Parent workspace configuration.
+            organization (str):
+                Organization used for the import status marker.
+
+        Returns:
+            bool:
+                True if the import succeeded or was already completed, otherwise False.
+
+        """
+
+        data_import = project["data_import"]
+        section_name = "appworksDataImport_{}_{}_{}".format(
+            organization, workspace["workspace_id"], project["documentId"]
+        )
+        if self.check_status_file(payload_section_name=section_name):
+            return True
+        file_path = data_import.get("file_path")
+        file_url = data_import.get("file_url")
+        request_json_path = data_import.get("request_json_path")
+        request_json_url = data_import.get("request_json_url")
+        project_meta = data_import.get("project_meta")
+        if bool(file_path) == bool(file_url) or bool(request_json_path) == bool(request_json_url):
+            self.logger.error(
+                "Project data import requires exactly one of file_path/file_url and request_json_path/request_json_url."
+            )
+            return False
+        if not isinstance(project_meta, dict):
+            self.logger.error("Project data import requires project_meta.")
+            return False
+        if not project_meta.get("entities") or not project_meta.get("homepageLayoutID"):
+            self.logger.error("Project data import metadata requires entities and homepageLayoutID.")
+            return False
+        try:
+            with tempfile.TemporaryDirectory(prefix="appworks-import-") as download_dir:
+                for source_url in (file_url, request_json_url):
+                    if source_url and urlparse(source_url).scheme not in ("http", "https"):
+                        self.logger.error("Project data import URLs must use HTTP or HTTPS.")
+                        return False
+                if file_url:
+                    file_path = self.download_transport_package(
+                        package_url=file_url, download_dir=os.path.join(download_dir, "workbook")
+                    )
+                    if not file_path:
+                        return False
+                if request_json_url:
+                    request_json_path = self.download_transport_package(
+                        package_url=request_json_url, download_dir=os.path.join(download_dir, "request")
+                    )
+                    if not request_json_path:
+                        return False
+                with open(request_json_path, encoding="utf-8") as request_file:
+                    request_json = json.load(request_file)
+                if not isinstance(request_json, dict) or not isinstance(request_json.get("solution"), str):
+                    self.logger.error("Import request JSON must contain a JSON-encoded solution string.")
+                    return False
+                solution = json.loads(request_json["solution"])
+                if not isinstance(solution, dict) or not isinstance(solution.get("entities"), list):
+                    self.logger.error("Import solution must contain an entities list.")
+                    return False
+                if request_json.get("workspaceName") != workspace["name"]:
+                    self.logger.error("Import request workspaceName does not match the configured workspace.")
+                    return False
+                metadata = {
+                    "projectID": project["documentId"],
+                    "projectName": project["name"],
+                    "workspaceID": workspace["name"],
+                    "workspaceName": workspace["name"],
+                    **project_meta,
+                }
+                response = self._otawp.import_project_data(
+                    file_path=file_path, request_json=request_json, project_meta=metadata, otds_object=self._otds
+                )
+        except (OSError, ValueError) as exception:
+            self.logger.error("Cannot prepare project import files -> '%s': %s", request_json_path, exception)
+            return False
+        success = response is not None
+        self.write_status_file(success=success, payload_section_name=section_name, payload_section=data_import)
         return success
 
     # end method definition
@@ -2475,6 +3098,7 @@ class Payload:
             self.logger.warning("No payload sections defined!")
             return
 
+        appworks_prerequisites: dict[str, bool] = {}
         for payload_section in self._payload_sections:
             with tracer.start_as_current_span("process_payload-section") as t:
                 t.set_attributes({"payload_section": payload_section["name"]})
@@ -2504,7 +3128,36 @@ class Payload:
                         self.process_avts_questions()
                     case "appworks":
                         self._log_header_callback(text="Process AppWorks Configurations")
-                        self.process_appworks_configurations()
+                        try:
+                            appworks_prerequisites["appworks"] = self.process_appworks_configurations()
+                        except Exception:
+                            appworks_prerequisites["appworks"] = False
+                            appworks_prerequisites["appworks_exception"] = True
+                            # One AppWorks failure must not abort the remaining payload sections.
+                            self.logger.exception(
+                                "Unexpected error while processing AppWorks configurations. "
+                                "Continuing with the remaining payload sections...",
+                            )
+                    case "appworksDataImports":
+                        if (
+                            appworks_prerequisites.get("appworks_exception", False)
+                            or "appworks" not in appworks_prerequisites
+                            or (
+                                not appworks_prerequisites["appworks"]
+                                and not getattr(self, "_appworks_organization_results", {})
+                            )
+                        ):
+                            self.logger.error(
+                                "Skipping AppWorks data imports: AppWorks processing must run before imports."
+                            )
+                            self.write_status_file(
+                                success=False,
+                                payload_section_name="appworksDataImports",
+                                payload_section=self._appworks_configurations,
+                            )
+                            continue
+                        self._log_header_callback(text="Process AppWorks Data Imports")
+                        self.process_appworks_data_imports()
                     case "webHooks":
                         self._log_header_callback(text="Process Web Hooks")
                         self.process_web_hooks(webhooks=self._webhooks)
@@ -2669,7 +3322,7 @@ class Payload:
                         self.process_exec_pod_commands()
                     case "kubernetes":
                         self._log_header_callback(text="Process Kubernetes Commands")
-                        self.process_kubernetes()
+                        appworks_prerequisites["kubernetes"] = self.process_kubernetes()
                     case "execCommands":
                         self._log_header_callback(text="Process Commands in Customizer Pod")
                         self.process_exec_commands()
@@ -2877,17 +3530,21 @@ class Payload:
                         self._log_header_callback(
                             text="Process additional group members for OTDS",
                         )
-                        self.process_additional_group_members()
+                        appworks_prerequisites["additionalGroupMemberships"] = self.process_additional_group_members()
                     case "additionalAccessRoleMemberships":
                         self._log_header_callback(
                             text="Process additional access role members for OTDS",
                         )
-                        self.process_additional_access_role_members()
+                        appworks_prerequisites["additionalAccessRoleMemberships"] = (
+                            self.process_additional_access_role_members()
+                        )
                     case "additionalApplicationRoleAssignments":
                         self._log_header_callback(
                             text="Process additional application role assignments for OTDS",
                         )
-                        self.process_additional_application_role_assignments()
+                        appworks_prerequisites["additionalApplicationRoleAssignments"] = (
+                            self.process_additional_application_role_assignments()
+                        )
                     case "renamings":
                         self._log_header_callback(text="Process Node Renamings")
                         self.process_renamings()

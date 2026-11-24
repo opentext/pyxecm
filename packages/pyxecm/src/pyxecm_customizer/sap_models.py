@@ -23,10 +23,7 @@ Class hierarchy - the subclasses mostly declare fields, the behavior comes from 
     SAPODataQueryModel                to_odata() = $filter / $orderby / $expand
     └── *QueryModel                   search criteria of SAP.get_*s() / iter_*s()
 
-A comment above each subclass names what it inherits and which SAP methods use it. These notes
-are comments on purpose: pydantic puts the class docstring into the JSON schema ("description"),
-and LLM tools that take or return the models show it to the LLM - so docstrings describe the
-data for API users and LLMs, comments explain the code to developers.
+A comment above each subclass names what it inherits and which SAP methods use it.
 
 The Python attribute names of the models are snake case, the aliases are the OData
 property names of the SAP APIs. Both can be used to initialize the models.
@@ -455,7 +452,7 @@ SAPCode = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True)
 SAPCurrency = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, pattern=r"^\s*[A-Za-z]{3}\s*$")]
 
 # A quantity / amount. SAP (OData V4) transfers decimals as strings to avoid rounding errors,
-# but the JSON schema shows a plain number - easier to fill for API clients and LLMs:
+# but the JSON schema shows a plain number - easier to fill for API clients:
 SAPDecimal = Annotated[Decimal, WithJsonSchema({"type": "number"})]
 
 # ISO codes (UN/ECE Recommendation 20) of SAP's standard English (commercial) unit codes. OData V4 APIs
@@ -785,8 +782,6 @@ class SAPODataModel(BaseModel):
 
     OData properties that are not modelled are ignored in the response models: SAP
     returns many technical properties (often in raw OData formats like "/Date(...)/")
-    that would only be noise for users or LLMs. Model a property to return it.
-    The create models reject them instead (see SAPODataCreateModel).
 
     Direct subclasses are the response models (*ResponseModel) that the SAP read methods
     validate the OData results with (model_validate()), e.g. SAP.get_sales_order().
@@ -831,10 +826,6 @@ class SAPODataModel(BaseModel):
     def drop_empty_text_lists(cls, data: object) -> object:
         """Treat an empty text sent for a list field as omitted.
 
-        LLMs sometimes send "" instead of [] for lists they don't need - e.g.
-        "to_SuplrInvcItemMaterial": "" for a supplier invoice with purchase order items
-        only. The validation would fail and the tool call would have to be repeated.
-
         Args:
             data (object):
                 The input data of the model (a dict with OData or field names).
@@ -866,10 +857,7 @@ class SAPODataModel(BaseModel):
 
         This is also what str() returns - for single models and for lists of models
         (str(list) uses the repr of the elements). So SAP entities can be passed as they
-        are to consumers that convert objects with str() - e.g. LangChain tools returning
-        these models to an LLM: the LLM sees the same OData names that it has to use in
-        filter expressions and changes, instead of Python attribute names and reprs like
-        "datetime.datetime(2026, 11, 2, 8, 0)".
+        are to consumers that convert objects with str().
 
         """
 
@@ -885,7 +873,7 @@ class SAPODataCreateModel(SAPODataModel):
 
     Serialization uses the OData property names (aliases), so to_odata() returns the
     payload as expected by the SAP API. Only the modelled fields can be set - unknown
-    fields are rejected, so an LLM can't invent OData properties that SAP rejects only
+    fields are rejected, so a call can't send OData properties that SAP rejects only
     after the user has confirmed the create or update. Model a property to make it
     settable.
 
@@ -894,7 +882,7 @@ class SAPODataCreateModel(SAPODataModel):
     * to_odata(): the payload of the SAP create methods, e.g. SAP.create_sales_order().
     * to_odata_update(): validates the changes of the SAP update methods, e.g.
       SAP.update_sales_order(), with the same field definitions as a create.
-    * check_unknown_fields(): rejects unknown field names (e.g. invented by an LLM).
+    * check_unknown_fields(): rejects unknown field names.
 
     """
 
@@ -1378,8 +1366,8 @@ class SAPODataQueryModel(BaseModel):
 
     The subclasses (*QueryModel) inherit limit, sort_direction, page_size and to_odata(). They
     are the query parameter of the SAP list methods, e.g. SAP.get_sales_orders(), which pass
-    to_odata() to SAP._iter_odata_collection(). Their JSON schema serves as the parameters of
-    LLM tools as well - so callers give readable criteria, not OData expressions.
+    to_odata() to SAP._iter_odata_collection(). Their JSON schema serves as the parameters
+    so callers give readable criteria, not OData expressions.
 
     """
 
@@ -1403,7 +1391,7 @@ class SAPODataQueryModel(BaseModel):
 
     limit: int | None = Field(default=None, ge=1, description="Maximum number of results. None = all results.")
     sort_direction: Literal["asc", "desc"] = Field(default="asc", description="Sort direction.")
-    # Transport setting - not part of the JSON schema (not relevant for API clients / LLMs):
+    # Transport setting - not part of the JSON schema (not relevant for API clients):
     page_size: SkipJsonSchema[int] = Field(
         default=ODATA_PAGE_SIZE,
         ge=1,
@@ -2426,7 +2414,7 @@ class SAPMaintenanceOrderObjectListItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_maintenance_order(), SAP.get_maintenance_orders() and
+# names. Returned by SAP.get_maintenance_order(), SAP.get_maintenance_orders() and
 # SAP.iter_maintenance_orders().
 class SAPMaintenanceOrderResponseModel(SAPODataModel):
     """An SAP Plant Maintenance order as returned by SAP (API_MAINTENANCEORDER).
@@ -2965,7 +2953,7 @@ class SAPMaintenanceNotificationItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_maintenance_notification(), SAP.get_maintenance_notifications()
+# names. Returned by SAP.get_maintenance_notification(), SAP.get_maintenance_notifications()
 # and SAP.iter_maintenance_notifications().
 class SAPMaintenanceNotificationResponseModel(SAPODataModel):
     """An SAP maintenance notification as returned by SAP (API_MAINTNOTIFICATION).
@@ -3931,7 +3919,7 @@ class SAPPurchaseOrderItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_purchase_order(), SAP.get_purchase_orders() and
+# names. Returned by SAP.get_purchase_order(), SAP.get_purchase_orders() and
 # SAP.iter_purchase_orders().
 class SAPPurchaseOrderResponseModel(SAPODataModel):
     """A purchase order as returned by SAP (API_PURCHASEORDER_2, OData V4).
@@ -4351,7 +4339,7 @@ class SAPSalesOrderItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_sales_order(), SAP.get_sales_orders() and SAP.iter_sales_orders().
+# names. Returned by SAP.get_sales_order(), SAP.get_sales_orders() and SAP.iter_sales_orders().
 class SAPSalesOrderResponseModel(SAPODataModel):
     """An SAP sales order as returned by SAP (API_SALES_ORDER_SRV, OData V2).
 
@@ -4791,7 +4779,7 @@ class SAPSalesContractItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_sales_contract(), SAP.get_sales_contracts() and
+# names. Returned by SAP.get_sales_contract(), SAP.get_sales_contracts() and
 # SAP.iter_sales_contracts().
 class SAPSalesContractResponseModel(SAPODataModel):
     """An SAP sales contract as returned by SAP (API_SALES_CONTRACT_SRV, OData V2).
@@ -5258,7 +5246,7 @@ class SAPPurchaseContractItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_purchase_contract(), SAP.get_purchase_contracts() and
+# names. Returned by SAP.get_purchase_contract(), SAP.get_purchase_contracts() and
 # SAP.iter_purchase_contracts().
 class SAPPurchaseContractResponseModel(SAPODataModel):
     """An SAP purchase contract as returned by SAP (API_PURCHASECONTRACT_PROCESS_SRV, OData V2).
@@ -5965,7 +5953,7 @@ class SAPPurchaseRequisitionItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_purchase_requisition(), SAP.get_purchase_requisitions() and
+# names. Returned by SAP.get_purchase_requisition(), SAP.get_purchase_requisitions() and
 # SAP.iter_purchase_requisitions().
 class SAPPurchaseRequisitionResponseModel(SAPODataModel):
     """An SAP purchase requisition as returned by SAP (API_PURCHASEREQUISITION_2, OData V4).
@@ -6519,7 +6507,7 @@ class SAPRequestForQuotationBidderResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_request_for_quotation(), SAP.get_requests_for_quotation() and
+# names. Returned by SAP.get_request_for_quotation(), SAP.get_requests_for_quotation() and
 # SAP.iter_requests_for_quotation().
 class SAPRequestForQuotationResponseModel(SAPODataModel):
     """An SAP request for quotation as returned by SAP (API_RFQ_PROCESS_SRV, OData V2).
@@ -6860,7 +6848,7 @@ class SAPSupplierQuotationItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_supplier_quotation(), SAP.get_supplier_quotations() and
+# names. Returned by SAP.get_supplier_quotation(), SAP.get_supplier_quotations() and
 # SAP.iter_supplier_quotations().
 class SAPSupplierQuotationResponseModel(SAPODataModel):
     """An SAP supplier quotation as returned by SAP (API_QTN_PROCESS_SRV, OData V2).
@@ -7420,7 +7408,7 @@ class SAPPurchasingInfoRecordDataResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_purchasing_info_record(), SAP.get_purchasing_info_records() and
+# names. Returned by SAP.get_purchasing_info_record(), SAP.get_purchasing_info_records() and
 # SAP.iter_purchasing_info_records().
 class SAPPurchasingInfoRecordResponseModel(SAPODataModel):
     """An SAP purchasing info record as returned by SAP (API_INFORECORD_PROCESS_SRV, OData V2).
@@ -7669,7 +7657,7 @@ class SAPSourceListRecordModel(SAPODataCreateModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_source_list_record(), SAP.get_source_list_records() and
+# names. Returned by SAP.get_source_list_record(), SAP.get_source_list_records() and
 # SAP.iter_source_list_records().
 class SAPSourceListRecordResponseModel(SAPODataModel):
     """An SAP source list record as returned by SAP (API_PURCHASING_SOURCE_SRV, OData V2)."""
@@ -8399,7 +8387,7 @@ class SAPWarrantyClaimVersionResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_warranty_claim(), SAP.get_warranty_claims(),
+# names. Returned by SAP.get_warranty_claim(), SAP.get_warranty_claims(),
 # SAP.iter_warranty_claims(), SAP.process_customer_claim(), SAP.process_supplier_claim() and
 # SAP.start_supplier_process_from_customer_claim().
 class SAPWarrantyClaimResponseModel(SAPODataModel):
@@ -8799,7 +8787,7 @@ class SAPCreditMemoRequestItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_credit_memo_request(), SAP.get_credit_memo_requests() and
+# names. Returned by SAP.get_credit_memo_request(), SAP.get_credit_memo_requests() and
 # SAP.iter_credit_memo_requests().
 class SAPCreditMemoRequestResponseModel(SAPODataModel):
     """An SAP credit memo request as returned by SAP (API_CREDIT_MEMO_REQUEST_SRV, OData V2).
@@ -9168,7 +9156,7 @@ class SAPDebitMemoRequestItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_debit_memo_request(), SAP.get_debit_memo_requests() and
+# names. Returned by SAP.get_debit_memo_request(), SAP.get_debit_memo_requests() and
 # SAP.iter_debit_memo_requests().
 class SAPDebitMemoRequestResponseModel(SAPODataModel):
     """An SAP debit memo request as returned by SAP (API_DEBIT_MEMO_REQUEST_SRV, OData V2).
@@ -9350,7 +9338,7 @@ class SAPBillingDocumentRequestItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_billing_document_request(), SAP.get_billing_document_requests()
+# names. Returned by SAP.get_billing_document_request(), SAP.get_billing_document_requests()
 # and SAP.iter_billing_document_requests().
 class SAPBillingDocumentRequestResponseModel(SAPODataModel):
     """An SAP billing document request as returned by SAP (API_BILLING_DOCUMENT_REQUEST_SRV, OData V2).
@@ -9538,7 +9526,7 @@ class SAPBillingDocumentItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_billing_document(), SAP.get_billing_documents() and
+# names. Returned by SAP.get_billing_document(), SAP.get_billing_documents() and
 # SAP.iter_billing_documents().
 class SAPBillingDocumentResponseModel(SAPODataModel):
     """An SAP billing document as returned by SAP (API_BILLING_DOCUMENT_SRV, OData V2).
@@ -9940,7 +9928,7 @@ class SAPOutboundDeliveryItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_outbound_deliveries(), SAP.get_outbound_delivery() and
+# names. Returned by SAP.get_outbound_deliveries(), SAP.get_outbound_delivery() and
 # SAP.iter_outbound_deliveries().
 class SAPOutboundDeliveryResponseModel(SAPODataModel):
     """An SAP outbound delivery as returned by SAP (API_OUTBOUND_DELIVERY_SRV, OData V2).
@@ -10315,7 +10303,7 @@ class SAPInboundDeliveryItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_inbound_deliveries(), SAP.get_inbound_delivery() and
+# names. Returned by SAP.get_inbound_deliveries(), SAP.get_inbound_delivery() and
 # SAP.iter_inbound_deliveries().
 class SAPInboundDeliveryResponseModel(SAPODataModel):
     """An SAP inbound delivery as returned by SAP (API_INBOUND_DELIVERY_SRV, OData V2).
@@ -11898,7 +11886,7 @@ SAP_SUPPLIER_INVOICE_STATUSES: dict[str, str] = {
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_supplier_invoice(), SAP.get_supplier_invoices() and
+# names. Returned by SAP.get_supplier_invoice(), SAP.get_supplier_invoices() and
 # SAP.iter_supplier_invoices().
 class SAPSupplierInvoiceResponseModel(SAPODataModel):
     """An SAP supplier invoice as returned by SAP (API_SUPPLIERINVOICE_PROCESS_SRV, OData V2).
@@ -12631,7 +12619,7 @@ class SAPGoodsMovementItemModel(SAPODataCreateModel):
         * With a reference document ("B" purchase order, "F" production order) SAP takes the
           account assignment from the order and rejects the account assignment properties
           that are not in the field selection of the goods receipt (e.g. a cost center the
-          LLM copied from the purchase order item) - they are dropped.
+          caller copied from the purchase order item) - they are dropped.
         * A goods receipt for an order is no transfer posting - receiving properties are rejected.
 
         Errors are raised before the user is asked to confirm the posting.
@@ -12871,7 +12859,7 @@ class SAPGoodsMovementItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_goods_movement(), SAP.get_goods_movements() and
+# names. Returned by SAP.get_goods_movement(), SAP.get_goods_movements() and
 # SAP.iter_goods_movements().
 class SAPGoodsMovementResponseModel(SAPODataModel):
     """A material document (goods movement) as returned by SAP (API_MATERIAL_DOCUMENT_SRV, OData V2).
@@ -13071,7 +13059,7 @@ class SAPGoodsMovementItemQueryModel(SAPODataQueryModel):
 # ---------------------------------------------------------------------------
 
 
-# Not shown to LLMs - parts of SAPOutboundDeliveryStorageLocationsModel.
+# Not shown to caller - parts of SAPOutboundDeliveryStorageLocationsModel.
 class SAPOutboundDeliveryStorageLocationModel(SAPODataModel):
     """The storage location to set for an item of an outbound delivery."""
 
@@ -13083,7 +13071,7 @@ class SAPOutboundDeliveryStorageLocationModel(SAPODataModel):
     storage_location: str = Field(description="The storage location to set.")
 
 
-# Not shown to LLMs - part of SAPOutboundDeliveryStorageLocationsModel.
+# Not shown to caller - part of SAPOutboundDeliveryStorageLocationsModel.
 class SAPOutboundDeliveryStorageLocationProblemModel(SAPODataModel):
     """An item of an outbound delivery whose storage location can't be determined."""
 
@@ -13101,7 +13089,7 @@ class SAPOutboundDeliveryStorageLocationProblemModel(SAPODataModel):
     )
 
 
-# Not shown to LLMs - the result of SAP.get_missing_outbound_delivery_storage_locations().
+# Not shown to caller - the result of SAP.get_missing_outbound_delivery_storage_locations().
 class SAPOutboundDeliveryStorageLocationsModel(SAPODataModel):
     """The storage locations to set for the delivery items without one - and the items where that is not possible."""
 
@@ -13109,7 +13097,7 @@ class SAPOutboundDeliveryStorageLocationsModel(SAPODataModel):
     problems: list[SAPOutboundDeliveryStorageLocationProblemModel] = Field(default_factory=list)
 
 
-# Not shown to LLMs - the result of SAP.check_warranty_claim().
+# Not shown to caller - the result of SAP.check_warranty_claim().
 class SAPWarrantyClaimCheckModel(SAPODataModel):
     """What SAP would reject in a new warranty claim - found before the claim is created."""
 
@@ -13176,7 +13164,7 @@ class SAPInvoiceReferenceCheckModel(SAPODataModel):
     )
 
 
-# Inherits from SAPODataModel: str() is compact JSON with the OData names (as LLM tools return it).
+# Inherits from SAPODataModel: str() is compact JSON with the OData names (as returned by the caller).
 # Returned by SAP.get_purchase_order_history().
 class SAPPurchaseOrderHistoryModel(SAPODataModel):
     """The goods receipts and supplier invoices of a purchase order (purchase order history)."""
@@ -13225,7 +13213,7 @@ class SAPPurchaseOrderHistoryModel(SAPODataModel):
         return [receipt for receipt in self.goods_receipts if not receipt.is_cancelled]
 
 
-# Not shown to LLMs - the result of SAP.complete_supplier_invoice().
+# Not shown to caller - the result of SAP.complete_supplier_invoice().
 class SAPSupplierInvoiceCompletionModel(SAPODataModel):
     """What SAP.complete_supplier_invoice() found out while filling in an invoice."""
 
@@ -13258,7 +13246,7 @@ SAP_INVENTORY_STOCK_TYPES: dict[str, str] = {
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_material_stock() and SAP.iter_material_stock().
+# names. Returned by SAP.get_material_stock() and SAP.iter_material_stock().
 class SAPMaterialStockResponseModel(SAPODataModel):
     """The stock of a material in one stock segment as returned by SAP (API_MATERIAL_STOCK_SRV, A_MatlStkInAcctMod).
 
@@ -13544,7 +13532,7 @@ class SAPMaintenanceOrderConfirmationModel(SAPODataCreateModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_maintenance_order_confirmation(),
+# names. Returned by SAP.get_maintenance_order_confirmation(),
 # SAP.get_maintenance_order_confirmations() and SAP.iter_maintenance_order_confirmations().
 class SAPMaintenanceOrderConfirmationResponseModel(SAPODataModel):
     """A maintenance order confirmation as returned by SAP (API_MAINTORDERCONFIRMATION, OData V2)."""
@@ -14026,7 +14014,7 @@ class SAPMaintenancePlanItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_maintenance_plan(), SAP.get_maintenance_plans() and
+# names. Returned by SAP.get_maintenance_plan(), SAP.get_maintenance_plans() and
 # SAP.iter_maintenance_plans().
 class SAPMaintenancePlanResponseModel(SAPODataModel):
     """A maintenance plan as returned by SAP (API_MAINTENANCEPLAN, OData V2).
@@ -14659,7 +14647,7 @@ class SAPTaskListOperationResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_task_list(), SAP.get_task_lists() and SAP.iter_task_lists().
+# names. Returned by SAP.get_task_list(), SAP.get_task_lists() and SAP.iter_task_lists().
 class SAPTaskListResponseModel(SAPODataModel):
     """A maintenance task list as returned by SAP (API_MAINTENANCETASKLIST, OData V4).
 
@@ -15007,7 +14995,7 @@ class SAPPlannedOrderComponentModel(SAPODataCreateModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_planned_order(), SAP.get_planned_orders() and
+# names. Returned by SAP.get_planned_order(), SAP.get_planned_orders() and
 # SAP.iter_planned_orders().
 class SAPPlannedOrderResponseModel(SAPODataModel):
     """A planned order as returned by SAP (API_PLANNEDORDER, OData V4).
@@ -15489,7 +15477,7 @@ class SAPProductionOrderStatusResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.create_production_order(), SAP.get_production_order(),
+# names. Returned by SAP.create_production_order(), SAP.get_production_order(),
 # SAP.get_production_orders() and SAP.iter_production_orders().
 class SAPProductionOrderResponseModel(SAPODataModel):
     """A production order as returned by SAP (API_PRODUCTION_ORDER_2_SRV, OData V2).
@@ -15719,7 +15707,7 @@ class SAPProductionOrderQueryModel(SAPODataQueryModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_plant(), SAP.get_plants() and SAP.iter_plants().
+# names. Returned by SAP.get_plant(), SAP.get_plants() and SAP.iter_plants().
 class SAPPlantResponseModel(SAPODataModel):
     """A plant as returned by SAP (API_PLANT_2, OData V4)."""
 
@@ -15793,7 +15781,7 @@ class SAPPlantQueryModel(SAPODataQueryModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_storage_location(), SAP.get_storage_locations() and
+# names. Returned by SAP.get_storage_location(), SAP.get_storage_locations() and
 # SAP.iter_storage_locations().
 class SAPStorageLocationResponseModel(SAPODataModel):
     """A storage location of a plant as returned by SAP (API_STORAGELOCATION_SRV, OData V2)."""
@@ -16069,7 +16057,7 @@ class SAPProductValuationModel(SAPODataCreateModel):
     # end method definition
 
 
-# Not shown to LLMs - the result of SAP.get_product_extension().
+# Not shown to caller - the result of SAP.get_product_extension().
 class SAPProductExtensionModel(SAPODataModel):
     """What is missing to extend an SAP product to a plant, storage locations and valuation area."""
 
@@ -16420,7 +16408,7 @@ class SAPProductPlantResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_product(), SAP.get_products() and SAP.iter_products().
+# names. Returned by SAP.get_product(), SAP.get_products() and SAP.iter_products().
 class SAPProductResponseModel(SAPODataModel):
     """A product (material) as returned by SAP (API_PRODUCT_SRV, OData V2).
 
@@ -16796,7 +16784,7 @@ class SAPMaterialBOMItemResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_material_boms() and SAP.iter_material_boms().
+# names. Returned by SAP.get_material_boms() and SAP.iter_material_boms().
 class SAPMaterialBOMResponseModel(SAPODataModel):
     """A material BOM as returned by SAP (API_BILL_OF_MATERIAL_SRV, OData V2).
 
@@ -16864,7 +16852,7 @@ class SAPMaterialBOMQueryModel(SAPODataQueryModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_production_version(), SAP.get_production_versions() and
+# names. Returned by SAP.get_production_version(), SAP.get_production_versions() and
 # SAP.iter_production_versions().
 class SAPProductionVersionResponseModel(SAPODataModel):
     """A production version (BOM + routing for a material in a plant) as returned by SAP (API_PRODUCTION_VERSION, OData V4)."""
@@ -16949,7 +16937,7 @@ class SAPProductionVersionQueryModel(SAPODataQueryModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_work_center(), SAP.get_work_centers() and SAP.iter_work_centers().
+# names. Returned by SAP.get_work_center(), SAP.get_work_centers() and SAP.iter_work_centers().
 class SAPWorkCenterResponseModel(SAPODataModel):
     """A work center as returned by SAP (API_WORK_CENTERS, OData V2).
 
@@ -17265,7 +17253,7 @@ class SAPEquipmentModel(SAPODataCreateModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_equipment(), SAP.get_equipments() and SAP.iter_equipments().
+# names. Returned by SAP.get_equipment(), SAP.get_equipments() and SAP.iter_equipments().
 class SAPEquipmentResponseModel(SAPODataModel):
     """An equipment (technical object) as returned by SAP (API_EQUIPMENT, OData V2).
 
@@ -17659,7 +17647,7 @@ class SAPFunctionalLocationModel(SAPODataCreateModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_functional_location(), SAP.get_functional_locations() and
+# names. Returned by SAP.get_functional_location(), SAP.get_functional_locations() and
 # SAP.iter_functional_locations().
 class SAPFunctionalLocationResponseModel(SAPODataModel):
     """A functional location (technical object) as returned by SAP (API_FUNCTIONALLOCATION, OData V2).
@@ -18674,7 +18662,7 @@ class SAPBusinessPartnerRoleResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_business_partner(), SAP.get_business_partners(),
+# names. Returned by SAP.get_business_partner(), SAP.get_business_partners(),
 # SAP.get_customer(), SAP.get_customers(), SAP.get_supplier(), SAP.get_suppliers(), SAP.iter_business_partners(),
 # SAP.iter_customers() and SAP.iter_suppliers().
 class SAPBusinessPartnerResponseModel(SAPODataModel):
@@ -19112,7 +19100,7 @@ class SAPSupplierQueryModel(SAPBusinessPartnerQueryModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_company_code(), SAP.get_company_codes() and
+# names. Returned by SAP.get_company_code(), SAP.get_company_codes() and
 # SAP.iter_company_codes().
 class SAPCompanyCodeResponseModel(SAPODataModel):
     """A company code as returned by SAP (API_COMPANYCODE_SRV, OData V2)."""
@@ -19179,7 +19167,7 @@ class SAPSalesOrganizationTextResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_sales_organization(), SAP.get_sales_organizations() and
+# names. Returned by SAP.get_sales_organization(), SAP.get_sales_organizations() and
 # SAP.iter_sales_organizations().
 class SAPSalesOrganizationResponseModel(SAPODataModel):
     """A sales organization as returned by SAP (API_SALESORGANIZATION_SRV, OData V2).
@@ -19242,7 +19230,7 @@ class SAPSalesOrganizationQueryModel(SAPODataQueryModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_purchasing_organization(), SAP.get_purchasing_organizations() and
+# names. Returned by SAP.get_purchasing_organization(), SAP.get_purchasing_organizations() and
 # SAP.iter_purchasing_organizations().
 class SAPPurchasingOrganizationResponseModel(SAPODataModel):
     """A purchasing organization as returned by SAP (API_PURCHASINGORGANIZATION, OData V4)."""
@@ -19295,7 +19283,7 @@ class SAPCostCenterTextResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_cost_center(), SAP.get_cost_centers() and SAP.iter_cost_centers().
+# names. Returned by SAP.get_cost_center(), SAP.get_cost_centers() and SAP.iter_cost_centers().
 class SAPCostCenterResponseModel(SAPODataModel):
     """A cost center as returned by SAP (API_COSTCENTER_SRV, OData V2).
 
@@ -19416,7 +19404,7 @@ class SAPProfitCenterTextResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_profit_center(), SAP.get_profit_centers() and
+# names. Returned by SAP.get_profit_center(), SAP.get_profit_centers() and
 # SAP.iter_profit_centers().
 class SAPProfitCenterResponseModel(SAPODataModel):
     """A profit center as returned by SAP (API_PROFITCENTER_SRV, OData V2).
@@ -19525,7 +19513,7 @@ class SAPGLAccountTextResponseModel(SAPODataModel):
 
 
 # Inherits from SAPODataModel: OData properties that are not modelled are dropped, str() is compact JSON with the OData
-# names (as LLM tools return it). Returned by SAP.get_gl_account(), SAP.get_gl_accounts() and SAP.iter_gl_accounts().
+# names. Returned by SAP.get_gl_account(), SAP.get_gl_accounts() and SAP.iter_gl_accounts().
 class SAPGLAccountResponseModel(SAPODataModel):
     """A G/L account of a chart of accounts as returned by SAP (API_GLACCOUNTINCHARTOFACCOUNTS_SRV, OData V2).
 

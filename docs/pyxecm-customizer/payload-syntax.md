@@ -3989,20 +3989,31 @@ Each list element is a dictionary with these fields:
 
 #### appworks
 
-`appworks` configures OpenText AppWorks Platform organizations. For each organization the Customizer first (optionally) sets up the OTDS resource, access role, license and Kubernetes configuration, then creates the AppWorks workspaces, publishes their projects and finally creates entities (categories, priorities, case types, customers, cases). The section requires that OTDS, Content Server, AppWorks Platform and Kubernetes access are configured.
+`appworks` configures OpenText AppWorks Platform organizations. For each organization the Customizer first (optionally) sets up the OTDS resource, access role, license and Kubernetes configuration, then creates the AppWorks workspaces, publishes their projects and finally creates entities (categories, priorities, case types, customers, cases). Resource configuration requires Kubernetes; creating a new workspace also requires Kubernetes to copy its artifacts. Existing workspaces and entities do not require Kubernetes for this section. Organization login URLs use the public OTDS URL configured in the customizer; when no public URL is supplied to the payload processor, the legacy OTDS base URL is used.
 
 Each list element is a dictionary with these fields:
 
 - `enabled` (bool, optional, default = `true`) - switch to turn the payload element on or off
 - `organization` (str, mandatory) - name of the AppWorks organization
 - `resource_config` (bool, optional, default = `false`) - if `true`, the OTDS resource `<organization>` is created (if missing), the Content Server and admin partitions are added to the OTDS access role `Access to <organization>`, the AppWorks license is assigned (if a license file is available), the organization configuration in the Kubernetes config map is updated and the AppWorks stateful set is restarted. If `false`, this part is skipped.
-- `workspaces` (list, optional) - list of AppWorks workspaces to create and synchronize. If missing, no workspaces or entities are processed for the organization.
+- `organization_roles_partition` (bool, optional, default = `false`) - create and use `awp-<organization>-partition` for the organization's roles. When omitted, the existing roles partition is preserved. The derived partition name must be valid in OTDS.
+- `use_shared_appworks_license` (bool, optional, default = `false`) - rely on the shared AppWorks resource license instead of creating an organization-specific license. Before processing, the shared resource configured by `otawp.resource_name` (normally `awp`) must have the AppWorks license and `USERS` assignments for `otds.admin` and the Content Server user partition. Configure those through the `licenses` and `partitions` sections before `appworks`. Missing shared licensing fails the organization. Existing organization licenses are not removed.
+- `strict_appworks_failures` (bool, optional, default = `false`) - stop work for this organization if its resource configuration or the AppWorks restart fails, and fail the workspace when artifact copying fails. This applies to all enabled entries for the same organization. By default a restart or copy failure is logged and legacy processing continues.
+- `start_if_stopped` (bool, optional, default = `false`) - scale a stopped AppWorks StatefulSet to one replica instead of requesting the legacy restart.
+- `process_entities_without_workspaces` (bool, optional, default = `false`) - process entities when the `workspaces` key is absent.
+- `workspaces` (list, optional) - list of AppWorks workspaces to create and synchronize. If missing, no workspaces or entities are processed unless `process_entities_without_workspaces` is enabled.
     - `workspace_id` (str, mandatory) - ID of the workspace
     - `name` (str, mandatory) - name of the workspace
     - `path` (str, mandatory) - directory in the AppWorks pod that contains the project artifacts. For a newly created workspace the content of this directory is copied into the workspace.
     - `projects` (list, optional) - list of projects in the workspace that are published
         - `name` (str, mandatory) - name of the project
         - `documentId` (str, mandatory) - document ID of the project
+        - `mcp_solution_name` (str, optional) - add the published solution to the AppWorks MCP configuration. MCP configuration failures are logged and do not fail the organization.
+        - `data_import` (mapping, optional) - spreadsheet data to import after publication. Add an enabled `appworksDataImports` entry to `payloadSections` **after** `appworks` and any required restart and role assignment sections.
+            - `enabled` (bool, optional, default = `true`)
+            - `file_path` or `file_url` - exactly one local workbook path or HTTP(S) URL
+            - `request_json_path` or `request_json_url` - exactly one local request JSON path or HTTP(S) URL; its `solution` field must be a JSON-encoded string
+            - `project_meta` (mapping, mandatory) - must contain `entities` and `homepageLayoutID`; optional fields override generated metadata.
 - `entities` (list, optional) - list of entities to create in the organization. Existing categories, priorities, case types and customers (identified by name) are skipped.
     - `type` (str, mandatory) - one of `category`, `priority`, `caseType`, `customer`, `case`
     - `name` (str, mandatory for all types except `case`) - name of the entity
@@ -4020,6 +4031,8 @@ Each list element is a dictionary with these fields:
     - `customer` (str, optional) - name of an existing customer. Only for type `case`.
     - `loan_amount` (int, optional, default = `1`) - only for type `case`
     - `loan_duration_in_month` (int, optional, default = `2`) - loan duration in months. Only for type `case`.
+
+Multiple entries for the same organization are supported and processed in payload order. A disabled entry is ignored; a null `appworks` value is treated as empty. Data imports are skipped for an organization whose AppWorks processing failed; an unrelated Kubernetes or role-assignment section does not automatically block other imports. If the import depends on such a section, place it after that section and ensure the dependency has succeeded.
 
 === "Terraform / HCL"
 

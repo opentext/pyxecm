@@ -1252,7 +1252,20 @@ class Customizer:
                 solution = yaml.safe_load(config_map.data["solution.yaml"])
 
                 # Change values as required
-                solution["platform"]["organizations"][organization]["otds"]["resourceId"] = awp_resource_id
+                platform = solution["platform"]
+                resource_settings = []
+                if isinstance(platform.get("otds"), dict):
+                    resource_settings.append(platform["otds"])
+                organizations = platform.get("organizations")
+                if isinstance(organizations, dict) and isinstance(organizations.get(organization), dict):
+                    system_otds = organizations[organization].get("otds")
+                    if isinstance(system_otds, dict) and ("resourceId" in system_otds or not resource_settings):
+                        resource_settings.append(system_otds)
+                if not resource_settings:
+                    self.logger.error("AppWorks solution YAML has no recognized system OTDS configuration.")
+                    return None
+                for resource_setting in resource_settings:
+                    resource_setting["resourceId"] = awp_resource_id
                 solution["platform"]["content"]["ContentServer"]["contentServerUrl"] = (
                     f"{str(self.settings.otcs.url).rstrip('/')}{self.settings.otcs.base_path}"
                 )
@@ -1875,6 +1888,7 @@ class Customizer:
                     otca_object=self.otca_object,
                     otkd_object=self.otkd_object,
                     avts_object=self.avts_object,
+                    otds_public_url=str(self.settings.otds.url),
                     settings=self.settings,
                     wait_budget=self.wait_budget,
                     logger=self.logger,

@@ -1437,7 +1437,7 @@ class SAP:
 
         The error is reset with each new request (do_request()), so it describes
         why the last method call (e.g. create_maintenance_order()) returned None
-        or False. Useful to show SAP's own error message to users (or LLMs).
+        or False. Useful to show SAP's own error message to users.
 
         Returns:
             str | None:
